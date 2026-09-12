@@ -1,0 +1,4 @@
+from .fixtures import PATIENTS, PHYSICIANS, PRIMARY_PATIENT_ID
+
+__all__ = ["PATIENTS", "PHYSICIANS", "PRIMARY_PATIENT_ID"]
+

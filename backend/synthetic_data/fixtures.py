@@ -1,0 +1,106 @@
+from backend.models import HistoricalCase, LabObservation, PatientRecord, PhysicianProfile
+
+PRIMARY_PATIENT_ID = "patient-ckd-htn-001"
+
+PATIENTS = {
+    PRIMARY_PATIENT_ID: PatientRecord(
+        id=PRIMARY_PATIENT_ID,
+        display_name="Jordan Lee (synthetic)",
+        age=62,
+        diagnoses=[
+            "Resistant hypertension",
+            "Type 2 diabetes mellitus",
+            "Progressive chronic kidney disease",
+        ],
+        medications=["Lisinopril", "Amlodipine", "Chlorthalidone"],
+        labs=[
+            LabObservation(date="2025-01-12", test="creatinine", value=1.1, unit="mg/dL"),
+            LabObservation(date="2025-05-16", test="creatinine", value=1.3, unit="mg/dL"),
+            LabObservation(date="2026-01-09", test="creatinine", value=1.6, unit="mg/dL"),
+            LabObservation(date="2026-08-21", test="creatinine", value=1.8, unit="mg/dL"),
+            LabObservation(date="2025-01-12", test="eGFR", value=68, unit="mL/min/1.73m2"),
+            LabObservation(date="2025-05-16", test="eGFR", value=59, unit="mL/min/1.73m2"),
+            LabObservation(date="2026-01-09", test="eGFR", value=48, unit="mL/min/1.73m2"),
+            LabObservation(date="2026-08-21", test="eGFR", value=41, unit="mL/min/1.73m2"),
+        ],
+        insurance="Lamina Demo PPO",
+        location="Oakland, CA",
+    )
+}
+
+PHYSICIANS = [
+    PhysicianProfile(
+        id="physician-jung",
+        name="Dr. Mina Jung (synthetic)",
+        specialty="Nephrology",
+        subspecialty="Hypertension and cardiorenal medicine",
+        focus_areas=["CKD stage 3–4", "resistant hypertension", "proteinuria", "cardiorenal disease"],
+        accepts_signals=["ckd_stage_3", "progressive_renal_dysfunction", "resistant_hypertension"],
+        explicit_rules=["Prioritize progressive CKD with resistant hypertension for nephrology review."],
+        required_workup=["Current basic metabolic panel (BMP)", "Urine protein/creatinine ratio (UPCR)"],
+        historical_cases=[
+            HistoricalCase(label="Progressive diabetic CKD with difficult blood pressure control", features=["diabetes", "ckd_stage_3", "progressive_renal_dysfunction", "resistant_hypertension"]),
+            HistoricalCase(label="Proteinuric CKD referred for cardiorenal management", features=["proteinuria", "ckd_stage_3"]),
+        ],
+        insurance_networks=["Lamina Demo PPO", "Bay Demo HMO"],
+        location="Oakland, CA",
+        availability_days=8,
+    ),
+    PhysicianProfile(
+        id="physician-onadeko",
+        name="Dr. Tayo Onadeko (synthetic)",
+        specialty="Cardiology",
+        subspecialty="Hypertension cardiology",
+        focus_areas=["resistant hypertension", "secondary hypertension", "cardiovascular risk"],
+        accepts_signals=["resistant_hypertension", "diabetes"],
+        explicit_rules=["When renal function is progressively declining, nephrology should evaluate first; hypertension cardiology can follow or co-manage."],
+        required_workup=["Home blood-pressure log", "Current ECG"],
+        historical_cases=[HistoricalCase(label="Resistant hypertension despite multidrug therapy", features=["resistant_hypertension", "diabetes"])],
+        insurance_networks=["Lamina Demo PPO"],
+        location="San Francisco, CA",
+        availability_days=42,
+    ),
+    PhysicianProfile(
+        id="physician-patel",
+        name="Dr. Avery Patel (synthetic)",
+        specialty="Cardiology",
+        subspecialty="General cardiology",
+        focus_areas=["hypertension", "ischemic heart disease", "cardiovascular risk"],
+        accepts_signals=["resistant_hypertension", "diabetes"],
+        explicit_rules=["Accept resistant hypertension when a cardiac evaluation is specifically needed."],
+        required_workup=["Current ECG", "Home blood-pressure log"],
+        historical_cases=[HistoricalCase(label="Hypertension with elevated cardiovascular risk", features=["resistant_hypertension", "diabetes"])],
+        insurance_networks=["Lamina Demo PPO", "Bay Demo HMO"],
+        location="Berkeley, CA",
+        availability_days=24,
+    ),
+    PhysicianProfile(
+        id="physician-rossi",
+        name="Dr. Elena Rossi (synthetic)",
+        specialty="Cardiac Electrophysiology",
+        subspecialty="Arrhythmia management",
+        focus_areas=["atrial fibrillation", "syncope", "device management"],
+        accepts_signals=["arrhythmia", "syncope"],
+        explicit_rules=["Do not route isolated hypertension or CKD without an arrhythmia concern to electrophysiology."],
+        required_workup=["ECG documenting suspected rhythm disorder"],
+        historical_cases=[HistoricalCase(label="Symptomatic atrial fibrillation", features=["arrhythmia"])],
+        insurance_networks=["Lamina Demo PPO"],
+        location="San Francisco, CA",
+        availability_days=18,
+    ),
+    PhysicianProfile(
+        id="physician-chen",
+        name="Dr. Noah Chen (synthetic)",
+        specialty="Endocrinology",
+        subspecialty="Diabetes",
+        focus_areas=["complex diabetes", "metabolic disease"],
+        accepts_signals=["diabetes"],
+        explicit_rules=["Diabetes alone does not make endocrinology the lead service for progressive CKD."],
+        required_workup=["Current HbA1c"],
+        historical_cases=[HistoricalCase(label="Complex diabetes medication management", features=["diabetes"])],
+        insurance_networks=["Bay Demo HMO"],
+        location="Oakland, CA",
+        availability_days=15,
+    ),
+]
+
