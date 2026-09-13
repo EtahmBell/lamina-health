@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { consultNetwork, getPatient, type Consultation, type Evaluation, type Patient } from './api'
 import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients'
+import { PhysicianDirectoryPage, PhysicianProfilePage } from './PhysicianNetwork'
 
 const JORDAN_ID = 'patient-ckd-htn-001'
 type Navigate = (path: string) => void
@@ -68,9 +69,8 @@ function PatientSelector({ navigate }: { navigate: Navigate }) {
   </main></ProductShell>
 }
 
-function PlaceholderPage({ navigate, kind }: { navigate: Navigate; kind: 'consultations' | 'network' }) {
-  const isConsultations = kind === 'consultations'
-  return <ProductShell navigate={navigate} section={isConsultations ? 'recent' : 'network'}><main className="page-shell placeholder-page"><NetworkMark /><p className="eyebrow">{isConsultations ? 'Recent consultations' : 'Physician network'}</p><h1>{isConsultations ? 'Your consult history will live here.' : 'Practice footprints, kept simple.'}</h1><p>{isConsultations ? 'This V1 pass focuses on starting and completing Jordan Lee’s specialty consult.' : 'The network directory is intentionally deferred while the consult workflow is validated.'}</p><button className="button-primary" onClick={() => navigate('/patients')}>Select patient <span>→</span></button></main></ProductShell>
+function PlaceholderPage({ navigate }: { navigate: Navigate }) {
+  return <ProductShell navigate={navigate} section="recent"><main className="page-shell placeholder-page"><NetworkMark /><p className="eyebrow">Recent consultations</p><h1>Your consult history will live here.</h1><p>This V1 pass focuses on starting and completing Jordan Lee’s specialty consult.</p><button className="button-primary" onClick={() => navigate('/patients')}>Select patient <span>→</span></button></main></ProductShell>
 }
 
 function UnfinishedPatient({ patient, navigate }: { patient: DemoPatientSummary; navigate: Navigate }) {
@@ -150,8 +150,10 @@ export default function App() {
   const navigate = (next: string) => { window.history.pushState({}, '', next); setPath(next); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   if (path === '/') return <LandingPage navigate={navigate} />
   if (path === '/patients') return <PatientSelector navigate={navigate} />
-  if (path === '/consultations') return <PlaceholderPage navigate={navigate} kind="consultations" />
-  if (path === '/network') return <PlaceholderPage navigate={navigate} kind="network" />
+  if (path === '/consultations') return <PlaceholderPage navigate={navigate} />
+  if (path === '/network') return <ProductShell navigate={navigate} section="network"><PhysicianDirectoryPage navigate={navigate} /></ProductShell>
+  const networkNpi = path.match(/^\/network\/([^/]+)$/)?.[1]
+  if (networkNpi) return <ProductShell navigate={navigate} section="network"><PhysicianProfilePage npi={networkNpi} navigate={navigate} /></ProductShell>
   const patientId = path.match(/^\/patients\/([^/]+)$/)?.[1]
   if (patientId === JORDAN_ID) return <JordanWorkspace navigate={navigate} />
   const demoPatient = DEMO_PATIENTS.find((patient) => patient.id === patientId)
