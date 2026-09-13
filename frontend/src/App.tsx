@@ -1,154 +1,160 @@
 import { useEffect, useMemo, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
-import { consultNetwork, getPatient, type Consultation, type Patient } from './api'
+import { consultNetwork, getPatient, type Consultation, type Evaluation, type Patient } from './api'
+import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients'
 
-const PATIENT_ID = 'patient-ckd-htn-001'
-const CONSULTED_SPECIALTIES = [
-  'Nephrology',
-  'Hypertension Cardiology',
-  'General Cardiology',
-  'Electrophysiology',
-  'Endocrinology',
-]
-
-const evidenceLabel = (kind: string) => kind.replaceAll('_', ' ')
-const physicianInitials = (name: string) =>
-  name.replace('Dr. ', '').replace(' (synthetic)', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
+const JORDAN_ID = 'patient-ckd-htn-001'
+type Navigate = (path: string) => void
 
 function Brand() {
-  return <div className="brand" aria-label="Lamina">
-    <span className="brand-symbol" aria-hidden="true"><img src={laminaLogo} alt="" /></span>
-    <span className="wordmark">LAMINA</span>
-  </div>
+  return <div className="brand" aria-label="Lamina"><span className="brand-symbol" aria-hidden="true"><img src={laminaLogo} alt="" /></span><span className="wordmark">LAMINA</span></div>
 }
 
-function ArrowIcon({ direction }: { direction: 'up' | 'down' }) {
-  return <svg className={`trend-icon ${direction}`} viewBox="0 0 20 20" aria-hidden="true">
-    <path d={direction === 'up' ? 'M4 14 10 8l3 3 3-5M12 6h4v4' : 'M4 6l6 6 3-3 3 5M12 14h4v-4'} />
-  </svg>
+function NetworkMark({ active = false, resolved = false }: { active?: boolean; resolved?: boolean }) {
+  return <span className={`network-motif ${active ? 'active' : ''} ${resolved ? 'resolved' : ''}`} aria-hidden="true">
+    <svg viewBox="0 0 120 120"><path d="M60 18 100 60 60 102 20 60Z" /><path d="M60 18V60M100 60H60M60 102V60M20 60H60" /></svg>
+    <i /><i /><i /><i /><b />
+  </span>
 }
 
-export default function App() {
-  const [patient, setPatient] = useState<Patient | null>(null)
-  const [consultation, setConsultation] = useState<Consultation | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [consulting, setConsulting] = useState(false)
-  const [detailOpen, setDetailOpen] = useState(false)
-  const [referralStarted, setReferralStarted] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+function SyntheticStatus() {
+  return <div className="synthetic-status"><span />Synthetic demo · no PHI</div>
+}
 
-  useEffect(() => {
-    getPatient(PATIENT_ID)
-      .then(setPatient)
-      .catch((loadError: Error) => setError(loadError.message))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const labs = useMemo(() => {
-    if (!patient) return []
-    const creatinine = patient.labs.filter((item) => item.test === 'creatinine')
-    const egfr = patient.labs.filter((item) => item.test === 'eGFR')
-    return creatinine.map((item, index) => ({ date: item.date, creatinine: item.value, egfr: egfr[index]?.value }))
-  }, [patient])
-
-  const chartPoints = useMemo(() => {
-    const x = (index: number) => labs.length > 1 ? 8 + (index / (labs.length - 1)) * 84 : 50
-    const range = (values: number[]) => ({ min: Math.min(...values), max: Math.max(...values) })
-    if (!labs.length) return { creatinine: '', egfr: '' }
-    const creatinineRange = range(labs.map((item) => item.creatinine))
-    const egfrRange = range(labs.map((item) => item.egfr))
-    const y = (value: number, min: number, max: number) => max === min ? 50 : 82 - ((value - min) / (max - min)) * 64
-    return {
-      creatinine: labs.map((item, index) => `${x(index)},${y(item.creatinine, creatinineRange.min, creatinineRange.max)}`).join(' '),
-      egfr: labs.map((item, index) => `${x(index)},${y(item.egfr, egfrRange.min, egfrRange.max)}`).join(' '),
-    }
-  }, [labs])
-
-  const runConsult = async () => {
-    setConsulting(true)
-    setError(null)
-    setReferralStarted(false)
-    setDetailOpen(false)
-    try {
-      setConsultation(await consultNetwork(PATIENT_ID))
-    } catch (consultError) {
-      setError(consultError instanceof Error ? consultError.message : 'Consultation failed')
-    } finally {
-      setConsulting(false)
-    }
-  }
-
-  if (loading) return <div className="page-state"><Brand /><div className="loading-line" /><p>Opening specialty care consult…</p></div>
-  if (!patient) return <div className="page-state error"><Brand /><p>{error || 'Patient unavailable'}</p></div>
-
-  const patientName = patient.display_name.replace(/\s*\(synthetic\)$/i, '')
-
+function ProductShell({ children, navigate, section }: { children: React.ReactNode; navigate: Navigate; section: string }) {
   return <div className="app-shell">
     <aside className="sidebar">
-      <div>
-        <Brand />
-        <p className="brand-subtitle">Specialty Care Network</p>
+      <div><button className="brand-button" onClick={() => navigate('/')}><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
         <nav aria-label="Primary navigation">
-          <button className="nav-item active" aria-current="page"><span className="nav-icon">✦</span><span><b>Specialty consult</b><small>Patient workspace</small></span></button>
-          <button className="nav-item" disabled><span className="nav-icon">◫</span><span><b>Consultations</b><small>Coming next</small></span></button>
-          <button className="nav-item" disabled><span className="nav-icon">⌁</span><span><b>Physician network</b><small>Practice footprints</small></span></button>
+          <button className={`nav-item ${section === 'consult' ? 'active' : ''}`} onClick={() => navigate('/patients')}><span className="nav-icon">✦</span><span><b>Specialty consult</b><small>Patient workspace</small></span></button>
+          <button className={`nav-item ${section === 'recent' ? 'active' : ''}`} onClick={() => navigate('/consultations')}><span className="nav-icon">◫</span><span><b>Consultations</b><small>Recent work</small></span></button>
+          <button className={`nav-item ${section === 'network' ? 'active' : ''}`} onClick={() => navigate('/network')}><span className="nav-icon">⌁</span><span><b>Physician network</b><small>Practice footprints</small></span></button>
         </nav>
       </div>
       <div className="sidebar-clinician"><div className="clinician-avatar">LC</div><div><span>Referring clinician</span><strong>Dr. Cha</strong><small>Primary Care</small></div></div>
     </aside>
-
-    <div className="workspace">
-      <header className="workspace-bar">
-        <div><span>Clinical workspace</span><b>/</b><strong>Specialty Care Consult</strong></div>
-        <div className="synthetic-status"><span />Synthetic demo · no PHI</div>
-      </header>
-
-      <main className="page-shell">
-        <header className="consult-header">
-          <div className="consult-heading"><p className="eyebrow">Specialty Care Consult</p><h1>{patientName}</h1><div className="patient-demographics"><span><b>Age</b>{patient.age} years</span><span><b>Location</b>{patient.location}</span></div></div>
-          <div className="patient-monogram" aria-hidden="true">JL</div>
-        </header>
-
-        <section className="referral-context" aria-label="Referral context">
-          <div><span>Referring clinician</span><strong>Dr. Cha</strong><small>Primary Care</small></div>
-          <div><span>Insurance</span><strong>{patient.insurance}</strong><small>Coverage on file</small></div>
-          <div className="consult-reason"><span>Reason for consult</span><strong>Resistant hypertension with progressive renal dysfunction</strong></div>
-        </section>
-
-        {error && <div className="error-banner" role="alert"><strong>Unable to complete this action.</strong> {error}</div>}
-
-        <section className="network-action">
-          <div className="network-copy"><div className="network-mark" aria-hidden="true"><span /><span /><span /><span /></div><div><p className="eyebrow">Physician agent network</p><h2>Find the appropriate next step in specialty care.</h2><p>Compare best-fit specialists, required workup, and fastest appropriate access.</p></div></div>
-          <button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting Network…' : 'Consult Network'}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" /></svg></button>
-        </section>
-
-        <div className="clinical-grid">
-          <section className="clinical-card"><div className="card-title"><span className="card-icon">+</span><div><p>Clinical context</p><h2>Active diagnoses</h2></div><b>{patient.diagnoses.length}</b></div><ul className="clinical-list">{patient.diagnoses.map((item) => <li key={item}><span />{item}</li>)}</ul></section>
-          <section className="clinical-card"><div className="card-title"><span className="card-icon medication">Rx</span><div><p>Current therapy</p><h2>Medications</h2></div><b>{patient.medications.length}</b></div><ul className="clinical-list medications">{patient.medications.map((item) => <li key={item}><span />{item}</li>)}</ul></section>
-          <section className="clinical-card renal-card">
-            <div className="card-title"><span className="card-icon chart">↗</span><div><p>Longitudinal labs</p><h2>Renal trajectory</h2></div><span className="status-label warning">Progressive decline</span></div>
-            <div className="trajectory-summary"><div><span>Creatinine</span><strong>1.1 → 1.8 <small>mg/dL</small></strong><em><ArrowIcon direction="up" />Increasing</em></div><div><span>eGFR</span><strong>68 → 41 <small>mL/min</small></strong><em><ArrowIcon direction="down" />Decreasing</em></div></div>
-            <div className="trajectory-visual" aria-label="Creatinine rises while eGFR falls across four observations"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img"><title>Renal lab trends</title><line x1="8" y1="18" x2="92" y2="18" /><line x1="8" y1="50" x2="92" y2="50" /><line x1="8" y1="82" x2="92" y2="82" /><polyline className="creatinine-line" points={chartPoints.creatinine} /><polyline className="egfr-line" points={chartPoints.egfr} /></svg><div className="chart-legend"><span className="creatinine">Creatinine</span><span className="egfr">eGFR</span></div><div className="chart-dates">{labs.map((item) => <span key={item.date}>{new Date(`${item.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}</span>)}</div></div>
-          </section>
-        </div>
-
-        {consulting && <section className="consulting-panel" role="status" aria-live="polite"><div className="consulting-head"><div className="network-spinner"><span /><span /><span /></div><div><p className="eyebrow">Consult Network</p><h2>Consulting the network…</h2><p>Reviewing fit against the supplied patient facts and physician practice rules.</p></div></div><div className="specialty-progress">{CONSULTED_SPECIALTIES.map((specialty, index) => <div key={specialty}><span style={{ animationDelay: `${index * 100}ms` }} />{specialty}<small>Reviewing</small></div>)}</div></section>}
-
-        {consultation && !consulting && <section className="recommendation">
-          <div className="recommendation-kicker"><span>Network recommendation</span><small>Grounded in supplied synthetic data</small></div>
-          <div className="recommendation-primary"><div className="physician-avatar">{physicianInitials(consultation.recommended_physician.physician_name)}</div><div><p>Recommended physician</p><h2>{consultation.recommended_physician.physician_name}</h2><span>{consultation.recommended_physician.specialty}</span></div><span className="status-label success">Strong fit</span></div>
-          <div className="recommendation-why"><span>Why</span><p>{consultation.why}</p></div>
-          <div className="recommendation-grid">
-            <section><p className="section-label">Required workup</p><ul>{consultation.before_referral.map((item) => <li key={item}><span>✓</span>{item}</li>)}</ul></section>
-            <section><p className="section-label">Access</p><strong>{consultation.availability}</strong><small>Approximate next availability</small></section>
-            <section><p className="section-label">Insurance</p><strong>{consultation.insurance.split(' (')[0]}</strong><small>Synthetic network information</small></section>
-            <section className="alternative"><p className="section-label">Alternative</p><strong>{consultation.alternatives[0].physician_name}</strong><span>{consultation.alternatives[0].specialty}</span><small>{consultation.alternatives[0].availability}</small></section>
-          </div>
-          <div className="recommendation-actions"><button className="button-secondary" onClick={() => setDetailOpen(!detailOpen)}>{detailOpen ? 'Hide Consultation' : 'View Consultation'}</button><button className="button-primary" onClick={() => setReferralStarted(true)}>Start Referral <span>→</span></button>{referralStarted && <span className="demo-note">Demo referral prepared — no external action taken.</span>}</div>
-          {detailOpen && <div className="consultation-detail"><div className="detail-heading"><div><p className="eyebrow">Consultation record</p><h3>Physician agent evaluations</h3></div><p>Structured evidence only. Hidden model reasoning is not shown.</p></div>{consultation.consultation.map((agent) => <details key={agent.physician_id} open={agent.clinical_fit === 'strong'}><summary><span className="mini-avatar">{physicianInitials(agent.physician_name)}</span><span className="agent-name"><b>{agent.physician_name}</b><small>{agent.specialty}</small></span><span className={`fit-label ${agent.clinical_fit}`}>{agent.clinical_fit} fit</span><span className="chevron">⌄</span></summary><div className="agent-body"><p className="agent-reason">{agent.reason}</p><dl><dt>Accepts case</dt><dd>{agent.accepts_case ? 'Yes' : 'No'}</dd><dt>Availability</dt><dd>{agent.availability}</dd><dt>Required workup</dt><dd>{agent.required_workup.join(' · ')}</dd></dl><div className="evidence">{agent.evidence.map((item, index) => <div key={`${item.kind}-${index}`}><span>{evidenceLabel(item.kind)}</span><p>{item.detail}</p></div>)}</div></div></details>)}</div>}
-          <p className="disclaimer">{consultation.disclaimer}</p>
-        </section>}
-      </main>
-    </div>
+    <div className="workspace"><header className="workspace-bar"><div><span>Clinical workspace</span><b>/</b><strong>{section === 'consult' ? 'Specialty Care Consult' : section === 'recent' ? 'Recent Consultations' : 'Physician Network'}</strong></div><SyntheticStatus /></header>{children}</div>
   </div>
+}
+
+function LandingPage({ navigate }: { navigate: Navigate }) {
+  return <main className="landing-page">
+    <header className="landing-header"><Brand /><SyntheticStatus /></header>
+    <section className="landing-content">
+      <p className="eyebrow">Primary care workspace</p>
+      <h1>Good morning, Dr. Cha.</h1>
+      <p className="landing-question">Who are we helping today?</p>
+      <button className="landing-network-control" onClick={() => navigate('/patients')} aria-label="Select patient">
+        <span className="ambient-ring one" /><span className="ambient-ring two" /><span className="ambient-line line-one" /><span className="ambient-line line-two" />
+        <NetworkMark active />
+        <strong>Select patient</strong><small>Begin a specialty care consult</small>
+      </button>
+      <nav className="landing-secondary" aria-label="Secondary navigation"><button onClick={() => navigate('/consultations')}>Recent consultations <span>→</span></button><button onClick={() => navigate('/network')}>Physician network <span>→</span></button></nav>
+    </section>
+    <p className="landing-footnote">Lamina helps primary care teams find the right specialist, required workup, and appropriate access.</p>
+  </main>
+}
+
+function PatientSelector({ navigate }: { navigate: Navigate }) {
+  const [query, setQuery] = useState('')
+  const visible = DEMO_PATIENTS.filter((patient) => `${patient.name} ${patient.reason} ${patient.location}`.toLowerCase().includes(query.toLowerCase()))
+  return <ProductShell navigate={navigate} section="consult"><main className="page-shell selector-page">
+    <button className="text-button back-link" onClick={() => navigate('/')}>← Home</button>
+    <header className="selector-header"><div><p className="eyebrow">Specialty Care Consult</p><h1>Select a patient</h1><p>Choose the patient whose next step in specialty care needs clarification.</p></div><span>{DEMO_PATIENTS.length} synthetic patients</span></header>
+    <label className="patient-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients or clinical problem…" aria-label="Search patients" /></label>
+    <div className="patient-list-heading"><h2>Recent patients</h2><span>Consult status</span></div>
+    <div className="patient-list">{visible.map((patient) => <button key={patient.id} className="patient-row" onClick={() => navigate(`/patients/${patient.id}`)}><span className="patient-row-avatar">{patient.initials}</span><span className="patient-row-identity"><strong>{patient.name}</strong><small>{patient.age} years · {patient.location}</small></span><span className="patient-row-reason">{patient.reason}</span><span className={`patient-status ${patient.implemented ? 'ready' : ''}`}>{patient.status}</span><span className="row-arrow">→</span></button>)}</div>
+    {!visible.length && <div className="empty-state"><NetworkMark /><h2>No patients found</h2><p>Try a different name or clinical problem.</p></div>}
+  </main></ProductShell>
+}
+
+function PlaceholderPage({ navigate, kind }: { navigate: Navigate; kind: 'consultations' | 'network' }) {
+  const isConsultations = kind === 'consultations'
+  return <ProductShell navigate={navigate} section={isConsultations ? 'recent' : 'network'}><main className="page-shell placeholder-page"><NetworkMark /><p className="eyebrow">{isConsultations ? 'Recent consultations' : 'Physician network'}</p><h1>{isConsultations ? 'Your consult history will live here.' : 'Practice footprints, kept simple.'}</h1><p>{isConsultations ? 'This V1 pass focuses on starting and completing Jordan Lee’s specialty consult.' : 'The network directory is intentionally deferred while the consult workflow is validated.'}</p><button className="button-primary" onClick={() => navigate('/patients')}>Select patient <span>→</span></button></main></ProductShell>
+}
+
+function UnfinishedPatient({ patient, navigate }: { patient: DemoPatientSummary; navigate: Navigate }) {
+  return <ProductShell navigate={navigate} section="consult"><main className="page-shell unfinished-page"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button><div className="unfinished-card"><span className="patient-row-avatar large">{patient.initials}</span><p className="eyebrow">Synthetic patient</p><h1>{patient.name}</h1><p className="unfinished-meta">{patient.age} years · {patient.location}</p><div className="unfinished-reason"><span>Reason for consult</span><strong>{patient.reason}</strong></div><NetworkMark /><h2>This demo case is not implemented yet.</h2><p>Jordan Lee remains the only case with a grounded physician-agent consultation. No recommendation has been fabricated for this patient.</p><button className="button-secondary" onClick={() => navigate(`/patients/${JORDAN_ID}`)}>Open Jordan Lee demo</button></div></main></ProductShell>
+}
+
+function ArrowIcon({ direction }: { direction: 'up' | 'down' }) {
+  return <svg className="trend-icon" viewBox="0 0 20 20" aria-hidden="true"><path d={direction === 'up' ? 'M4 14 10 8l3 3 3-5M12 6h4v4' : 'M4 6l6 6 3-3 3 5M12 14h4v-4'} /></svg>
+}
+
+const physicianInitials = (name: string) => name.replace('Dr. ', '').replace(' (synthetic)', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
+const evidenceFor = (evaluation: Evaluation, kind: string) => evaluation.evidence.find((item) => item.kind === kind)?.detail
+const cleanName = (name: string) => name.replace(' (synthetic)', '')
+const insuranceLabel = (status: string) => status.startsWith('In network') ? 'In-network' : 'Network unknown'
+
+function ConsultationNetwork() {
+  const agents = [
+    ['Dr. Jung', 'Nephrology'], ['Dr. Onadeko', 'Hypertension Cardiology'], ['Dr. Patel', 'General Cardiology'], ['Dr. Rossi', 'Electrophysiology'], ['Dr. Chen', 'Endocrinology'],
+  ]
+  return <section className="network-consultation" role="status" aria-live="polite"><div className="network-consult-copy"><p className="eyebrow">Consult Network</p><h2>Consulting physician representatives…</h2><p>Comparing this patient with explicit referral rules and synthetic practice signals.</p></div><div className="agent-network-map"><svg viewBox="0 0 600 260" preserveAspectRatio="none" aria-hidden="true"><path d="M300 130 90 48M300 130 510 48M300 130 56 205M300 130 300 232M300 130 544 205" /></svg><div className="network-core"><NetworkMark active /><strong>Lamina</strong></div>{agents.map(([name, specialty], index) => <div className={`consult-agent agent-${index + 1}`} key={name}><span>{physicianInitials(name)}</span><div><strong>{name}</strong><small>{specialty}</small></div><em><i />Reviewing…</em></div>)}</div></section>
+}
+
+function RecommendationView({ consultation }: { consultation: Consultation }) {
+  const [networkOpen, setNetworkOpen] = useState(false)
+  const [referralStarted, setReferralStarted] = useState(false)
+  const primary = consultation.recommended_physician
+  const historical = evidenceFor(primary, 'historical_practice_similarity')
+  const explicitRule = evidenceFor(primary, 'explicit_physician_rule')
+  const operational = evidenceFor(primary, 'operational')
+  const reasons = [
+    'Progressive stage 3b CKD is the dominant clinical trajectory.',
+    historical?.split(';')[0],
+    explicitRule,
+    operational,
+  ].filter(Boolean) as string[]
+  return <section className="recommendations" aria-label="Specialist recommendations">
+    <article className="best-fit-card"><div className="best-fit-label"><span>Best fit</span><small>Network resolved · 5 agents consulted</small></div><div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(primary.physician_name)}</span><div><h2>{cleanName(primary.physician_name)}</h2><p>{primary.specialty}</p></div><div className="fit-summary"><span>Strong clinical fit</span><span>{primary.availability.replace('Approximately ', '')}</span><span>{insuranceLabel(primary.insurance_status)}</span></div></div>
+      <div className="best-fit-body"><section><p className="section-label">Why Dr. Jung</p><ul className="reason-list">{reasons.map((reason) => <li key={reason}><span>✓</span>{reason}</li>)}</ul></section><section className="before-visit"><p className="section-label">Before visit</p>{consultation.before_referral.map((item) => <span key={item}>{item.includes('(') ? item.match(/\(([^)]+)\)/)?.[1] : item}<small>{item}</small></span>)}</section></div>
+      <div className="best-fit-actions"><button className="button-primary" onClick={() => setReferralStarted(true)}>Start Referral <span>→</span></button>{referralStarted && <span className="demo-note">Demo referral prepared — no external action taken.</span>}</div>
+    </article>
+
+    <section className="options-section"><div className="options-heading"><div><p className="eyebrow">Other appropriate choices</p><h2>Referral options</h2></div><p>Different practice focus or access, based on the same supplied evidence.</p></div><div className="option-grid">{consultation.alternatives.map((option, index) => <article className="option-card" key={option.physician_id}><div><span className="mini-avatar">{physicianInitials(option.physician_name)}</span><span className="option-label">{index === 0 ? 'Strong alternative' : 'Additional option'}</span></div><h3>{cleanName(option.physician_name)}</h3><p className="option-specialty">{option.specialty}</p><div className="option-meta"><span>{option.clinical_fit} fit</span><span>{option.availability.replace('Approximately ', '')}</span><span>{insuranceLabel(option.insurance_status)}</span></div><p className="option-reason">{option.reason}</p></article>)}</div></section>
+
+    <section className="network-transparency"><button className="network-transparency-toggle" onClick={() => setNetworkOpen(!networkOpen)} aria-expanded={networkOpen}><span><NetworkMark resolved /><span><b>View network consultation</b><small>All five physician-agent conclusions and supporting evidence</small></span></span><em>{networkOpen ? 'Hide' : 'View'} <i>⌄</i></em></button>
+      {networkOpen && <div className="network-record"><div className="record-note">Structured evidence only. Hidden model chain-of-thought is not shown.</div>{consultation.consultation.map((agent) => { const rule = evidenceFor(agent, 'explicit_physician_rule'); const history = evidenceFor(agent, 'historical_practice_similarity'); return <details key={agent.physician_id} open={agent.physician_id === primary.physician_id}><summary><span className="mini-avatar">{physicianInitials(agent.physician_name)}</span><span className="agent-name"><b>{cleanName(agent.physician_name)}</b><small>{agent.specialty}</small></span><span className={`decision-badge ${agent.clinical_fit}`}>{agent.accepts_case ? agent.clinical_fit === 'strong' ? 'Strong fit' : 'Accepts' : 'Redirect'}</span><span className="chevron">⌄</span></summary><div className="structured-evidence"><p>{agent.reason}</p><div className="evidence-grid"><div><span>Decision</span><strong>{agent.accepts_case ? 'Accepts case' : 'Redirects / does not accept'}</strong></div><div><span>Availability</span><strong>{agent.availability}</strong></div><div><span>Insurance</span><strong>{insuranceLabel(agent.insurance_status)}</strong></div><div><span>Required workup</span><strong>{agent.required_workup.join(' · ')}</strong></div>{rule && <div className="wide"><span>Relevant physician rule</span><strong>{rule}</strong></div>}{history && <div className="wide"><span>Historical-practice signal</span><strong>{history}</strong></div>}</div></div></details> })}</div>}
+    </section>
+    <p className="disclaimer">{consultation.disclaimer}</p>
+  </section>
+}
+
+function JordanWorkspace({ navigate }: { navigate: Navigate }) {
+  const [patient, setPatient] = useState<Patient | null>(null)
+  const [consultation, setConsultation] = useState<Consultation | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [consulting, setConsulting] = useState(false)
+  const [context, setContext] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { getPatient(JORDAN_ID).then(setPatient).catch((loadError: Error) => setError(loadError.message)).finally(() => setLoading(false)) }, [])
+  const labs = useMemo(() => { if (!patient) return []; const creatinine = patient.labs.filter((item) => item.test === 'creatinine'); const egfr = patient.labs.filter((item) => item.test === 'eGFR'); return creatinine.map((item, index) => ({ date: item.date, creatinine: item.value, egfr: egfr[index]?.value ?? 0 })) }, [patient])
+  const chartPoints = useMemo(() => { if (!labs.length) return { creatinine: '', egfr: '' }; const x = (index: number) => 8 + (index / (labs.length - 1)) * 84; const y = (value: number, min: number, max: number) => 82 - ((value - min) / (max - min)) * 64; return { creatinine: labs.map((item, index) => `${x(index)},${y(item.creatinine, 1.1, 1.8)}`).join(' '), egfr: labs.map((item, index) => `${x(index)},${y(item.egfr, 41, 68)}`).join(' ') } }, [labs])
+  const runConsult = async () => { setConsulting(true); setConsultation(null); setError(null); try { const [result] = await Promise.all([consultNetwork(JORDAN_ID, context), new Promise((resolve) => setTimeout(resolve, 1400))]); setConsultation(result) } catch (consultError) { setError(consultError instanceof Error ? consultError.message : 'Consultation failed') } finally { setConsulting(false) } }
+  if (loading) return <ProductShell navigate={navigate} section="consult"><div className="page-state embedded"><div className="loading-line" /><p>Opening patient workspace…</p></div></ProductShell>
+  if (!patient) return <ProductShell navigate={navigate} section="consult"><div className="page-state embedded error"><p>{error || 'Patient unavailable'}</p></div></ProductShell>
+  return <ProductShell navigate={navigate} section="consult"><main className="page-shell"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
+    <header className="consult-header"><div><p className="eyebrow">Specialty Care Consult</p><h1>Jordan Lee</h1><div className="patient-demographics"><span><b>Age</b>{patient.age} years</span><span><b>Location</b>{patient.location}</span></div></div><div className="patient-monogram">JL</div></header>
+    <section className="referral-context" aria-label="Referral context"><div><span>Referring clinician</span><strong>Dr. Cha</strong><small>Primary Care</small></div><div><span>Insurance</span><strong>{patient.insurance}</strong><small>Coverage on file</small></div><div className="consult-reason"><span>Reason for consult</span><strong>Resistant hypertension with progressive renal dysfunction</strong></div></section>
+    {error && <div className="error-banner" role="alert"><strong>Unable to complete this action.</strong> {error}</div>}
+    <section className="network-action"><div className="network-copy"><NetworkMark active={consulting} resolved={Boolean(consultation)} /><div><p className="eyebrow">Physician agent network</p><h2>Find the appropriate next step in specialty care.</h2><p>Compare best-fit specialists, required workup, and fastest appropriate access.</p></div></div><div className="network-controls"><label><span>Add context for the network <em>Optional</em></span><input value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="e.g. Considering nephrology vs cardiology" /></label><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult Network'}</span><span>→</span></button></div></section>
+    <div className="clinical-grid"><section className="clinical-card"><div className="card-title"><span className="card-icon">+</span><div><p>Clinical context</p><h2>Active diagnoses</h2></div><b>{patient.diagnoses.length}</b></div><ul className="clinical-list">{patient.diagnoses.map((item) => <li key={item}><span />{item}</li>)}</ul></section><section className="clinical-card"><div className="card-title"><span className="card-icon medication">Rx</span><div><p>Current therapy</p><h2>Medications</h2></div><b>{patient.medications.length}</b></div><ul className="clinical-list medications">{patient.medications.map((item) => <li key={item}><span />{item}</li>)}</ul></section><section className="clinical-card renal-card"><div className="card-title"><span className="card-icon chart">↗</span><div><p>Longitudinal labs</p><h2>Renal trajectory</h2></div><span className="status-label warning">Progressive decline</span></div><div className="trajectory-summary"><div><span>Creatinine</span><strong>1.1 → 1.8 <small>mg/dL</small></strong><em><ArrowIcon direction="up" />Increasing</em></div><div><span>eGFR</span><strong>68 → 41 <small>mL/min</small></strong><em><ArrowIcon direction="down" />Decreasing</em></div></div><div className="trajectory-visual"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="8" y1="18" x2="92" y2="18" /><line x1="8" y1="50" x2="92" y2="50" /><line x1="8" y1="82" x2="92" y2="82" /><polyline className="creatinine-line" points={chartPoints.creatinine} /><polyline className="egfr-line" points={chartPoints.egfr} /></svg><div className="chart-legend"><span>Creatinine</span><span className="egfr">eGFR</span></div><div className="chart-dates">{labs.map((item) => <span key={item.date}>{new Date(`${item.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}</span>)}</div></div></section></div>
+    {consulting && <ConsultationNetwork />}{consultation && <RecommendationView consultation={consultation} />}
+  </main></ProductShell>
+}
+
+export default function App() {
+  const [path, setPath] = useState(window.location.pathname)
+  useEffect(() => { const onPop = () => setPath(window.location.pathname); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop) }, [])
+  const navigate = (next: string) => { window.history.pushState({}, '', next); setPath(next); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  if (path === '/') return <LandingPage navigate={navigate} />
+  if (path === '/patients') return <PatientSelector navigate={navigate} />
+  if (path === '/consultations') return <PlaceholderPage navigate={navigate} kind="consultations" />
+  if (path === '/network') return <PlaceholderPage navigate={navigate} kind="network" />
+  const patientId = path.match(/^\/patients\/([^/]+)$/)?.[1]
+  if (patientId === JORDAN_ID) return <JordanWorkspace navigate={navigate} />
+  const demoPatient = DEMO_PATIENTS.find((patient) => patient.id === patientId)
+  if (demoPatient) return <UnfinishedPatient patient={demoPatient} navigate={navigate} />
+  return <LandingPage navigate={navigate} />
 }

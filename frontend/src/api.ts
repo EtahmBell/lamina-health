@@ -28,7 +28,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const getPatient = (id: string) => request<Patient>(`/api/patients/${encodeURIComponent(id)}`)
-export const consultNetwork = (id: string) => request<Consultation>(`/api/patients/${encodeURIComponent(id)}/consultations`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pcp_guidance: null }),
+export const consultNetwork = (id: string, pcpGuidance?: string) => request<Consultation>(`/api/patients/${encodeURIComponent(id)}/consultations`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pcp_guidance: pcpGuidance?.trim() || null }),
 })
 
