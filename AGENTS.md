@@ -23,6 +23,14 @@ These instructions apply to all work in this repository.
 - Never expose hidden chain-of-thought. Store and show concise structured evidence only.
 - LLMs may assist reasoning and orchestration but must not be the sole source of clinical truth.
 
+## Clinical interoperability
+
+- Keep NPPES provider identity separate from Medplum/FHIR patient context.
+- Consultation code consumes only the bounded `ClinicalDataSource` interface; never pass raw FHIR resources or credentials to physician agents.
+- The default clinical source must remain deterministic and offline. An explicitly configured Medplum source must fail visibly rather than silently falling back.
+- Medplum demo resources must be tagged synthetic, use stable identifiers, and be upserted without deleting unrelated resources.
+- Consultation messages are deliberate structured records, not hidden reasoning. Store only concise summaries, selected evidence, related patient facts, sequence, and bounded metadata.
+
 ## Engineering
 
 - Keep domain logic separate from API and UI code.
@@ -32,4 +40,3 @@ These instructions apply to all work in this repository.
 - Keep FHIR/Medplum behind a bounded clinical-data interface; do not expose credentials or raw FHIR records to models.
 - Do not commit `.env` files, credentials, local databases, generated artifacts, or sensitive data.
 - The sibling `../lamina-og/` tree is read-only reference material. Never modify it.
-

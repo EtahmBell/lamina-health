@@ -6,6 +6,7 @@ from backend.models import (
     PhysicianProfile,
 )
 
+from .conversation import build_consultation_messages
 from .physician_agent import evaluate_physician
 
 FIT_ORDER = {ClinicalFit.STRONG: 0, ClinicalFit.MODERATE: 1, ClinicalFit.POOR: 2}
@@ -32,11 +33,17 @@ def consult_network(
     )
     recommended = ranked[0]
     alternatives = [item for item in ranked[1:] if item.accepts_case][:2]
+    consultation_id = f"consult-{patient.id}-v1"
+    messages = build_consultation_messages(
+        consultation_id, context, physicians, evaluations, recommended
+    )
     return ConsultationResult(
-        consultation_id=f"consult-{patient.id}-v1",
+        consultation_id=consultation_id,
         patient_id=patient.id,
         patient_facts_used=context.facts,
         candidates=candidates,
+        patient_context=context,
+        messages=messages,
         recommended_physician=recommended,
         why=(
             "The renal trajectory changes the referral priority: explicit nephrology and "

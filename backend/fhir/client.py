@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import os
 from typing import Protocol
 
 from backend.models import PatientRecord
@@ -5,12 +8,27 @@ from backend.synthetic_data import PATIENTS
 
 
 class ClinicalDataSource(Protocol):
-    """Boundary for synthetic fixtures now and a bounded FHIR adapter later."""
+    """Bounded patient-context source used by the consultation application."""
+
+    source_name: str
 
     def get_patient(self, patient_id: str) -> PatientRecord | None: ...
 
 
 class SyntheticClinicalDataSource:
+    source_name = "synthetic_fixture"
+
     def get_patient(self, patient_id: str) -> PatientRecord | None:
         return PATIENTS.get(patient_id)
+
+
+def create_clinical_data_source(source: str | None = None) -> ClinicalDataSource:
+    selected = (source or os.getenv("LAMINA_CLINICAL_SOURCE", "synthetic")).strip().casefold()
+    if selected == "synthetic":
+        return SyntheticClinicalDataSource()
+    if selected == "medplum":
+        from .medplum import MedplumClinicalDataSource, MedplumSettings
+
+        return MedplumClinicalDataSource(MedplumSettings.from_environment())
+    raise RuntimeError("LAMINA_CLINICAL_SOURCE must be 'synthetic' or 'medplum'")
 

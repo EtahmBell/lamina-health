@@ -4,8 +4,16 @@ export type LabObservation = { date: string; test: 'creatinine' | 'eGFR'; value:
 export type Patient = {
   id: string; display_name: string; synthetic: true; age: number; diagnoses: string[]
   medications: string[]; labs: LabObservation[]; insurance: string; location: string
+  clinical_data_source: 'synthetic_fixture' | 'medplum_fhir'
 }
 export type Evidence = { kind: string; detail: string }
+export type ConsultationMessage = {
+  id: string; consultation_id: string; sequence: number; sender_agent_id: string
+  sender_name: string; sender_role: string; recipient_agent_id: string
+  message_type: 'consult_request' | 'fit_response' | 'follow_up_question' | 'follow_up_answer' | 'referral_requirement' | 'redirect' | 'access_update' | 'synthesis'
+  summary: string; evidence: Evidence[]; related_patient_facts: string[]
+  metadata: Record<string, string | number | boolean>
+}
 export type Evaluation = {
   physician_id: string; physician_name: string; specialty: string
   clinical_fit: 'strong' | 'moderate' | 'poor'; accepts_case: boolean; reason: string
@@ -15,7 +23,7 @@ export type Evaluation = {
 export type Consultation = {
   consultation_id: string; patient_facts_used: string[]; recommended_physician: Evaluation
   why: string; before_referral: string[]; availability: string; insurance: string
-  alternatives: Evaluation[]; consultation: Evaluation[]; disclaimer: string
+  alternatives: Evaluation[]; consultation: Evaluation[]; messages: ConsultationMessage[]; disclaimer: string
 }
 export type AgentStatus = 'reserved' | 'verification_pending' | 'verified' | 'active' | 'disabled'
 export type AgentPreferences = {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from threading import RLock
 
-from backend.synthetic_data import PHYSICIANS
+from backend.synthetic_data import PHYSICIANS, SYNTHETIC_PHYSICIAN_NPIS
 
 from .directory import NppesDirectory
 from .models import (
@@ -36,20 +36,11 @@ class AgentOverlay:
     preferences: AgentPreferences | None = None
 
 
-SYNTHETIC_NPIS = {
-    "physician-jung": "9900000001",
-    "physician-onadeko": "9900000002",
-    "physician-patel": "9900000003",
-    "physician-rossi": "9900000004",
-    "physician-chen": "9900000005",
-}
-
-
 def _synthetic_profiles() -> list[PhysicianNetworkProfile]:
     profiles: list[PhysicianNetworkProfile] = []
     for physician in PHYSICIANS:
         city, state = physician.location.rsplit(", ", 1)
-        npi = SYNTHETIC_NPIS[physician.id]
+        npi = SYNTHETIC_PHYSICIAN_NPIS[physician.id]
         profiles.append(
             PhysicianNetworkProfile(
                 npi=npi,

@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from backend.agents import consult_network, evaluate_physician
 from backend.clinical import build_patient_context, generate_candidates
 from backend.main import app
-from backend.models import ClinicalFit, EvidenceKind
+from backend.models import ClinicalFit, ConsultationMessageType, EvidenceKind
 from backend.synthetic_data import PATIENTS, PHYSICIANS, PRIMARY_PATIENT_ID
 
 
@@ -85,4 +85,43 @@ def test_api_runs_without_credentials_or_network():
     )
     assert result.status_code == 200
     assert result.json()["recommended_physician"]["physician_name"].startswith("Dr. Mina Jung")
+    assert result.json()["messages"]
 
+
+def test_consultation_has_auditable_messages_and_meaningful_follow_up():
+    patient = PATIENTS[PRIMARY_PATIENT_ID]
+    result = consult_network(patient, PHYSICIANS)
+    assert result.messages[0].message_type == ConsultationMessageType.CONSULT_REQUEST
+
+    physician_responses = [
+        message
+        for message in result.messages
+        if message.message_type
+        in {ConsultationMessageType.FIT_RESPONSE, ConsultationMessageType.REDIRECT}
+    ]
+    assert len(physician_responses) == len(PHYSICIANS)
+    jung = next(message for message in physician_responses if "Jung" in message.sender_name)
+    onadeko = next(message for message in physician_responses if "Onadeko" in message.sender_name)
+    electrophysiology = next(
+        message for message in physician_responses if "Rossi" in message.sender_name
+    )
+    assert jung.metadata["clinical_fit"] == "strong"
+    assert "nephrology" in onadeko.summary.casefold()
+    assert electrophysiology.metadata["clinical_fit"] == "poor"
+
+    follow_up = next(
+        message
+        for message in result.messages
+        if message.message_type == ConsultationMessageType.FOLLOW_UP_ANSWER
+    )
+    assert "nephrology first" in follow_up.summary.casefold()
+    requirement = next(
+        message
+        for message in result.messages
+        if message.message_type == ConsultationMessageType.REFERRAL_REQUIREMENT
+    )
+    assert requirement.metadata["required_workup"] == "BMP · UPCR"
+    assert result.messages[-1].message_type == ConsultationMessageType.SYNTHESIS
+
+    forbidden_fields = {"chain_of_thought", "reasoning_trace", "scratchpad", "tokens"}
+    assert all(forbidden_fields.isdisjoint(message.model_dump()) for message in result.messages)

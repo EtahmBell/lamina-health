@@ -2,6 +2,8 @@ from .consultation import (
     CandidateReason,
     ClinicalFit,
     ClinicalRepresentation,
+    ConsultationMessage,
+    ConsultationMessageType,
     ConsultationRequest,
     ConsultationResult,
     Evidence,
@@ -17,6 +19,8 @@ __all__ = [
     "CandidateReason",
     "ClinicalFit",
     "ClinicalRepresentation",
+    "ConsultationMessage",
+    "ConsultationMessageType",
     "ConsultationRequest",
     "ConsultationResult",
     "Evidence",
@@ -27,4 +31,3 @@ __all__ = [
     "PhysicianEvaluation",
     "PhysicianProfile",
 ]
-

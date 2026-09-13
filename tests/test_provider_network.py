@@ -9,10 +9,10 @@ from backend.provider_network.api import provider_network
 from backend.provider_network.directory import NppesDirectory
 from backend.provider_network.models import AgentPreferencesInput, AgentStatus
 from backend.provider_network.service import (
-    SYNTHETIC_NPIS,
     DemoVerificationForbiddenError,
     ProviderNetwork,
 )
+from backend.synthetic_data import SYNTHETIC_PHYSICIAN_NPIS
 
 
 def build_directory(path: Path) -> NppesDirectory:
@@ -68,7 +68,7 @@ def test_nppes_profile_cannot_use_demo_verification(tmp_path: Path) -> None:
 
 def test_synthetic_profile_completes_structured_activation() -> None:
     network = ProviderNetwork(NppesDirectory(Path("missing.sqlite")))
-    npi = SYNTHETIC_NPIS["physician-jung"]
+    npi = SYNTHETIC_PHYSICIAN_NPIS["physician-jung"]
 
     assert network.claim(npi).agent.status == AgentStatus.VERIFICATION_PENDING
     assert network.verify_demo(npi).agent.status == AgentStatus.VERIFIED

@@ -23,6 +23,17 @@ class EvidenceKind(StrEnum):
     OPERATIONAL = "operational"
 
 
+class ConsultationMessageType(StrEnum):
+    CONSULT_REQUEST = "consult_request"
+    FIT_RESPONSE = "fit_response"
+    FOLLOW_UP_QUESTION = "follow_up_question"
+    FOLLOW_UP_ANSWER = "follow_up_answer"
+    REFERRAL_REQUIREMENT = "referral_requirement"
+    REDIRECT = "redirect"
+    ACCESS_UPDATE = "access_update"
+    SYNTHESIS = "synthesis"
+
+
 class LabObservation(StrictModel):
     date: str
     test: Literal["creatinine", "eGFR"]
@@ -40,6 +51,7 @@ class PatientRecord(StrictModel):
     labs: list[LabObservation]
     insurance: str
     location: str
+    clinical_data_source: Literal["synthetic_fixture", "medplum_fhir"] = "synthetic_fixture"
 
 
 class ClinicalRepresentation(StrictModel):
@@ -105,11 +117,28 @@ class ConsultationRequest(StrictModel):
     pcp_guidance: str | None = Field(default=None, max_length=500)
 
 
+class ConsultationMessage(StrictModel):
+    id: str
+    consultation_id: str
+    sequence: int = Field(ge=1)
+    sender_agent_id: str
+    sender_name: str
+    sender_role: str
+    recipient_agent_id: str
+    message_type: ConsultationMessageType
+    summary: str
+    evidence: list[Evidence]
+    related_patient_facts: list[str]
+    metadata: dict[str, str | int | bool] = Field(default_factory=dict)
+
+
 class ConsultationResult(StrictModel):
     consultation_id: str
     patient_id: str
     patient_facts_used: list[str]
     candidates: list[CandidateReason]
+    patient_context: ClinicalRepresentation
+    messages: list[ConsultationMessage]
     recommended_physician: PhysicianEvaluation
     why: str
     before_referral: list[str]
@@ -118,4 +147,3 @@ class ConsultationResult(StrictModel):
     alternatives: list[PhysicianEvaluation]
     consultation: list[PhysicianEvaluation]
     disclaimer: str
-
