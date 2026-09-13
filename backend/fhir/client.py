@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
 from typing import Protocol
 
+from backend.config import environment
 from backend.models import PatientRecord
 from backend.synthetic_data import PATIENTS
 
@@ -23,7 +23,7 @@ class SyntheticClinicalDataSource:
 
 
 def create_clinical_data_source(source: str | None = None) -> ClinicalDataSource:
-    selected = (source or os.getenv("LAMINA_CLINICAL_SOURCE", "synthetic")).strip().casefold()
+    selected = (source or environment.get("LAMINA_CLINICAL_SOURCE", "synthetic")).strip().casefold()
     if selected == "synthetic":
         return SyntheticClinicalDataSource()
     if selected == "medplum":
@@ -31,4 +31,3 @@ def create_clinical_data_source(source: str | None = None) -> ClinicalDataSource
 
         return MedplumClinicalDataSource(MedplumSettings.from_environment())
     raise RuntimeError("LAMINA_CLINICAL_SOURCE must be 'synthetic' or 'medplum'")
-

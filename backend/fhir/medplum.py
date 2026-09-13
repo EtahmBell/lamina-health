@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -8,6 +7,7 @@ from urllib.parse import quote
 
 import httpx
 
+from backend.config import environment
 from backend.models import PatientRecord
 
 from .mapping import map_fhir_resources_to_patient
@@ -41,19 +41,21 @@ class MedplumSettings:
 
     @classmethod
     def from_environment(cls) -> MedplumSettings:
-        base_url = os.getenv("MEDPLUM_BASE_URL", "").strip().rstrip("/")
-        client_id = os.getenv("MEDPLUM_CLIENT_ID", "").strip()
-        client_secret = os.getenv("MEDPLUM_CLIENT_SECRET", "").strip()
-        project_id = os.getenv("MEDPLUM_PROJECT_ID", "").strip()
+        base_url = environment.get("MEDPLUM_BASE_URL", "").strip().rstrip("/")
+        client_id = environment.get("MEDPLUM_CLIENT_ID", "").strip()
+        client_secret = environment.get("MEDPLUM_CLIENT_SECRET", "").strip()
+        project_id = environment.get("MEDPLUM_PROJECT_ID", "").strip()
         if not all((base_url, client_id, client_secret, project_id)):
             raise MedplumError("medplum_not_configured")
-        token_url = os.getenv("MEDPLUM_TOKEN_URL", "").strip() or f"{base_url}/oauth2/token"
+        token_url = (
+            environment.get("MEDPLUM_TOKEN_URL", "").strip() or f"{base_url}/oauth2/token"
+        )
         fhir_base = (
-            os.getenv("MEDPLUM_FHIR_BASE_URL", "").strip().rstrip("/")
+            environment.get("MEDPLUM_FHIR_BASE_URL", "").strip().rstrip("/")
             or f"{base_url}/fhir/R4"
         )
         try:
-            timeout = float(os.getenv("MEDPLUM_REQUEST_TIMEOUT_SECONDS", "20"))
+            timeout = float(environment.get("MEDPLUM_REQUEST_TIMEOUT_SECONDS", "20"))
         except ValueError as error:
             raise MedplumError("medplum_configuration_invalid") from error
         if timeout <= 0:
@@ -235,4 +237,3 @@ class MedplumClinicalDataSource:
             synthetic_subject("Observation"),
             synthetic_subject("Coverage", "beneficiary"),
         )
-

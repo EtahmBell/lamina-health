@@ -1,8 +1,10 @@
 from datetime import date
+from pathlib import Path
 
 import pytest
 
 from backend.clinical import build_patient_context
+from backend.config import load_repository_environment
 from backend.fhir import (
     MedplumClinicalDataSource,
     MedplumError,
@@ -121,6 +123,30 @@ def test_offline_source_needs_no_medplum_credentials(monkeypatch: pytest.MonkeyP
     assert isinstance(create_clinical_data_source("synthetic"), SyntheticClinicalDataSource)
     with pytest.raises(MedplumError, match="medplum_not_configured"):
         create_clinical_data_source("medplum")
+
+
+def test_repository_environment_loader_supplies_medplum_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    values = {
+        "MEDPLUM_BASE_URL": "https://example.test",
+        "MEDPLUM_CLIENT_ID": "test-client",
+        "MEDPLUM_CLIENT_SECRET": "test-secret",
+        "MEDPLUM_PROJECT_ID": "test-project",
+    }
+    for name in values:
+        monkeypatch.delenv(name, raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(f"{name}={value}" for name, value in values.items()), encoding="utf-8"
+    )
+
+    assert load_repository_environment(env_file) is True
+    settings = MedplumSettings.from_environment()
+
+    assert settings.base_url == "https://example.test"
+    assert settings.client_id == "test-client"
+    assert settings.project_id == "test-project"
 
 
 def test_jordan_seed_is_idempotent_and_never_deletes_resources() -> None:
