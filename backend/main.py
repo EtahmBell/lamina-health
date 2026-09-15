@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.consult import router as consult_router
+from backend.api.workspace import router as workspace_router
 from backend.config import environment
 from backend.provider_network import router as provider_network_router
 
@@ -21,6 +22,7 @@ app.add_middleware(
     allow_headers=["Accept", "Content-Type"],
 )
 app.include_router(consult_router)
+app.include_router(workspace_router)
 app.include_router(provider_network_router)
 
 

@@ -6,6 +6,20 @@ from typing import Any
 from backend.models import LabObservation, PatientRecord
 
 DEMO_AGE_EXTENSION = "https://lamina.health/fhir/StructureDefinition/demo-age"
+DEMO_CLINICAL_NOTE_EXTENSION = "https://lamina.health/fhir/StructureDefinition/demo-clinical-note"
+
+LAB_CODES = {
+    "2160-0": "creatinine",
+    "98979-8": "eGFR",
+    "718-7": "hemoglobin",
+    "2276-4": "ferritin",
+    "2498-4": "serum_iron",
+    "2500-7": "TIBC",
+    "2502-3": "transferrin_saturation",
+    "787-2": "MCV",
+    "6690-2": "WBC",
+    "777-3": "platelets",
+}
 
 
 def _concept_text(value: Any) -> str:
@@ -41,10 +55,24 @@ def _lab_kind(observation: dict[str, Any]) -> str | None:
     code = observation.get("code") or {}
     codes = {str(item.get("code", "")) for item in code.get("coding") or []}
     text = _concept_text(code).casefold()
-    if "2160-0" in codes or "creatinine" in text:
-        return "creatinine"
-    if "98979-8" in codes or "egfr" in text or "glomerular filtration" in text:
-        return "eGFR"
+    for code, kind in LAB_CODES.items():
+        if code in codes:
+            return kind
+    text_kinds = {
+        "creatinine": "creatinine",
+        "egfr": "eGFR",
+        "glomerular filtration": "eGFR",
+        "hemoglobin": "hemoglobin",
+        "ferritin": "ferritin",
+        "iron saturation": "transferrin_saturation",
+        "iron binding capacity": "TIBC",
+        "mcv": "MCV",
+        "leukocyte": "WBC",
+        "platelet": "platelets",
+    }
+    for term, kind in text_kinds.items():
+        if term in text:
+            return kind
     return None
 
 
@@ -87,6 +115,11 @@ def map_fhir_resources_to_patient(
     )
     coverage = coverages[0] if coverages else {}
     insurer = _concept_text(coverage.get("type")) or str(coverage.get("subscriberId") or "")
+    clinical_notes = [
+        str(extension["valueString"])
+        for extension in patient.get("extension") or []
+        if extension.get("url") == DEMO_CLINICAL_NOTE_EXTENSION and extension.get("valueString")
+    ]
     return PatientRecord(
         id=patient_id,
         display_name=_display_name(patient),
@@ -94,8 +127,8 @@ def map_fhir_resources_to_patient(
         diagnoses=[value for value in diagnoses if value],
         medications=[value for value in medications if value],
         labs=labs,
+        clinical_notes=clinical_notes,
         insurance=insurer or "Insurance not supplied",
         location=location or "Location not supplied",
         clinical_data_source="medplum_fhir",
     )
-

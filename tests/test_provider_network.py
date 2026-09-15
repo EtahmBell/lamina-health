@@ -91,7 +91,7 @@ def test_synthetic_profile_completes_structured_activation() -> None:
 def test_provider_api_search_and_status() -> None:
     provider_network.reset_demo_state()
     client = TestClient(app)
-    response = client.get("/api/providers/search", params={"q": "Mina Jung"})
+    response = client.get("/api/providers/search", params={"q": "Iain Jung"})
     assert response.status_code == 200
     result = response.json()["results"][0]
     assert result["source"] == "SYNTHETIC"

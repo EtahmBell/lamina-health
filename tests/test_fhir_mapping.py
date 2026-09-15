@@ -13,8 +13,13 @@ from backend.fhir import (
     create_clinical_data_source,
     map_fhir_resources_to_patient,
 )
-from backend.fhir.demo import jordan_lee_fhir_resources, seed_jordan_lee
-from backend.synthetic_data import PATIENTS, PRIMARY_PATIENT_ID
+from backend.fhir.demo import (
+    jordan_lee_fhir_resources,
+    maria_santos_fhir_resources,
+    seed_demo_patients,
+    seed_jordan_lee,
+)
+from backend.synthetic_data import MARIA_PATIENT_ID, PATIENTS, PRIMARY_PATIENT_ID
 
 
 def linked_demo_resources():
@@ -39,6 +44,32 @@ def mapped_demo_patient():
     patient, linked = linked_demo_resources()
     return map_fhir_resources_to_patient(
         PRIMARY_PATIENT_ID,
+        patient,
+        linked["Condition"],
+        linked["MedicationRequest"],
+        linked["Observation"],
+        linked["Coverage"],
+        as_of=date(2026, 9, 12),
+    )
+
+
+def mapped_maria_patient():
+    resources = maria_santos_fhir_resources()
+    patient = {**resources["Patient"][0], "id": "medplum-maria"}
+    subject = {"reference": "Patient/medplum-maria"}
+    linked = {
+        key: [
+            {
+                **item,
+                "id": f"{key.casefold()}-{index}",
+                ("beneficiary" if key == "Coverage" else "subject"): subject,
+            }
+            for index, item in enumerate(resources[key], 1)
+        ]
+        for key in ("Condition", "MedicationRequest", "Observation", "Coverage")
+    }
+    return map_fhir_resources_to_patient(
+        MARIA_PATIENT_ID,
         patient,
         linked["Condition"],
         linked["MedicationRequest"],
@@ -76,6 +107,26 @@ def test_synthetic_and_fhir_sources_build_equivalent_patient_context() -> None:
     assert build_patient_context(fhir) == build_patient_context(local)
 
 
+def test_maria_fhir_maps_anaemia_trend_iron_studies_and_prior_workup() -> None:
+    patient = mapped_maria_patient()
+    context = build_patient_context(patient)
+
+    assert patient.display_name == "Maria Santos (synthetic)"
+    assert patient.age == 54
+    assert patient.medications == ["Ferrous sulfate (oral iron)"]
+    assert context.hemoglobin_trend == [10.8, 10.1, 9.5]
+    assert context.iron_studies == {
+        "ferritin": 7,
+        "serum_iron": 28,
+        "TIBC": 410,
+        "transferrin_saturation": 7,
+    }
+    assert context.microcytic_anemia is True
+    assert context.prior_endoscopy_documented is False
+    assert any("additional cytopenias" in note for note in patient.clinical_notes)
+    assert context == build_patient_context(PATIENTS[MARIA_PATIENT_ID])
+
+
 class FakeMedplumClient:
     def __init__(self) -> None:
         self.patient, self.linked = linked_demo_resources()
@@ -92,7 +143,10 @@ class FakeUpsertClient:
 
     def upsert_by_identifier(self, resource_type, system, value, resource):
         key = (resource_type, system, value)
-        stored = {**resource, "id": self.resources.get(key, {}).get("id", f"id-{len(self.resources) + 1}")}
+        stored = {
+            **resource,
+            "id": self.resources.get(key, {}).get("id", f"id-{len(self.resources) + 1}"),
+        }
         self.resources[key] = stored
         return stored
 
@@ -162,3 +216,15 @@ def test_jordan_seed_is_idempotent_and_never_deletes_resources() -> None:
         "Observation",
         "Coverage",
     }
+
+
+def test_all_demo_patient_seeding_is_idempotent_and_preserves_jordan() -> None:
+    client = FakeUpsertClient()
+    first = seed_demo_patients(client)
+    second = seed_demo_patients(client)
+
+    assert first == second
+    assert set(first) == {PRIMARY_PATIENT_ID, MARIA_PATIENT_ID}
+    assert len(client.resources) == 31
+    assert first[PRIMARY_PATIENT_ID]["Patient"]
+    assert first[MARIA_PATIENT_ID]["Patient"]

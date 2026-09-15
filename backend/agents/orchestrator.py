@@ -37,6 +37,7 @@ def consult_network(
     messages = build_consultation_messages(
         consultation_id, context, physicians, evaluations, recommended
     )
+    anemia_case = context.persistent_iron_deficiency_anemia
     return ConsultationResult(
         consultation_id=consultation_id,
         patient_id=patient.id,
@@ -46,7 +47,12 @@ def consult_network(
         messages=messages,
         recommended_physician=recommended,
         why=(
-            "The renal trajectory changes the referral priority: explicit nephrology and "
+            "Gastroenterology is the best first referral because persistent iron deficiency has "
+            "not had source evaluation. Haematology remains appropriate if that evaluation is "
+            "unrevealing, anaemia persists, unusual blood-count findings appear, or IV iron is "
+            "needed; its faster access does not override clinical sequencing."
+            if anemia_case
+            else "The renal trajectory changes the referral priority: explicit nephrology and "
             "hypertension-cardiology rules both support nephrology first. Historical case "
             "similarity and access information reinforce, but do not determine, that choice."
         ),

@@ -1,15 +1,32 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.agents import consult_network, evaluate_physician
+from backend.api import consult as consult_api
 from backend.clinical import build_patient_context, generate_candidates
+from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
 from backend.models import ClinicalFit, ConsultationMessageType, EvidenceKind
-from backend.synthetic_data import PATIENTS, PHYSICIANS, PRIMARY_PATIENT_ID
+from backend.synthetic_data import (
+    MARIA_PATIENT_ID,
+    MARIA_PHYSICIANS,
+    PATIENTS,
+    PHYSICIANS,
+    PRIMARY_PATIENT_ID,
+)
+from backend.workflow import WorkflowStore
 
 
 def patient_and_context():
     patient = PATIENTS[PRIMARY_PATIENT_ID]
     return patient, build_patient_context(patient)
+
+
+@pytest.fixture
+def api_client(monkeypatch: pytest.MonkeyPatch, tmp_path) -> TestClient:
+    monkeypatch.setattr(consult_api, "data_source", SyntheticClinicalDataSource())
+    monkeypatch.setattr(consult_api, "workflow_store", WorkflowStore(tmp_path / "workflow.sqlite"))
+    return TestClient(app)
 
 
 def test_patient_context_captures_renal_decline_and_resistant_hypertension():
@@ -39,13 +56,24 @@ def test_agents_return_schema_and_meaningfully_different_responses():
     for result in results:
         dumped = result.model_dump(mode="json")
         assert set(dumped) == {
-            "physician_id", "physician_name", "specialty", "clinical_fit",
-            "accepts_case", "reason", "evidence", "required_workup", "urgency",
-            "availability", "insurance_status", "confidence",
+            "physician_id",
+            "physician_name",
+            "specialty",
+            "clinical_fit",
+            "accepts_case",
+            "reason",
+            "evidence",
+            "required_workup",
+            "urgency",
+            "availability",
+            "insurance_status",
+            "confidence",
         }
     assert len({result.reason for result in results}) == 5
     assert {result.clinical_fit for result in results} == {
-        ClinicalFit.STRONG, ClinicalFit.MODERATE, ClinicalFit.POOR
+        ClinicalFit.STRONG,
+        ClinicalFit.MODERATE,
+        ClinicalFit.POOR,
     }
 
 
@@ -74,17 +102,16 @@ def test_primary_network_result_is_grounded_and_inspectable():
     assert all(item.evidence for item in result.consultation)
 
 
-def test_api_runs_without_credentials_or_network():
-    client = TestClient(app)
-    assert client.get("/health").json() == {"status": "ok", "data_mode": "synthetic"}
-    patient = client.get(f"/api/patients/{PRIMARY_PATIENT_ID}")
+def test_api_runs_without_credentials_or_network(api_client: TestClient):
+    assert api_client.get("/health").json() == {"status": "ok", "data_mode": "synthetic"}
+    patient = api_client.get(f"/api/patients/{PRIMARY_PATIENT_ID}")
     assert patient.status_code == 200
-    result = client.post(
+    result = api_client.post(
         f"/api/patients/{PRIMARY_PATIENT_ID}/consultations",
         json={"pcp_guidance": "Thinking nephrology vs cardiology"},
     )
     assert result.status_code == 200
-    assert result.json()["recommended_physician"]["physician_name"].startswith("Dr. Mina Jung")
+    assert result.json()["recommended_physician"]["physician_name"].startswith("Dr. Iain Jung")
     assert result.json()["messages"]
 
 
@@ -125,3 +152,70 @@ def test_consultation_has_auditable_messages_and_meaningful_follow_up():
 
     forbidden_fields = {"chain_of_thought", "reasoning_trace", "scratchpad", "tokens"}
     assert all(forbidden_fields.isdisjoint(message.model_dump()) for message in result.messages)
+
+
+def test_maria_recommends_gastroenterology_first_despite_faster_haematology() -> None:
+    result = consult_network(PATIENTS[MARIA_PATIENT_ID], MARIA_PHYSICIANS)
+
+    assert result.recommended_physician.physician_id == "physician-alvarez"
+    assert result.recommended_physician.specialty == "Gastroenterology"
+    assert result.recommended_physician.availability == "Approximately 12 days"
+    assert result.alternatives[0].physician_id == "physician-brooks"
+    assert result.alternatives[0].specialty == "Haematology"
+    assert result.alternatives[0].availability == "Approximately 8 days"
+    assert "appropriate" in result.alternatives[0].reason.casefold()
+    assert "first" in result.why.casefold()
+    assert result.before_referral == [
+        "Recent complete blood count (CBC)",
+        "Ferritin",
+        "Iron studies",
+    ]
+
+
+def test_maria_consultation_has_gi_clarification_acceptance_and_synthesis() -> None:
+    result = consult_network(PATIENTS[MARIA_PATIENT_ID], MARIA_PHYSICIANS)
+
+    question = next(
+        message
+        for message in result.messages
+        if message.message_type == ConsultationMessageType.FOLLOW_UP_QUESTION
+    )
+    answer = next(
+        message
+        for message in result.messages
+        if message.message_type == ConsultationMessageType.FOLLOW_UP_ANSWER
+    )
+    acceptance = next(
+        message
+        for message in result.messages
+        if message.message_type == ConsultationMessageType.REFERRAL_REQUIREMENT
+    )
+    assert question.sender_agent_id.endswith("0000006")
+    assert "colonoscopy" in question.summary.casefold()
+    assert answer.sender_name == "Dr. Lianne Cha Agent"
+    assert "no prior" in answer.summary.casefold()
+    assert acceptance.metadata["accepts_after_clarification"] is True
+    assert acceptance.metadata["required_workup"] == "CBC · Ferritin · Iron studies"
+    assert result.messages[-1].message_type == ConsultationMessageType.SYNTHESIS
+    assert "haematology remains appropriate later" in result.messages[-1].summary.casefold()
+
+    forbidden_fields = {"chain_of_thought", "reasoning_trace", "scratchpad", "tokens"}
+    assert all(forbidden_fields.isdisjoint(message.model_dump()) for message in result.messages)
+
+
+def test_api_lists_and_runs_both_demo_cases(api_client: TestClient) -> None:
+    patients = api_client.get("/api/patients")
+    assert patients.status_code == 200
+    assert {patient["id"] for patient in patients.json()} == {
+        PRIMARY_PATIENT_ID,
+        MARIA_PATIENT_ID,
+    }
+
+    response = api_client.post(
+        f"/api/patients/{MARIA_PATIENT_ID}/consultations",
+        json={"pcp_guidance": "Gastroenterology versus haematology"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommended_physician"]["specialty"] == "Gastroenterology"
+    assert payload["alternatives"][0]["specialty"] == "Haematology"

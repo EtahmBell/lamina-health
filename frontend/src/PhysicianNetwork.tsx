@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import laminaLogo from './assets/lamina-logo-source.png'
 import {
   activateProvider,
   claimProvider,
@@ -27,7 +28,7 @@ const titleCaseName = (value: string) => value === value.toUpperCase()
   : value
 
 function NetworkGlyph({ active = false }: { active?: boolean }) {
-  return <span className={`directory-network-glyph ${active ? 'active' : ''}`} aria-hidden="true"><i /><i /><i /><i /><b /></span>
+  return <span className={`directory-network-glyph ${active ? 'active' : ''}`} aria-hidden="true"><span className="motif-logo"><img src={laminaLogo} alt="" /></span></span>
 }
 
 function StatusBadge({ status }: { status: AgentStatus }) {
@@ -69,7 +70,7 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
       <button className="button-primary" type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search network'} <span>→</span></button>
     </form>
 
-    <section className="activation-demo-banner"><div><span className="mini-avatar">MJ</span><div><small>Controlled synthetic workflow</small><strong>Try physician-agent activation with Dr. Mina Jung</strong><p>Claim, verify, confirm practice information, set referral preferences, and activate—without implying a real NPPES physician participated.</p></div></div><button className="button-secondary" onClick={() => navigate('/network/9900000001')}>Open activation demo</button></section>
+    <section className="activation-demo-banner"><div><span className="mini-avatar">IJ</span><div><small>Controlled synthetic workflow</small><strong>Try physician-agent activation with Dr. Iain Jung</strong><p>Claim, verify, confirm practice information, set referral preferences, and activate—without implying a real NPPES physician participated.</p></div></div><button className="button-secondary" onClick={() => navigate('/network/9900000001')}>Open activation demo</button></section>
 
     {error && <div className="error-banner" role="alert">{error}</div>}
     <div className="directory-results-heading"><div><p className="eyebrow">Search results</p><h2>{filters.q || filters.specialty || filters.location ? 'Matching physicians' : 'Synthetic consult physicians'}</h2></div><span>{response?.count ?? 0} shown</span></div>

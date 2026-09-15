@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from threading import RLock
 
-from backend.synthetic_data import PHYSICIANS, SYNTHETIC_PHYSICIAN_NPIS
+from backend.synthetic_data import ALL_PHYSICIANS, SYNTHETIC_PHYSICIAN_NPIS
 
 from .directory import NppesDirectory
 from .models import (
@@ -38,7 +38,7 @@ class AgentOverlay:
 
 def _synthetic_profiles() -> list[PhysicianNetworkProfile]:
     profiles: list[PhysicianNetworkProfile] = []
-    for physician in PHYSICIANS:
+    for physician in ALL_PHYSICIANS:
         city, state = physician.location.rsplit(", ", 1)
         npi = SYNTHETIC_PHYSICIAN_NPIS[physician.id]
         profiles.append(
@@ -139,7 +139,9 @@ class ProviderNetwork:
         with self._lock:
             overlay = self._overlays.setdefault(npi, AgentOverlay(status=profile.agent.status))
             if overlay.status not in {AgentStatus.VERIFIED, AgentStatus.ACTIVE}:
-                raise AgentTransitionError("Verify the physician identity before configuring the agent")
+                raise AgentTransitionError(
+                    "Verify the physician identity before configuring the agent"
+                )
             overlay.practice_confirmed = request.practice_confirmed
             overlay.preferences = AgentPreferences.model_validate(
                 request.model_dump(exclude={"practice_confirmed"})
@@ -159,7 +161,9 @@ class ProviderNetwork:
             if overlay.status != AgentStatus.VERIFIED:
                 raise AgentTransitionError("Verify the physician identity before activation")
             if not overlay.practice_confirmed or not overlay.preferences:
-                raise AgentTransitionError("Confirm practice information and save preferences first")
+                raise AgentTransitionError(
+                    "Confirm practice information and save preferences first"
+                )
             if not overlay.preferences.areas_of_focus:
                 raise AgentTransitionError("Add at least one area of focus before activation")
             overlay.status = AgentStatus.ACTIVE

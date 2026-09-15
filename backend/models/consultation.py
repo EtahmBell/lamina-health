@@ -36,7 +36,18 @@ class ConsultationMessageType(StrEnum):
 
 class LabObservation(StrictModel):
     date: str
-    test: Literal["creatinine", "eGFR"]
+    test: Literal[
+        "creatinine",
+        "eGFR",
+        "hemoglobin",
+        "ferritin",
+        "serum_iron",
+        "TIBC",
+        "transferrin_saturation",
+        "MCV",
+        "WBC",
+        "platelets",
+    ]
     value: float
     unit: str
 
@@ -49,6 +60,7 @@ class PatientRecord(StrictModel):
     diagnoses: list[str]
     medications: list[str]
     labs: list[LabObservation]
+    clinical_notes: list[str] = Field(default_factory=list)
     insurance: str
     location: str
     clinical_data_source: Literal["synthetic_fixture", "medplum_fhir"] = "synthetic_fixture"
@@ -65,6 +77,11 @@ class ClinicalRepresentation(StrictModel):
     resistant_hypertension: bool
     progressive_renal_dysfunction: bool
     ckd_stage: str
+    hemoglobin_trend: list[float] = Field(default_factory=list)
+    iron_studies: dict[str, float] = Field(default_factory=dict)
+    persistent_iron_deficiency_anemia: bool = False
+    microcytic_anemia: bool = False
+    prior_endoscopy_documented: bool | None = None
 
 
 class HistoricalCase(StrictModel):

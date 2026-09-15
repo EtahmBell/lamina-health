@@ -16,11 +16,25 @@ def generate_candidates(
         if "Cardiology" in physician.specialty and context.resistant_hypertension:
             reasons.append("Resistant hypertension warrants comparison with cardiology pathways")
         if physician.specialty == "Cardiac Electrophysiology":
-            reasons.append("Included to test specialty-boundary rejection; no rhythm signal is present")
+            reasons.append(
+                "Included to test specialty-boundary rejection; no rhythm signal is present"
+            )
+        if (
+            physician.specialty == "Gastroenterology"
+            and context.prior_endoscopy_documented is False
+        ):
+            reasons.insert(0, "Persistent iron deficiency requires initial GI source evaluation")
+        if physician.specialty == "Haematology" and context.persistent_iron_deficiency_anemia:
+            reasons.append("Haematology remains relevant for refractory deficiency or IV iron")
+        if physician.specialty == "Colorectal Surgery":
+            reasons.append("Included to confirm diagnostic evaluation should precede surgery")
         if pcp_guidance:
             specialty = physician.specialty.casefold()
             if any(word in pcp_guidance.casefold() for word in specialty.split()):
                 reasons.append("Matches optional PCP guidance")
-        candidates.append(CandidateReason(physician_id=physician.id, reasons=reasons or ["Boundary comparison candidate"]))
+        candidates.append(
+            CandidateReason(
+                physician_id=physician.id, reasons=reasons or ["Boundary comparison candidate"]
+            )
+        )
     return candidates
-

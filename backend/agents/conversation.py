@@ -9,7 +9,7 @@ from backend.models import (
 )
 from backend.synthetic_data import synthetic_agent_id
 
-PCP_AGENT_ID = "agent-pcp-cha"
+PCP_AGENT_ID = "agent-pcp-lianne-cha"
 NETWORK_AGENT_ID = "agent-network-orchestrator"
 
 
@@ -50,13 +50,15 @@ def build_consultation_messages(
     evaluations: list[PhysicianEvaluation],
     recommended: PhysicianEvaluation,
 ) -> list[ConsultationMessage]:
+    if context.persistent_iron_deficiency_anemia:
+        return _build_anemia_messages(consultation_id, context, profiles, evaluations, recommended)
     profiles_by_id = {profile.id: profile for profile in profiles}
     messages = [
         _message(
             consultation_id=consultation_id,
             sequence=1,
             sender_agent_id=PCP_AGENT_ID,
-            sender_name="Dr. Cha Agent",
+            sender_name="Dr. Lianne Cha Agent",
             sender_role="Primary Care",
             recipient_agent_id="network",
             message_type=ConsultationMessageType.CONSULT_REQUEST,
@@ -81,7 +83,9 @@ def build_consultation_messages(
         related_facts = [
             fact
             for fact in context.facts
-            if any(term in fact.casefold() for term in ("hypertension", "creatinine", "egfr", "ckd"))
+            if any(
+                term in fact.casefold() for term in ("hypertension", "creatinine", "egfr", "ckd")
+            )
         ]
         messages.append(
             _message(
@@ -115,13 +119,15 @@ def build_consultation_messages(
             consultation_id=consultation_id,
             sequence=sequence,
             sender_agent_id=synthetic_agent_id("physician-jung"),
-            sender_name="Dr. Mina Jung Agent",
+            sender_name="Dr. Iain Jung Agent",
             sender_role="Nephrology",
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.REFERRAL_REQUIREMENT,
             summary="Requests a current BMP and urine protein/creatinine ratio before the visit.",
             evidence=[item for item in jung.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
-            related_patient_facts=[fact for fact in context.facts if "CKD" in fact or "eGFR" in fact],
+            related_patient_facts=[
+                fact for fact in context.facts if "CKD" in fact or "eGFR" in fact
+            ],
             metadata={"required_workup": "BMP · UPCR"},
         )
     )
@@ -131,7 +137,7 @@ def build_consultation_messages(
             consultation_id=consultation_id,
             sequence=sequence,
             sender_agent_id=PCP_AGENT_ID,
-            sender_name="Dr. Cha Agent",
+            sender_name="Dr. Lianne Cha Agent",
             sender_role="Primary Care",
             recipient_agent_id=synthetic_agent_id("physician-onadeko"),
             message_type=ConsultationMessageType.FOLLOW_UP_QUESTION,
@@ -147,15 +153,13 @@ def build_consultation_messages(
     )
     sequence += 1
     onadeko = next(item for item in evaluations if item.physician_id == "physician-onadeko")
-    explicit_rule = [
-        item for item in onadeko.evidence if item.kind == EvidenceKind.EXPLICIT_RULE
-    ]
+    explicit_rule = [item for item in onadeko.evidence if item.kind == EvidenceKind.EXPLICIT_RULE]
     messages.append(
         _message(
             consultation_id=consultation_id,
             sequence=sequence,
             sender_agent_id=synthetic_agent_id("physician-onadeko"),
-            sender_name="Dr. Tayo Onadeko Agent",
+            sender_name="Dr. Matthew Onadeko Agent",
             sender_role="Hypertension Cardiology",
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.FOLLOW_UP_ANSWER,
@@ -181,7 +185,7 @@ def build_consultation_messages(
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.SYNTHESIS,
             summary=(
-                "Recommends Dr. Mina Jung in nephrology first: strongest clinical fit, explicit "
+                "Recommends Dr. Iain Jung in nephrology first: strongest clinical fit, explicit "
                 "criteria match, relevant practice footprint, known workup, and earliest "
                 "strong-fit access."
             ),
@@ -195,3 +199,150 @@ def build_consultation_messages(
     )
     return messages
 
+
+def _build_anemia_messages(
+    consultation_id: str,
+    context: ClinicalRepresentation,
+    profiles: list[PhysicianProfile],
+    evaluations: list[PhysicianEvaluation],
+    recommended: PhysicianEvaluation,
+) -> list[ConsultationMessage]:
+    profiles_by_id = {profile.id: profile for profile in profiles}
+    messages = [
+        _message(
+            consultation_id=consultation_id,
+            sequence=1,
+            sender_agent_id=PCP_AGENT_ID,
+            sender_name="Dr. Lianne Cha Agent",
+            sender_role="Primary Care",
+            recipient_agent_id="network",
+            message_type=ConsultationMessageType.CONSULT_REQUEST,
+            summary=f"Requests specialty sequencing guidance for {context.summary}",
+            evidence=[],
+            related_patient_facts=context.facts,
+        )
+    ]
+    sequence = 2
+    related_facts = [
+        fact
+        for fact in context.facts
+        if any(
+            term in fact.casefold()
+            for term in ("hemoglobin", "ferritin", "iron", "endoscopic", "cytopenia")
+        )
+    ]
+    for evaluation in evaluations:
+        profile = profiles_by_id[evaluation.physician_id]
+        messages.append(
+            _message(
+                consultation_id=consultation_id,
+                sequence=sequence,
+                sender_agent_id=synthetic_agent_id(evaluation.physician_id),
+                sender_name=f"{evaluation.physician_name.replace(' (synthetic)', '')} Agent",
+                sender_role=profile.subspecialty,
+                recipient_agent_id=PCP_AGENT_ID,
+                message_type=(
+                    ConsultationMessageType.FIT_RESPONSE
+                    if evaluation.accepts_case
+                    else ConsultationMessageType.REDIRECT
+                ),
+                summary=evaluation.reason,
+                evidence=[
+                    item
+                    for item in evaluation.evidence
+                    if item.kind
+                    in {
+                        EvidenceKind.EXPLICIT_RULE,
+                        EvidenceKind.PRACTICE_SIMILARITY,
+                        EvidenceKind.OPERATIONAL,
+                    }
+                ],
+                related_patient_facts=related_facts,
+                metadata={
+                    "clinical_fit": evaluation.clinical_fit.value,
+                    "accepts_case": evaluation.accepts_case,
+                    "availability": evaluation.availability,
+                    "required_workup": " · ".join(evaluation.required_workup) or "None specified",
+                },
+            )
+        )
+        sequence += 1
+
+    alvarez = next(item for item in evaluations if item.physician_id == "physician-alvarez")
+    messages.append(
+        _message(
+            consultation_id=consultation_id,
+            sequence=sequence,
+            sender_agent_id=synthetic_agent_id("physician-alvarez"),
+            sender_name="Dr. Sofia Alvarez Agent",
+            sender_role="Gastroenterology",
+            recipient_agent_id=PCP_AGENT_ID,
+            message_type=ConsultationMessageType.FOLLOW_UP_QUESTION,
+            summary="Is any prior colonoscopy or upper endoscopy documented?",
+            evidence=[item for item in alvarez.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
+            related_patient_facts=[fact for fact in context.facts if "endoscopic" in fact],
+        )
+    )
+    sequence += 1
+    messages.append(
+        _message(
+            consultation_id=consultation_id,
+            sequence=sequence,
+            sender_agent_id=PCP_AGENT_ID,
+            sender_name="Dr. Lianne Cha Agent",
+            sender_role="Primary Care",
+            recipient_agent_id=synthetic_agent_id("physician-alvarez"),
+            message_type=ConsultationMessageType.FOLLOW_UP_ANSWER,
+            summary="No prior colonoscopy or upper endoscopy is documented.",
+            evidence=[],
+            related_patient_facts=[fact for fact in context.facts if "endoscopic" in fact],
+            metadata={"prior_endoscopy_documented": False},
+        )
+    )
+    sequence += 1
+    messages.append(
+        _message(
+            consultation_id=consultation_id,
+            sequence=sequence,
+            sender_agent_id=synthetic_agent_id("physician-alvarez"),
+            sender_name="Dr. Sofia Alvarez Agent",
+            sender_role="Gastroenterology",
+            recipient_agent_id=PCP_AGENT_ID,
+            message_type=ConsultationMessageType.REFERRAL_REQUIREMENT,
+            summary=(
+                "Accepts as the first referral for occult GI source evaluation; requests a "
+                "recent CBC, ferritin, and iron studies before the visit."
+            ),
+            evidence=[item for item in alvarez.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
+            related_patient_facts=related_facts,
+            metadata={
+                "accepts_after_clarification": True,
+                "required_workup": "CBC · Ferritin · Iron studies",
+            },
+        )
+    )
+    sequence += 1
+    messages.append(
+        _message(
+            consultation_id=consultation_id,
+            sequence=sequence,
+            sender_agent_id=NETWORK_AGENT_ID,
+            sender_name="Network Orchestrator",
+            sender_role="Recommendation synthesis",
+            recipient_agent_id=PCP_AGENT_ID,
+            message_type=ConsultationMessageType.SYNTHESIS,
+            summary=(
+                "Recommends Dr. Sofia Alvarez in gastroenterology first for source evaluation. "
+                "Haematology remains appropriate later if evaluation is unrevealing, anaemia "
+                "persists, other abnormalities appear, or IV iron is required."
+            ),
+            evidence=recommended.evidence,
+            related_patient_facts=context.facts,
+            metadata={
+                "recommended_physician_id": recommended.physician_id,
+                "clinical_fit": ClinicalFit.STRONG.value,
+                "sequencing_decision": "gastroenterology_first",
+            },
+        )
+    )
+    return messages

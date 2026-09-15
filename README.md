@@ -1,14 +1,28 @@
 # Lamina
 
-Lamina is a specialty-care orchestration product built around one primary action: **Consult Network**. From a patient chart, Lamina creates a concise clinical representation, asks relevant physician agents to exchange deliberate structured consult messages using their practice footprints, and returns a grounded, inspectable recommendation.
+Lamina is a physician-agent network for specialty care. Each physician's configured agent can represent their practice and consult other physician agents around a patient. **Consult Network** is the first specialty-referral application: it creates a concise clinical representation, exchanges deliberate structured messages, and returns a grounded, inspectable recommendation.
 
 This rebuild is intentionally different from the YC × Medplum hackathon prototype in `../lamina-og/`: there is no social feed, public agent conversation, or chatbot-first workflow. V1 is a small, deterministic demonstration using synthetic patients and physicians only—no PHI.
 
-## Primary demo
+## Clinical demos
 
-The included 62-year-old synthetic patient has resistant hypertension on three medications, diabetes, and a creatinine/eGFR trajectory consistent with progressive stage 3b CKD. Five synthetic physician agents respond differently. The network recommends Dr. Mina Jung in nephrology, places Dr. Tayo Onadeko in hypertension cardiology as a reasonable alternative, rejects electrophysiology as a poor fit, and requests a current BMP and UPCR before referral.
+Lamina includes two deliberately different synthetic consultation patterns:
+
+- **Jordan Lee — ownership:** resistant hypertension with progressive stage 3b
+  CKD. The network recommends Dr. Iain Jung in nephrology, keeps hypertension
+  cardiology as an alternative, and requests a current BMP and UPCR.
+- **Maria Santos — sequencing:** persistent microcytic iron-deficiency anaemia
+  despite oral iron, without documented prior endoscopic source evaluation. The
+  network recommends gastroenterology first, even though haematology has faster
+  synthetic access. Haematology remains appropriate later for persistent
+  anaemia, unusual blood-count findings, or IV iron management.
+
+Each case uses a controlled five-agent synthetic network and returns concise,
+inspectable consultation messages rather than hidden reasoning.
 
 NPPES supplies public provider identity and reserved Lamina agent identities. Medplum can supply synthetic FHIR clinical context. Lamina keeps those layers separate and supplies the physician-agent orchestration between them.
+
+The clinician workspace has Home, Patients, Consultations, My Agent, and Physician Network. My Agent exposes the synthetic Dr. Lianne Cha profile, source-labelled facts, access boundaries, bounded calibration scenarios, and confirm/edit/reject controls for demo preference suggestions. A small Lamina-owned local SQLite record (`data/workflow.sqlite`, gitignored) holds patient open/consult recency, completed consultation results, and these demo preferences; it is separate from Medplum clinical data. Confirmed preferences are inspectable in My Agent but do not silently alter the deterministic V1 consult rules. Consultation History is populated only by completed Lamina consultations, not fixture timestamps.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the domain flow, [docs/NPPES_LEGACY_AUDIT.md](docs/NPPES_LEGACY_AUDIT.md) for provider-network decisions, and [docs/MEDPLUM_CONVERSATION_AUDIT.md](docs/MEDPLUM_CONVERSATION_AUDIT.md) for this pass's interoperability decisions.
 
@@ -67,7 +81,7 @@ To use a Medplum development project, copy `.env.example`, set
 Medplum endpoints. The application reports a configured Medplum failure; it
 does not silently substitute local fixtures.
 
-Seed Jordan Lee into the configured project:
+Seed all current demo patients into the configured project:
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\seed_medplum_demo.py
@@ -75,8 +89,9 @@ Seed Jordan Lee into the configured project:
 
 The script upserts stable, explicitly tagged synthetic Patient, Condition,
 MedicationRequest, Observation, and Coverage resources. It prints the resulting
-resource IDs and never deletes unrelated resources. Never put credentials in
-source control.
+resource IDs for Jordan Lee and Maria Santos and never deletes unrelated
+resources. Running it again updates the same stable resources rather than
+creating duplicates. Never put credentials in source control.
 
 ## Tests and build
 
@@ -87,7 +102,11 @@ cd frontend
 npm run build
 ```
 
-The core tests are deterministic and offline. They verify FHIR mapping and source equivalence, patient parsing, renal decline, resistant hypertension, candidate coverage, structured physician messages and follow-up, explicit-rule precedence, the expected recommendation and alternative, workup requirements, evidence visibility, provider-network status, and credential-free API execution.
+The core tests are deterministic and offline. They verify both FHIR/source
+equivalence paths, renal and anaemia trends, specialty ownership and sequencing,
+structured follow-ups, explicit-rule precedence, workup requirements, evidence
+visibility, access ordering, provider-network status, and credential-free API
+execution.
 
 ## HTTP demo
 
@@ -96,6 +115,8 @@ With the backend running:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/patients/patient-ckd-htn-001
 Invoke-RestMethod -Method Post -ContentType application/json -Body '{"pcp_guidance":null}' http://127.0.0.1:8000/api/patients/patient-ckd-htn-001/consultations
+Invoke-RestMethod http://127.0.0.1:8000/api/patients/patient-ida-002
+Invoke-RestMethod -Method Post -ContentType application/json -Body '{"pcp_guidance":null}' http://127.0.0.1:8000/api/patients/patient-ida-002/consultations
 ```
 
 ## Intentionally unfinished
@@ -103,4 +124,4 @@ Invoke-RestMethod -Method Post -ContentType application/json -Body '{"pcp_guidan
 - Production EHR authorization and live Epic/Cerner integration.
 - Persistent consultation storage and real referral submission.
 - Live payer eligibility, scheduling, and availability integrations.
-- LLM augmentation and a second demo case.
+- LLM augmentation beyond the deterministic structured demonstration.
