@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
+import { LaminaMark } from './LaminaMark'
 import { consultNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type Patient, type PatientActivity } from './api'
 import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients'
 import { PhysicianDirectoryPage, PhysicianProfilePage } from './PhysicianNetwork'
@@ -13,9 +14,7 @@ function Brand() {
 }
 
 function NetworkMark({ active = false, resolved = false }: { active?: boolean; resolved?: boolean }) {
-  return <span className={`network-motif ${active ? 'active' : ''} ${resolved ? 'resolved' : ''}`} aria-hidden="true">
-    <span className="motif-logo"><img src={laminaLogo} alt="" /></span>
-  </span>
+  return <LaminaMark active={active} resolved={resolved} />
 }
 
 function SyntheticStatus() {

@@ -56,6 +56,22 @@ export type ProviderSearchResponse = {
   results: PhysicianNetworkProfile[]; count: number; directory_available: boolean
   directory_records: number; data_mode: 'read_only_nppes_with_synthetic_demo'
 }
+export type AgentRelationship = {
+  source_agent: string; target_agent: string; relationship_type: 'recommended' | 'redirected' | 'consulted'
+  consultation_count: number; recommended_count: number; redirect_count: number
+  most_recent_interaction: string; last_patient_id: string; last_patient_name: string
+  last_record_id: number; associated_consultation_ids: number[]
+}
+export type NetworkAgent = {
+  id: string; physician_id: string; npi: string; name: string; specialty: string; subspecialty: string
+  location: string; status: AgentStatus; source: 'SYNTHETIC'; focus_areas: string[]
+  required_workup: string[]; explicit_rules: string[]; confirmed_preferences: AgentPreferences | null
+  provenance: string; relationship: AgentRelationship | null
+}
+export type AgentNetwork = {
+  center: { id: string; name: string; specialty: string; location: string; status: 'active'; source: string }
+  nodes: NetworkAgent[]; record_count: number; relationship_source: string; status_note: string
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, init)
@@ -74,6 +90,7 @@ export const getPatientActivity = () => request<PatientActivity[]>('/api/workspa
 export const getConsultationHistory = () => request<ConsultationRecord[]>('/api/workspace/consultations')
 export const getConsultationRecord = (id: number) => request<ConsultationRecord>(`/api/workspace/consultations/${id}`)
 export const getMyAgent = () => request<MyAgent>('/api/workspace/agent')
+export const getAgentNetwork = () => request<AgentNetwork>('/api/workspace/network')
 export const updateAgentLearning = (key: string, action: 'confirm' | 'edit' | 'reject', statement?: string) => request<AgentLearning>(`/api/workspace/agent/learnings/${encodeURIComponent(key)}`, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, statement }),
 })

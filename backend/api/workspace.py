@@ -5,6 +5,8 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.network_projection import project_agent_network
+from backend.provider_network import provider_network
 from backend.synthetic_data import PATIENTS
 from backend.workflow import workflow_store
 
@@ -86,6 +88,11 @@ def update_learning(key: str, update: PreferenceUpdate) -> dict:
 @router.get("/activity")
 def patient_activity() -> list[dict]:
     return workflow_store.activity(list(PATIENTS))
+
+
+@router.get("/network")
+def agent_network() -> dict:
+    return project_agent_network(workflow_store.history(limit=200), provider_network)
 
 
 @router.get("/consultations")
