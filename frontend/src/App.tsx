@@ -26,6 +26,7 @@ function SyntheticStatus() {
 }
 
 const navItems = [
+  { id: 'home', title: 'Home', icon: '⌂', path: '/home' },
   { id: 'patients', title: 'Patients', icon: '✦', path: '/patients' },
   { id: 'consultations', title: 'Consultations', icon: '◫', path: '/consultations' },
   { id: 'agent', title: 'My Agent', icon: '◇', path: '/agent' },
@@ -39,38 +40,89 @@ function ProfileControl({ navigate }: { navigate: Navigate }) {
 function ProductShell({ children, navigate, section, trail }: { children: React.ReactNode; navigate: Navigate; section: string; trail?: string }) {
   return <div className="app-shell">
     <aside className="sidebar">
-      <div><button className="brand-button" onClick={() => navigate('/')}><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
+      <div><button className="brand-button" onClick={() => navigate('/home')}><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
         <nav aria-label="Primary navigation">
           {navItems.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span><b>{item.title}</b></span></button>)}
         </nav>
       </div>
       <div className="sidebar-clinician"><div className="clinician-avatar">LS</div><div><span>Your physician agent</span><strong>{PCP_AGENT_NAME}</strong><small>Active · Primary Care</small></div></div>
     </aside>
-    <div className="workspace"><header className="workspace-bar"><div><strong>{section === 'patients' ? 'Patients' : section === 'consultations' ? 'Consultations' : section === 'agent' ? 'My Agent' : section === 'profile' ? 'Profile' : 'Physician Network'}</strong>{trail && <><b>/</b><span>{trail}</span></>}</div><div className="workspace-bar-actions"><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>{children}</div>
+    <div className="workspace"><header className="workspace-bar"><div><strong>{section === 'home' ? 'Home' : section === 'patients' ? 'Patients' : section === 'consultations' ? 'Consultations' : section === 'agent' ? 'My Agent' : section === 'profile' ? 'Profile' : 'Physician Network'}</strong>{trail && <><b>/</b><span>{trail}</span></>}</div><div className="workspace-bar-actions"><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>{children}</div>
   </div>
 }
 
 function LandingPage({ navigate }: { navigate: Navigate }) {
-  const [recent, setRecent] = useState<ConsultationRecord | null>(null)
-  const [pending, setPending] = useState(0)
-  useEffect(() => { getConsultationHistory().then((records) => setRecent(records[0] || null)).catch(() => {}); getMyAgent().then((agent) => setPending(agent.learnings.filter((item) => item.status === 'suggested').length)).catch(() => {}) }, [])
   return <main className="landing-page">
     <header className="landing-header"><Brand /><div className="landing-header-actions"><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>
     <section className="landing-content">
       <p className="eyebrow">Primary care workspace</p>
       <h1>Good morning, {PCP_NAME}.</h1>
-      <p className="landing-question">Who are we helping today?</p>
-      <button className="landing-network-control" onClick={() => navigate('/patients')} aria-label="Select patient">
+      <p className="landing-question">Your agent is active.</p>
+      <button className="landing-network-control" onClick={() => navigate('/home')} aria-label="Enter workspace">
         <span className="ambient-ring one" /><span className="ambient-ring two" /><span className="ambient-line line-one" /><span className="ambient-line line-two" />
         <NetworkMark active />
         <span className="landing-agent-label">YOUR AGENT · ACTIVE</span>
-        <strong>Select patient</strong><small>Consult the physician network</small>
+        <strong>Enter workspace</strong><small>See what needs your attention</small>
       </button>
       <p className="agent-ready">{PCP_AGENT_NAME} is active and ready to consult the network.</p>
-      {(recent || pending > 0) && <nav className="landing-state" aria-label="Recent state">{recent && <button onClick={() => navigate(`/consultations/${recent.id}`)}><span>Continue: {patientName(recent.patient_id)}</span><small>{cleanName(recent.result.recommended_physician.physician_name)} · {recent.result.recommended_physician.specialty}</small><b>→</b></button>}{pending > 0 && <button onClick={() => navigate('/agent?tab=calibration')}><span>{pending} agent learning{pending === 1 ? '' : 's'} to review</span><small>Review in Calibration</small><b>→</b></button>}</nav>}
     </section>
     <p className="landing-footnote">Lamina helps primary care teams find the right specialist, required workup, and appropriate access.</p>
   </main>
+}
+
+function relativeTime(value: string) {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60000))
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} hr${hours === 1 ? '' : 's'} ago`
+  const days = Math.round(hours / 24)
+  return `${days} day${days === 1 ? '' : 's'} ago`
+}
+
+function HomePage({ navigate }: { navigate: Navigate }) {
+  const [records, setRecords] = useState<ConsultationRecord[]>([])
+  const [patientActivity, setPatientActivity] = useState<PatientActivity[]>([])
+  const [agent, setAgent] = useState<MyAgent | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  useEffect(() => {
+    Promise.all([getConsultationHistory(), getPatientActivity(), getMyAgent()])
+      .then(([consultations, activity, currentAgent]) => { setRecords(consultations); setPatientActivity(activity); setAgent(currentAgent) })
+      .catch(() => setError(true)).finally(() => setLoading(false))
+  }, [])
+  const ordered = [...records].sort((a, b) => b.completed_at.localeCompare(a.completed_at))
+  const latestByPatient = ordered.filter((record, index) => ordered.findIndex((item) => item.patient_id === record.patient_id) === index)
+  const pending = agent?.learnings.filter((item) => item.status === 'suggested') || []
+  const attentionCount = latestByPatient.slice(0, 2).length + (pending.length ? 1 : 0)
+  const activity = ordered.flatMap((record) => {
+    const physician = cleanName(record.result.recommended_physician.physician_name)
+    const clarification = record.result.messages.find((message) => message.message_type === 'follow_up_question')
+    return [
+      { id: `${record.id}-resolved`, time: record.completed_at, order: 3, title: 'Consultation resolved', detail: `${record.result.recommended_physician.specialty} recommended${record.patient_id === MARIA_ID ? ' first' : ''}`, patient: patientName(record.patient_id), recordId: record.id },
+      ...(clarification ? [{ id: `${record.id}-clarification`, time: record.completed_at, order: 2, title: clarification.sender_agent_id === PCP_AGENT_ID ? 'Your agent requested specialist clarification' : `${messageSender(clarification)} requested clarification`, detail: clarification.summary, patient: patientName(record.patient_id), recordId: record.id }] : []),
+      { id: `${record.id}-consulted`, time: record.completed_at, order: 1, title: `Your agent consulted ${physician}'s Agent`, detail: `${record.result.consultation.length} physician representatives participated`, patient: patientName(record.patient_id), recordId: record.id },
+    ]
+  }).sort((a, b) => b.time.localeCompare(a.time) || b.order - a.order).slice(0, 6)
+  const activityByPatient = new Map(patientActivity.map((item) => [item.patient_id, item]))
+  const recentPatients = [...DEMO_PATIENTS].sort((a, b) => {
+    const aDate = activityByPatient.get(a.id)?.last_consultation || activityByPatient.get(a.id)?.last_opened || ''
+    const bDate = activityByPatient.get(b.id)?.last_consultation || activityByPatient.get(b.id)?.last_opened || ''
+    return bDate.localeCompare(aDate)
+  }).slice(0, 4)
+  const lastRecord = ordered[0]
+  return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page">
+    <header className="home-hero"><div><p className="eyebrow">Physician workspace</p><h1>Good morning, Lucy.</h1><p>Recent care activity and the work that needs your attention.</p></div><button className="button-primary home-start" onClick={() => navigate('/patients')}>Start consultation <span>→</span></button></header>
+    {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
+    {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
+    {!loading && !error && <>
+      {attentionCount > 0 && <section className="home-attention"><div className="home-section-heading"><div><p className="eyebrow">Current work</p><h2>Needs your attention</h2></div><span>{attentionCount}</span></div><div className="attention-list">{latestByPatient.slice(0, 2).map((record) => <article key={record.id}><span className="patient-row-avatar">{DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials}</span><div><strong>{patientName(record.patient_id)}</strong><p>{record.result.recommended_physician.specialty} recommended{record.patient_id === MARIA_ID ? ' first' : ''}</p><small>{cleanName(record.result.recommended_physician.physician_name)} · Workup identified</small></div><button onClick={() => navigate(`/consultations/${record.id}`)}>Review consultation →</button></article>)}{pending.length > 0 && <article><NetworkMark /><div><strong>{pending.length} agent learning{pending.length === 1 ? '' : 's'}</strong><p>Ready for your confirmation</p><small>Suggested preferences are not used as physician-confirmed rules.</small></div><button onClick={() => navigate('/agent?tab=calibration')}>Review calibration →</button></article>}</div></section>}
+      <section className="home-main-grid"><div className="home-activity"><div className="home-section-heading"><div><p className="eyebrow">Operational record</p><h2>Recent activity</h2></div></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} onClick={() => navigate(`/consultations/${item.recordId}`)}><span className="activity-marker" /><span><strong>{item.title}</strong><small>{item.detail}</small><em>{item.patient} · {relativeTime(item.time)}</em></span><b>→</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</div>
+        <aside className="home-agent-card"><div className="home-agent-title"><NetworkMark active /><div><p className="eyebrow">Your Agent</p><h2>{PCP_AGENT_NAME}</h2><span><i /> Active</span></div></div><dl><div><dt>Last activity</dt><dd>{lastRecord ? `Consulted ${lastRecord.result.consultation.length} physician agents for ${patientName(lastRecord.patient_id)}` : 'No consultations yet'}</dd></div>{pending.length > 0 && <div><dt>Calibration</dt><dd>{pending.length} learning{pending.length === 1 ? '' : 's'} to review</dd></div>}</dl><div><button className="button-secondary" onClick={() => navigate('/agent')}>Open My Agent</button>{pending.length > 0 && <button className="text-button" onClick={() => navigate('/agent?tab=calibration')}>Review calibration →</button>}</div></aside>
+      </section>
+      <section className="home-patients"><div className="home-section-heading"><div><p className="eyebrow">Current patients</p><h2>Recent patients</h2></div><button className="text-button" onClick={() => navigate('/patients')}>View all patients →</button></div><div className="recent-patient-list">{recentPatients.map((patient) => { const record = latestByPatient.find((item) => item.patient_id === patient.id); const workflow = activityByPatient.get(patient.id); return <button key={patient.id} onClick={() => navigate(`/patients/${patient.id}`)}><span className="patient-row-avatar">{patient.initials}</span><span><strong>{patient.name}</strong><small>{patient.reason}</small><em>{record ? `${record.result.recommended_physician.specialty} recommended${patient.id === MARIA_ID ? ' first' : ''}` : workflow?.last_opened ? `Opened ${relativeTime(workflow.last_opened)}` : patient.status}</em></span><b>→</b></button> })}</div></section>
+    </>}
+  </main></ProductShell>
 }
 
 function PatientSelector({ navigate }: { navigate: Navigate }) {
@@ -267,6 +319,7 @@ export default function App() {
   useEffect(() => { const onPop = () => setPath(window.location.pathname); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop) }, [])
   const navigate = (next: string) => { window.history.pushState({}, '', next); setPath(new URL(next, window.location.origin).pathname); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   if (path === '/') return <LandingPage navigate={navigate} />
+  if (path === '/home') return <HomePage navigate={navigate} />
   if (path === '/patients') return <PatientSelector navigate={navigate} />
   if (path === '/consultations') return <ConsultationsPage navigate={navigate} />
   if (path === '/agent') return <MyAgentPage navigate={navigate} />

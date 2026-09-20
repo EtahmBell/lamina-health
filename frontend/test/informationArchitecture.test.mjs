@@ -4,12 +4,33 @@ import { test } from 'node:test'
 
 const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 
-test('sidebar uses the final four-item navigation model', () => {
+test('workspace sidebar restores Home without turning the portal into workspace navigation', () => {
   const navigation = source.slice(source.indexOf('const navItems'), source.indexOf('function ProfileControl'))
-  assert.doesNotMatch(navigation, /title: 'Home'/)
-  for (const title of ['Patients', 'Consultations', 'My Agent', 'Physician Network']) {
+  for (const title of ['Home', 'Patients', 'Consultations', 'My Agent', 'Physician Network']) {
     assert.match(navigation, new RegExp(`title: '${title}'`))
   }
+  const portal = source.slice(source.indexOf('function LandingPage'), source.indexOf('function relativeTime'))
+  assert.match(portal, /navigate\('\/home'\)/)
+  assert.match(portal, /Enter workspace/)
+  assert.doesNotMatch(portal, /getConsultationHistory/)
+})
+
+test('workspace logo and Home actions target the expected routes', () => {
+  assert.match(source, /className="brand-button" onClick=\{\(\) => navigate\('\/home'\)\}/)
+  assert.match(source, /className="button-primary home-start" onClick=\{\(\) => navigate\('\/patients'\)\}/)
+  assert.match(source, /navigate\('\/agent\?tab=calibration'\)/)
+  assert.match(source, /navigate\(`\/patients\/\$\{patient\.id\}`\)/)
+})
+
+test('Home derives attention and activity from existing workspace state', () => {
+  const home = source.slice(source.indexOf('function HomePage'), source.indexOf('function PatientSelector'))
+  assert.match(home, /getConsultationHistory\(\)/)
+  assert.match(home, /getPatientActivity\(\)/)
+  assert.match(home, /getMyAgent\(\)/)
+  assert.match(home, /Needs your attention/)
+  assert.match(home, /Recent activity/)
+  assert.match(home, /Recent patients/)
+  assert.match(home, /follow_up_question/)
 })
 
 test('referral brief and progressive source disclosure remain present', () => {
