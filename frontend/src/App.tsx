@@ -37,17 +37,17 @@ function ProfileControl({ navigate }: { navigate: Navigate }) {
   return <button className="profile-control" onClick={() => navigate('/profile')} aria-label="Open clinician profile"><span>LS</span><strong>{PCP_NAME}</strong></button>
 }
 
-function ProductShell({ children, navigate, section, trail }: { children: React.ReactNode; navigate: Navigate; section: string; trail?: string }) {
+function ProductShell({ children, navigate, section }: { children: React.ReactNode; navigate: Navigate; section: string }) {
   return <div className="app-shell">
     <aside className="sidebar">
-      <div><button className="brand-button" onClick={() => navigate('/home')}><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
+      <div><button className="brand-button" onClick={() => navigate('/')} aria-label="Return to Lamina portal"><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
         <nav aria-label="Primary navigation">
           {navItems.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span><b>{item.title}</b></span></button>)}
         </nav>
       </div>
       <div className="sidebar-clinician"><div className="clinician-avatar">LS</div><div><span>Your physician agent</span><strong>{PCP_AGENT_NAME}</strong><small>Active · Primary Care</small></div></div>
     </aside>
-    <div className="workspace"><header className="workspace-bar"><div><strong>{section === 'home' ? 'Home' : section === 'patients' ? 'Patients' : section === 'consultations' ? 'Consultations' : section === 'agent' ? 'My Agent' : section === 'profile' ? 'Profile' : 'Physician Network'}</strong>{trail && <><b>/</b><span>{trail}</span></>}</div><div className="workspace-bar-actions"><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>{children}</div>
+    <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>{children}</div>
   </div>
 }
 
@@ -57,7 +57,7 @@ function LandingPage({ navigate }: { navigate: Navigate }) {
     <section className="landing-content">
       <p className="eyebrow">Primary care workspace</p>
       <h1>Good morning, {PCP_NAME}.</h1>
-      <p className="landing-question">Your agent is active.</p>
+      <p className="landing-question">Who are we helping today?</p>
       <button className="landing-network-control" onClick={() => navigate('/home')} aria-label="Enter workspace">
         <span className="ambient-ring one" /><span className="ambient-ring two" /><span className="ambient-line line-one" /><span className="ambient-line line-two" />
         <NetworkMark active />
@@ -192,7 +192,7 @@ function MyAgentPage({ navigate }: { navigate: Navigate }) {
   const confirmed = selectedLearning?.status === 'confirmed'
   const pending = agent?.learnings.filter((item) => item.status === 'suggested').length ?? 0
   const selectTab = (next: typeof tab) => { setTab(next); window.history.replaceState({}, '', `/agent?tab=${next}`) }
-  return <ProductShell navigate={navigate} section="agent" trail={tab[0].toUpperCase() + tab.slice(1)}><main className="page-shell agent-page">
+  return <ProductShell navigate={navigate} section="agent"><main className="page-shell agent-page">
     {error && <div className="error-banner" role="alert">{error}</div>}{!agent && !error && <p className="muted-note">Opening your agent…</p>}
     {agent && <><section className="agent-hero"><div className="agent-hero-mark"><NetworkMark active /></div><div><p className="eyebrow">Your physician agent</p><h1>{PCP_AGENT_NAME}</h1><p>Primary Care · Represents how you practise across the Lamina network.</p><span className="agent-state"><i /> ACTIVE</span></div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{(['overview', 'knowledge', 'calibration', 'activity'] as const).map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
@@ -302,7 +302,7 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const runConsult = async () => { setConsulting(true); setConsultation(null); setVisibleMessageCount(0); setError(null); try { const result = await consultNetwork(patientId, context); setConsultation(result); for (let index = 1; index <= result.messages.length; index += 1) { await new Promise((resolve) => setTimeout(resolve, 250)); setVisibleMessageCount(index) } } catch (consultError) { setError(consultError instanceof Error ? consultError.message : 'Consultation failed') } finally { setConsulting(false) } }
   if (loading) return <ProductShell navigate={navigate} section="patients"><div className="page-state embedded"><div className="loading-line" /><p>Opening patient workspace…</p></div></ProductShell>
   if (!patient) return <ProductShell navigate={navigate} section="patients"><div className="page-state embedded error"><p>{error || 'Patient unavailable'}</p></div></ProductShell>
-  return <ProductShell navigate={navigate} section="patients" trail={demoPatient?.name}><main className="page-shell referral-brief"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
+  return <ProductShell navigate={navigate} section="patients"><main className="page-shell referral-brief"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
     <header className="brief-identity"><div><p className="eyebrow">Specialty care referral brief</p><h1>{demoPatient?.name ?? cleanName(patient.display_name)}</h1><p>{patient.age} years · {patient.location}</p></div><div className="patient-monogram">{demoPatient?.initials}</div></header>
     <p className="brief-synthesis">{anemiaCase ? 'Hemoglobin has declined from 10.8 to 9.5 g/dL despite oral iron therapy, with no GI source evaluation documented.' : 'Progressive renal decline is occurring despite treatment for resistant hypertension.'}</p>
     <div className="decision-signals">{anemiaCase ? <><span><b>Hgb ↓</b>10.8 → 9.5 g/dL</span><span><b>Ferritin</b>{latestLab('ferritin')?.value} · low</span><span><b>Iron saturation</b>{latestLab('transferrin_saturation')?.value}% · low</span><span><b>Prior GI workup</b>None documented</span></> : <><span><b>Creatinine ↑</b>1.1 → 1.8 mg/dL</span><span><b>eGFR ↓</b>68 → 41</span><span><b>Clinical signal</b>Resistant hypertension</span><span><b>Trajectory</b>CKD progression</span></>}</div>
