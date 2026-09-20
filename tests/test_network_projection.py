@@ -28,13 +28,17 @@ def _setup(tmp_path):
 def test_network_starts_with_center_and_no_invented_relationships(tmp_path):
     store, providers = _setup(tmp_path)
     network = project_agent_network(store.history(), providers)
-    assert network["center"]["name"] == "Dr. Lianne Cha's Agent"
+    assert network["center"]["name"] == "Dr. Lucy Saru's Agent"
     assert network["center"]["status"] == "active"
     assert network["record_count"] == 0
     assert all(node["relationship"] is None for node in network["nodes"])
     jung = next(node for node in network["nodes"] if node["physician_id"] == "physician-jung")
     assert jung["status"] == "reserved"
     assert "not physician-confirmed" in jung["provenance"]
+    cha = next(node for node in network["nodes"] if node["physician_id"] == "physician-cha")
+    assert cha["name"] == "Dr. Lianne Cha"
+    assert cha["specialty"] == "Primary Care"
+    assert cha["relationship"] is None
 
 
 def test_jordan_and_maria_consults_project_real_edges_and_records(tmp_path, monkeypatch):

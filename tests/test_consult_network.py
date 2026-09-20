@@ -192,7 +192,7 @@ def test_maria_consultation_has_gi_clarification_acceptance_and_synthesis() -> N
     )
     assert question.sender_agent_id.endswith("0000006")
     assert "colonoscopy" in question.summary.casefold()
-    assert answer.sender_name == "Dr. Lianne Cha Agent"
+    assert answer.sender_name == "Dr. Lucy Saru Agent"
     assert "no prior" in answer.summary.casefold()
     assert acceptance.metadata["accepts_after_clarification"] is True
     assert acceptance.metadata["required_workup"] == "CBC · Ferritin · Iron studies"

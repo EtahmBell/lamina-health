@@ -1,3 +1,4 @@
+from backend.demo_identity import PCP_AGENT_ID, PCP_SENDER_NAME
 from backend.models import (
     ClinicalFit,
     ClinicalRepresentation,
@@ -9,7 +10,6 @@ from backend.models import (
 )
 from backend.synthetic_data import synthetic_agent_id
 
-PCP_AGENT_ID = "agent-pcp-lianne-cha"
 NETWORK_AGENT_ID = "agent-network-orchestrator"
 
 
@@ -58,7 +58,7 @@ def build_consultation_messages(
             consultation_id=consultation_id,
             sequence=1,
             sender_agent_id=PCP_AGENT_ID,
-            sender_name="Dr. Lianne Cha Agent",
+            sender_name=PCP_SENDER_NAME,
             sender_role="Primary Care",
             recipient_agent_id="network",
             message_type=ConsultationMessageType.CONSULT_REQUEST,
@@ -137,7 +137,7 @@ def build_consultation_messages(
             consultation_id=consultation_id,
             sequence=sequence,
             sender_agent_id=PCP_AGENT_ID,
-            sender_name="Dr. Lianne Cha Agent",
+            sender_name=PCP_SENDER_NAME,
             sender_role="Primary Care",
             recipient_agent_id=synthetic_agent_id("physician-onadeko"),
             message_type=ConsultationMessageType.FOLLOW_UP_QUESTION,
@@ -213,7 +213,7 @@ def _build_anemia_messages(
             consultation_id=consultation_id,
             sequence=1,
             sender_agent_id=PCP_AGENT_ID,
-            sender_name="Dr. Lianne Cha Agent",
+            sender_name=PCP_SENDER_NAME,
             sender_role="Primary Care",
             recipient_agent_id="network",
             message_type=ConsultationMessageType.CONSULT_REQUEST,
@@ -289,7 +289,7 @@ def _build_anemia_messages(
             consultation_id=consultation_id,
             sequence=sequence,
             sender_agent_id=PCP_AGENT_ID,
-            sender_name="Dr. Lianne Cha Agent",
+            sender_name=PCP_SENDER_NAME,
             sender_role="Primary Care",
             recipient_agent_id=synthetic_agent_id("physician-alvarez"),
             message_type=ConsultationMessageType.FOLLOW_UP_ANSWER,

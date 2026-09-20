@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from backend.demo_identity import PCP_AGENT_ID, PCP_AGENT_NAME
 from backend.provider_network.service import ProviderNetwork
 from backend.synthetic_data import ALL_PHYSICIANS, PATIENTS, SYNTHETIC_PHYSICIAN_NPIS
 
 CENTER_AGENT = {
-    "id": "agent-pcp-lianne-cha",
-    "name": "Dr. Lianne Cha's Agent",
+    "id": PCP_AGENT_ID,
+    "name": PCP_AGENT_NAME,
     "specialty": "Primary Care",
     "location": "Oakland, CA",
     "status": "active",

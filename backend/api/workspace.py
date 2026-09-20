@@ -5,6 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.demo_identity import PCP_AGENT_ID, PCP_NAME
 from backend.network_projection import project_agent_network
 from backend.provider_network import provider_network
 from backend.synthetic_data import PATIENTS
@@ -12,7 +13,6 @@ from backend.workflow import workflow_store
 
 router = APIRouter(prefix="/api/workspace", tags=["clinician-workspace"])
 
-AGENT_ID = "agent-pcp-lianne-cha"
 LEARNINGS = {
     "renal": "Progressive CKD with resistant hypertension usually leads to nephrology first.",
     "anaemia": "Persistent iron deficiency without GI source evaluation usually leads to gastroenterology first.",
@@ -40,7 +40,7 @@ class PreferenceUpdate(BaseModel):
 def my_agent() -> dict:
     saved = {item["key"]: item for item in workflow_store.preferences()}
     return {
-        "id": AGENT_ID, "physician": "Dr. Lianne Cha", "specialty": "Primary Care",
+        "id": PCP_AGENT_ID, "physician": PCP_NAME, "specialty": "Primary Care",
         "status": "active", "synthetic": True, "location": "Oakland, CA (synthetic demo)",
         "known": [
             {"label": "Specialty", "value": "Primary Care", "source": "Configured synthetic demo profile"},

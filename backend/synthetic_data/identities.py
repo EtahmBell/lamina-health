@@ -9,6 +9,7 @@ SYNTHETIC_PHYSICIAN_NPIS = {
     "physician-wu": "9900000008",
     "physician-kim": "9900000009",
     "physician-reed": "9900000010",
+    "physician-cha": "9900000011",
 }
 
 

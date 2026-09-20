@@ -274,7 +274,24 @@ MARIA_PHYSICIANS = [
     ),
 ]
 
-ALL_PHYSICIANS = [*PHYSICIANS, *MARIA_PHYSICIANS]
+DEMO_NETWORK_PHYSICIANS = [
+    PhysicianProfile(
+        id="physician-cha",
+        name="Dr. Lianne Cha (synthetic)",
+        specialty="Primary Care",
+        subspecialty="Primary care and specialty-care coordination",
+        focus_areas=["primary care", "specialty-care coordination"],
+        accepts_signals=[],
+        explicit_rules=[],
+        required_workup=[],
+        historical_cases=[],
+        insurance_networks=["Lamina Demo PPO"],
+        location="Oakland, CA",
+        availability_days=21,
+    ),
+]
+
+ALL_PHYSICIANS = [*PHYSICIANS, *MARIA_PHYSICIANS, *DEMO_NETWORK_PHYSICIANS]
 PHYSICIANS_BY_PATIENT = {
     PRIMARY_PATIENT_ID: PHYSICIANS,
     MARIA_PATIENT_ID: MARIA_PHYSICIANS,

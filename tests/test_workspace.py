@@ -31,7 +31,7 @@ def test_agent_profile_and_suggestion_provenance(client: TestClient):
     response = client.get("/api/workspace/agent")
     assert response.status_code == 200
     agent = response.json()
-    assert agent["physician"] == "Dr. Lianne Cha"
+    assert agent["physician"] == "Dr. Lucy Saru"
     assert agent["status"] == "active"
     assert agent["synthetic"] is True
     assert agent["learnings"][0]["status"] == "suggested"
