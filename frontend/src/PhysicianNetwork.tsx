@@ -19,7 +19,7 @@ import {
 type Navigate = (path: string) => void
 
 const statusCopy: Record<AgentStatus, { label: string; detail: string }> = {
-  reserved: { label: 'Reserved · not yet activated', detail: 'A Lamina agent identity is held for this directory profile.' },
+  reserved: { label: 'Reserved · not activated', detail: 'A Lamina agent identity is held for this directory profile.' },
   verification_pending: { label: 'Claimed · verification pending', detail: 'A profile claim has started. Identity verification is not complete.' },
   verified: { label: 'Verified · configuration needed', detail: 'Identity is verified; practice details and preferences can now be configured.' },
   active: { label: 'Verified · Active', detail: 'This physician’s configured agent is active.' },
@@ -40,11 +40,13 @@ function StatusBadge({ status }: { status: AgentStatus }) {
 
 function PhysicianCard({ profile, navigate }: { profile: PhysicianNetworkProfile; navigate: Navigate }) {
   const name = titleCaseName(profile.display_name).replace(/, Md\b/i, ', MD').replace(/, Do\b/i, ', DO')
-  return <button className="directory-physician-card" onClick={() => navigate(`/network/${profile.npi}`)}>
-    <span className="directory-avatar">{name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')}</span>
-    <span className="directory-card-copy"><span className="directory-source">{profile.source === 'NPPES' ? 'NPPES identity' : 'Synthetic demo identity'}</span><strong>{name}</strong><span>{profile.specialty}</span><small>{profile.city || 'Location not listed'}{profile.state ? `, ${profile.state}` : ''}</small></span>
-    <span className="directory-card-agent"><small>Lamina Agent</small><StatusBadge status={profile.agent.status} /></span>
-    <span className="directory-view-profile">View profile →</span>
+  const initials = name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')
+  const location = `${profile.city || 'Location not listed'}${profile.state ? `, ${profile.state}` : ''}`
+  return <button className={`lam-row ${profile.agent.status === 'active' ? '' : 'muted'}`} onClick={() => navigate(`/network/${profile.npi}`)}>
+    <span className="lam-row-mark directory-avatar">{initials}</span>
+    <span className="lam-row-main"><strong>{name}</strong><span>{profile.specialty}</span><small>{location} · {profile.source === 'NPPES' ? 'NPPES identity' : 'Synthetic demo identity'}</small></span>
+    <StatusBadge status={profile.agent.status} />
+    <span className="lam-row-action">View profile <b>→</b></span>
   </button>
 }
 
@@ -67,17 +69,17 @@ function NetworkGraph({ network, selectedId, onSelect }: { network: AgentNetwork
   return <div className="agent-network-stage"><div className="agent-network-caption"><span className="legend-recommended"><i /> Recommended</span><span className="legend-consulted"><i /> Consulted</span><span className="legend-redirected"><i /> Redirected</span><span className="legend-roster"><i /> Roster only · no edge</span></div><div className="agent-network-canvas">
     <svg className="agent-network-edges" viewBox="0 0 1000 560" preserveAspectRatio="none" aria-hidden="true">{roster.map((agent, index) => agent.relationship && <line key={agent.id} x1="500" y1="280" x2={graphSlots[index].x * 10} y2={graphSlots[index].y * 5.6} className={`relationship-edge ${agent.relationship.relationship_type}`} />)}</svg>
     <div className="agent-network-center"><LaminaMark active /><span>Your agent</span><strong>{network.center.name}</strong><small>{network.center.specialty}</small><em>ACTIVE</em></div>
-    {roster.map((agent, index) => <button key={agent.id} className={`agent-network-node ${agent.relationship ? 'connected' : 'unconnected'} ${selectedId === agent.id ? 'selected' : ''}`} style={{ '--node-x': `${graphSlots[index].x}%`, '--node-y': `${graphSlots[index].y}%` } as CSSProperties} onClick={() => onSelect(agent.id)} aria-label={`Open ${agent.name}'s agent details`}><span className="agent-node-symbol">{shortName(agent.name).split(/\s+/).map((part) => part[0]).join('')}</span><strong>{agent.name}'s Agent</strong><small>{agent.subspecialty || agent.specialty}</small><em className={`node-status ${agent.status}`}>{agent.status === 'verification_pending' ? 'CLAIMED' : agent.status.toUpperCase()}</em>{agent.relationship && <span className="node-relationship">{relationshipLabel(agent)}</span>}</button>)}
-  </div><p className="graph-provenance">Edges reflect completed Lamina demo consultations only. Reserved synthetic profiles can appear in a demo consult without being physician-activated.</p></div>
+    {roster.map((agent, index) => <button key={agent.id} className={`agent-network-node ${agent.relationship ? 'connected' : 'unconnected'} ${selectedId === agent.id ? 'selected' : ''}`} style={{ '--node-x': `${graphSlots[index].x}%`, '--node-y': `${graphSlots[index].y}%` } as CSSProperties} onClick={() => onSelect(agent.id)} aria-label={`${agent.name}'s Agent · ${agent.specialty} · ${statusCopy[agent.status].label} · ${relationshipLabel(agent)}. Open agent details.`}><LaminaMark active={agent.status === 'active'} /><strong>{agent.name}</strong><small>{agent.specialty}</small><i className={`node-dot ${agent.status}`} aria-hidden="true" /></button>)}
+  </div></div>
 }
 
 function AgentDetail({ agent, navigate, close }: { agent: NetworkAgent; navigate: Navigate; close: () => void }) {
   const relation = agent.relationship
   return <section className="network-detail-panel" aria-label={`${agent.name} agent details`}><header><div><p className="eyebrow">Physician agent</p><h2>{agent.name}'s Agent</h2><p>{agent.specialty} · {agent.location}</p></div><button className="detail-close" onClick={close} aria-label="Close agent details">×</button></header><StatusBadge status={agent.status} />
-    <p className="detail-status-note">{agent.status === 'reserved' ? 'Agent identity reserved. This physician has not activated or authorised a Lamina agent.' : statusCopy[agent.status].detail}</p>
+    {agent.status !== 'reserved' && <p className="detail-status-note">{statusCopy[agent.status].detail}</p>}
     <div className="network-detail-grid"><div><span>What this agent represents</span><strong>{agent.subspecialty}</strong><p>{agent.focus_areas.slice(0, 3).join(' · ')}</p></div><div><span>Configured referral rule</span><p>{agent.explicit_rules[0] || 'Not specified'}</p></div><div><span>Pre-referral requirements</span><p>{agent.required_workup.join(' · ') || 'Not specified'}</p></div><div><span>Relationship to your agent</span><strong>{relationshipLabel(agent)}</strong><p>{relation ? `${relation.recommended_count} recommendation${relation.recommended_count === 1 ? '' : 's'} · ${relation.redirect_count} redirect${relation.redirect_count === 1 ? '' : 's'}` : 'No completed Lamina consultation connects these agents yet.'}</p></div><div><span>Last interaction</span><strong>{relation ? relation.last_patient_name : 'None recorded'}</strong>{relation && <p>{interactionDate(relation.most_recent_interaction)}</p>}</div><div><span>Provenance</span><p>{agent.provenance}</p>{relation && <small>Relationship: completed Lamina synthetic consultation record</small>}</div></div>
     {agent.confirmed_preferences && <div className="confirmed-agent-preference"><span>Physician-confirmed demo preferences</span><p>{agent.confirmed_preferences.areas_of_focus.join(' · ')}</p></div>}
-    <footer><button className="button-primary" onClick={() => navigate(`/network/${agent.npi}`)}>View full physician profile →</button>{relation && <button className="button-secondary" onClick={() => navigate(`/consultations/${relation.last_record_id}`)}>View recent consultation</button>}</footer>
+    <footer><button className="text-button" onClick={() => navigate(`/network/${agent.npi}`)}>View full physician profile →</button>{relation && <button className="text-button" onClick={() => navigate(`/consultations/${relation.last_record_id}`)}>View recent consultation →</button>}</footer>
   </section>
 }
 
@@ -88,10 +90,11 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
   const [networkError, setNetworkError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showAllResults, setShowAllResults] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const runSearch = async (event?: FormEvent) => {
-    event?.preventDefault(); setLoading(true); setError(null)
+    event?.preventDefault(); setLoading(true); setError(null); setShowAllResults(false)
     try { setResponse(await searchProviders(filters)) }
     catch (searchError) { setError(searchError instanceof Error ? searchError.message : 'Directory search failed') }
     finally { setLoading(false) }
@@ -102,9 +105,13 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
   const selected = network?.nodes.find((node) => node.id === selectedId)
   const recent = network?.nodes.filter((node) => node.relationship?.recommended_count).sort((a, b) => (b.relationship?.most_recent_interaction || '').localeCompare(a.relationship?.most_recent_interaction || '')) || []
   const relevant = (recent.length ? recent : network?.nodes.filter((node) => graphRoster.slice(0, 4).includes(node.physician_id)) || []).slice(0, 4)
+  const results = response?.results || []
+  const visibleResults = showAllResults ? results : results.slice(0, 4)
+  const hiddenResults = results.length - visibleResults.length
 
   return <main className="page-shell physician-directory-page">
-    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Physician Network</h1><p>See how your agent connects with specialty practices around patient care. Every visible connection comes from a completed Lamina consultation.</p></div><NetworkGlyph active /></header>
+    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Physician Network</h1><p>See how your agent connects with specialty practices around patient care. Every visible connection comes from a completed Lamina consultation.</p></div></header>
+    <p className="network-boundary-notice">Reserved agents are held directory identities only — an NPPES listing does not imply participation in Lamina, and edges appear only for completed demo consultations.</p>
 
     <section className="network-primary-section"><div className="network-section-heading"><div><p className="eyebrow">Your network</p><h2>Care moves through agents.</h2></div><p>Select a physician agent to inspect its practice footprint, activation state, and relationship to yours.</p></div>
       {networkError && <div className="error-banner" role="alert">Network relationships unavailable: {networkError}</div>}
@@ -112,19 +119,18 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
       {network && <><NetworkGraph network={network} selectedId={selectedId} onSelect={setSelectedId} />{selected && <AgentDetail agent={selected} navigate={navigate} close={() => setSelectedId(null)} />}</>}
     </section>
 
-    <section className="network-recent-section"><div className="network-section-heading"><div><p className="eyebrow">Practice connections</p><h2>{recent.length ? 'Recently consulted' : 'Relevant demo agents'}</h2></div><p>{recent.length ? 'From completed consultations in this Lamina workspace.' : 'Configured synthetic practice footprints. No consultation history has been recorded yet.'}</p></div><div className="network-recent-grid">{relevant.map((agent) => <button className="network-recent-card" key={agent.id} onClick={() => setSelectedId(agent.id)}><span className="directory-avatar">{shortName(agent.name).split(/\s+/).map((part) => part[0]).join('')}</span><span><strong>{agent.name}</strong><small>{agent.specialty}</small><em>{agent.relationship ? `${agent.relationship.last_patient_name} · ${relationshipLabel(agent)}` : 'Synthetic demo practice footprint'}</em></span><span className={`node-status ${agent.status}`}>{agent.status === 'verification_pending' ? 'CLAIMED' : agent.status.toUpperCase()}</span></button>)}</div></section>
+    <section className="network-recent-section"><div className="network-section-heading"><div><p className="eyebrow">Practice connections</p><h2>{recent.length ? 'Recently consulted' : 'Relevant demo agents'}</h2></div><p>{recent.length ? 'From completed consultations in this Lamina workspace.' : 'Configured synthetic practice footprints. No consultation history has been recorded yet.'}</p></div><div className="lam-list">{relevant.map((agent) => <button className="lam-row" key={agent.id} onClick={() => setSelectedId(agent.id)}><span className="lam-row-mark directory-avatar">{shortName(agent.name).split(/\s+/).map((part) => part[0]).join('')}</span><span className="lam-row-main"><strong>{agent.name}</strong><span>{agent.specialty}</span><small>{agent.relationship ? `${agent.relationship.last_patient_name} · ${relationshipLabel(agent)}` : 'Synthetic demo practice footprint'}</small></span><StatusBadge status={agent.status} /><span className="lam-row-action">View agent <b>→</b></span></button>)}</div></section>
 
-    <section className="network-search-section"><div className="network-section-heading"><div><p className="eyebrow">Directory utility</p><h2>Search the national physician network</h2></div><p>Find a physician identity by name, specialty, or location.</p></div>
-    <form className="directory-search-panel" onSubmit={runSearch}>
+    <section className="network-search-section"><div className="network-section-heading quiet"><div><p className="eyebrow">Supporting directory</p><h2>Search the national physician directory</h2></div><p>Find a physician identity by name, specialty, or location.</p></div>
+    <form className="directory-search-panel quiet" onSubmit={runSearch}>
       <label className="directory-search-main"><span>Physician name</span><input value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} placeholder="e.g. Jane Smith" /></label>
       <label><span>Specialty</span><input value={filters.specialty} onChange={(event) => setFilters({ ...filters, specialty: event.target.value })} placeholder="e.g. Nephrology" /></label>
       <label><span>Location</span><input value={filters.location} onChange={(event) => setFilters({ ...filters, location: event.target.value })} placeholder="City or state" /></label>
-      <button className="button-primary" type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search physicians'} <span>→</span></button>
+      <button className="button-secondary" type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button>
     </form>
-    <p className="network-search-disclaimer">NPPES directory identity does not imply participation in Lamina. Reserved agents are not physician-authorised. {response?.directory_available && `${response.directory_records.toLocaleString()} directory records available.`}</p>
     {error && <div className="error-banner" role="alert">{error}</div>}
-    <div className="directory-results-heading"><div><p className="eyebrow">Search results</p><h2>{filters.q || filters.specialty || filters.location ? 'Matching physicians' : 'Synthetic demo physicians'}</h2></div><span>{response?.count ?? 0} shown</span></div>
-    {loading ? <div className="directory-loading"><NetworkGlyph active /><p>Searching physician identities…</p></div> : <div className="directory-results">{response?.results.map((profile) => <PhysicianCard key={profile.npi} profile={profile} navigate={navigate} />)}{response?.results.length === 0 && <div className="empty-state"><NetworkGlyph /><h2>No physicians found</h2><p>Try fewer terms or search by a city, state, or specialty.</p></div>}</div>}
+    <div className="directory-results-heading quiet"><h3>{filters.q || filters.specialty || filters.location ? 'Matching physicians' : 'Synthetic demo physicians'}</h3><span>{response?.count ?? 0} shown{response?.directory_available ? ` · ${response.directory_records.toLocaleString()} directory records` : ''}</span></div>
+    {loading ? <div className="directory-loading"><NetworkGlyph active /><p>Searching physician identities…</p></div> : <><div className="lam-list quiet">{visibleResults.map((profile) => <PhysicianCard key={profile.npi} profile={profile} navigate={navigate} />)}{results.length === 0 && <div className="empty-state"><NetworkGlyph /><h2>No physicians found</h2><p>Try fewer terms or search by a city, state, or specialty.</p></div>}</div>{hiddenResults > 0 && <button className="text-button results-expand" onClick={() => setShowAllResults(true)}>Show {hiddenResults} more result{hiddenResults === 1 ? '' : 's'} →</button>}</>}
     </section>
   </main>
 }
