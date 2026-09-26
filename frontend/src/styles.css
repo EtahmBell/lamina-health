@@ -1,8 +1,9 @@
 :root {
   --font-display: "Lora", Georgia, serif; --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --background: #f7f3ec; --surface: #fffcf7; --text-primary: #1e1e1c; --text-secondary: #6b6963; --border: #d8d2c7;
+  --background: #f7f3ec; --surface: #fffcf7; --text-primary: #1e1e1c; --text-secondary: #625f59; --border: #ded8ce;
   --accent: #b85c32; --accent-hover: #934729; --clinical: #243447; --success: #3f6b55; --warning: #a76b28; --danger: #9b3a35;
-  --shadow-soft: 0 12px 34px rgb(36 52 71 / 7%); font-family: var(--font-ui); color: var(--text-primary); background: var(--background); font-synthesis: none;
+  --shadow-soft: 0 14px 30px rgb(36 52 71 / 5%); --type-meta: .68rem; --type-body: .76rem; --section-space: 36px;
+  font-family: var(--font-ui); color: var(--text-primary); background: var(--background); font-synthesis: none;
 }
 * { box-sizing: border-box; }
 html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
@@ -359,3 +360,112 @@ button.lam-row:hover { background: #fff9f1; }
 .results-expand { display: inline-block; margin: 13px 2px 0; font-size: .66rem; }
 @media (max-width: 900px) { .directory-search-panel.quiet { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 680px) { .directory-search-panel.quiet { grid-template-columns: 1fr; } }
+
+/* Second-pass visual system: legible supporting type, quieter surfaces, and
+   a clearer visual path from current work to agent activity to evidence. */
+.eyebrow, .section-label { line-height: 1.35; }
+.text-button, .lam-row-action, .agent-handling-toggle { text-underline-offset: 4px; }
+.text-button:hover, button.lam-row:hover .lam-row-action, .agent-handling-toggle:hover { text-decoration: underline; }
+.button-primary, .button-secondary, .consult-button { transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+.button-secondary:hover { background: #fff8f0; box-shadow: 0 4px 12px rgb(36 52 71 / 5%); }
+.lam-row-main small, .lam-row-action, .lam-row-status, .agent-status-badge { font-size: var(--type-meta); }
+.lam-row-status, .agent-status-badge { padding: 6px 10px; }
+.page-fineprint { font-size: var(--type-meta); line-height: 1.5; }
+
+/* Home is a work queue first, with a shorter greeting and a more prominent
+   current-work heading. The supporting sections remain unboxed. */
+.home-hero h1 { font-size: clamp(2.55rem, 4.2vw, 3.45rem); }
+.home-hero { padding-bottom: 24px; }
+.home-attention { margin-top: var(--section-space); }
+.home-attention .home-section-heading h2 { font-size: clamp(1.65rem, 2.2vw, 2rem); }
+.home-attention .home-section-heading > span { width: 31px; height: 31px; font-size: .74rem; }
+.home-main-grid, .home-patients { margin-top: var(--section-space); }
+.home-activity .home-section-heading h2, .home-patients .home-section-heading h2 { font-size: 1.55rem; }
+.home-agent-card { padding-top: 19px; }
+.home-agent-card dd, .activity-stream small, .activity-stream em { font-size: var(--type-meta); }
+.home-agent-card dt { font-size: .61rem; }
+.activity-stream strong { font-size: .86rem; }
+.activity-stream > button { padding-block: 17px; }
+
+/* Referral briefs keep their editorial layout; signals and disclosure now
+   remain readable without becoming chart-like panels. */
+.decision-signals { gap: 9px; }
+.decision-signals span { padding: 9px 12px; font-size: .72rem; line-height: 1.35; }
+.decision-signals b { font-size: .62rem; }
+.clinical-question p:last-child, .source-record > summary { font-size: var(--type-body); }
+.source-record > summary span { font-size: var(--type-meta); }
+.brief-action .network-controls label > span { font-size: .66rem; }
+
+/* My Agent reads as one persistent identity above its work, not a settings
+   card stacked on more settings cards. The mark and active state remain. */
+.agent-hero { gap: 30px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; padding: 15px 4px 28px; box-shadow: none; }
+.agent-hero-mark { width: 106px; height: 106px; flex-basis: 106px; background: #f4e8dc; box-shadow: inset 0 0 0 9px rgb(255 252 247 / 55%); }
+.agent-tabs { margin: 7px 0 24px; }
+.agent-tabs button { padding: 13px 19px; font-size: .76rem; }
+.agent-tabs button:hover:not(.active) { color: var(--clinical); background: rgb(255 252 247 / 45%); }
+.agent-summary-panel { border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; padding: 2px 0 0; box-shadow: none; }
+.agent-summary-panel span, .agent-summary-panel small { font-size: .65rem; }
+.agent-summary-panel strong { font-size: .97rem; }
+.agent-section-grid .agent-panel { box-shadow: none; }
+.agent-section-grid .agent-panel + .agent-panel { border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; padding-inline: 0; }
+.agent-facts span, .agent-access strong, .agent-facts small, .agent-access span { font-size: var(--type-meta); }
+.agent-facts strong { font-size: var(--type-body); }
+.learning-panel, .calibration-panel, .agent-activity { border: 0; border-radius: 0; background: transparent; padding: 8px 0 0; box-shadow: none; }
+.learning-card { background: var(--surface); }
+.learning-card small, .calibration-answer small, .agent-activity-row small { font-size: var(--type-meta); }
+.learning-actions button, .calibration-questions button { font-size: .72rem; }
+.agent-activity-row strong { font-size: .8rem; }
+
+/* The network graph stays primary. Larger labels and clearer edges make the
+   geometry readable without adding animation or changing relationships. */
+.agent-network-caption { font-size: .66rem; }
+.relationship-edge { opacity: .66; }
+.relationship-edge.recommended { opacity: .95; }
+.agent-network-node { width: 148px; padding: 13px 11px; }
+.agent-network-node strong { font-size: .78rem; line-height: 1.25; }
+.agent-network-node small { font-size: .66rem; line-height: 1.35; }
+.agent-network-node.selected { background: #fff9f1; box-shadow: 0 0 0 3px rgb(184 92 50 / 12%), 0 11px 27px rgb(36 52 71 / 11%); }
+.network-detail-grid span, .network-detail-grid small { font-size: .62rem; }
+.network-detail-grid p, .confirmed-agent-preference p { font-size: var(--type-meta); }
+
+/* Consultation motion continues to mean activity; improved type makes the
+   actor, current event, clarification, and resolution easier to follow. */
+.consult-peer strong { font-size: .69rem; line-height: 1.3; }
+.consult-peer small { font-size: .58rem; }
+.consult-peer em, .consult-peer p { font-size: .61rem; }
+.consult-network-center strong { font-size: .9rem; }
+.consult-network-center small, .consult-stage-rail small { font-size: .6rem; }
+.consult-current-event strong, .consult-clarification p { font-size: .72rem; }
+.consult-current-event p { font-size: .75rem; }
+.consult-clarification { background: #fff9f2; }
+.consult-resolution { border-left: 3px solid var(--success); }
+.consult-resolution strong { font-size: 1.08rem; }
+.consult-resolution small, .consult-resolution > b { font-size: var(--type-meta); }
+
+/* The recommended physician and workup lead; alternatives and the structured
+   record are quieter while remaining fully inspectable. */
+.best-fit-physician h2 { font-size: clamp(1.95rem, 2.6vw, 2.25rem); }
+.best-fit-physician p, .reason-list li, .recommendation-access strong { font-size: var(--type-body); }
+.fit-summary span, .best-fit-label small, .recommendation-access span { font-size: .64rem; }
+.best-fit-body { background: #f7f5ef; }
+.before-visit > span { min-width: 82px; font-size: .8rem; }
+.option-card { box-shadow: none; }
+.option-card h3 { font-size: 1.07rem; }
+.option-reason { font-size: var(--type-meta); }
+.network-transparency { box-shadow: none; }
+.consult-record-stage { border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+.consult-record-stage-heading { background: transparent; padding: 11px 12px; }
+.consult-record-event summary strong, .consult-record-event summary small, .consult-record-evidence p { font-size: var(--type-meta); }
+.evidence-grid strong { font-size: var(--type-meta); }
+
+@media (max-width: 950px) {
+  .agent-network-node { width: auto; }
+}
+@media (max-width: 760px) {
+  .agent-hero { gap: 18px; padding-block: 10px 24px; }
+  .agent-hero-mark { width: 72px; height: 72px; flex-basis: 72px; }
+  .home-hero h1 { font-size: clamp(2.35rem, 8vw, 3.25rem); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .button-primary, .button-secondary, .consult-button { transition: none; }
+}
