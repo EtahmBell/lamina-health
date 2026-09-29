@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
-import { LaminaMark } from './LaminaMark'
+import { LaminaMark } from './LaminaMark.tsx'
 import {
   activateProvider,
   claimProvider,
@@ -14,7 +14,7 @@ import {
   type NetworkAgent,
   type PhysicianNetworkProfile,
   type ProviderSearchResponse,
-} from './api'
+} from './api.ts'
 
 type Navigate = (path: string) => void
 

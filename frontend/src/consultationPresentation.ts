@@ -1,4 +1,4 @@
-import type { ConsultationMessage } from './api'
+import type { ConsultationMessage } from './api.ts'
 
 export type ConsultationStage = {
   id: string
