@@ -470,13 +470,17 @@ button.lam-row:hover { background: #fff9f1; }
   .button-primary, .button-secondary, .consult-button { transition: none; }
 }
 
-/* Pass 1: the portal owns the greeting, Home owns current work, and the patient
-   page shows available clinical context instead of an editorial referral brief. */
+
+/* Pass 1 + 1.1: the portal owns the greeting, Home owns current work, and the
+   patient page reads as a compact clinical workspace rather than a brief. */
 .sidebar-clinician { width: 100%; border: 0; border-top: 1px solid var(--border); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .sidebar-clinician:hover strong { text-decoration: underline; text-underline-offset: 3px; }
 
-.home-header { display: flex; align-items: center; justify-content: space-between; gap: 25px; padding: 6px 0 20px; border-bottom: 1px solid var(--border); }
+.home-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 25px; padding: 6px 0 17px; border-bottom: 1px solid var(--border); }
 .home-header h1 { margin: 0; font-size: 1.85rem; }
+.home-header p { margin: 6px 0 0; color: var(--text-secondary); font-size: var(--type-body); }
+.home-page .home-attention { margin-top: 24px; }
+.home-page .home-main-grid { margin-top: 30px; }
 
 /* Agent interactions and consultation milestones stay legibly distinct. */
 .activity-stream > button { align-items: start; }
@@ -487,6 +491,13 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-activity-row .activity-kind { margin: 0 0 4px; color: var(--text-secondary); font-size: .53rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
 .agent-activity-row i { display: block; margin-top: 5px; color: #817d75; font-size: var(--type-meta); font-style: normal; }
 
+/* The agent summary is a real panel so it balances the activity list. */
+.home-agent-card { border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 13px; background: var(--surface); padding: 22px; box-shadow: var(--shadow-soft); }
+.home-agent-card dl { margin: 19px 0 4px; }
+.home-agent-card dl > div { border-top: 1px solid var(--border); padding: 13px 0; }
+.home-agent-card dd small { display: block; margin-top: 5px; color: var(--text-secondary); font-size: var(--type-meta); }
+.home-agent-card > div:last-child { border-top: 1px solid var(--border); padding-top: 15px; }
+
 .page-breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; color: var(--text-secondary); font-size: var(--type-meta); }
 .page-breadcrumb .text-button { font-size: var(--type-meta); }
 .page-breadcrumb b { color: var(--clinical); font-weight: 600; }
@@ -494,62 +505,119 @@ button.lam-row:hover { background: #fff9f1; }
 .patient-page { max-width: 1080px; }
 .patient-identity { margin-top: 4px; }
 .patient-identity h1 { margin: 0; font-size: clamp(1.75rem, 2.6vw, 2.2rem); }
-.patient-identity p { margin: 7px 0 0; color: var(--text-secondary); font-size: .82rem; }
+.patient-identity p { margin: 7px 0 0; color: var(--clinical); font-size: .88rem; }
 .agent-task { display: flex; flex-wrap: wrap; gap: 3px 10px; max-width: 780px; margin: 2px 0 0; padding: 0 2px; color: var(--text-secondary); font-size: var(--type-meta); line-height: 1.55; }
 .agent-task b { color: var(--accent-hover); font-size: .52rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 
-.clinical-summary { margin-top: 28px; border-top: 1px solid var(--border); padding-top: 22px; }
-.clinical-summary h2 { margin: 0; font-size: 1.5rem; }
-.clinical-summary-note { margin: 7px 0 0; color: var(--text-secondary); font-size: var(--type-meta); }
-.clinical-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 26px; margin-top: 19px; }
-.clinical-summary-grid > div { min-width: 0; }
-.clinical-summary ul { margin: 8px 0 0; padding-left: 17px; color: var(--clinical); font-size: var(--type-body); line-height: 1.75; }
-.clinical-trajectory, .clinical-latest, .clinical-context { margin-top: 22px; }
-.clinical-latest > div { display: flex; flex-wrap: wrap; gap: 7px 24px; margin-top: 10px; }
-.clinical-latest span { display: flex; align-items: baseline; gap: 7px; color: var(--clinical); font-size: var(--type-body); }
-.clinical-latest b { color: var(--text-secondary); font-size: var(--type-meta); font-weight: 600; }
-.clinical-provenance { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px 24px; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
-.clinical-provenance span, .clinical-provenance strong { display: block; }
-.clinical-provenance span { color: var(--text-secondary); font-size: .52rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
-.clinical-provenance strong { margin-top: 5px; color: var(--clinical); font-size: var(--type-meta); font-weight: 500; }
+/* Clinical overview: grouped sections and dividers rather than many cards. */
+.clinical-overview { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 22px; }
+.clinical-overview-head h2 { margin: 0; font-size: 1.5rem; }
+.clinical-overview-head p { margin: 7px 0 0; color: var(--text-secondary); font-size: var(--type-meta); }
+.clinical-overview h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 0 11px; color: var(--text-secondary); font-family: var(--font-ui); font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.clinical-overview h3 em { color: #817d75; font-size: var(--type-meta); font-style: normal; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.clinical-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px 44px; margin-top: 22px; }
+.clinical-columns > section { min-width: 0; }
+.clinical-list { margin: 0; padding-left: 18px; color: var(--clinical); font-size: var(--type-body); line-height: 1.85; }
+.clinical-list li::marker { color: var(--accent); }
+.clinical-block { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 20px; }
 
-/* Small clinical trend charts. Real readings only; stacked charts share an x axis. */
-.trend-chart-stack { display: grid; gap: 13px; max-width: 620px; margin-top: 12px; }
-.trend-chart { margin: 0; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); padding: 13px 16px 11px; }
-.trend-chart figcaption { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 10px; }
-.trend-chart figcaption strong { color: var(--clinical); font-family: var(--font-display); font-size: .92rem; }
-.trend-chart figcaption span { color: var(--text-secondary); font-size: .6rem; }
-.trend-chart figcaption em { margin-left: auto; color: var(--text-secondary); font-size: .62rem; font-style: normal; }
-.trend-chart-plot { position: relative; height: 84px; margin-top: 10px; }
+/* Latest values read as clinical numbers, not fine print. */
+.result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 16px 22px; }
+.result-grid > div { min-width: 0; border-left: 2px solid rgb(184 92 50 / 28%); padding-left: 12px; }
+.result-grid strong { display: block; color: var(--clinical); font-family: var(--font-display); font-size: 1.32rem; font-weight: 600; line-height: 1.15; }
+.result-grid i { color: var(--text-secondary); font-size: .66rem; font-style: normal; font-weight: 400; }
+.result-grid span { display: block; margin-top: 5px; color: var(--text-primary); font-size: var(--type-meta); }
+.result-grid small { display: block; margin-top: 3px; color: var(--text-secondary); font-size: .58rem; }
+
+.care-context dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px 24px; }
+.care-context dt { color: var(--text-secondary); font-size: .52rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.care-context dd { margin: 5px 0 0; color: var(--clinical); font-size: var(--type-body); }
+
+/* Trend charts: numeric axes, every measurement date, value at each point. */
+.trend-chart-stack { display: grid; gap: 14px; margin-top: 4px; }
+.trend-chart-stack.paired { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.trend-chart-stack.single .trend-chart-plot { height: 150px; }
+.trend-chart { margin: 0; min-width: 0; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); padding: 14px 16px 10px; }
+.trend-chart figcaption { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 9px; }
+.trend-chart figcaption strong { color: var(--clinical); font-family: var(--font-display); font-size: .95rem; }
+.trend-chart figcaption span { color: var(--text-secondary); font-size: .62rem; }
+.trend-chart figcaption em { margin-left: auto; color: var(--text-secondary); font-size: .6rem; font-style: normal; }
+.trend-chart-body { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; margin-top: 12px; }
+.trend-chart-scale { position: relative; }
+.trend-chart-scale span { position: absolute; right: 0; width: 100%; color: var(--text-secondary); font-size: .58rem; font-variant-numeric: tabular-nums; text-align: right; transform: translateY(-50%); white-space: nowrap; }
+.trend-chart-plot { position: relative; height: 128px; }
 .trend-chart-plot > svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.trend-baseline { stroke: var(--border); }
+.trend-grid { stroke: #e7e1d7; stroke-dasharray: 3 3; }
+.trend-grid.baseline { stroke: var(--border); stroke-dasharray: none; }
 .trend-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .trend-chart.accent .trend-line { stroke: var(--accent); }
 .trend-chart.clinical .trend-line { stroke: var(--clinical); }
 .trend-dot { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--surface); transform: translate(-50%, -50%); }
 .trend-chart.accent .trend-dot { box-shadow: 0 0 0 2px var(--accent); }
 .trend-chart.clinical .trend-dot { box-shadow: 0 0 0 2px var(--clinical); }
-.trend-chart-axis { display: flex; justify-content: space-between; margin-top: 8px; color: var(--text-secondary); font-size: .55rem; }
+.trend-value { position: absolute; color: var(--clinical); font-size: .63rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.trend-value.above { transform: translate(-50%, -175%); }
+.trend-value.below { transform: translate(-50%, 75%); }
+.trend-chart-axis { position: relative; height: 15px; margin: 9px 0 0 46px; }
+.trend-chart-axis span { position: absolute; top: 0; color: var(--text-secondary); font-size: .58rem; transform: translateX(-50%); white-space: nowrap; }
 
 /* One quiet correction prompt on the final recommendation. */
 .recommendation-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; margin-top: 18px; border-top: 1px solid var(--border); padding-top: 15px; color: var(--text-secondary); font-size: var(--type-meta); }
 .recommendation-feedback .text-button { font-size: var(--type-meta); }
 .recommendation-feedback em { color: var(--success); font-style: normal; }
 
-/* Deep-linked structured event and its calibration counterpart. */
+/* Source clinical data: a readable record, not a wall of mini-cards. */
+.source-record > summary { padding-block: 20px; font-size: .78rem; }
+.source-record > summary span { font-size: .66rem; }
+.source-record-body { display: grid; gap: 26px; padding: 4px 2px 22px; }
+.source-record-body > section { min-width: 0; }
+.source-record-body h3 { margin: 0 0 11px; border-bottom: 1px solid var(--border); padding-bottom: 8px; color: var(--clinical); font-family: var(--font-ui); font-size: .64rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.record-rows { margin: 0; padding: 0; list-style: none; }
+.record-rows li { padding: 9px 2px; color: var(--clinical); font-size: .78rem; line-height: 1.5; }
+.record-rows li + li { border-top: 1px solid rgb(222 216 206 / 60%); }
+.record-table-scroll { overflow-x: auto; }
+.record-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.record-table caption { caption-side: bottom; padding-top: 11px; color: var(--text-secondary); font-size: var(--type-meta); line-height: 1.5; text-align: left; }
+.record-table th, .record-table td { padding: 9px 12px 9px 0; text-align: left; vertical-align: baseline; white-space: nowrap; }
+.record-table thead th { border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: .58rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.record-table thead th small { display: block; margin-top: 3px; font-size: .55rem; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.record-table tbody tr + tr th, .record-table tbody tr + tr td { border-top: 1px solid rgb(222 216 206 / 60%); }
+.record-table tbody th { color: var(--clinical); font-size: .76rem; font-weight: 600; }
+.record-table tbody td { color: var(--clinical); font-size: .78rem; }
+.record-context { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px 24px; }
+.record-context dt { color: var(--text-secondary); font-size: .52rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.record-context dd { margin: 5px 0 0; color: var(--clinical); font-size: .78rem; }
+
+/* Deep-linked structured event: one continuous rust tint, no grey slab and no
+   layout shift. The ring is inset because the stage clips anything outside it. */
 .consult-record-event { scroll-margin: 110px 0 40px; }
-.consult-record-event.targeted { border-radius: 8px; background: #fff9f2; box-shadow: inset 0 0 0 1px rgb(184 92 50 / 32%); }
-.consult-record-event.event-focus { box-shadow: inset 0 0 0 2px rgb(184 92 50 / 55%), 0 0 0 4px rgb(184 92 50 / 9%); transition: box-shadow 200ms ease; }
+.consult-record-event.targeted { background: #fdf3e8; box-shadow: inset 0 0 0 2px rgb(184 92 50 / 30%); transition: background-color 220ms ease, box-shadow 220ms ease; }
+.consult-record-event.targeted, .consult-record-event.targeted + .consult-record-event { border-top-color: transparent; }
+.consult-record-event.targeted .consult-record-evidence { border-top-color: rgb(184 92 50 / 22%); background: transparent; }
+.consult-record-event.event-focus { background: #fbe9d7; box-shadow: inset 0 0 0 2px rgb(184 92 50 / 70%); }
 .learning-card { scroll-margin: 110px 0 40px; }
 .learning-card.focused { border-color: rgb(184 92 50 / 45%); background: #fff9f2; box-shadow: 0 0 0 3px rgb(184 92 50 / 10%); }
 .learning-card p.learning-case-source { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin: 10px 0 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: var(--type-meta); line-height: 1.5; }
 .learning-card p.learning-case-source .text-button { font-size: var(--type-meta); }
 
+@media (max-width: 1180px) {
+  .trend-chart-stack.paired { grid-template-columns: minmax(0, 1fr); }
+}
+/* Once the consult banner stacks, its row-mode bottom alignment would push the
+   agent copy and controls to the right against empty space. */
+@media (max-width: 1040px) {
+  .network-action.brief-action { align-items: stretch; }
+  .brief-action .network-controls { width: 100%; }
+}
 @media (max-width: 600px) {
   .home-header { align-items: flex-start; flex-direction: column; gap: 13px; }
   .trend-chart figcaption em { margin-left: 0; }
   .activity-stream > button > b { font-size: .6rem; }
+  .trend-chart-body { grid-template-columns: 30px minmax(0, 1fr); }
+  .trend-chart-axis { margin-left: 38px; }
+  .trend-chart-axis span, .trend-chart-scale span { font-size: .52rem; }
+  .trend-value { font-size: .58rem; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .consult-record-event.event-focus { transition: none; }
+  .consult-record-event.targeted { transition: none; }
 }

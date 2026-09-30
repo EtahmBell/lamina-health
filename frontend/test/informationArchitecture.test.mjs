@@ -67,7 +67,23 @@ test('Home is a titled work queue with no repeated greeting or patient directory
   assert.match(home(), /Current work/)
   assert.doesNotMatch(home(), /Needs your attention/)
   assert.match(home(), /Recent agent activity/)
+  assert.match(home(), /<p>Current work and recent agent activity\.<\/p>/, 'Home needs a quiet subtitle, not a greeting')
   assert.match(source, /className="button-primary home-start" onClick=\{\(\) => navigate\('\/patients'\)\}/)
+})
+
+test('the Home activity header links to all agent activity, not to consultations', () => {
+  assert.match(home(), /onClick=\{\(\) => navigate\('\/agent\?tab=activity'\)\}>View all activity/)
+  assert.doesNotMatch(home(), /View all consultations/)
+  assert.match(home(), /'View interaction' : 'View consultation'/)
+})
+
+test('the Your Agent summary carries existing factual state only', () => {
+  const card = home().slice(home().indexOf('home-agent-card'), home().indexOf('</aside>'))
+  assert.match(card, /Last activity/)
+  assert.match(card, /Proposed learnings/)
+  assert.match(card, /awaiting your confirmation/)
+  assert.match(card, /navigate\('\/agent\?tab=overview'\)/)
+  assert.doesNotMatch(card, /Math\.|%|average|score|trend/i, 'no invented metrics')
 })
 
 test('Home activity carries timestamps and differentiates interactions from milestones', () => {
@@ -96,7 +112,7 @@ test('the editorial referral brief is gone from the patient page', () => {
 
 test('the patient page leads with a compact identity then the consult action', () => {
   const page = patientPage()
-  const order = ['patient-identity', 'Ready to consult the network.', 'Agent task', 'Clinical summary']
+  const order = ['patient-identity', 'Ready to consult the network.', 'Agent task', 'Clinical overview']
   const positions = order.map((token) => page.indexOf(token))
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b))
@@ -104,16 +120,38 @@ test('the patient page leads with a compact identity then the consult action', (
   assert.match(page, /Anything your agent should consider\?/)
 })
 
-test('the clinical summary is built from available patient data only', () => {
+test('the clinical overview is built from available patient data only', () => {
   const page = patientPage()
   assert.match(page, /const trends = clinicalTrends\(patient\.labs\)/)
   assert.match(page, /trends\.domain && trends\.series\.length > 0/)
   assert.match(page, /<TrendChart /)
-  for (const label of ['Problems', 'Current medications', 'Clinical trajectory', 'Latest values']) {
+  for (const label of ['Problems', 'Current medications', 'Clinical trajectory', 'Latest relevant results', 'Recent relevant context', 'Care context']) {
     assert.match(page, new RegExp(label))
   }
-  assert.match(page, /Recent relevant context/)
   assert.match(page, /View source clinical data/)
+  assert.match(page, /trends\.series\.length > 1 \? 'paired' : 'single'/, 'paired charts use the page width')
+})
+
+test('the source record is a readable table of every measurement, not mini-cards', () => {
+  const page = patientPage()
+  assert.match(page, /const flowsheet = labFlowsheet\(patient\.labs\)/)
+  assert.match(page, /<table className="record-table">/)
+  assert.match(page, /<th scope="col">Date<\/th>/)
+  assert.match(page, /<th scope="row">\{labDate\(row\.date\)\}<\/th>/)
+  assert.match(page, /aria-label="No result recorded"/)
+  assert.match(page, /Laboratory history/)
+  assert.match(page, /Provenance/)
+  assert.doesNotMatch(page, /source-record-grid|source-labs/, 'the mini-card lab grid is gone')
+})
+
+test('trend charts expose dates, a numeric axis and the value at each reading', () => {
+  const chart = readFileSync(new URL('../src/TrendChart.tsx', import.meta.url), 'utf8')
+  assert.match(chart, /valueTicks\(series\.points\.map\(\(point\) => point\.value\)\)/)
+  assert.match(chart, /ticks\.map\(\(tick\) => <span key=\{tick\}/, 'y axis tick labels')
+  assert.match(chart, /className="trend-chart-axis"/)
+  assert.match(chart, /plotted\.map\(\(point, index\) => <span key=\{`axis-\$\{index\}`\}/, 'a label at every reading')
+  assert.match(chart, /className=\{`trend-value \$\{point\.top < 26 \? 'below' : 'above'\}`\}/)
+  assert.match(chart, /role="img" aria-label=\{description\}/)
 })
 
 /* ----------------------------------------------------------- consultations */
@@ -141,6 +179,17 @@ test('an interaction target expands the network consultation and highlights the 
   assert.match(source, /focusEventId=\{params\.get\('event'\)\}/)
   assert.match(styles, /\.consult-record-event \{ scroll-margin/)
   assert.match(styles, /\.consult-record-event\.event-focus/)
+})
+
+test('the targeted event keeps its normal layout with no grey evidence slab', () => {
+  assert.match(styles, /\.consult-record-event\.targeted \.consult-record-evidence \{[^}]*background: transparent/,
+    'the default grey evidence panel must be cleared inside a targeted event')
+  const targeted = styles.slice(styles.indexOf('.consult-record-event.targeted {'), styles.indexOf('.learning-card {'))
+  assert.doesNotMatch(targeted, /padding|margin|border-width|font-size/, 'highlighting must not move anything')
+  for (const rule of ['.consult-record-event.targeted {', '.consult-record-event.event-focus {']) {
+    const declaration = styles.slice(styles.indexOf(rule), styles.indexOf('}', styles.indexOf(rule)))
+    assert.match(declaration, /inset 0 0 0 2px/, 'both states use the same ring width so nothing reflows')
+  }
 })
 
 test('My Agent activity reuses the one deep-link helper instead of a second implementation', () => {

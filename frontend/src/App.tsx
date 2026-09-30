@@ -3,7 +3,7 @@ import laminaLogo from './assets/lamina-logo-source.png'
 import { LaminaMark } from './LaminaMark.tsx'
 import { consultNetwork, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type Patient, type PatientActivity } from './api.ts'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient } from './agentActivity.ts'
-import { clinicalTrends, labDate } from './clinicalTrends.ts'
+import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, cleanName, patientName } from './demoIdentity.ts'
@@ -97,13 +97,13 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const activity = agentActivity(ordered).slice(0, 3)
   const lastRecord = ordered[0]
   return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page">
-    <header className="home-header"><h1>Home</h1><button className="button-primary home-start" onClick={() => navigate('/patients')}>Start consultation <span>→</span></button></header>
+    <header className="home-header"><div><h1>Home</h1><p>Current work and recent agent activity.</p></div><button className="button-primary home-start" onClick={() => navigate('/patients')}>Start consultation <span>→</span></button></header>
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
       {workCount > 0 && <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{workCount}</span></div><div className="lam-list needs-attention">{currentWork.map((record) => <button className="lam-row" key={record.id} onClick={() => navigate(consultationPath(record.id))}><span className="lam-row-mark patient-row-avatar">{DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials}</span><span className="lam-row-main"><strong>{patientName(record.patient_id)}</strong><span>{record.result.recommended_physician.specialty} recommended{record.patient_id === MARIA_ID ? ' first' : ''}</span><small>{cleanName(record.result.recommended_physician.physician_name)} · Workup identified</small></span><span className="lam-row-action">Review consultation <b>→</b></span></button>)}{pending.length > 0 && <button className="lam-row" onClick={() => navigate(calibrationPath())}><NetworkMark /><span className="lam-row-main"><strong>{pending.length} agent learning{pending.length === 1 ? '' : 's'}</strong><span>Ready for your confirmation</span><small>Proposed learnings are not used as physician-confirmed rules.</small></span><span className="lam-row-action">Review calibration <b>→</b></span></button>}</div></section>}
-      <section className="home-main-grid"><div className="home-activity"><div className="home-section-heading"><div><h2>Recent agent activity</h2></div><button className="text-button" onClick={() => navigate('/consultations')}>View all consultations →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span><em className="activity-kind">{item.kind === 'interaction' ? 'Agent interaction' : 'Consultation milestone'}</em><strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</div>
-        <aside className="home-agent-card"><div className="home-agent-title"><NetworkMark active /><div><p className="eyebrow">Your Agent</p><h2>{PCP_AGENT_NAME}</h2><span><i /> Active</span></div></div><dl><div><dt>Last activity</dt><dd>{lastRecord ? `Consulted ${lastRecord.result.consultation.length} physician agents for ${patientName(lastRecord.patient_id)}` : 'No consultations yet'}</dd></div></dl><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View agent →</button></aside>
+      <section className="home-main-grid"><div className="home-activity"><div className="home-section-heading"><div><h2>Recent agent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=activity')}>View all activity →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span><em className="activity-kind">{item.kind === 'interaction' ? 'Agent interaction' : 'Consultation milestone'}</em><strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</div>
+        <aside className="home-agent-card"><div className="home-agent-title"><NetworkMark active /><div><p className="eyebrow">Your Agent</p><h2>{PCP_AGENT_NAME}</h2><span><i /> Active</span></div></div><dl><div><dt>Last activity</dt><dd>{lastRecord ? `Consulted ${lastRecord.result.consultation.length} physician agents for ${patientName(lastRecord.patient_id)}` : 'No consultations yet'}{lastRecord && <small>{eventTimestamp(lastRecord.completed_at)}</small>}</dd></div><div><dt>Proposed learnings</dt><dd>{pending.length ? `${pending.length} awaiting your confirmation` : 'None awaiting review'}</dd></div></dl><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View My Agent →</button></aside>
       </section>
     </>}
   </main></ProductShell>
@@ -334,24 +334,67 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   if (loading) return <ProductShell navigate={navigate} section="patients"><div className="page-state embedded"><div className="loading-line" /><p>Opening patient workspace…</p></div></ProductShell>
   if (!patient) return <ProductShell navigate={navigate} section="patients"><div className="page-state embedded error"><p>{error || 'Patient unavailable'}</p></div></ProductShell>
   const trends = clinicalTrends(patient.labs)
-  const singleDate = new Set(trends.latest.map((item) => item.date)).size === 1
+  const flowsheet = labFlowsheet(patient.labs)
+  const resultDates = new Set(trends.latest.map((item) => item.date))
+  const sharedResultDate = resultDates.size === 1 ? trends.latest[0].date : null
+  const clinicalSource = patient.clinical_data_source === 'medplum_fhir' ? 'Synthetic FHIR via Medplum' : 'Local synthetic fixture'
+  const careContext = [
+    { label: 'Referring clinician', value: `${PCP_NAME} · Primary Care` },
+    { label: 'Insurance', value: patient.insurance },
+    { label: 'Clinical source', value: clinicalSource },
+  ]
   return <ProductShell navigate={navigate} section="patients"><main className="page-shell patient-page"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
     <header className="patient-identity"><h1>{demoPatient?.name ?? cleanName(patient.display_name)}</h1><p>{patient.age} years · {patient.location}</p></header>
     {error && <div className="error-banner" role="alert"><strong>Unable to complete this action.</strong> {error}</div>}
     <section className="network-action brief-action"><div className="network-copy"><NetworkMark active={consulting} resolved={Boolean(consultation)} /><div><p className="eyebrow">{PCP_AGENT_NAME}</p><h2>Ready to consult the network.</h2></div></div><div className="network-controls"><label><span>Anything your agent should consider? <em>Optional</em></span><input value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder={anemiaCase ? 'e.g. Patient strongly prefers telehealth' : 'e.g. Considering nephrology vs cardiology'} /></label><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult the network'}</span><span>→</span></button></div></section>
     <p className="agent-task"><b>Agent task</b><span>Evaluate appropriate specialty, required workup, and viable access options using the available clinical context.</span></p>
     {(consulting || consultation) && <ConsultationNetwork result={consultation} visibleCount={visibleMessageCount} consulting={consulting} networkAgents={networkAgents} />}{consultation && !consulting && <RecommendationView consultation={consultation} navigate={navigate} />}
-    <section className="clinical-summary"><h2>Clinical summary</h2><p className="clinical-summary-note">The bounded synthetic context available to your agent. Not a complete medical record.</p>
-      <div className="clinical-summary-grid">
-        <div><p className="section-label">Problems</p><ul>{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></div>
-        <div><p className="section-label">Current medications</p><ul>{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></div>
+    <section className="clinical-overview" aria-labelledby="clinical-overview-heading">
+      <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
+      <div className="clinical-columns">
+        <section><h3>Problems</h3><ul className="clinical-list">{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section>
+        <section><h3>Current medications</h3><ul className="clinical-list">{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></section>
       </div>
-      {trends.domain && trends.series.length > 0 && <div className="clinical-trajectory"><p className="section-label">Clinical trajectory</p><div className="trend-chart-stack">{trends.series.map((series, index) => <TrendChart key={series.test} series={series} domain={trends.domain as [number, number]} tone={index === 0 ? 'accent' : 'clinical'} />)}</div></div>}
-      {trends.latest.length > 0 && <div className="clinical-latest"><p className="section-label">Latest values{singleDate ? ` · ${labDate(trends.latest[0].date)}` : ''}</p><div>{trends.latest.map((item) => <span key={item.test}><b>{item.label}</b>{item.value} {item.unit}{singleDate ? '' : ` · ${labDate(item.date)}`}</span>)}</div></div>}
-      {patient.clinical_notes.length > 0 && <div className="clinical-context"><p className="section-label">Recent relevant context</p><ul>{patient.clinical_notes.map((note) => <li key={note}>{note}</li>)}</ul></div>}
+      {trends.domain && trends.series.length > 0 && <section className="clinical-block">
+        <h3>Clinical trajectory</h3>
+        <div className={`trend-chart-stack ${trends.series.length > 1 ? 'paired' : 'single'}`}>{trends.series.map((series, index) => <TrendChart key={series.test} series={series} domain={trends.domain as [number, number]} tone={index === 0 ? 'accent' : 'clinical'} />)}</div>
+      </section>}
+      {trends.latest.length > 0 && <section className="clinical-block">
+        <h3>Latest relevant results{sharedResultDate && <em>{labDate(sharedResultDate)}</em>}</h3>
+        <div className="result-grid">{trends.latest.map((item) => <div key={item.test}>
+          <strong>{item.value} <i>{labUnit(item.unit)}</i></strong>
+          <span>{item.label}</span>
+          {!sharedResultDate && <small>{labDate(item.date)}</small>}
+        </div>)}</div>
+      </section>}
+      {patient.clinical_notes.length > 0 && <section className="clinical-block">
+        <h3>Recent relevant context</h3>
+        <ul className="clinical-list">{patient.clinical_notes.map((note) => <li key={note}>{note}</li>)}</ul>
+      </section>}
+      <section className="clinical-block care-context">
+        <h3>Care context</h3>
+        <dl>{careContext.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+      </section>
     </section>
-    <div className="clinical-provenance"><div><span>Referring clinician</span><strong>{PCP_NAME} · Primary Care</strong></div><div><span>Insurance</span><strong>{patient.insurance}</strong></div><div><span>Clinical source</span><strong>{patient.clinical_data_source === 'medplum_fhir' ? 'Synthetic FHIR via Medplum' : 'Local synthetic fixture'}</strong></div></div>
-    <details className="source-record"><summary>View source clinical data <span>Diagnoses, medications, full lab history, access details and provenance</span></summary><div className="source-record-grid"><section><h3>Active diagnoses</h3><ul>{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section><section><h3>Medications</h3><ul>{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></section><section><h3>Access context</h3><p><b>Referring clinician</b>{PCP_NAME} · Primary Care</p><p><b>Insurance</b>{patient.insurance}</p><p><b>Clinical source</b>{patient.clinical_data_source === 'medplum_fhir' ? 'Synthetic FHIR via Medplum' : 'Local synthetic fixture'}</p></section><section className="source-labs"><h3>Lab history</h3><div>{patient.labs.map((lab) => <span key={`${lab.test}-${lab.date}`}><b>{lab.test}</b>{lab.value} {lab.unit}<small>{labDate(lab.date)}</small></span>)}</div></section>{patient.clinical_notes.length > 0 && <section className="source-notes"><h3>Clinical notes</h3><ul>{patient.clinical_notes.map((note) => <li key={note}>{note}</li>)}</ul></section>}</div></details>
+    <details className="source-record"><summary>View source clinical data <span>Problems, medications, full laboratory history and provenance</span></summary>
+      <div className="source-record-body">
+        <section><h3>Problems</h3><ul className="record-rows">{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section>
+        <section><h3>Medications</h3><ul className="record-rows">{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></section>
+        <section><h3>Laboratory history</h3>
+          <div className="record-table-scroll">
+            <table className="record-table">
+              <caption>Every recorded synthetic result, oldest first. A dash means no result was recorded on that date.</caption>
+              <thead><tr><th scope="col">Date</th>{flowsheet.columns.map((column) => <th key={column.test} scope="col">{column.label}<small>{labUnit(column.unit)}</small></th>)}</tr></thead>
+              <tbody>{flowsheet.rows.map((row) => <tr key={row.date}><th scope="row">{labDate(row.date)}</th>{row.cells.map((cell, index) => <td key={flowsheet.columns[index].test}>{cell === null ? <span aria-label="No result recorded">—</span> : cell}</td>)}</tr>)}</tbody>
+            </table>
+          </div>
+        </section>
+        {patient.clinical_notes.length > 0 && <section><h3>Clinical notes</h3><ul className="record-rows">{patient.clinical_notes.map((note) => <li key={note}>{note}</li>)}</ul></section>}
+        <section><h3>Care context</h3>
+          <dl className="record-context">{[...careContext, { label: 'Provenance', value: 'Synthetic demo record · no PHI' }].map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+        </section>
+      </div>
+    </details>
   </main></ProductShell>
 }
 
