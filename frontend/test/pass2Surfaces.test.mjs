@@ -77,7 +77,9 @@ test('a directory row keeps the human avatar and the separate agent status badge
 
 test('the graph still draws edges only from recorded consultations', () => {
   const graph = slice(network, 'function NetworkGraph', 'function AgentDetail')
-  assert.match(graph, /new Map\(network\.edges\.map/)
+  const filterModule = readFileSync(new URL('../src/graphFilter.ts', import.meta.url), 'utf8')
+  assert.match(filterModule, /new Map<string, AgentRelationship>\(network\.edges\.map/)
+  assert.match(graph, /graphVisibility\(network, filter\)/)
   assert.match(graph, /return edge && <line/)
   assert.match(graph, /agent\.relationship \? 'connected' : 'unconnected'/)
   assert.doesNotMatch(graph, /Roster only · no edge/)

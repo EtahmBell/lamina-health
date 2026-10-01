@@ -17,6 +17,7 @@ import {
   type PhysicianNetworkProfile,
   type ProviderSearchResponse,
 } from './api.ts'
+import { DEFAULT_GRAPH_FILTER, GRAPH_FILTERS, graphVisibility, type GraphFilter } from './graphFilter.ts'
 import { membershipLabel, networkRoster, physicianDisplayName, rosterSize, type NetworkRelationship } from './networkRoster.ts'
 
 type Navigate = (path: string) => void
@@ -87,14 +88,35 @@ function relationshipLabel(agent: NetworkAgent) {
   return `${count} recorded consultation${count === 1 ? '' : 's'}`
 }
 
-function NetworkGraph({ network, selectedId, onSelect }: { network: AgentNetwork; selectedId: string | null; onSelect: (id: string) => void }) {
-  const roster = graphRoster.map((id) => network.nodes.find((node) => node.physician_id === id)).filter((node): node is NetworkAgent => Boolean(node))
-  const edges = new Map(network.edges.map((edge) => [edge.target_agent, edge]))
-  return <div className="agent-network-stage"><div className="agent-network-caption"><span className="legend-recommended"><i /> Recommended</span><span className="legend-consulted"><i /> Consulted</span><span className="legend-redirected"><i /> Redirected</span></div><div className="agent-network-canvas">
-    <svg className="agent-network-edges" viewBox="0 0 1000 560" preserveAspectRatio="none" aria-hidden="true">{roster.map((agent, index) => { const edge = edges.get(agent.id); return edge && <line key={agent.id} x1="500" y1="280" x2={graphSlots[index].x * 10} y2={graphSlots[index].y * 5.6} className={`relationship-edge ${edge.relationship_type}`} /> })}</svg>
-    <div className="agent-network-center"><LaminaMark active /><span>Your agent</span><strong>{network.center.name}</strong><small>{network.center.specialty}</small><em>ACTIVE</em></div>
-    {roster.map((agent, index) => <button key={agent.id} className={`agent-network-node ${agent.relationship ? 'connected' : 'unconnected'} ${selectedId === agent.id ? 'selected' : ''}`} style={{ '--node-x': `${graphSlots[index].x}%`, '--node-y': `${graphSlots[index].y}%` } as CSSProperties} onClick={() => onSelect(agent.id)} aria-label={`${agent.name}'s Agent · ${agent.specialty} · ${statusCopy[agent.status].label} · ${relationshipLabel(agent)}. Open agent details.`}><LaminaMark active={agent.status === 'active'} /><strong>{agent.name}</strong><small>{agent.specialty}</small><i className={`node-dot ${agent.status}`} aria-hidden="true" /></button>)}
-  </div></div>
+function NetworkGraph({ network, selectedId, onSelect, filter, onFilter }: {
+  network: AgentNetwork; selectedId: string | null; onSelect: (id: string) => void
+  filter: GraphFilter; onFilter: (filter: GraphFilter) => void
+}) {
+  const { edges, visible } = graphVisibility(network, filter)
+  /** Each physician keeps its own slot, so filtering changes visibility, never position. */
+  const placed = graphRoster
+    .map((id, index) => ({ agent: network.nodes.find((node) => node.physician_id === id), slot: graphSlots[index] }))
+    .filter((entry): entry is { agent: NetworkAgent; slot: typeof graphSlots[number] } => Boolean(entry.agent))
+    .filter((entry) => visible(entry.agent.id))
+  return <div className="agent-network-stage">
+    <div className="agent-network-caption">
+      <div className="agent-network-legend"><span className="legend-recommended"><i /> Recommended</span><span className="legend-consulted"><i /> Consulted</span><span className="legend-redirected"><i /> Redirected</span></div>
+      <div className="graph-filter" role="group" aria-label="Show physician agents">
+        {GRAPH_FILTERS.map((option) => <button
+          key={option.id}
+          type="button"
+          className={filter === option.id ? 'active' : ''}
+          aria-pressed={filter === option.id}
+          onClick={() => onFilter(option.id)}
+        >{option.label}</button>)}
+      </div>
+    </div>
+    <div className="agent-network-canvas">
+      <svg className="agent-network-edges" viewBox="0 0 1000 560" preserveAspectRatio="none" aria-hidden="true">{placed.map(({ agent, slot }) => { const edge = edges.get(agent.id); return edge && <line key={agent.id} x1="500" y1="280" x2={slot.x * 10} y2={slot.y * 5.6} className={`relationship-edge ${edge.relationship_type}`} /> })}</svg>
+      <div className="agent-network-center"><LaminaMark active /><span>Your agent</span><strong>{network.center.name}</strong><small>{network.center.specialty}</small><em>ACTIVE</em></div>
+      {placed.map(({ agent, slot }) => <button key={agent.id} className={`agent-network-node ${agent.relationship ? 'connected' : 'unconnected'} ${selectedId === agent.id ? 'selected' : ''}`} style={{ '--node-x': `${slot.x}%`, '--node-y': `${slot.y}%` } as CSSProperties} onClick={() => onSelect(agent.id)} aria-label={`${agent.name}'s Agent · ${agent.specialty} · ${statusCopy[agent.status].label} · ${relationshipLabel(agent)}. Open agent details.`}><LaminaMark active={agent.status === 'active'} /><strong>{agent.name}</strong><small>{agent.specialty}</small><i className={`node-dot ${agent.status}`} aria-hidden="true" /></button>)}
+    </div>
+  </div>
 }
 
 function AgentDetail({ agent, navigate, close }: { agent: NetworkAgent; navigate: Navigate; close: () => void }) {
@@ -117,6 +139,7 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
   const [showAllResults, setShowAllResults] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingNpi, setPendingNpi] = useState<string | null>(null)
+  const [graphFilter, setGraphFilter] = useState<GraphFilter>(DEFAULT_GRAPH_FILTER)
 
   const runSearch = async (event?: FormEvent) => {
     event?.preventDefault(); setLoading(true); setError(null); setShowAllResults(false)
@@ -127,6 +150,11 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
   const loadNetwork = () => getAgentNetwork().then(setNetwork).catch((loadError: Error) => setNetworkError(loadError.message))
   useEffect(() => { void runSearch(); void loadNetwork() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (selectedId) document.querySelector('.network-detail-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [selectedId])
+  /** A filtered-out physician must not keep an open detail panel behind the graph. */
+  useEffect(() => {
+    if (!network || !selectedId) return
+    if (!graphVisibility(network, graphFilter).visible(selectedId)) setSelectedId(null)
+  }, [network, selectedId, graphFilter])
 
   const changeMembership = async (npi: string, action: () => Promise<unknown>) => {
     setPendingNpi(npi); setError(null)
@@ -182,7 +210,7 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
     </section>
 
     <section className="network-visual-section"><div className="network-section-heading"><div><h2>Network visualization</h2></div><p>Select a physician agent to inspect its practice footprint, activation state, and relationship to yours. Edges appear only for completed Lamina consultations.</p></div>
-      {network && <><NetworkGraph network={network} selectedId={selectedId} onSelect={setSelectedId} />{selected && <AgentDetail agent={selected} navigate={navigate} close={() => setSelectedId(null)} />}</>}
+      {network && <><NetworkGraph network={network} selectedId={selectedId} onSelect={setSelectedId} filter={graphFilter} onFilter={setGraphFilter} />{selected && <AgentDetail agent={selected} navigate={navigate} close={() => setSelectedId(null)} />}</>}
       <p className="network-roster-note">The visualization shows physician agents involved in Lamina consultations. Added relationships without a consultation appear in Your network above.</p>
     </section>
   </main>

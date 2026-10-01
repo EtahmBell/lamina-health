@@ -53,7 +53,9 @@ test('recommended, consulted and redirected edges are visually distinct', () => 
 
 test('a manually added relationship needs no graph edge, and the graph says so', () => {
   const graph = slice(network, 'function NetworkGraph', 'function AgentDetail')
-  assert.match(graph, /new Map\(network\.edges\.map/)
+  const filterModule = readFileSync(new URL('../src/graphFilter.ts', import.meta.url), 'utf8')
+  assert.match(filterModule, /new Map<string, AgentRelationship>\(network\.edges\.map/)
+  assert.match(graph, /graphVisibility\(network, filter\)/)
   assert.match(graph, /return edge && <line/, 'a line exists only where the projection has an edge')
   assert.doesNotMatch(graph, /in_network/, 'membership must never draw or style an edge')
   assert.match(network, /The visualization shows physician agents involved in Lamina consultations\./)

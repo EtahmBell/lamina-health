@@ -777,3 +777,24 @@ button.lam-row:hover { background: #fff9f1; }
 }
 .demo-reset-block { margin-top: 15px; border-top: 1px solid rgb(222 216 206 / 60%); padding-top: 16px; }
 .demo-reset-error { color: var(--danger); }
+
+/* Graph visibility filter. The legend still explains edge meaning; this only
+   controls which physician agents are drawn. */
+.agent-network-caption { flex-wrap: wrap; justify-content: space-between; gap: 9px 20px; }
+.agent-network-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 9px 20px; }
+.graph-filter { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 2px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 2px; }
+.graph-filter button { border: 0; border-radius: 999px; background: transparent; padding: 5px 12px; color: var(--text-secondary); font: inherit; font-size: .58rem; font-weight: 600; cursor: pointer; transition: background-color 150ms ease, color 150ms ease; }
+.graph-filter button:hover:not(.active) { color: var(--clinical); background: rgb(243 231 219 / 55%); }
+.graph-filter button.active { background: #f3e7db; color: var(--accent-hover); }
+.graph-filter button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.agent-network-node { animation: graph-node-in 180ms ease-out both; }
+@keyframes graph-node-in { from { opacity: 0; } to { opacity: 1; } }
+
+@media (max-width: 600px) {
+  .graph-filter { width: 100%; justify-content: space-between; }
+  .graph-filter button { flex: 1; text-align: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-filter button { transition: none; }
+  .agent-network-node { animation: none; }
+}
