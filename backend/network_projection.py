@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from backend.demo_identity import PCP_AGENT_ID, PCP_AGENT_NAME
-from backend.provider_network.service import ProviderNetwork
+from backend.provider_network.service import ProviderNetwork, ProviderNotFoundError
 from backend.synthetic_data import ALL_PHYSICIANS, PATIENTS, SYNTHETIC_PHYSICIAN_NPIS
 
 CENTER_AGENT = {
@@ -16,8 +18,36 @@ CENTER_AGENT = {
 }
 
 
-def project_agent_network(records: list[dict], providers: ProviderNetwork) -> dict:
-    """Only saved structured consult outcomes create edges; roster alone creates none."""
+def _resolve_member(npi: str, added_at: str, providers: ProviderNetwork) -> dict:
+    """Render a recorded relationship from live directory identity, never a stored copy."""
+    try:
+        profile = providers.get(npi)
+    except ProviderNotFoundError:
+        return {
+            "npi": npi, "added_at": added_at, "resolved": False, "name": f"NPI {npi}",
+            "specialty": "Specialty unavailable", "location": "", "agent_id": None,
+            "status": None, "source": None,
+        }
+    location = ", ".join(part for part in (profile.city, profile.state) if part)
+    return {
+        "npi": npi, "added_at": added_at, "resolved": True,
+        "name": profile.display_name, "specialty": profile.specialty, "location": location,
+        "agent_id": profile.agent.id, "status": profile.agent.status.value,
+        "source": profile.source.value,
+    }
+
+
+def project_agent_network(
+    records: list[dict],
+    providers: ProviderNetwork,
+    members: Sequence[dict] = (),
+) -> dict:
+    """Only saved structured consult outcomes create edges; roster alone creates none.
+
+    A recorded relationship marks a node `in_network`. It never creates an edge and
+    never changes the physician's separate agent activation status.
+    """
+    member_dates = {member["npi"]: member["added_at"] for member in members}
     relationships: dict[str, dict] = {}
     for record in records:
         result = record["result"]
@@ -90,11 +120,19 @@ def project_agent_network(records: list[dict], providers: ProviderNetwork) -> di
                 else "Configured synthetic demo practice footprint · not physician-confirmed"
             ),
             "relationship": relationships.get(footprint.id),
+            "in_network": npi in member_dates,
+            "added_at": member_dates.get(npi),
         })
 
+    graph_npis = {node["npi"] for node in nodes}
     return {
         "center": CENTER_AGENT,
         "nodes": nodes,
+        "members": [
+            _resolve_member(npi, added_at, providers)
+            for npi, added_at in member_dates.items()
+            if npi not in graph_npis
+        ],
         "record_count": len(records),
         "relationship_source": "Completed Lamina synthetic consultation records only",
         "status_note": (

@@ -67,10 +67,19 @@ export type NetworkAgent = {
   location: string; status: AgentStatus; source: 'SYNTHETIC'; focus_areas: string[]
   required_workup: string[]; explicit_rules: string[]; confirmed_preferences: AgentPreferences | null
   provenance: string; relationship: AgentRelationship | null
+  /** A referral relationship the clinician recorded. Never implies agent activation. */
+  in_network: boolean; added_at: string | null
 }
+/** A recorded relationship with a physician outside the synthetic consult roster. */
+export type NetworkMemberProfile = {
+  npi: string; added_at: string; resolved: boolean; name: string; specialty: string; location: string
+  agent_id: string | null; status: AgentStatus | null; source: 'NPPES' | 'SYNTHETIC' | null
+}
+export type NetworkMember = { npi: string; added_at: string }
 export type AgentNetwork = {
   center: { id: string; name: string; specialty: string; location: string; status: 'active'; source: string }
-  nodes: NetworkAgent[]; record_count: number; relationship_source: string; status_note: string
+  nodes: NetworkAgent[]; members: NetworkMemberProfile[]
+  record_count: number; relationship_source: string; status_note: string
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -91,6 +100,16 @@ export const getConsultationHistory = () => request<ConsultationRecord[]>('/api/
 export const getConsultationRecord = (id: number) => request<ConsultationRecord>(`/api/workspace/consultations/${id}`)
 export const getMyAgent = () => request<MyAgent>('/api/workspace/agent')
 export const getAgentNetwork = () => request<AgentNetwork>('/api/workspace/network')
+export const addNetworkMember = (npi: string) => request<NetworkMember>('/api/workspace/network/members', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ npi }),
+})
+export const removeNetworkMember = async (npi: string) => {
+  const response = await fetch(`${API_BASE_URL}/api/workspace/network/members/${encodeURIComponent(npi)}`, { method: 'DELETE' })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: string } | null
+    throw new Error(body?.detail || `Request failed (${response.status})`)
+  }
+}
 export const updateAgentLearning = (key: string, action: 'confirm' | 'edit' | 'reject', statement?: string) => request<AgentLearning>(`/api/workspace/agent/learnings/${encodeURIComponent(key)}`, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, statement }),
 })

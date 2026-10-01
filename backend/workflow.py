@@ -32,6 +32,9 @@ class WorkflowStore:
                   provenance TEXT NOT NULL, status TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS network_members (
+                  npi TEXT PRIMARY KEY, added_at TEXT NOT NULL
+                );
                 """
             )
             if "last_started" not in {
@@ -113,6 +116,35 @@ class WorkflowStore:
              "completed_at": row["completed_at"], "result": json.loads(row["result_json"])}
             if row else None
         )
+
+    def network_members(self) -> list[dict]:
+        """Physician relationships the clinician recorded, oldest first.
+
+        Membership is a workspace relationship only. It is deliberately separate
+        from physician-agent activation state and never mutates directory identity.
+        """
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT npi, added_at FROM network_members ORDER BY added_at, npi"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_network_member(self, npi: str) -> dict:
+        """Idempotent: re-adding an existing relationship keeps the original date."""
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO network_members(npi, added_at) VALUES (?, ?) "
+                "ON CONFLICT(npi) DO NOTHING",
+                (npi, self._now()),
+            )
+            row = db.execute(
+                "SELECT npi, added_at FROM network_members WHERE npi=?", (npi,)
+            ).fetchone()
+        return dict(row)
+
+    def remove_network_member(self, npi: str) -> bool:
+        with self._connect() as db:
+            return db.execute("DELETE FROM network_members WHERE npi=?", (npi,)).rowcount > 0
 
     def preferences(self) -> list[dict]:
         with self._connect() as db:

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from backend.demo_identity import PCP_AGENT_ID, PCP_NAME
 from backend.network_projection import project_agent_network
 from backend.provider_network import provider_network
+from backend.provider_network.service import ProviderNotFoundError
 from backend.synthetic_data import PATIENTS
 from backend.workflow import workflow_store
 
@@ -34,6 +35,10 @@ CALIBRATIONS = {
 class PreferenceUpdate(BaseModel):
     action: Literal["confirm", "edit", "reject"]
     statement: str | None = Field(default=None, max_length=240)
+
+
+class NetworkMemberRequest(BaseModel):
+    npi: str = Field(min_length=1, max_length=20, pattern=r"^[0-9]+$")
 
 
 @router.get("/agent")
@@ -92,7 +97,30 @@ def patient_activity() -> list[dict]:
 
 @router.get("/network")
 def agent_network() -> dict:
-    return project_agent_network(workflow_store.history(limit=200), provider_network)
+    return project_agent_network(
+        workflow_store.history(limit=200), provider_network, workflow_store.network_members()
+    )
+
+
+@router.get("/network/members")
+def network_members() -> list[dict]:
+    return workflow_store.network_members()
+
+
+@router.post("/network/members", status_code=201)
+def add_network_member(request: NetworkMemberRequest) -> dict:
+    """Records a referral relationship. Agent activation state is untouched."""
+    try:
+        provider_network.get(request.npi)
+    except ProviderNotFoundError as error:
+        raise HTTPException(404, "Physician profile not found") from error
+    return workflow_store.add_network_member(request.npi)
+
+
+@router.delete("/network/members/{npi}", status_code=204)
+def remove_network_member(npi: str) -> None:
+    if not workflow_store.remove_network_member(npi):
+        raise HTTPException(404, "Physician is not in your network")
 
 
 @router.get("/consultations")

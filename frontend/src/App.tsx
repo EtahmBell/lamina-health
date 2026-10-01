@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { LaminaMark } from './LaminaMark.tsx'
 import { consultNetwork, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type Patient, type PatientActivity } from './api.ts'
-import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient } from './agentActivity.ts'
+import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient, specialtiesConsulted } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
@@ -165,6 +165,23 @@ function ConsultationRecordPage({ id, focusEventId, navigate }: { id: number; fo
   return <ProductShell navigate={navigate} section="consultations"><main className="page-shell history-detail">{record ? <nav className="page-breadcrumb" aria-label="Breadcrumb"><button className="text-button" onClick={() => navigate('/consultations')}>Consultations</button><span aria-hidden="true">→</span><button className="text-button" onClick={() => navigate(`/consultations/patient/${record.patient_id}`)}>{patientName(record.patient_id)}</button></nav> : <button className="text-button back-link" onClick={() => navigate('/consultations')}>← Consultations</button>}{error && <div className="error-banner" role="alert">{error}</div>}{!record && !error && <p className="muted-note">Loading consultation record…</p>}{record && <><p className="eyebrow">Completed consultation · {formatTime(record.completed_at)}</p><h1>{patientName(record.patient_id)}</h1><p className="page-intro">A saved structured consultation. Clinical context remains in the patient workspace.</p><button className="text-button record-open-patient" onClick={() => navigate(`/patients/${record.patient_id}`)}>Open patient →</button><RecommendationView consultation={record.result} navigate={navigate} focusEventId={focusEventId} recordId={record.id} /></>}</main></ProductShell>
 }
 
+/** Where this agent's completed consultations have landed. Counts only, no scoring. */
+function ConsultationFootprint({ records }: { records: ConsultationRecord[] }) {
+  const specialties = specialtiesConsulted(records)
+  const peak = specialties[0]?.count ?? 0
+  return <section className="agent-footprint" aria-labelledby="agent-footprint-heading">
+    <h3 id="agent-footprint-heading">Specialties consulted</h3>
+    <p>Completed consultations in this workspace, by recommended specialty.</p>
+    {specialties.length === 0
+      ? <p className="agent-empty-note">No consultation activity yet.</p>
+      : <ul>{specialties.map((item) => <li key={item.specialty}>
+        <span>{item.specialty}</span>
+        <i aria-hidden="true"><b style={{ width: `${Math.round((item.count / peak) * 100)}%` }} /></i>
+        <em>{item.count}</em>
+      </li>)}</ul>}
+  </section>
+}
+
 const AGENT_TABS = ['overview', 'knowledge', 'calibration', 'activity'] as const
 type AgentTab = typeof AGENT_TABS[number]
 const isAgentTab = (value: string | null): value is AgentTab => AGENT_TABS.includes(value as AgentTab)
@@ -204,7 +221,7 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
     {error && <div className="error-banner" role="alert">{error}</div>}{!agent && !error && <p className="muted-note">Opening your agent…</p>}
     {agent && <><section className="agent-hero"><div className="agent-hero-mark"><NetworkMark active /></div><div><p className="eyebrow">Your physician agent</p><h1>{PCP_AGENT_NAME}</h1><p>Primary Care · Represents how you practise across the Lamina network.</p><span className="agent-state"><i /> ACTIVE</span></div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-      {tab === 'overview' && <div className="agent-overview"><div className="agent-overview-intro"><p className="eyebrow">Practice snapshot</p><h2>Primary care in Oakland, coordinating specialty referrals.</h2><p>Your agent uses bounded patient context, current synthetic referral rules, and the physician network to help choose an appropriate first destination.</p><button className="button-primary" onClick={() => selectTab('calibration')}>Test my agent →</button></div><div className="agent-summary-panel"><p className="eyebrow">Agent summary</p><button onClick={() => selectTab('knowledge')}><span>What is it using?</span><strong>{agent.known.length} attributed knowledge sources</strong><small>View knowledge and access →</small></button><button onClick={() => selectTab('activity')}><span>What has it done?</span><strong>{records[0] ? `Last consultation: ${patientName(records[0].patient_id)}` : 'No agent activity yet'}</strong><small>View activity →</small></button><button onClick={() => selectTab('calibration')}><span>How do I correct it?</span><strong>{pending ? `${pending} proposed learning${pending === 1 ? '' : 's'} need confirmation` : 'No new preferences to review'}</strong><small>Open calibration →</small></button></div></div>}
+      {tab === 'overview' && <div className="agent-overview"><div className="agent-overview-intro"><p className="eyebrow">Practice snapshot</p><h2>Primary care in Oakland, coordinating specialty referrals.</h2><p>Your agent uses bounded patient context, current synthetic referral rules, and the physician network to help choose an appropriate first destination.</p><button className="button-primary" onClick={() => selectTab('calibration')}>Test my agent →</button></div><div className="agent-overview-side"><div className="agent-summary-panel"><p className="eyebrow">Agent summary</p><button onClick={() => selectTab('knowledge')}><span>What is it using?</span><strong>{agent.known.length} attributed knowledge sources</strong><small>View knowledge and access →</small></button><button onClick={() => selectTab('activity')}><span>What has it done?</span><strong>{records[0] ? `Last consultation: ${patientName(records[0].patient_id)}` : 'No agent activity yet'}</strong><small>View activity →</small></button><button onClick={() => selectTab('calibration')}><span>How do I correct it?</span><strong>{pending ? `${pending} proposed learning${pending === 1 ? '' : 's'} need confirmation` : 'No new preferences to review'}</strong><small>Open calibration →</small></button></div><ConsultationFootprint records={records} /></div></div>}
       {tab === 'knowledge' && <div className="agent-section-grid"><section className="agent-panel"><p className="eyebrow">Inspectable practice profile</p><h2>What my agent knows</h2><p className="panel-intro">Every fact has a source. Demo rules are not physician-confirmed preferences.</p><div className="agent-facts">{agent.known.map((fact, index) => <div key={`${fact.label}-${index}`}><span>{fact.label}</span><strong>{fact.value}</strong><small>Source: {fact.source}</small></div>)}</div></section>
       <section className="agent-panel access-panel"><p className="eyebrow">Clear boundaries</p><h2>What my agent can access</h2><div className="agent-access">{agent.access.map((item) => <div key={item.label}><strong>{item.label}</strong><span>{item.detail}</span></div>)}</div></section></div>}
       {tab === 'calibration' && <><section className="agent-panel learning-panel"><div className="panel-header"><div><p className="eyebrow">Under your control</p><h2>Proposed learnings</h2><p className="panel-intro">Suggestions from synthetic rules are not silently treated as your preferences. A proposal stays proposed until you confirm or edit it, and confirmation here does not change the existing consult engine.</p></div></div>{pending === 0 && <p className="agent-empty-note">Your agent is up to date. No new practice preferences need review.</p>}<div className="learning-grid">{agent.learnings.map((learning) => <article className={`learning-card ${focusedLearning === learning.key ? 'focused' : ''}`} id={`learning-${learning.key}`} key={learning.key}><span className={`learning-status ${learning.status}`}>{learning.status === 'suggested' ? 'Proposed · needs confirmation' : learning.status === 'confirmed' ? 'Physician-confirmed' : 'Rejected'}</span><p>{learning.statement}</p><small>Source: {learning.provenance}</small>{focusedLearning === learning.key && caseParam && <p className="learning-case-source">Raised from the {patientName(caseParam)} consultation.{recordParam && <button className="text-button" onClick={() => navigate(consultationPath(Number(recordParam)))}>View consultation →</button>}</p>}{editing === learning.key ? <div className="learning-edit"><label htmlFor={`edit-${learning.key}`}>Correct this preference</label><textarea id={`edit-${learning.key}`} maxLength={240} value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="button-primary" disabled={!draft.trim()} onClick={() => act(learning, 'edit', draft)}>Save draft</button><button className="text-button" onClick={() => setEditing(null)}>Cancel</button></div></div> : <div className="learning-actions"><button onClick={() => act(learning, 'confirm')} disabled={learning.status === 'confirmed'}>Confirm</button><button onClick={() => { setEditing(learning.key); setDraft(learning.statement) }}>Edit</button><button onClick={() => act(learning, 'reject')} disabled={learning.status === 'rejected'}>Reject</button></div>}</article>)}</div></section>
@@ -215,17 +232,48 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
 }
 
 function ProfilePage({ navigate }: { navigate: Navigate }) {
+  const [agent, setAgent] = useState<MyAgent | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => { getMyAgent().then(setAgent).catch((err: Error) => setError(err.message)) }, [])
+  const access = (label: string) => agent?.access.find((item) => item.label === label)?.detail
+  const sections = agent ? [
+    { title: 'Practice', rows: [
+      { label: 'Specialty', value: agent.specialty },
+      { label: 'Location', value: agent.location },
+      { label: 'Role in this workspace', value: 'Referring clinician' },
+    ] },
+    { title: 'Account', rows: [
+      { label: 'Display name', value: agent.physician },
+      { label: 'Physician agent', value: PCP_AGENT_NAME },
+      { label: 'Agent identifier', value: agent.id },
+      { label: 'Authentication', value: 'Not part of this demo' },
+    ] },
+    { title: 'Data & privacy', rows: [
+      { label: 'Data', value: agent.synthetic ? 'Synthetic demo data · no PHI' : '' },
+      { label: 'Patient context', value: access('Patient clinical context') },
+      { label: 'Physician identity', value: access('Public physician identity') },
+      { label: 'Scheduling', value: access('Scheduling') },
+    ] },
+  ] : []
   return <ProductShell navigate={navigate} section="profile"><main className="page-shell profile-page">
-    <button className="text-button back-link" onClick={() => navigate('/home')}>← Home</button>
-    <section className="profile-composition">
-      <span className="clinician-avatar large">LS</span>
-      <p className="eyebrow">Synthetic clinician profile</p>
-      <h1>{PCP_NAME}</h1>
-      <p className="profile-role">Primary Care · Oakland, CA</p>
-      <div className="profile-agent-line"><NetworkMark active /><span><small>Your physician agent</small><strong>{PCP_AGENT_NAME}</strong><em><i />Active</em></span></div>
-      <button className="button-primary" onClick={() => navigate('/agent?tab=overview')}>View My Agent →</button>
-      <p className="muted-note">This demo does not include account authentication or production practice verification.</p>
-    </section>
+    {error && <div className="error-banner" role="alert">{error}</div>}
+    {!agent && !error && <p className="muted-note">Opening your profile…</p>}
+    {agent && <>
+      <header className="profile-hero">
+        <span className="clinician-avatar large">LS</span>
+        <div><p className="eyebrow">Clinician profile</p><h1>{agent.physician}</h1><p className="profile-role">{agent.specialty} · {agent.location}</p></div>
+      </header>
+      <section className="profile-agent-card">
+        <NetworkMark active />
+        <div><p className="eyebrow">Your physician agent</p><strong>{PCP_AGENT_NAME}</strong><span className="agent-state"><i /> ACTIVE</span></div>
+        <button className="button-primary" onClick={() => navigate('/agent?tab=overview')}>View My Agent →</button>
+      </section>
+      {sections.map((section) => <section className="profile-section" key={section.title}>
+        <h2>{section.title}</h2>
+        <dl>{section.rows.filter((row) => row.value).map((row) => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>
+      </section>)}
+      <p className="muted-note">Read-only for this demonstration. Account settings, credentialing, and production practice verification are not implemented.</p>
+    </>}
   </main></ProductShell>
 }
 

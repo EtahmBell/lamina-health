@@ -103,3 +103,21 @@ export function calibrationPath(learningKey?: string | null, patientId?: string,
   if (learningKey && recordId !== undefined) params.set('record', String(recordId))
   return `/agent?${params}`
 }
+
+export type SpecialtyCount = { specialty: string; count: number }
+
+/**
+ * Completed consultations grouped by the specialty each one resolved to.
+ * Counting every participating agent instead would make each specialty equal,
+ * because the same roster is consulted every time.
+ */
+export function specialtiesConsulted(records: ConsultationRecord[]): SpecialtyCount[] {
+  const counts = new Map<string, number>()
+  for (const record of records) {
+    const specialty = record.result.recommended_physician.specialty
+    counts.set(specialty, (counts.get(specialty) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([specialty, count]) => ({ specialty, count }))
+    .sort((a, b) => b.count - a.count || a.specialty.localeCompare(b.specialty))
+}

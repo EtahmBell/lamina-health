@@ -621,3 +621,81 @@ button.lam-row:hover { background: #fff9f1; }
 @media (prefers-reduced-motion: reduce) {
   .consult-record-event.targeted { transition: none; }
 }
+
+/* Pass 2: the physician network leads with real relationships, My Agent gains one
+   consultation footprint, and Profile reads as a restrained clinician surface. */
+.network-section-heading h2 { margin: 0; }
+.network-specialty-group + .network-specialty-group { margin-top: 22px; }
+.network-specialty-heading { display: flex; align-items: baseline; gap: 10px; margin: 0 0 9px; padding: 0 2px; }
+.network-specialty-heading h3 { margin: 0; color: var(--clinical); font-family: var(--font-ui); font-size: .64rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.network-specialty-heading::after { flex: 1; height: 1px; background: var(--border); content: ""; }
+.network-specialty-heading span { order: 3; color: var(--text-secondary); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.network-roster-note { margin: 14px 2px 0; color: var(--text-secondary); font-size: var(--type-meta); }
+
+/* Build your network: purposeful, rust-accented, but not the page's main action. */
+.network-build-section { margin-top: var(--section-space); }
+.network-build-banner { display: flex; align-items: flex-start; gap: 17px; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 14px; background: var(--surface); padding: 20px 22px; box-shadow: var(--shadow-soft); }
+.network-build-banner .directory-network-glyph { width: 46px; height: 46px; flex: 0 0 46px; }
+.network-build-banner .eyebrow { margin: 0 0 5px; }
+.network-build-banner h2 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+.network-build-banner p:last-child { margin: 7px 0 0; max-width: 62ch; color: var(--text-secondary); font-size: var(--type-body); line-height: 1.5; }
+.network-build-section .directory-search-panel { margin-top: 16px; }
+
+.directory-result { flex-wrap: wrap; }
+.directory-result-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 14px; }
+.directory-result-actions .button-secondary { padding: 9px 13px; font-size: .68rem; white-space: nowrap; }
+.directory-result-actions .text-button { font-size: var(--type-meta); white-space: nowrap; }
+.directory-result-actions .quiet-remove { color: var(--text-secondary); }
+.relationship-chip { border: 1px solid rgb(184 92 50 / 28%); border-radius: 999px; background: #fdf3e8; padding: 6px 11px; color: var(--accent-hover); font-size: var(--type-meta); font-weight: 600; white-space: nowrap; }
+.agent-status-badge.unknown { color: var(--text-secondary); }
+.agent-status-badge.unknown i { background: var(--text-secondary); }
+
+.network-visual-section { margin-top: var(--section-space); }
+
+/* One consultation footprint on My Agent. Counts only — no scores or rates. */
+.agent-overview-side { min-width: 0; align-self: start; }
+.agent-footprint { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 18px; }
+.agent-footprint h3 { margin: 0; color: var(--clinical); font-family: var(--font-ui); font-size: .62rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.agent-footprint > p { margin: 7px 0 0; color: var(--text-secondary); font-size: var(--type-meta); line-height: 1.5; }
+.agent-footprint ul { display: grid; gap: 11px; margin: 16px 0 0; padding: 0; list-style: none; }
+.agent-footprint li { display: grid; grid-template-columns: minmax(96px, auto) minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.agent-footprint li > span { color: var(--clinical); font-size: var(--type-body); }
+.agent-footprint li > i { height: 9px; border-radius: 999px; background: #efe9df; overflow: hidden; }
+.agent-footprint li > i b { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.agent-footprint li > em { color: var(--clinical); font-family: var(--font-display); font-size: .92rem; font-style: normal; font-variant-numeric: tabular-nums; }
+
+/* Profile: the physician and their agent, then quiet factual sections. The shell
+   keeps the workspace's own width so the page starts where every other page does. */
+.profile-page { max-width: 1080px; }
+.profile-hero, .profile-agent-card, .profile-section, .profile-page > .muted-note { max-width: 720px; }
+.profile-hero { display: flex; align-items: center; gap: 18px; padding: 6px 0 22px; }
+.profile-hero .clinician-avatar.large { width: 62px; height: 62px; flex-basis: 62px; font-size: 1.05rem; }
+.profile-hero .eyebrow { margin: 0 0 4px; }
+.profile-hero h1 { margin: 0; font-size: 1.95rem; }
+.profile-role { margin: 6px 0 0; color: var(--text-secondary); font-size: .8rem; }
+.profile-agent-card { display: flex; align-items: center; gap: 16px; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 14px; background: var(--surface); padding: 18px 20px; box-shadow: var(--shadow-soft); }
+.profile-agent-card .network-motif { width: 46px; height: 46px; flex: 0 0 46px; }
+.profile-agent-card .network-motif .motif-logo { transform: scale(.7); }
+.profile-agent-card > div { flex: 1; min-width: 0; }
+.profile-agent-card .eyebrow { margin: 0 0 3px; }
+.profile-agent-card strong { display: block; font-family: var(--font-display); font-size: 1.1rem; }
+.profile-agent-card .agent-state { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; color: var(--success); font-size: .55rem; font-weight: 700; letter-spacing: .08em; }
+.profile-agent-card .agent-state i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.profile-section { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 18px; }
+.profile-section h2 { margin: 0 0 13px; color: var(--clinical); font-family: var(--font-ui); font-size: .62rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.profile-section dl { display: grid; gap: 0; margin: 0; }
+.profile-section dl > div { display: grid; grid-template-columns: minmax(150px, 34%) minmax(0, 1fr); gap: 16px; padding: 11px 2px; }
+.profile-section dl > div + div { border-top: 1px solid rgb(222 216 206 / 60%); }
+.profile-section dt { color: var(--text-secondary); font-size: var(--type-body); }
+.profile-section dd { margin: 0; color: var(--clinical); font-size: var(--type-body); line-height: 1.5; }
+.profile-page .muted-note { margin-top: 26px; }
+
+@media (max-width: 760px) {
+  .directory-result-actions { width: 100%; justify-content: flex-start; }
+  .network-build-banner { flex-direction: column; gap: 13px; }
+  .profile-hero { align-items: flex-start; }
+  .profile-agent-card { align-items: flex-start; flex-direction: column; }
+  .profile-section dl > div { grid-template-columns: 1fr; gap: 4px; }
+  .agent-footprint li { grid-template-columns: minmax(0, 1fr) auto; }
+  .agent-footprint li > i { grid-column: 1 / -1; }
+}
