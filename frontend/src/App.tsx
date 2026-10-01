@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { LaminaMark } from './LaminaMark.tsx'
-import { consultNetwork, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type Patient, type PatientActivity } from './api.ts'
+import { consultNetwork, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, resetJordanDemo, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type Patient, type PatientActivity } from './api.ts'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient, specialtiesConsulted } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
@@ -74,6 +74,14 @@ function formatTime(value: string) {
   return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
+/** Quiet list-row date, e.g. "Sep 25". */
+function shortDate(value: string) {
+  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
 /** Compact activity timestamp, e.g. "Sep 25 · 10:58 PM". */
 function eventTimestamp(value: string) {
   return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(', ', ' · ')
@@ -119,7 +127,7 @@ function PatientSelector({ navigate }: { navigate: Navigate }) {
   const consulted = visible.filter((item) => activityFor(item.id)?.has_consultation).sort((a, b) => (activityFor(b.id)?.latest_consulted_at || '').localeCompare(activityFor(a.id)?.latest_consulted_at || ''))
   const ready = visible.filter((item) => item.implemented && !activityFor(item.id)?.has_consultation).sort((a, b) => (activityFor(b.id)?.last_opened || '').localeCompare(activityFor(a.id)?.last_opened || ''))
   const other = visible.filter((item) => !item.implemented && !activityFor(item.id)?.has_consultation)
-  const group = (title: string, patients: DemoPatientSummary[]) => patients.length > 0 && <section className="patient-group" key={title}><div className="patient-group-heading"><h2>{title}</h2><span>{patients.length}</span></div><div className="lam-list">{patients.map((patient) => { const record = activityFor(patient.id); return <button key={patient.id} className="lam-row" onClick={() => navigate(`/patients/${patient.id}`)}><span className="lam-row-mark patient-row-avatar">{patient.initials}</span><span className="lam-row-main"><strong>{patient.name}</strong><span>{patient.reason}</span><small>{patient.age} years · {patient.location}{record?.latest_consulted_at ? ` · Last consulted ${formatTime(record.latest_consulted_at)} · ${record.consultation_count} consult${record.consultation_count === 1 ? '' : 's'}` : record?.last_opened ? ` · Opened ${formatTime(record.last_opened)}` : ''}</small></span><span className={`lam-row-status ${patient.implemented ? 'ready' : ''}`}>{record?.has_consultation ? 'Consulted' : patient.status}</span><span className="lam-row-action">{patient.implemented ? 'Open patient' : 'View demo'} <b>→</b></span></button> })}</div></section>
+  const group = (title: string, patients: DemoPatientSummary[]) => patients.length > 0 && <section className="patient-group" key={title}><div className="patient-group-heading"><h2>{title}</h2><span>{patients.length}</span></div><div className="lam-list">{patients.map((patient) => { const record = activityFor(patient.id); return <button key={patient.id} className="lam-row" onClick={() => navigate(`/patients/${patient.id}`)}><span className="lam-row-mark patient-row-avatar">{patient.initials}</span><span className="lam-row-main"><strong>{patient.name}</strong><span>{patient.reason}</span><small>{patient.age} years · {patient.location}{record?.has_consultation && record.latest_consulted_at ? ` · Latest: ${record.latest_recommended_specialty || 'consultation'} · ${shortDate(record.latest_consulted_at)}` : record?.last_opened ? ` · Opened ${formatTime(record.last_opened)}` : ''}</small></span><span className={`lam-row-status ${patient.implemented ? 'ready' : ''}`}>{record?.has_consultation ? 'Consulted' : patient.status}</span><span className="lam-row-action">{patient.implemented ? 'Open patient' : 'View demo'} <b>→</b></span></button> })}</div></section>
   return <ProductShell navigate={navigate} section="patients"><main className="page-shell selector-page">
     <header className="selector-header"><div><p className="eyebrow">Specialty Care Consult</p><h1>Select a patient</h1><p>Choose the patient whose next step in specialty care needs clarification.</p></div><span>{DEMO_PATIENTS.length} synthetic patients</span></header>
     <label className="patient-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients or clinical problem…" aria-label="Search patients" /></label>
@@ -231,6 +239,38 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   </main></ProductShell>
 }
 
+/** Demo-only control. Clears Jordan's Lamina workflow history, never clinical data. */
+function DemoResetControl() {
+  const [stage, setStage] = useState<'idle' | 'confirming' | 'working' | 'done'>('idle')
+  const [removed, setRemoved] = useState(0)
+  const [error, setError] = useState('')
+  const reset = async () => {
+    setStage('working'); setError('')
+    try {
+      const result = await resetJordanDemo()
+      setRemoved(result.removed_consultations)
+      setStage('done')
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : 'Could not reset the demo case')
+      setStage('confirming')
+    }
+  }
+  return <div className="demo-reset-block">
+    <div className="demo-reset">
+      <div><strong>Jordan Lee demo case</strong><p>Reset Jordan to pre-consult state.</p></div>
+      {stage !== 'confirming' && <button className="button-secondary" onClick={() => { setStage('confirming'); setError('') }}>Reset Jordan case</button>}
+    </div>
+    {stage === 'confirming' && <div className="demo-reset-confirm" role="group" aria-label="Confirm demo reset">
+      <strong>Reset Jordan demo case?</strong>
+      <p>This removes Jordan's Lamina consultation history and returns the case to its pre-consult demo state. Synthetic patient data is unchanged.</p>
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      <div><button className="text-button" onClick={() => setStage('idle')}>Cancel</button><button className="button-primary" onClick={reset}>Reset case</button></div>
+    </div>}
+    {stage === 'working' && <p className="muted-note">Resetting…</p>}
+    {stage === 'done' && <p className="demo-reset-result" role="status"><b>✓</b>Jordan demo case reset.{removed > 0 ? ` ${removed} consultation${removed === 1 ? '' : 's'} removed.` : ''}</p>}
+  </div>
+}
+
 function ProfilePage({ navigate }: { navigate: Navigate }) {
   const [agent, setAgent] = useState<MyAgent | null>(null)
   const [error, setError] = useState('')
@@ -272,6 +312,11 @@ function ProfilePage({ navigate }: { navigate: Navigate }) {
         <h2>{section.title}</h2>
         <dl>{section.rows.filter((row) => row.value).map((row) => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>
       </section>)}
+      <section className="profile-section">
+        <h2>Demo environment</h2>
+        <dl><div><dt>Environment</dt><dd>Synthetic data · no PHI</dd></div></dl>
+        <DemoResetControl />
+      </section>
       <p className="muted-note">Read-only for this demonstration. Account settings, credentialing, and production practice verification are not implemented.</p>
     </>}
   </main></ProductShell>
@@ -286,7 +331,7 @@ const evidenceFor = (evaluation: Evaluation, kind: string) => evaluation.evidenc
 const insuranceLabel = (status: string) => status.startsWith('In network') ? 'In-network' : 'Network unknown'
 const messageSender = (message: ConsultationMessage) => message.sender_agent_id === PCP_AGENT_ID ? `${PCP_NAME} Agent` : message.sender_name
 
-function ConsultationNetwork({ result, visibleCount, consulting, networkAgents }: { result: Consultation | null; visibleCount: number; consulting: boolean; networkAgents: NetworkAgent[] }) {
+function ConsultationNetwork({ result, visibleCount, consulting, networkAgents, completion = 'idle' }: { result: Consultation | null; visibleCount: number; consulting: boolean; networkAgents: NetworkAgent[]; completion?: 'idle' | 'showing' | 'leaving' }) {
   const messages = result?.messages || []
   const visible = messages.slice(0, visibleCount)
   const current = visible.at(-1)
@@ -302,6 +347,12 @@ function ConsultationNetwork({ result, visibleCount, consulting, networkAgents }
     <div className="consult-network-stage"><svg viewBox="0 0 1000 450" preserveAspectRatio="none" aria-hidden="true">{agents.map((agent, index) => { const [x, y] = nodePositions[index]; const participating = visible.some((item) => item.sender_name.includes(cleanName(agent.physician_name))); return <line key={agent.physician_id} x1="500" y1="220" x2={x} y2={y} className={`${participating ? 'participating' : ''} ${activeAgent?.physician_id === agent.physician_id && !resolved ? 'current' : ''} ${resolved && result?.recommended_physician.physician_id === agent.physician_id ? 'chosen' : ''}`} /> })}</svg>
       <div className="consult-network-center"><NetworkMark active={consulting} resolved={resolved} /><span>YOUR AGENT · ACTIVE</span><strong>{PCP_AGENT_NAME}</strong><small>Patient context → physician network</small></div>
       {agents.map((agent, index) => { const name = cleanName(agent.physician_name); const events = visible.filter((item) => item.sender_name.includes(name)); const latest = events.at(-1); const profile = networkAgents.find((node) => node.physician_id === agent.physician_id); const status = profile?.status === 'active' ? 'Active demo profile' : profile?.status === 'verified' ? 'Verified demo profile' : profile?.status === 'verification_pending' ? 'Claimed demo profile' : profile?.status === 'reserved' ? 'Reserved demo profile' : 'Synthetic representative'; const conclusion = !latest ? 'Reviewing case…' : latest.message_type === 'redirect' ? 'Redirects · not first fit' : latest.message_type === 'follow_up_question' ? 'Clarification requested' : latest.message_type === 'follow_up_answer' ? 'Referral sequence clarified' : latest.message_type === 'referral_requirement' ? 'Accepts · workup specified' : agent.clinical_fit === 'strong' ? 'Strong fit' : 'Appropriate alternative'; return <div className={`consult-peer consult-peer-${index + 1} ${latest ? 'responded' : ''} ${resolved && agent.physician_id === result?.recommended_physician.physician_id ? 'chosen' : ''} ${activeAgent?.physician_id === agent.physician_id && !resolved ? 'current' : ''}`} key={agent.physician_id}><NetworkMark /><div><strong>{name}'s Agent</strong><small>{agent.specialty} · {status}</small></div><em>{conclusion}</em>{latest && <p>{latest.summary}</p>}</div> })}
+      {completion !== 'idle' && result && <div className={`consult-complete ${completion === 'leaving' ? 'leaving' : ''}`} role="status">
+        <span aria-hidden="true">✓</span>
+        <strong>Consultation complete</strong>
+        <span>{result.consultation.length} physician agent{result.consultation.length === 1 ? '' : 's'} consulted</span>
+        <em>Recommendation ready ↓</em>
+      </div>}
     </div>
     {current && !resolved && <div className={`consult-current-event ${current.message_type}`}><span>{current.sequence.toString().padStart(2, '0')}</span><div><strong>{messageSender(current)} <b>→</b> {current.recipient_agent_id === 'network' ? 'Physician network' : current.recipient_agent_id === PCP_AGENT_ID ? PCP_AGENT_NAME : agents.find((item) => networkAgents.find((node) => node.physician_id === item.physician_id)?.id === current.recipient_agent_id)?.physician_name.replace(' (synthetic)', '') || 'specialist agent'}</strong><p>{current.summary}</p></div><em>{messageLabel(current)}</em></div>}
     {clarification.length > 0 && <div className="consult-clarification"><span>Agent-to-agent clarification</span><div>{clarification.map((item) => <p key={item.id}><b>{messageSender(item)}</b><span>{item.summary}</span></p>)}</div></div>}
@@ -345,7 +396,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   const patientFact = (term: string) => consultation.patient_facts_used.find((fact) => fact.toLowerCase().includes(term))
   const reasons = (anemiaCase ? [patientFact('hemoglobin declined'), patientFact('no documented prior'), explicitRule] : [patientFact('creatinine'), patientFact('egfr'), explicitRule]).filter(Boolean) as string[]
   const shortName = cleanName(primary.physician_name).split(' ').at(-1)
-  return <section className="recommendations" aria-label="Specialist recommendations">
+  return <section className="recommendations" aria-label="Specialist recommendations" tabIndex={-1}>
     <article className="best-fit-card"><div className="best-fit-label"><span>{anemiaCase ? 'Recommended first referral' : 'Recommended physician'}</span><small>Network resolved · {consultation.consultation.length} agents consulted</small></div><div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(primary.physician_name)}</span><div><h2>{cleanName(primary.physician_name)}</h2><p>{primary.specialty}</p></div><div className="fit-summary"><span>Strong clinical fit</span><span>{primary.availability.replace('Approximately ', '')}</span><span>{insuranceLabel(primary.insurance_status)}</span></div></div>
       <div className="best-fit-body"><section><p className="section-label">Why Dr. {shortName}</p><ul className="reason-list">{reasons.map((reason) => <li key={reason}><span>✓</span>{reason}</li>)}</ul></section><section className="before-visit"><p className="section-label">Required before referral</p>{consultation.before_referral.map((item) => <span key={item}>{item.includes('(') ? item.match(/\(([^)]+)\)/)?.[1] : item}<small>{item}</small></span>)}</section></div>
       <div className="recommendation-access"><div><span>Access</span><strong>{primary.availability}</strong></div><div><span>Insurance</span><strong>{primary.insurance_status}</strong></div></div>
@@ -373,12 +424,51 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const [visibleMessageCount, setVisibleMessageCount] = useState(0)
   const [context, setContext] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [activity, setActivity] = useState<PatientActivity | null>(null)
+  const [reconsulting, setReconsulting] = useState(false)
+  const [completion, setCompletion] = useState<'idle' | 'showing' | 'leaving'>('idle')
   const demoPatient = DEMO_PATIENTS.find((item) => item.id === patientId)
   const anemiaCase = patientId === MARIA_ID
+  const loadActivity = () => getPatientActivity()
+    .then((records) => setActivity(records.find((item) => item.patient_id === patientId) ?? null))
+    .catch(() => setActivity(null))
   useEffect(() => { setLoading(true); getPatient(patientId).then(setPatient).catch((loadError: Error) => setError(loadError.message)).finally(() => setLoading(false)) }, [patientId])
+  useEffect(() => { setReconsulting(false); setActivity(null); void loadActivity() }, [patientId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { getAgentNetwork().then((network) => setNetworkAgents(network.nodes)).catch(() => setNetworkAgents([])) }, [])
   useEffect(() => { if (consulting) document.querySelector('.consult-experience')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, [consulting])
-  const runConsult = async () => { setConsulting(true); setConsultation(null); setVisibleMessageCount(0); setError(null); try { const result = await consultNetwork(patientId, context); setConsultation(result); for (let index = 1; index <= result.messages.length; index += 1) { await new Promise((resolve) => setTimeout(resolve, 250)); setVisibleMessageCount(index) } } catch (consultError) { setError(consultError instanceof Error ? consultError.message : 'Consultation failed') } finally { setConsulting(false) } }
+  /**
+   * Runs a consultation and closes it with a short completion state before guiding
+   * the clinician to the recommendation. Only a live run reaches this path: saved
+   * consultations render through ConsultationRecordPage, which has no playback.
+   */
+  const runConsult = async () => {
+    setConsulting(true); setConsultation(null); setVisibleMessageCount(0); setError(null); setCompletion('idle')
+    let played = false
+    try {
+      const result = await consultNetwork(patientId, context)
+      setConsultation(result)
+      for (let index = 1; index <= result.messages.length; index += 1) {
+        await delay(250); setVisibleMessageCount(index)
+      }
+      played = true
+    } catch (consultError) {
+      setError(consultError instanceof Error ? consultError.message : 'Consultation failed')
+    } finally {
+      setConsulting(false)
+    }
+    if (!played) return
+    void loadActivity()
+    const calm = prefersReducedMotion()
+    await delay(calm ? 0 : 350)
+    setCompletion('showing')
+    await delay(calm ? 600 : 1000)
+    const target = document.querySelector<HTMLElement>('.recommendations')
+    target?.scrollIntoView({ behavior: calm ? 'auto' : 'smooth', block: 'start' })
+    target?.focus({ preventScroll: true })
+    if (calm) { setCompletion('idle'); return }
+    await delay(400); setCompletion('leaving')
+    await delay(300); setCompletion('idle')
+  }
   if (loading) return <ProductShell navigate={navigate} section="patients"><div className="page-state embedded"><div className="loading-line" /><p>Opening patient workspace…</p></div></ProductShell>
   if (!patient) return <ProductShell navigate={navigate} section="patients"><div className="page-state embedded error"><p>{error || 'Patient unavailable'}</p></div></ProductShell>
   const trends = clinicalTrends(patient.labs)
@@ -386,6 +476,8 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const resultDates = new Set(trends.latest.map((item) => item.date))
   const sharedResultDate = resultDates.size === 1 ? trends.latest[0].date : null
   const clinicalSource = patient.clinical_data_source === 'medplum_fhir' ? 'Synthetic FHIR via Medplum' : 'Local synthetic fixture'
+  const priorConsultation = activity?.has_consultation === true && activity.latest_consultation_id !== null
+  const showPriorConsult = priorConsultation && !consulting && !consultation
   const careContext = [
     { label: 'Referring clinician', value: `${PCP_NAME} · Primary Care` },
     { label: 'Insurance', value: patient.insurance },
@@ -394,9 +486,23 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   return <ProductShell navigate={navigate} section="patients"><main className="page-shell patient-page"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
     <header className="patient-identity"><h1>{demoPatient?.name ?? cleanName(patient.display_name)}</h1><p>{patient.age} years · {patient.location}</p></header>
     {error && <div className="error-banner" role="alert"><strong>Unable to complete this action.</strong> {error}</div>}
-    <section className="network-action brief-action"><div className="network-copy"><NetworkMark active={consulting} resolved={Boolean(consultation)} /><div><p className="eyebrow">{PCP_AGENT_NAME}</p><h2>Ready to consult the network.</h2></div></div><div className="network-controls"><label><span>Anything your agent should consider? <em>Optional</em></span><input value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder={anemiaCase ? 'e.g. Patient strongly prefers telehealth' : 'e.g. Considering nephrology vs cardiology'} /></label><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult the network'}</span><span>→</span></button></div></section>
+    {showPriorConsult
+      ? <>
+        <section className="prior-consult">
+          <div className="prior-consult-copy"><NetworkMark resolved /><div>
+            <p className="eyebrow">{PCP_AGENT_NAME}</p>
+            <h2>Previous consultation available.</h2>
+            <span className="prior-consult-outcome"><b>{cleanName(activity?.latest_recommended_physician || '')}</b>{activity?.latest_recommended_specialty ? ` · ${activity.latest_recommended_specialty}` : ''}<small>{activity?.latest_consulted_at ? formatTime(activity.latest_consulted_at) : ''}</small></span>
+          </div></div>
+          <div className="prior-consult-actions"><button className="button-primary" onClick={() => navigate(consultationPath(activity?.latest_consultation_id as number))}>View consultation <span>→</span></button></div>
+        </section>
+        {reconsulting
+          ? <section className="reconsult-panel"><div className="network-controls"><label><span>What changed? <em>Optional</em></span><input value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="New symptoms, updated labs, new preference…" /></label><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult the network'}</span><span>→</span></button></div></section>
+          : <p className="reconsult-prompt"><span>New information or want another network review?</span><button className="text-button" onClick={() => setReconsulting(true)}>Re-consult the network →</button></p>}
+      </>
+      : <section className="network-action brief-action"><div className="network-copy"><NetworkMark active={consulting} resolved={Boolean(consultation)} /><div><p className="eyebrow">{PCP_AGENT_NAME}</p><h2>{priorConsultation ? 'Ready to re-consult the network.' : 'Ready to consult the network.'}</h2></div></div><div className="network-controls"><label><span>{priorConsultation ? <>What changed? <em>Optional</em></> : <>Anything your agent should consider? <em>Optional</em></>}</span><input value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder={anemiaCase ? 'e.g. Patient strongly prefers telehealth' : 'e.g. Considering nephrology vs cardiology'} /></label><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult the network'}</span><span>→</span></button></div></section>}
     <p className="agent-task"><b>Agent task</b><span>Evaluate appropriate specialty, required workup, and viable access options using the available clinical context.</span></p>
-    {(consulting || consultation) && <ConsultationNetwork result={consultation} visibleCount={visibleMessageCount} consulting={consulting} networkAgents={networkAgents} />}{consultation && !consulting && <RecommendationView consultation={consultation} navigate={navigate} />}
+    {(consulting || consultation) && <ConsultationNetwork result={consultation} visibleCount={visibleMessageCount} consulting={consulting} networkAgents={networkAgents} completion={completion} />}{consultation && !consulting && <RecommendationView consultation={consultation} navigate={navigate} />}
     <section className="clinical-overview" aria-labelledby="clinical-overview-heading">
       <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
       <div className="clinical-columns">

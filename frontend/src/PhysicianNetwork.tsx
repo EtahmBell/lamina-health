@@ -75,8 +75,8 @@ function NetworkRelationshipRow({ member, navigate }: { member: NetworkRelations
 
 const graphRoster = ['physician-jung', 'physician-onadeko', 'physician-alvarez', 'physician-patel', 'physician-brooks', 'physician-rossi']
 const graphSlots = [
-  { x: 20, y: 23 }, { x: 80, y: 23 }, { x: 50, y: 12 },
-  { x: 20, y: 77 }, { x: 80, y: 77 }, { x: 50, y: 88 },
+  { x: 20, y: 25 }, { x: 80, y: 25 }, { x: 50, y: 16 },
+  { x: 20, y: 75 }, { x: 80, y: 75 }, { x: 50, y: 84 },
 ]
 const shortName = (name: string) => name.replace(/^Dr\.\s*/, '')
 const interactionDate = (value: string) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -141,7 +141,6 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
     ...(network?.nodes.filter((node) => node.in_network).map((node) => node.npi) || []),
     ...(network?.members.map((member) => member.npi) || []),
   ])
-  const offGraphMembers = network?.members.length ?? 0
   const results = response?.results || []
   const visibleResults = showAllResults ? results : results.slice(0, 4)
   const hiddenResults = results.length - visibleResults.length
@@ -162,7 +161,7 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
     </section>
 
     <section className="network-build-section">
-      <div className="network-build-banner"><NetworkGlyph active /><div><p className="eyebrow">Build your network</p><h2>Add physicians and practices you already work with.</h2><p>Lamina preserves those relationships alongside the broader physician directory. Added physicians become part of your Lamina network.</p></div></div>
+      <div className="network-build-banner"><NetworkGlyph active /><div><p className="eyebrow">Add your network</p><h2>Add physicians and practices you already work with.</h2><p>Lamina can preserve those relationships alongside the broader network. Added physicians become part of your Lamina network.</p></div></div>
       <form className="directory-search-panel quiet" onSubmit={runSearch}>
         <label className="directory-search-main"><span>Physician name</span><input value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} placeholder="e.g. Jane Smith" /></label>
         <label><span>Specialty</span><input value={filters.specialty} onChange={(event) => setFilters({ ...filters, specialty: event.target.value })} placeholder="e.g. Nephrology" /></label>
@@ -184,7 +183,7 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
 
     <section className="network-visual-section"><div className="network-section-heading"><div><h2>Network visualization</h2></div><p>Select a physician agent to inspect its practice footprint, activation state, and relationship to yours. Edges appear only for completed Lamina consultations.</p></div>
       {network && <><NetworkGraph network={network} selectedId={selectedId} onSelect={setSelectedId} />{selected && <AgentDetail agent={selected} navigate={navigate} close={() => setSelectedId(null)} />}</>}
-      {offGraphMembers > 0 && <p className="network-roster-note">{offGraphMembers} added physician{offGraphMembers === 1 ? '' : 's'} without a Lamina consult agent {offGraphMembers === 1 ? 'is' : 'are'} listed in Your network and {offGraphMembers === 1 ? 'does' : 'do'} not appear here.</p>}
+      <p className="network-roster-note">The visualization shows physician agents involved in Lamina consultations. Added relationships without a consultation appear in Your network above.</p>
     </section>
   </main>
 }

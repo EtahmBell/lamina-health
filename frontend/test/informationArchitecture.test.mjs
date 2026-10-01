@@ -89,7 +89,8 @@ test('the Your Agent summary carries existing factual state only', () => {
 
 test('Patients uses canonical consultation state rather than inferring from legacy activity', () => {
   assert.match(patients(), /record\?\.has_consultation/)
-  assert.match(patients(), /record\?\.latest_consulted_at/)
+  assert.match(patients(), /record\.latest_consulted_at/)
+  assert.match(patients(), /record\.latest_recommended_specialty/)
   assert.doesNotMatch(patients(), /record\?\.last_consultation/)
 })
 

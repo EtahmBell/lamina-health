@@ -14,7 +14,7 @@ const footprint = () => slice(app, 'function ConsultationFootprint', 'const AGEN
 /* ---------------------------------------------------------- network hero */
 
 test('the network page leads with relationships, then building, then the graph', () => {
-  const order = ['Your network', 'Build your network', 'Network visualization']
+  const order = ['Your network', 'Add your network', 'Network visualization']
   const positions = order.map((token) => directory().indexOf(token))
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b))
@@ -85,9 +85,9 @@ test('the graph still draws edges only from recorded consultations', () => {
 })
 
 test('added physicians outside the consult roster are disclosed, not faked into the graph', () => {
-  assert.match(directory(), /offGraphMembers > 0 &&/)
-  assert.match(directory(), /not appear here/)
-  assert.match(directory(), /without a Lamina consult agent/)
+  assert.match(directory(), /The visualization shows physician agents involved in Lamina consultations\./)
+  assert.match(directory(), /Added relationships without a consultation appear in Your network above\./)
+  assert.doesNotMatch(directory(), /offGraphMembers/, 'one quiet line replaces the conditional note')
 })
 
 /* -------------------------------------------------------------- my agent */

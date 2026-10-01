@@ -185,7 +185,7 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 .network-section-heading > p { max-width: 380px; margin: 0; color: var(--text-secondary); font-size: .69rem; line-height: 1.5; text-align: right; }
 .agent-network-stage { overflow: hidden; border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 15px; background: radial-gradient(circle at center, #fffdf9 0, #fbf7ef 50%, #f7f1e8 100%); box-shadow: var(--shadow-soft); }
 .agent-network-caption { display: flex; align-items: center; gap: 20px; border-bottom: 1px solid rgb(216 210 199 / 65%); padding: 12px 19px; color: var(--text-secondary); font-size: .59rem; }
-.agent-network-caption span { display: flex; align-items: center; gap: 7px; }.agent-network-caption i { width: 20px; height: 2px; background: var(--accent); }.agent-network-caption .legend-consulted i { background: var(--clinical); }.agent-network-caption .legend-redirected i { background: transparent; border-top: 1px dashed var(--clinical); }.agent-network-caption .legend-roster i { background: transparent; border-top: 1px dashed #aaa49a; }
+.agent-network-caption span { display: flex; align-items: center; gap: 7px; }.agent-network-caption i { width: 20px; height: 2px; background: var(--accent); }.agent-network-caption .legend-consulted i { background: var(--clinical); }.agent-network-caption .legend-redirected i { background: transparent; border-top: 1px dashed var(--clinical); }
 .agent-network-canvas { position: relative; height: 560px; }
 .agent-network-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }.relationship-edge { stroke: var(--clinical); stroke-width: 1.2; vector-effect: non-scaling-stroke; opacity: .55; }.relationship-edge.recommended { stroke: var(--accent); stroke-width: 2.2; opacity: .82; }.relationship-edge.redirected { stroke-dasharray: 5 5; opacity: .4; }
 .agent-network-center, .agent-network-node { position: absolute; transform: translate(-50%, -50%); }
@@ -699,3 +699,81 @@ button.lam-row:hover { background: #fff9f1; }
   .agent-footprint li { grid-template-columns: minmax(0, 1fr) auto; }
   .agent-footprint li > i { grid-column: 1 / -1; }
 }
+
+/* Frontend UX pass: distinguishable consult edges, a roomier graph, two patient
+   consult states, a demo reset, and a deliberate consultation-complete moment. */
+
+/* Recommended, consulted and redirected must be legible at a glance. */
+.relationship-edge { stroke: var(--clinical); stroke-width: 1.9; opacity: .72; stroke-dasharray: none; }
+.relationship-edge.recommended { stroke: var(--accent); stroke-width: 2.6; opacity: .95; }
+.relationship-edge.consulted { stroke: var(--clinical); stroke-width: 1.9; opacity: .72; }
+.relationship-edge.redirected { stroke: #7d8da0; stroke-width: 1.6; stroke-dasharray: 7 6; opacity: .6; }
+.agent-network-caption .legend-recommended i { height: 3px; background: var(--accent); }
+.agent-network-caption .legend-consulted i { height: 2px; background: var(--clinical); }
+.agent-network-caption .legend-redirected i { height: 0; background: transparent; border-top: 2px dashed #7d8da0; }
+
+/* Breathing room above and below the outer agents; the centre stays centred. */
+.agent-network-canvas { height: 620px; }
+
+.network-roster-note { max-width: 78ch; }
+
+/* Previously consulted patients get a resolved navy state, not a rust CTA. */
+.prior-consult { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 20px 0 0; border: 1px solid var(--border); border-left: 4px solid var(--clinical); border-radius: 14px; background: var(--surface); padding: 20px 22px; box-shadow: var(--shadow-soft); }
+.prior-consult-copy { display: flex; align-items: center; gap: 17px; min-width: 0; }
+.prior-consult-copy > .network-motif { width: 50px; height: 50px; flex: 0 0 50px; }
+.prior-consult-copy > .network-motif svg { inset: 5px; width: 40px; height: 40px; }
+.prior-consult .eyebrow { margin: 0 0 4px; }
+.prior-consult h2 { margin: 0; font-size: 1.2rem; font-weight: 600; }
+.prior-consult-outcome { display: block; margin-top: 8px; color: var(--clinical); font-size: var(--type-body); }
+.prior-consult-outcome b { font-weight: 600; }
+.prior-consult-outcome small { display: block; margin-top: 3px; color: var(--text-secondary); font-size: var(--type-meta); }
+.prior-consult-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 16px; }
+.prior-consult-actions .button-primary { background: var(--clinical); border-color: var(--clinical); white-space: nowrap; }
+.prior-consult-actions .button-primary:hover { background: #1b2735; }
+.reconsult-prompt { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin: 13px 0 0; padding: 0 2px; color: var(--text-secondary); font-size: var(--type-meta); }
+.reconsult-prompt .text-button { font-size: var(--type-meta); }
+.reconsult-panel { margin: 13px 0 18px; border-left: 3px solid var(--accent); padding: 4px 0 4px 17px; }
+.reconsult-panel .network-controls { width: min(100%, 560px); }
+
+/* Profile demo environment: deliberate, reversible, never alarming. */
+.demo-reset { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.demo-reset > div { min-width: 0; }
+.demo-reset strong { display: block; color: var(--clinical); font-size: var(--type-body); }
+.demo-reset p { margin: 5px 0 0; color: var(--text-secondary); font-size: var(--type-meta); line-height: 1.5; }
+.demo-reset .button-secondary { flex: 0 0 auto; white-space: nowrap; }
+.demo-reset-confirm { margin-top: 15px; border: 1px solid rgb(184 92 50 / 32%); border-radius: 11px; background: #fdf6ee; padding: 17px 19px; }
+.demo-reset-confirm strong { display: block; color: var(--clinical); font-family: var(--font-display); font-size: .95rem; }
+.demo-reset-confirm p { margin: 8px 0 0; max-width: 62ch; color: var(--text-secondary); font-size: var(--type-meta); line-height: 1.55; }
+.demo-reset-confirm div { display: flex; align-items: center; gap: 12px; margin-top: 15px; }
+.demo-reset-result { display: flex; align-items: center; gap: 8px; margin-top: 14px; color: var(--success); font-size: var(--type-meta); }
+.demo-reset-result b { font-size: .8rem; }
+
+/* The consultation resolves into a short completion state over the graph. */
+.consult-complete { position: absolute; inset: 0; z-index: 3; display: grid; align-content: center; justify-items: center; gap: 5px; border-radius: 13px; background: rgb(247 243 236 / 88%); backdrop-filter: blur(2px); text-align: center; animation: consult-complete-in 260ms ease-out both; }
+.consult-complete > span:first-child { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 7px; border-radius: 50%; background: #e8f0ea; color: var(--success); font-size: 1.1rem; }
+.consult-complete strong { color: var(--clinical); font-family: var(--font-display); font-size: 1.35rem; }
+.consult-complete > span:nth-of-type(2) { color: var(--text-secondary); font-size: var(--type-body); }
+.consult-complete em { margin-top: 11px; color: var(--accent-hover); font-size: var(--type-meta); font-style: normal; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.consult-complete.leaving { animation: consult-complete-out 300ms ease-in both; }
+@keyframes consult-complete-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes consult-complete-out { from { opacity: 1; } to { opacity: 0; } }
+
+.recommendations { scroll-margin-top: 92px; }
+.recommendations:focus { outline: none; }
+
+@media (max-width: 950px) {
+  .agent-network-canvas { height: auto; }
+}
+@media (max-width: 760px) {
+  .prior-consult { align-items: stretch; flex-direction: column; gap: 16px; }
+  .prior-consult-actions { flex-wrap: wrap; }
+  .demo-reset { flex-direction: column; }
+  .demo-reset .button-secondary { width: 100%; }
+  .demo-reset-confirm div { flex-wrap: wrap; }
+  .consult-complete strong { font-size: 1.15rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .consult-complete, .consult-complete.leaving { animation: none; }
+}
+.demo-reset-block { margin-top: 15px; border-top: 1px solid rgb(222 216 206 / 60%); padding-top: 16px; }
+.demo-reset-error { color: var(--danger); }

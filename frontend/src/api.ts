@@ -106,6 +106,11 @@ export const getPatientActivity = () => request<PatientActivity[]>('/api/workspa
 export const getConsultationHistory = () => request<ConsultationRecord[]>('/api/workspace/consultations')
 export const getConsultationRecord = (id: number) => request<ConsultationRecord>(`/api/workspace/consultations/${id}`)
 export const getMyAgent = () => request<MyAgent>('/api/workspace/agent')
+export type DemoResetResult = {
+  patient_id: string; removed_consultations: number; remaining_consultations: number; reset_complete: boolean
+}
+/** Clears one demo case's Lamina workflow history. Synthetic clinical data is untouched. */
+export const resetJordanDemo = () => request<DemoResetResult>('/api/workspace/demo/reset/jordan', { method: 'POST' })
 export const getAgentNetwork = () => request<AgentNetwork>('/api/workspace/network')
 export const addNetworkMember = (npi: string) => request<NetworkMember>('/api/workspace/network/members', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ npi }),
