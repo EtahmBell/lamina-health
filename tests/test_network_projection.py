@@ -31,6 +31,7 @@ def test_network_starts_with_center_and_no_invented_relationships(tmp_path):
     assert network["center"]["name"] == "Dr. Lucy Saru's Agent"
     assert network["center"]["status"] == "active"
     assert network["record_count"] == 0
+    assert network["edges"] == []
     assert all(node["relationship"] is None for node in network["nodes"])
     jung = next(node for node in network["nodes"] if node["physician_id"] == "physician-jung")
     assert jung["status"] == "reserved"
@@ -77,6 +78,11 @@ def test_jordan_and_maria_consults_project_real_edges_and_records(tmp_path, monk
     assert onadeko["relationship"]["recommended_count"] == 0
     assert nodes["physician-patel"]["specialty"] == "Cardiology"
     assert nodes["physician-patel"]["name"] == "Dr. Celeste Bell"
+    edges = {edge["target_agent"]: edge for edge in network["edges"]}
+    assert edges[jung["id"]]["relationship_type"] == "recommended"
+    assert edges[nodes["physician-onadeko"]["id"]]["relationship_type"] == "consulted"
+    assert edges[rossi["id"]]["relationship_type"] == "redirected"
+    assert nodes["physician-cha"]["id"] not in edges, "roster-only nodes emit no edge"
 
 
 def test_activation_state_is_read_from_existing_overlay(tmp_path):

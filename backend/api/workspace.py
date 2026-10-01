@@ -9,7 +9,7 @@ from backend.demo_identity import PCP_AGENT_ID, PCP_NAME
 from backend.network_projection import project_agent_network
 from backend.provider_network import provider_network
 from backend.provider_network.service import ProviderNotFoundError
-from backend.synthetic_data import PATIENTS
+from backend.synthetic_data import PATIENTS, PRIMARY_PATIENT_ID
 from backend.workflow import workflow_store
 
 router = APIRouter(prefix="/api/workspace", tags=["clinician-workspace"])
@@ -93,6 +93,12 @@ def update_learning(key: str, update: PreferenceUpdate) -> dict:
 @router.get("/activity")
 def patient_activity() -> list[dict]:
     return workflow_store.activity(list(PATIENTS))
+
+
+@router.post("/demo/reset/jordan")
+def reset_jordan_demo() -> dict:
+    """Reset only the controlled Jordan synthetic case's Lamina-owned workflow state."""
+    return workflow_store.reset_demo_case(PRIMARY_PATIENT_ID)
 
 
 @router.get("/network")

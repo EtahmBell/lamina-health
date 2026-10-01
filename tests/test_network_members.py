@@ -84,6 +84,7 @@ def test_membership_marks_a_node_without_creating_an_edge(tmp_path):
     assert wu["relationship"] is None, "a recorded relationship must never fabricate an edge"
     assert wu["status"] == "reserved", "membership must not change activation state"
     assert all(node["relationship"] is None for node in network["nodes"])
+    assert network["edges"] == [], "membership must never create an interaction edge"
     assert network["members"] == [], "synthetic roster members stay on their graph node"
     others = [node for node in network["nodes"] if node["npi"] != WU_NPI]
     assert all(node["in_network"] is False for node in others)

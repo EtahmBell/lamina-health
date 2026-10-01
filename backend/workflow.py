@@ -86,15 +86,66 @@ class WorkflowStore:
     def activity(self, patient_ids: list[str]) -> list[dict]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM patient_activity").fetchall()
+            consultations = db.execute(
+                "SELECT id, patient_id, completed_at, result_json "
+                "FROM consultations ORDER BY id DESC"
+            ).fetchall()
         records = {row["patient_id"]: dict(row) for row in rows}
-        return [
-            records.get(
+        consultation_counts: dict[str, int] = {}
+        latest: dict[str, sqlite3.Row] = {}
+        for consultation in consultations:
+            patient_id = consultation["patient_id"]
+            consultation_counts[patient_id] = consultation_counts.get(patient_id, 0) + 1
+            latest.setdefault(patient_id, consultation)
+
+        def projected(patient_id: str) -> dict:
+            activity = records.get(
                 patient_id,
-                {"patient_id": patient_id, "last_opened": None, "last_started": None,
-                 "last_consultation": None, "consultation_count": 0},
+                {"patient_id": patient_id, "last_opened": None, "last_started": None},
             )
+            latest_record = latest.get(patient_id)
+            result = json.loads(latest_record["result_json"]) if latest_record else None
+            recommended = result["recommended_physician"] if result else None
+            latest_at = latest_record["completed_at"] if latest_record else None
+            return {
+                **activity,
+                "last_consultation": latest_at,
+                "consultation_count": consultation_counts.get(patient_id, 0),
+                "has_consultation": latest_record is not None,
+                "latest_consultation_id": latest_record["id"] if latest_record else None,
+                "latest_consulted_at": latest_at,
+                "latest_recommended_physician": (
+                    recommended["physician_name"] if recommended else None
+                ),
+                "latest_recommended_specialty": (
+                    recommended["specialty"] if recommended else None
+                ),
+            }
+
+        return [
+            projected(patient_id)
             for patient_id in patient_ids
         ]
+
+    def reset_demo_case(self, patient_id: str) -> dict:
+        """Remove one demo case's Lamina workflow history, never its clinical source."""
+        with self._connect() as db:
+            removed = db.execute(
+                "SELECT COUNT(*) FROM consultations WHERE patient_id=?", (patient_id,)
+            ).fetchone()[0]
+            db.execute("DELETE FROM consultations WHERE patient_id=?", (patient_id,))
+            db.execute(
+                """UPDATE patient_activity SET last_started=NULL,
+                   last_consultation=NULL, consultation_count=0 WHERE patient_id=?""",
+                (patient_id,),
+            )
+            remaining = db.execute("SELECT COUNT(*) FROM consultations").fetchone()[0]
+        return {
+            "patient_id": patient_id,
+            "removed_consultations": removed,
+            "remaining_consultations": remaining,
+            "reset_complete": True,
+        }
 
     def history(self, limit: int = 30) -> list[dict]:
         with self._connect() as db:

@@ -30,7 +30,12 @@ export type Consultation = {
   why: string; before_referral: string[]; availability: string; insurance: string
   alternatives: Evaluation[]; consultation: Evaluation[]; messages: ConsultationMessage[]; disclaimer: string
 }
-export type PatientActivity = { patient_id: string; last_opened: string | null; last_started: string | null; last_consultation: string | null; consultation_count: number }
+export type PatientActivity = {
+  patient_id: string; last_opened: string | null; last_started: string | null
+  last_consultation: string | null; consultation_count: number; has_consultation: boolean
+  latest_consultation_id: number | null; latest_consulted_at: string | null
+  latest_recommended_physician: string | null; latest_recommended_specialty: string | null
+}
 export type ConsultationRecord = { id: number; patient_id: string; completed_at: string; result: Consultation }
 export type AgentLearning = { key: string; statement: string; provenance: string; status: 'suggested' | 'confirmed' | 'rejected'; updated_at: string | null }
 export type MyAgent = {
@@ -80,7 +85,7 @@ export type NetworkMemberProfile = {
 export type NetworkMember = { npi: string; added_at: string }
 export type AgentNetwork = {
   center: { id: string; name: string; specialty: string; location: string; status: 'active'; source: string }
-  nodes: NetworkAgent[]; members: NetworkMemberProfile[]
+  nodes: NetworkAgent[]; edges: AgentRelationship[]; members: NetworkMemberProfile[]
   record_count: number; relationship_source: string; status_note: string
 }
 

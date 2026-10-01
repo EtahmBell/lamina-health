@@ -140,6 +140,11 @@ def project_agent_network(
     return {
         "center": CENTER_AGENT,
         "nodes": nodes,
+        "edges": [
+            relationships[footprint.id]
+            for footprint in ALL_PHYSICIANS
+            if footprint.id in relationships
+        ],
         "members": [
             _resolve_member(npi, added_at, providers)
             for npi, added_at in member_dates.items()

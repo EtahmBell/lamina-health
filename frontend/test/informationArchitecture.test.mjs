@@ -9,6 +9,7 @@ const slice = (from, to) => source.slice(source.indexOf(from), source.indexOf(to
 const portal = () => slice('function LandingPage', 'function formatTime')
 const shell = () => slice('function ProductShell', 'function LandingPage')
 const home = () => slice('function HomePage', 'function PatientSelector')
+const patients = () => slice('function PatientSelector', 'function ConsultationsPage')
 const consultationsIndex = () => slice('function ConsultationsPage', 'function PatientConsultationsPage')
 const myAgent = () => slice('function MyAgentPage', 'function ProfilePage')
 const consultationLog = () => slice('function ConsultationLog', 'function RecommendationView')
@@ -84,6 +85,12 @@ test('the Your Agent summary carries existing factual state only', () => {
   assert.match(card, /awaiting your confirmation/)
   assert.match(card, /navigate\('\/agent\?tab=overview'\)/)
   assert.doesNotMatch(card, /Math\.|%|average|score|trend/i, 'no invented metrics')
+})
+
+test('Patients uses canonical consultation state rather than inferring from legacy activity', () => {
+  assert.match(patients(), /record\?\.has_consultation/)
+  assert.match(patients(), /record\?\.latest_consulted_at/)
+  assert.doesNotMatch(patients(), /record\?\.last_consultation/)
 })
 
 test('Home activity carries timestamps and differentiates interactions from milestones', () => {

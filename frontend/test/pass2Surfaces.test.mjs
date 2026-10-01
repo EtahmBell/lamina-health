@@ -77,9 +77,10 @@ test('a directory row keeps the human avatar and the separate agent status badge
 
 test('the graph still draws edges only from recorded consultations', () => {
   const graph = slice(network, 'function NetworkGraph', 'function AgentDetail')
-  assert.match(graph, /agent\.relationship && <line/)
+  assert.match(graph, /new Map\(network\.edges\.map/)
+  assert.match(graph, /return edge && <line/)
   assert.match(graph, /agent\.relationship \? 'connected' : 'unconnected'/)
-  assert.match(graph, /Roster only · no edge/)
+  assert.doesNotMatch(graph, /Roster only · no edge/)
   assert.doesNotMatch(graph, /in_network/, 'membership must never create or style an edge')
 })
 
