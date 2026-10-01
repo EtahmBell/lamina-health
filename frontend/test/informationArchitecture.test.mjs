@@ -217,6 +217,8 @@ test('Not quite routes to the case-linked proposal without confirming anything',
     recommendation().indexOf('options-section'),
   )
   assert.doesNotMatch(feedback, /updateAgentLearning|act\(/)
+  assert.match(styles, /\.recommendation-feedback \{[^}]*font-size: \.95rem/s)
+  assert.match(styles, /\.recommendation-feedback \.text-button \{[^}]*font-weight: 600/s)
 })
 
 test('a proposed learning stays proposed until Confirm or Edit, and focus is visual only', () => {

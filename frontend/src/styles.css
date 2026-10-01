@@ -562,8 +562,9 @@ button.lam-row:hover { background: #fff9f1; }
 .trend-chart-axis span { position: absolute; top: 0; color: var(--text-secondary); font-size: .58rem; transform: translateX(-50%); white-space: nowrap; }
 
 /* One quiet correction prompt on the final recommendation. */
-.recommendation-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; margin-top: 18px; border-top: 1px solid var(--border); padding-top: 15px; color: var(--text-secondary); font-size: var(--type-meta); }
-.recommendation-feedback .text-button { font-size: var(--type-meta); }
+.recommendation-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 22px; border-top: 1px solid var(--border); padding-top: 19px; color: var(--text-secondary); font-size: .95rem; line-height: 1.5; }
+.recommendation-feedback .text-button { border-radius: 5px; padding: 4px 2px; color: var(--accent-hover); font-size: .95rem; font-weight: 600; }
+.recommendation-feedback .text-button:hover { color: var(--clinical); }
 .recommendation-feedback em { color: var(--success); font-style: normal; }
 
 /* Source clinical data: a readable record, not a wall of mini-cards. */
@@ -730,8 +731,9 @@ button.lam-row:hover { background: #fff9f1; }
 .prior-consult-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 16px; }
 .prior-consult-actions .button-primary { background: var(--clinical); border-color: var(--clinical); white-space: nowrap; }
 .prior-consult-actions .button-primary:hover { background: #1b2735; }
-.reconsult-prompt { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin: 13px 0 0; padding: 0 2px; color: var(--text-secondary); font-size: var(--type-meta); }
-.reconsult-prompt .text-button { font-size: var(--type-meta); }
+.reconsult-prompt { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 13px; margin: 17px 0 2px; padding: 2px; color: var(--text-secondary); font-size: .9rem; line-height: 1.5; }
+.reconsult-prompt .text-button { border-radius: 5px; padding: 4px 2px; color: var(--accent-hover); font-size: .9rem; font-weight: 600; }
+.reconsult-prompt .text-button:hover { color: var(--clinical); }
 .reconsult-panel { margin: 13px 0 18px; border-left: 3px solid var(--accent); padding: 4px 0 4px 17px; }
 .reconsult-panel .network-controls { width: min(100%, 560px); }
 

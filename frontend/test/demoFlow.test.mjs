@@ -104,6 +104,8 @@ test('re-consulting is available but secondary, and reveals optional context', (
   const promptIndex = prior.indexOf('reconsult-prompt')
   const actionIndex = prior.indexOf('prior-consult-actions')
   assert.ok(actionIndex < promptIndex, 'View consultation leads; re-consult follows')
+  assert.ok(someRule('.reconsult-prompt', /font-size: \.9rem/))
+  assert.ok(someRule('.reconsult-prompt .text-button', /font-weight: 600/))
 })
 
 test('the previous-consultation state reads as resolved, not as an alert', () => {
