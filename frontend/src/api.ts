@@ -61,6 +61,8 @@ export type AgentRelationship = {
   consultation_count: number; recommended_count: number; redirect_count: number
   most_recent_interaction: string; last_patient_id: string; last_patient_name: string
   last_record_id: number; associated_consultation_ids: number[]
+  most_recent_recommendation: string | null; last_recommendation_patient_id: string | null
+  last_recommendation_patient_name: string | null; last_recommendation_record_id: number | null
 }
 export type NetworkAgent = {
   id: string; physician_id: string; npi: string; name: string; specialty: string; subspecialty: string

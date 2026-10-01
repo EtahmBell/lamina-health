@@ -13,6 +13,10 @@ const relationship = (count, recommended, when) => ({
   consultation_count: count, recommended_count: recommended, redirect_count: 0,
   most_recent_interaction: when, last_patient_id: 'p', last_patient_name: 'Jordan Lee',
   last_record_id: 13, associated_consultation_ids: [13],
+  most_recent_recommendation: recommended ? when : null,
+  last_recommendation_patient_id: recommended ? 'p' : null,
+  last_recommendation_patient_name: recommended ? 'Jordan Lee' : null,
+  last_recommendation_record_id: recommended ? 13 : null,
 })
 
 const network = {
@@ -28,15 +32,16 @@ const network = {
   record_count: 13, relationship_source: 'records', status_note: '',
 }
 
-test('the roster holds consulted physicians, added physicians, and both', () => {
+test('the roster holds only recommendation destinations and explicitly added physicians', () => {
   const groups = networkRoster(network)
   const everyone = groups.flatMap((group) => group.members)
   assert.deepEqual(everyone.map((member) => member.name).sort(), [
-    'Dr. Claire Wu', 'Dr. Iain Jung', 'Dr. Matthew Onadeko', 'Dr. Sofia Alvarez',
-  ], 'an untouched roster physician is not in the clinician network')
+    'Dr. Claire Wu', 'Dr. Iain Jung', 'Dr. Sofia Alvarez',
+  ], 'queried-only and untouched roster physicians are not in the clinician network')
   assert.equal(everyone.find((member) => member.name === 'Dr. Iain Jung').source, 'consulted')
   assert.equal(everyone.find((member) => member.name === 'Dr. Claire Wu').source, 'added')
-  assert.equal(rosterSize(groups), 4)
+  assert.equal(rosterSize(groups), 3)
+  assert.equal(everyone.some((member) => member.name === 'Dr. Matthew Onadeko'), false)
 })
 
 test('a physician who was both consulted and added reports both', () => {
@@ -56,13 +61,20 @@ test('membership never implies agent activation', () => {
   const wu = networkRoster(network).flatMap((group) => group.members).find((member) => member.name === 'Dr. Claire Wu')
   assert.equal(wu.status, 'reserved', 'an added physician keeps their own agent state')
   assert.equal(wu.consultationCount, 0)
-  assert.equal(wu.lastInteraction, null, 'adding a relationship creates no consultation history')
+  assert.equal(wu.lastRecommendation, null, 'adding a relationship creates no consultation history')
 })
 
-test('physicians are grouped by their actual specialty, routing destinations first', () => {
+test('physicians are grouped by specialty without count-based ranking', () => {
   const groups = networkRoster(network)
-  assert.deepEqual(groups.map((group) => group.specialty), ['Nephrology', 'Gastroenterology', 'Cardiology'])
-  assert.deepEqual(groups[1].members.map((member) => member.name), ['Dr. Sofia Alvarez', 'Dr. Claire Wu'])
+  assert.deepEqual(groups.map((group) => group.specialty), ['Gastroenterology', 'Nephrology'])
+  assert.deepEqual(groups[0].members.map((member) => member.name), ['Dr. Claire Wu', 'Dr. Sofia Alvarez'])
+})
+
+test('a queried or redirected relationship remains in the graph payload but not the hero roster', () => {
+  const onadeko = network.nodes.find((member) => member.name === 'Dr. Matthew Onadeko')
+  assert.equal(onadeko.relationship.consultation_count, 8)
+  assert.equal(onadeko.relationship.recommended_count, 0)
+  assert.equal(networkRoster(network).flatMap((group) => group.members).some((member) => member.npi === onadeko.npi), false)
 })
 
 test('a physician outside the consult roster is listed but is not a graph node', () => {

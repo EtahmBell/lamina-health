@@ -59,13 +59,22 @@ def test_jordan_and_maria_consults_project_real_edges_and_records(tmp_path, monk
     assert jung["relationship"]["last_patient_name"] == "Jordan Lee"
     assert jung["relationship"]["associated_consultation_ids"] == [jordan_id]
     assert jung["relationship"]["last_record_id"] == jordan_id
+    assert jung["relationship"]["last_recommendation_record_id"] == jordan_id
+    assert jung["relationship"]["last_recommendation_patient_name"] == "Jordan Lee"
     assert jung["status"] == "reserved"  # Consult demo participation is not activation.
 
     alvarez = nodes["physician-alvarez"]
     assert alvarez["relationship"]["last_patient_name"] == "Maria Santos"
     assert alvarez["relationship"]["associated_consultation_ids"] == [maria_id]
     assert alvarez["relationship"]["recommended_count"] == 1
-    assert nodes["physician-rossi"]["relationship"]["relationship_type"] == "redirected"
+    assert alvarez["relationship"]["last_recommendation_record_id"] == maria_id
+    rossi = nodes["physician-rossi"]
+    assert rossi["relationship"]["relationship_type"] == "redirected"
+    assert rossi["relationship"]["recommended_count"] == 0
+    assert rossi["relationship"]["most_recent_recommendation"] is None
+    onadeko = nodes["physician-onadeko"]
+    assert onadeko["relationship"] is not None, "queried agents remain in the graph"
+    assert onadeko["relationship"]["recommended_count"] == 0
     assert nodes["physician-patel"]["specialty"] == "Cardiology"
     assert nodes["physician-patel"]["name"] == "Dr. Celeste Bell"
 

@@ -27,8 +27,8 @@ test('physicians are grouped by real specialty with their own relationship row',
   assert.match(directory(), /<NetworkRelationshipRow key=\{member\.npi\} member=\{member\} navigate=\{navigate\} \/>/)
   const row = slice(network, 'function NetworkRelationshipRow', 'const graphRoster')
   assert.match(row, /membershipLabel\(member\.source\)/)
-  assert.match(row, /Last interaction \$\{interactionDate\(member\.lastInteraction\)\}/)
-  assert.match(row, /consultation\$\{consultations === 1/)
+  assert.match(row, /Last recommended \$\{interactionDate\(member\.lastRecommendation\)\}/)
+  assert.doesNotMatch(row, /member\.consultationCount/, 'synthetic run volume is not primary row copy')
 })
 
 test('the redundant Recently consulted block is gone and marketing copy with it', () => {

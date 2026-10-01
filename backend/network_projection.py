@@ -70,6 +70,10 @@ def project_agent_network(
                     "recommended_count": 0,
                     "redirect_count": 0,
                     "most_recent_interaction": None,
+                    "most_recent_recommendation": None,
+                    "last_recommendation_patient_id": None,
+                    "last_recommendation_patient_name": None,
+                    "last_recommendation_record_id": None,
                     "last_patient_id": None,
                     "last_patient_name": None,
                     "last_record_id": None,
@@ -80,6 +84,14 @@ def project_agent_network(
             relation["recommended_count"] += int(physician_id == recommended_id)
             relation["redirect_count"] += int(not evaluation["accepts_case"])
             relation["associated_consultation_ids"].append(record["id"])
+            if (
+                physician_id == recommended_id
+                and relation["most_recent_recommendation"] is None
+            ):
+                relation["most_recent_recommendation"] = record["completed_at"]
+                relation["last_recommendation_patient_id"] = patient_id
+                relation["last_recommendation_patient_name"] = patient_name
+                relation["last_recommendation_record_id"] = record["id"]
             if relation["most_recent_interaction"] is None:
                 relation["most_recent_interaction"] = record["completed_at"]
                 relation["last_patient_id"] = patient_id

@@ -58,15 +58,13 @@ function DirectoryResult({ profile, navigate, inNetwork, busy, onAdd, onRemove }
 }
 
 function NetworkRelationshipRow({ member, navigate }: { member: NetworkRelationship; navigate: Navigate }) {
-  const consultations = member.consultationCount
   return <button className="lam-row" onClick={() => navigate(`/network/${member.npi}`)}>
     <span className="lam-row-mark directory-avatar">{member.initials}</span>
     <span className="lam-row-main">
       <strong>{member.name}</strong>
       <span>{membershipLabel(member.source)}</span>
       <small>{[
-        member.lastInteraction ? `Last interaction ${interactionDate(member.lastInteraction)}` : null,
-        consultations ? `${consultations} consultation${consultations === 1 ? '' : 's'}` : null,
+        member.lastRecommendation ? `Last recommended ${interactionDate(member.lastRecommendation)}` : null,
         member.resolved ? member.location : 'Directory record unavailable',
       ].filter(Boolean).join(' · ')}</small>
     </span>
@@ -151,7 +149,7 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
     <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Physician Network</h1><p>Your referral relationships and the physician agents your agent has interacted with around patient care.</p></div></header>
     <p className="network-boundary-notice">Directory identities are sourced from NPPES; a reserved identity does not imply that the physician participates in Lamina. Adding a physician records your relationship — it does not activate their agent.</p>
 
-    <section className="network-primary-section"><div className="network-section-heading"><div><h2>Your network</h2></div><p>Physicians you have recorded a relationship with, and those your agent has reached through a completed Lamina consultation.</p></div>
+    <section className="network-primary-section"><div className="network-section-heading"><div><h2>Your network</h2></div><p>Physicians you have recorded a relationship with, and recommendation destinations from completed Lamina consultations.</p></div>
       {networkError && <div className="error-banner" role="alert">Network relationships unavailable: {networkError}</div>}
       {!network && !networkError && <div className="directory-loading"><NetworkGlyph active /><p>Loading your physician relationships…</p></div>}
       {network && !groups.length && <div className="empty-state"><NetworkGlyph /><h2>No physicians yet</h2><p>Consult the network for a patient, or add a physician you already work with below.</p></div>}

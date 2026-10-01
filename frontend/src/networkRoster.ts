@@ -13,9 +13,9 @@ export type NetworkRelationship = {
   status: AgentStatus | null
   source: RelationshipSource
   consultationCount: number
-  /** Consultations this physician was the recommended destination for. Ordering only. */
+  /** Completed consultations in which this physician was the canonical destination. */
   recommendedCount: number
-  lastInteraction: string | null
+  lastRecommendation: string | null
   lastPatientName: string | null
   lastRecordId: number | null
   agentId: string | null
@@ -48,30 +48,25 @@ export const physicianInitials = (name: string) => name
 
 type Entry = NetworkRelationship & { added: string }
 
-const recency = (member: Entry) => member.lastInteraction || member.added
+const isExplicit = (member: Entry) => member.source === 'added' || member.source === 'both'
 const byRelationship = (a: Entry, b: Entry) =>
-  b.recommendedCount - a.recommendedCount
-  || recency(b).localeCompare(recency(a))
+  Number(isExplicit(b)) - Number(isExplicit(a))
+  || (b.lastRecommendation || '').localeCompare(a.lastRecommendation || '')
   || a.name.localeCompare(b.name)
 
-/** Specialties the agent has actually routed patients to lead the list. */
-const peakRecommended = (group: SpecialtyGroup) =>
-  Math.max(...group.members.map((member) => member.recommendedCount))
 const bySpecialty = (a: SpecialtyGroup, b: SpecialtyGroup) =>
-  peakRecommended(b) - peakRecommended(a)
-  || (b.members[0].lastInteraction || '').localeCompare(a.members[0].lastInteraction || '')
-  || a.specialty.localeCompare(b.specialty)
+  a.specialty.localeCompare(b.specialty)
 
 /**
- * The clinician's network: physicians reached through a completed Lamina
- * consultation, physicians they recorded a relationship with, or both.
+ * The clinician's network: canonical recommendation destinations from completed
+ * Lamina consultations, physicians they recorded a relationship with, or both.
  * Grouped by the specialty actually recorded for each physician.
  */
 export function networkRoster(network: AgentNetwork): SpecialtyGroup[] {
   const entries: Entry[] = []
   for (const node of network.nodes) {
-    const consulted = Boolean(node.relationship)
-    if (!consulted && !node.in_network) continue
+    const recommended = Boolean(node.relationship?.recommended_count)
+    if (!recommended && !node.in_network) continue
     entries.push({
       npi: node.npi,
       name: node.name,
@@ -79,12 +74,12 @@ export function networkRoster(network: AgentNetwork): SpecialtyGroup[] {
       specialty: node.specialty,
       location: node.location,
       status: node.status,
-      source: consulted && node.in_network ? 'both' : consulted ? 'consulted' : 'added',
+      source: recommended && node.in_network ? 'both' : recommended ? 'consulted' : 'added',
       consultationCount: node.relationship?.consultation_count ?? 0,
       recommendedCount: node.relationship?.recommended_count ?? 0,
-      lastInteraction: node.relationship?.most_recent_interaction ?? null,
-      lastPatientName: node.relationship?.last_patient_name ?? null,
-      lastRecordId: node.relationship?.last_record_id ?? null,
+      lastRecommendation: node.relationship?.most_recent_recommendation ?? null,
+      lastPatientName: node.relationship?.last_recommendation_patient_name ?? null,
+      lastRecordId: node.relationship?.last_recommendation_record_id ?? null,
       agentId: node.id,
       resolved: true,
       inGraph: true,
@@ -103,7 +98,7 @@ export function networkRoster(network: AgentNetwork): SpecialtyGroup[] {
       source: 'added',
       consultationCount: 0,
       recommendedCount: 0,
-      lastInteraction: null,
+      lastRecommendation: null,
       lastPatientName: null,
       lastRecordId: null,
       agentId: member.agent_id,
