@@ -12,6 +12,7 @@ class StrictModel(BaseModel):
 
 class AgentStatus(StrEnum):
     RESERVED = "reserved"
+    CLAIMED = "claimed"
     VERIFICATION_PENDING = "verification_pending"
     VERIFIED = "verified"
     ACTIVE = "active"
@@ -21,6 +22,14 @@ class AgentStatus(StrEnum):
 class ProviderSource(StrEnum):
     NPPES = "NPPES"
     SYNTHETIC = "SYNTHETIC"
+
+
+class ClaimStatus(StrEnum):
+    CLAIMED = "claimed"
+    VERIFICATION_PENDING = "verification_pending"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    REVOKED = "revoked"
 
 
 class AgentPreferences(StrictModel):
@@ -73,6 +82,35 @@ class PhysicianNetworkProfile(StrictModel):
     consult_eligible: bool = False
     consult_physician_id: str | None = None
     directory_disclaimer: str
+    synthetic: bool = False
+    lifecycle_status: AgentStatus = AgentStatus.RESERVED
+    claimable: bool = True
+    agent_active: bool = False
+    claimed_by_me: bool = False
+    my_claim_id: int | None = None
+    my_claim_status: ClaimStatus | None = None
+
+
+class ProviderClaim(StrictModel):
+    id: int
+    npi: str
+    status: ClaimStatus
+    claimed_at: str
+    verification_submitted_at: str | None = None
+    verified_at: str | None = None
+    updated_at: str
+    verification_method: str | None = None
+
+
+class ProviderClaimState(StrictModel):
+    npi: str
+    synthetic: bool
+    lifecycle_status: AgentStatus
+    claimable: bool
+    agent_active: bool
+    claimed_by_me: bool = False
+    my_claim_id: int | None = None
+    my_claim_status: ClaimStatus | None = None
 
 
 class ProviderSearchResponse(StrictModel):

@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.provider_network.api import provider_network
+from backend.provider_network import api as provider_api
 from backend.provider_network.directory import NppesDirectory
 from backend.provider_network.models import AgentPreferencesInput, AgentStatus
 from backend.provider_network.service import (
@@ -13,6 +13,7 @@ from backend.provider_network.service import (
     ProviderNetwork,
 )
 from backend.synthetic_data import SYNTHETIC_PHYSICIAN_NPIS
+from backend.workflow import WorkflowStore
 
 
 def build_directory(path: Path) -> NppesDirectory:
@@ -44,7 +45,8 @@ def build_directory(path: Path) -> NppesDirectory:
 
 
 def test_nppes_search_maps_directory_identity_and_reserved_agent(tmp_path: Path) -> None:
-    network = ProviderNetwork(build_directory(tmp_path / "providers.sqlite"))
+    store = WorkflowStore(tmp_path / "workflow.sqlite")
+    network = ProviderNetwork(build_directory(tmp_path / "providers.sqlite"), store)
     response = network.search(specialty="nephrology", location="Palo Alto")
 
     assert response.directory_available is True
@@ -59,21 +61,27 @@ def test_nppes_search_maps_directory_identity_and_reserved_agent(tmp_path: Path)
 
 
 def test_nppes_profile_cannot_use_demo_verification(tmp_path: Path) -> None:
-    network = ProviderNetwork(build_directory(tmp_path / "providers.sqlite"))
-    claimed = network.claim("1234567890")
-    assert claimed.agent.status == AgentStatus.VERIFICATION_PENDING
+    store = WorkflowStore(tmp_path / "workflow.sqlite")
+    network = ProviderNetwork(build_directory(tmp_path / "providers.sqlite"), store, True)
+    claimed = network.claim("1234567890", "user-a")
+    network.submit_verification(claimed.id, "user-a")
+    assert network.get("1234567890").agent.status == AgentStatus.VERIFICATION_PENDING
     with pytest.raises(DemoVerificationForbiddenError):
-        network.verify_demo("1234567890")
+        network.verify_demo(claimed.id, "user-a")
 
 
-def test_synthetic_profile_completes_structured_activation() -> None:
-    network = ProviderNetwork(NppesDirectory(Path("missing.sqlite")))
+def test_synthetic_profile_completes_structured_activation(tmp_path: Path) -> None:
+    store = WorkflowStore(tmp_path / "workflow.sqlite")
+    network = ProviderNetwork(NppesDirectory(Path("missing.sqlite")), store, True)
     npi = SYNTHETIC_PHYSICIAN_NPIS["physician-jung"]
 
-    assert network.claim(npi).agent.status == AgentStatus.VERIFICATION_PENDING
-    assert network.verify_demo(npi).agent.status == AgentStatus.VERIFIED
+    claim = network.claim(npi, "user-a")
+    assert network.get(npi).agent.status == AgentStatus.CLAIMED
+    network.submit_verification(claim.id, "user-a")
+    assert network.verify_demo(claim.id, "user-a").status.value == "verified"
     configured = network.configure(
         npi,
+        "user-a",
         AgentPreferencesInput(
             practice_confirmed=True,
             areas_of_focus=["Resistant hypertension", "Progressive CKD"],
@@ -85,11 +93,13 @@ def test_synthetic_profile_completes_structured_activation() -> None:
     )
     assert configured.agent.practice_confirmed is True
     assert configured.agent.preferences is not None
-    assert network.activate(npi).agent.status == AgentStatus.ACTIVE
+    assert network.activate(claim.id, "user-a").agent.status == AgentStatus.ACTIVE
 
 
-def test_provider_api_search_and_status() -> None:
-    provider_network.reset_demo_state()
+def test_provider_api_search_and_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = WorkflowStore(tmp_path / "workflow.sqlite")
+    providers = ProviderNetwork(NppesDirectory(Path("missing.sqlite")), store)
+    monkeypatch.setattr(provider_api, "provider_network", providers)
     client = TestClient(app)
     response = client.get("/api/providers/search", params={"q": "Iain Jung"})
     assert response.status_code == 200

@@ -27,16 +27,6 @@ def _fts_prefix_query(text: str) -> str:
     return " ".join(f'"{token.replace(chr(34), "")}"*' for token in tokens)
 
 
-def _status(value: str) -> AgentStatus:
-    normalized = value.casefold()
-    mapped = {
-        "claim_pending": AgentStatus.VERIFICATION_PENDING,
-        "configuring": AgentStatus.VERIFIED,
-        "paused": AgentStatus.DISABLED,
-    }.get(normalized)
-    return mapped or AgentStatus(normalized)
-
-
 class NppesDirectory:
     """Read-only adapter for the audited legacy NPPES/FTS schema."""
 
@@ -118,7 +108,7 @@ class NppesDirectory:
             phone=row["phone"] or None,
             source=ProviderSource.NPPES,
             agent=ReservedAgentIdentity(
-                id=f"agent-{row['npi']}", status=_status(row["agent_status"])
+                id=f"agent-{row['npi']}", status=AgentStatus.RESERVED
             ),
             directory_disclaimer=(
                 "Public NPPES directory record. This does not indicate that the physician "

@@ -19,7 +19,7 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Accept", "Content-Type"],
+    allow_headers=["Accept", "Authorization", "Content-Type"],
 )
 app.include_router(consult_router)
 app.include_router(workspace_router)

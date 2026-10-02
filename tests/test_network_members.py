@@ -9,7 +9,6 @@ from backend.agents import consult_network
 from backend.api import workspace as workspace_api
 from backend.main import app
 from backend.network_projection import project_agent_network
-from backend.provider_network import provider_network
 from backend.provider_network.directory import NppesDirectory
 from backend.provider_network.service import ProviderNetwork
 from backend.synthetic_data import PATIENTS, PHYSICIANS, PRIMARY_PATIENT_ID
@@ -22,11 +21,11 @@ NPPES_NPI = "1234567890"
 
 def _setup(tmp_path):
     store = WorkflowStore(tmp_path / "workflow.sqlite")
-    providers = ProviderNetwork(NppesDirectory(tmp_path / "missing-nppes.sqlite"))
+    providers = ProviderNetwork(NppesDirectory(tmp_path / "missing-nppes.sqlite"), store)
     return store, providers
 
 
-def _nppes_providers(path):
+def _nppes_providers(path, store):
     with sqlite3.connect(path) as db:
         db.executescript(
             """
@@ -51,16 +50,16 @@ def _nppes_providers(path):
             );
             """
         )
-    return ProviderNetwork(NppesDirectory(path))
+    return ProviderNetwork(NppesDirectory(path), store)
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     store = WorkflowStore(tmp_path / "workflow.sqlite")
+    providers = ProviderNetwork(NppesDirectory(tmp_path / "missing-nppes.sqlite"), store)
     monkeypatch.setattr(workspace_api, "workflow_store", store)
-    provider_network.reset_demo_state()
+    monkeypatch.setattr(workspace_api, "provider_network", providers)
     yield TestClient(app)
-    provider_network.reset_demo_state()
 
 
 def test_adding_a_relationship_is_idempotent_and_removable(tmp_path):
@@ -92,7 +91,7 @@ def test_membership_marks_a_node_without_creating_an_edge(tmp_path):
 
 def test_added_nppes_physician_appears_without_a_graph_node(tmp_path):
     store = WorkflowStore(tmp_path / "workflow.sqlite")
-    providers = _nppes_providers(tmp_path / "providers.sqlite")
+    providers = _nppes_providers(tmp_path / "providers.sqlite", store)
     store.add_network_member(NPPES_NPI)
 
     network = project_agent_network(store.history(), providers, store.network_members())

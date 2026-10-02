@@ -46,7 +46,8 @@ SQLite database are intentionally ignored by Git.
   profiles, agent status, activation preferences, and practice footprints.
 - The public lifecycle is reduced to `reserved`, `verification_pending`,
   `verified`, `active`, and `disabled`.
-- Demo activation state is a local overlay; the NPPES database remains read only.
+- Claim, preference, and activation state is a Lamina-owned persistent workflow
+  projection; the NPPES database remains read only.
 - Search and profile API responses expose only useful directory fields, not raw
   NPPES rows or legacy forum permissions.
 - Controlled synthetic consult physicians share the provider-network identity

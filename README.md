@@ -24,7 +24,7 @@ NPPES supplies public provider identity and reserved Lamina agent identities. Me
 
 The clinician workspace has Home, Patients, Consultations, My Agent, and Physician Network. My Agent exposes the synthetic Dr. Lianne Cha profile, source-labelled facts, access boundaries, bounded calibration scenarios, and confirm/edit/reject controls for demo preference suggestions. A small Lamina-owned local SQLite record (`data/workflow.sqlite`, gitignored) holds patient open/consult recency, completed consultation results, and these demo preferences; it is separate from Medplum clinical data. Confirmed preferences are inspectable in My Agent but do not silently alter the deterministic V1 consult rules. Consultation History is populated only by completed Lamina consultations, not fixture timestamps.
 
-Physician Network projects a deterministic agent graph over those completed consultation records. Edges represent recorded consult participation, with recommendations and redirects distinguished; the fixed synthetic roster has no edge until a consultation exists. Agent activation status comes independently from the existing provider profile overlay. A synthetic consult representative can participate in the demo while its profile is still Reserved; that does not imply physician authorisation. NPPES search remains a separate read-only directory utility below the graph.
+Physician Network projects a deterministic agent graph over those completed consultation records. Edges represent recorded consult participation, with recommendations and redirects distinguished; the fixed synthetic roster has no edge until a consultation exists. Agent activation status comes independently from persistent workflow state. A synthetic consult representative can participate in the demo while its profile is still Reserved; that does not imply physician authorisation. NPPES search remains a separate read-only directory utility below the graph.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the domain flow, [docs/NPPES_LEGACY_AUDIT.md](docs/NPPES_LEGACY_AUDIT.md) for provider-network decisions, and [docs/MEDPLUM_CONVERSATION_AUDIT.md](docs/MEDPLUM_CONVERSATION_AUDIT.md) for this pass's interoperability decisions.
 
@@ -67,6 +67,26 @@ npm run dev
 Open `http://127.0.0.1:5173`, review the synthetic patient, and click **Consult Network**. **View Consultation** expands the structured conclusions and evidence; **Start Referral** is deliberately a local demo action and performs no external write.
 
 The frontend defaults to `http://127.0.0.1:8000`. To change it, create `frontend/.env` with `VITE_API_BASE_URL`. Allowed development origins can be configured with `LAMINA_CORS_ORIGINS`; see `.env.example`.
+
+## Authentication and provider claims
+
+Supabase is used only for user authentication. Lamina continues to store its
+workflow, provider claims, physician preferences, and agent activation state in
+the local workflow SQLite database. Configure the browser client with
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`; both are public client values.
+Never place a Supabase service-role key, Medplum client secret, or other backend
+secret in a `VITE_` variable.
+
+FastAPI validates bearer tokens independently with the configured Supabase
+signing keys. Set `SUPABASE_JWT_ISSUER`, `SUPABASE_JWKS_URL`, and
+`SUPABASE_JWT_AUDIENCE` (normally `authenticated`).
+`SUPABASE_JWKS_CACHE_SECONDS` optionally controls the local JWKS cache.
+`LAMINA_DEMO_VERIFICATION_ENABLED=true` enables the explicitly synthetic-only
+verification shortcut; it never applies to an NPPES identity.
+
+The current Lucy clinical workspace remains available without authentication.
+Claim, verification, provider-preference, activation, and disable mutations
+require a valid access token.
 
 ## Synthetic Medplum / FHIR mode
 

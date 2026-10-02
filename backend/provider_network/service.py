@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from threading import RLock
-
+from backend.config import environment
 from backend.synthetic_data import ALL_PHYSICIANS, SYNTHETIC_PHYSICIAN_NPIS
+from backend.workflow import WorkflowStore, workflow_store
 
 from .directory import NppesDirectory
+from .lifecycle import project_lifecycle
 from .models import (
     AgentPreferences,
     AgentPreferencesInput,
     AgentStatus,
+    ClaimStatus,
     PhysicianNetworkProfile,
+    ProviderClaim,
+    ProviderClaimState,
     ProviderSearchResponse,
     ProviderSource,
     ReservedAgentIdentity,
@@ -25,15 +28,24 @@ class AgentTransitionError(ValueError):
     pass
 
 
+class ClaimNotFoundError(LookupError):
+    pass
+
+
+class ClaimConflictError(ValueError):
+    pass
+
+
 class DemoVerificationForbiddenError(PermissionError):
     pass
 
 
-@dataclass
-class AgentOverlay:
-    status: AgentStatus = AgentStatus.RESERVED
-    practice_confirmed: bool = False
-    preferences: AgentPreferences | None = None
+class DemoVerificationDisabledError(PermissionError):
+    pass
+
+
+def _enabled(value: str) -> bool:
+    return value.strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _synthetic_profiles() -> list[PhysicianNetworkProfile]:
@@ -56,24 +68,49 @@ def _synthetic_profiles() -> list[PhysicianNetworkProfile]:
                 directory_disclaimer=(
                     "Synthetic physician identity and practice footprint for the Lamina demo."
                 ),
+                synthetic=True,
             )
         )
     return profiles
 
 
 class ProviderNetwork:
-    def __init__(self, directory: NppesDirectory | None = None) -> None:
+    def __init__(
+        self,
+        directory: NppesDirectory | None = None,
+        store: WorkflowStore | None = None,
+        demo_verification_enabled: bool | None = None,
+    ) -> None:
         self.directory = directory or NppesDirectory()
+        self.store = store or workflow_store
         self.synthetic = {profile.npi: profile for profile in _synthetic_profiles()}
-        self._overlays: dict[str, AgentOverlay] = {}
-        self._lock = RLock()
+        self.demo_verification_enabled = (
+            _enabled(environment.get("LAMINA_DEMO_VERIFICATION_ENABLED", "false"))
+            if demo_verification_enabled is None
+            else demo_verification_enabled
+        )
 
-    def reset_demo_state(self) -> None:
-        with self._lock:
-            self._overlays.clear()
+    def _resolve(self, npi: str) -> PhysicianNetworkProfile:
+        profile = self.synthetic.get(npi) or self.directory.get(npi)
+        if not profile:
+            raise ProviderNotFoundError("Physician profile not found")
+        return profile
+
+    @staticmethod
+    def _public_claim(row: dict) -> ProviderClaim:
+        return ProviderClaim.model_validate(
+            {key: value for key, value in row.items() if key != "auth_user_id"}
+        )
+
+    def _owned_claim(self, claim_id: int, auth_user_id: str) -> dict:
+        claim = self.store.provider_claim(claim_id)
+        if not claim or claim["auth_user_id"] != auth_user_id:
+            raise ClaimNotFoundError("Provider claim not found")
+        return claim
 
     def search(
-        self, query: str = "", specialty: str = "", location: str = "", limit: int = 20
+        self, query: str = "", specialty: str = "", location: str = "", limit: int = 20,
+        auth_user_id: str | None = None,
     ) -> ProviderSearchResponse:
         terms = " ".join(value.strip() for value in (query, specialty, location) if value.strip())
         normalized = terms.casefold()
@@ -87,9 +124,12 @@ class ProviderNetwork:
                 or normalized in searchable
                 or all(token in searchable for token in normalized.split())
             ):
-                synthetic.append(self._with_overlay(profile))
+                synthetic.append(self._with_state(profile, auth_user_id))
         remaining = max(0, limit - len(synthetic))
-        nppes = [self._with_overlay(profile) for profile in self.directory.search(terms, remaining)]
+        nppes = [
+            self._with_state(profile, auth_user_id)
+            for profile in self.directory.search(terms, remaining)
+        ]
         results = (synthetic + nppes)[:limit]
         return ProviderSearchResponse(
             results=results,
@@ -99,89 +139,132 @@ class ProviderNetwork:
             data_mode="read_only_nppes_with_synthetic_demo",
         )
 
-    def get(self, npi: str) -> PhysicianNetworkProfile:
-        profile = self.synthetic.get(npi) or self.directory.get(npi)
-        if not profile:
-            raise ProviderNotFoundError("Physician profile not found")
-        return self._with_overlay(profile)
+    def get(self, npi: str, auth_user_id: str | None = None) -> PhysicianNetworkProfile:
+        return self._with_state(self._resolve(npi), auth_user_id)
 
-    def claim(self, npi: str) -> PhysicianNetworkProfile:
-        profile = self.get(npi)
-        with self._lock:
-            overlay = self._overlays.setdefault(npi, AgentOverlay(status=profile.agent.status))
-            if overlay.status == AgentStatus.RESERVED:
-                overlay.status = AgentStatus.VERIFICATION_PENDING
-            elif overlay.status != AgentStatus.VERIFICATION_PENDING:
-                raise AgentTransitionError("Only a reserved profile can begin verification")
-        return self.get(npi)
+    def claim_state(
+        self, npi: str, auth_user_id: str | None = None
+    ) -> ProviderClaimState:
+        profile = self.get(npi, auth_user_id)
+        return ProviderClaimState(
+            npi=profile.npi,
+            synthetic=profile.synthetic,
+            lifecycle_status=profile.lifecycle_status,
+            claimable=profile.claimable,
+            agent_active=profile.agent_active,
+            claimed_by_me=profile.claimed_by_me,
+            my_claim_id=profile.my_claim_id,
+            my_claim_status=profile.my_claim_status,
+        )
 
-    def verify_demo(self, npi: str) -> PhysicianNetworkProfile:
-        profile = self.get(npi)
+    def claim(self, npi: str, auth_user_id: str) -> ProviderClaim:
+        self._resolve(npi)
+        claim, conflict = self.store.claim_provider(auth_user_id, npi)
+        if conflict:
+            raise ClaimConflictError("Provider identity already has an active claim")
+        return self._public_claim(claim)
+
+    def claims_for_user(self, auth_user_id: str) -> list[ProviderClaim]:
+        return [self._public_claim(row) for row in self.store.provider_claims(auth_user_id)]
+
+    def submit_verification(self, claim_id: int, auth_user_id: str) -> ProviderClaim:
+        self._owned_claim(claim_id, auth_user_id)
+        try:
+            claim = self.store.submit_provider_verification(claim_id, auth_user_id)
+        except ValueError as error:
+            raise AgentTransitionError(str(error)) from error
+        if not claim:
+            raise ClaimNotFoundError("Provider claim not found")
+        return self._public_claim(claim)
+
+    def verify_demo(self, claim_id: int, auth_user_id: str) -> ProviderClaim:
+        claim = self._owned_claim(claim_id, auth_user_id)
+        profile = self._resolve(claim["npi"])
         if profile.source != ProviderSource.SYNTHETIC:
             raise DemoVerificationForbiddenError(
-                "NPPES profiles require production identity verification; demo verification is synthetic only"
+                "Real NPPES identities require production physician verification"
             )
-        with self._lock:
-            overlay = self._overlays.setdefault(npi, AgentOverlay(status=profile.agent.status))
-            if overlay.status == AgentStatus.VERIFIED:
-                return self.get(npi)
-            if overlay.status != AgentStatus.VERIFICATION_PENDING:
-                raise AgentTransitionError("Claim the reserved profile before demo verification")
-            overlay.status = AgentStatus.VERIFIED
-        return self.get(npi)
+        if not self.demo_verification_enabled:
+            raise DemoVerificationDisabledError("Synthetic demo verification is disabled")
+        try:
+            verified = self.store.verify_provider_claim(
+                claim_id, auth_user_id, "synthetic_demo"
+            )
+        except ValueError as error:
+            raise AgentTransitionError(str(error)) from error
+        if not verified:
+            raise ClaimNotFoundError("Provider claim not found")
+        return self._public_claim(verified)
 
-    def configure(self, npi: str, request: AgentPreferencesInput) -> PhysicianNetworkProfile:
-        profile = self.get(npi)
-        if profile.source != ProviderSource.SYNTHETIC:
-            raise DemoVerificationForbiddenError(
-                "Demo agent configuration is limited to synthetic physician profiles"
-            )
-        with self._lock:
-            overlay = self._overlays.setdefault(npi, AgentOverlay(status=profile.agent.status))
-            if overlay.status not in {AgentStatus.VERIFIED, AgentStatus.ACTIVE}:
-                raise AgentTransitionError(
-                    "Verify the physician identity before configuring the agent"
-                )
-            overlay.practice_confirmed = request.practice_confirmed
-            overlay.preferences = AgentPreferences.model_validate(
-                request.model_dump(exclude={"practice_confirmed"})
-            )
-        return self.get(npi)
+    def configure(
+        self, npi: str, auth_user_id: str, request: AgentPreferencesInput
+    ) -> PhysicianNetworkProfile:
+        profile = self._resolve(npi)
+        claim = self.store.active_provider_claim(npi)
+        if not claim or claim["auth_user_id"] != auth_user_id:
+            raise ClaimNotFoundError("Provider claim not found")
+        if claim["status"] != ClaimStatus.VERIFIED:
+            raise AgentTransitionError("Verify the physician identity before configuration")
+        preferences = AgentPreferences.model_validate(
+            request.model_dump(exclude={"practice_confirmed"})
+        )
+        self.store.save_provider_agent_preferences(
+            npi,
+            request.practice_confirmed,
+            preferences.model_dump(mode="json"),
+        )
+        return self._with_state(profile, auth_user_id)
 
-    def activate(self, npi: str) -> PhysicianNetworkProfile:
-        profile = self.get(npi)
-        if profile.source != ProviderSource.SYNTHETIC:
-            raise DemoVerificationForbiddenError(
-                "NPPES profiles cannot be activated through the synthetic demo workflow"
-            )
-        with self._lock:
-            overlay = self._overlays.setdefault(npi, AgentOverlay(status=profile.agent.status))
-            if overlay.status == AgentStatus.ACTIVE:
-                return self.get(npi)
-            if overlay.status != AgentStatus.VERIFIED:
-                raise AgentTransitionError("Verify the physician identity before activation")
-            if not overlay.practice_confirmed or not overlay.preferences:
-                raise AgentTransitionError(
-                    "Confirm practice information and save preferences first"
-                )
-            if not overlay.preferences.areas_of_focus:
-                raise AgentTransitionError("Add at least one area of focus before activation")
-            overlay.status = AgentStatus.ACTIVE
-        return self.get(npi)
+    def activate(self, claim_id: int, auth_user_id: str) -> PhysicianNetworkProfile:
+        claim = self._owned_claim(claim_id, auth_user_id)
+        if claim["status"] != ClaimStatus.VERIFIED:
+            raise AgentTransitionError("A verified claim is required before activation")
+        profile = self._resolve(claim["npi"])
+        self.store.activate_provider_agent(profile.npi)
+        return self._with_state(profile, auth_user_id)
 
-    def _with_overlay(self, profile: PhysicianNetworkProfile) -> PhysicianNetworkProfile:
-        with self._lock:
-            overlay = self._overlays.get(profile.npi)
-            if not overlay:
-                return profile.model_copy(deep=True)
-            return profile.model_copy(
-                update={
-                    "agent": ReservedAgentIdentity(
-                        id=profile.agent.id,
-                        status=overlay.status,
-                        practice_confirmed=overlay.practice_confirmed,
-                        preferences=overlay.preferences,
-                    )
-                },
-                deep=True,
-            )
+    def disable(self, claim_id: int, auth_user_id: str) -> PhysicianNetworkProfile:
+        claim = self._owned_claim(claim_id, auth_user_id)
+        if claim["status"] != ClaimStatus.VERIFIED:
+            raise AgentTransitionError("A verified claim is required to disable this agent")
+        profile = self._resolve(claim["npi"])
+        state = self.store.provider_agent_state(profile.npi)
+        if not state or state["status"] not in {"active", "disabled"}:
+            raise AgentTransitionError("The provider agent is not active")
+        if state["status"] == "active":
+            self.store.disable_provider_agent(profile.npi)
+        return self._with_state(profile, auth_user_id)
+
+    def _with_state(
+        self,
+        profile: PhysicianNetworkProfile,
+        auth_user_id: str | None = None,
+    ) -> PhysicianNetworkProfile:
+        claim = self.store.active_provider_claim(profile.npi)
+        agent_state = self.store.provider_agent_state(profile.npi)
+        lifecycle = project_lifecycle(claim, agent_state)
+        owned = bool(claim and auth_user_id and claim["auth_user_id"] == auth_user_id)
+        preferences = (
+            AgentPreferences.model_validate(agent_state["preferences"])
+            if agent_state and agent_state.get("preferences") else None
+        )
+        return profile.model_copy(
+            update={
+                "agent": ReservedAgentIdentity(
+                    id=profile.agent.id,
+                    status=lifecycle,
+                    practice_confirmed=bool(
+                        agent_state and agent_state.get("practice_confirmed")
+                    ),
+                    preferences=preferences,
+                ),
+                "synthetic": profile.source == ProviderSource.SYNTHETIC,
+                "lifecycle_status": lifecycle,
+                "claimable": claim is None,
+                "agent_active": lifecycle == AgentStatus.ACTIVE,
+                "claimed_by_me": owned,
+                "my_claim_id": claim["id"] if owned else None,
+                "my_claim_status": ClaimStatus(claim["status"]) if owned else None,
+            },
+            deep=True,
+        )

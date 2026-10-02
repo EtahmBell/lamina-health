@@ -35,6 +35,33 @@ class WorkflowStore:
                 CREATE TABLE IF NOT EXISTS network_members (
                   npi TEXT PRIMARY KEY, added_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS provider_claims (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  auth_user_id TEXT NOT NULL,
+                  npi TEXT NOT NULL,
+                  status TEXT NOT NULL CHECK(status IN (
+                    'claimed', 'verification_pending', 'verified', 'rejected', 'revoked'
+                  )),
+                  claimed_at TEXT NOT NULL,
+                  verification_submitted_at TEXT,
+                  verified_at TEXT,
+                  updated_at TEXT NOT NULL,
+                  verification_method TEXT
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS provider_claims_active_npi
+                  ON provider_claims(npi)
+                  WHERE status IN ('claimed', 'verification_pending', 'verified');
+                CREATE INDEX IF NOT EXISTS provider_claims_auth_user
+                  ON provider_claims(auth_user_id, updated_at);
+                CREATE TABLE IF NOT EXISTS provider_agent_state (
+                  npi TEXT PRIMARY KEY,
+                  status TEXT NOT NULL CHECK(status IN ('inactive', 'active', 'disabled')),
+                  practice_confirmed INTEGER NOT NULL DEFAULT 0,
+                  preferences_json TEXT,
+                  activated_at TEXT,
+                  disabled_at TEXT,
+                  updated_at TEXT NOT NULL
+                );
                 """
             )
             if "last_started" not in {
@@ -196,6 +223,168 @@ class WorkflowStore:
     def remove_network_member(self, npi: str) -> bool:
         with self._connect() as db:
             return db.execute("DELETE FROM network_members WHERE npi=?", (npi,)).rowcount > 0
+
+    @staticmethod
+    def _claim_dict(row: sqlite3.Row | None) -> dict | None:
+        return dict(row) if row else None
+
+    def active_provider_claim(self, npi: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT * FROM provider_claims WHERE npi=?
+                   AND status IN ('claimed', 'verification_pending', 'verified')
+                   ORDER BY id DESC LIMIT 1""",
+                (npi,),
+            ).fetchone()
+        return self._claim_dict(row)
+
+    def provider_claim(self, claim_id: int) -> dict | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM provider_claims WHERE id=?", (claim_id,)).fetchone()
+        return self._claim_dict(row)
+
+    def provider_claims(self, auth_user_id: str) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM provider_claims WHERE auth_user_id=? ORDER BY claimed_at, id",
+                (auth_user_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def claim_provider(self, auth_user_id: str, npi: str) -> tuple[dict, bool]:
+        """Create one active claim per NPI, returning (claim, conflict)."""
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                """SELECT * FROM provider_claims WHERE npi=?
+                   AND status IN ('claimed', 'verification_pending', 'verified')
+                   ORDER BY id DESC LIMIT 1""",
+                (npi,),
+            ).fetchone()
+            if existing:
+                return dict(existing), existing["auth_user_id"] != auth_user_id
+            cursor = db.execute(
+                """INSERT INTO provider_claims(
+                     auth_user_id, npi, status, claimed_at, updated_at
+                   ) VALUES (?, ?, 'claimed', ?, ?)""",
+                (auth_user_id, npi, now, now),
+            )
+            row = db.execute(
+                "SELECT * FROM provider_claims WHERE id=?", (cursor.lastrowid,)
+            ).fetchone()
+        return dict(row), False
+
+    def submit_provider_verification(self, claim_id: int, auth_user_id: str) -> dict | None:
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM provider_claims WHERE id=? AND auth_user_id=?",
+                (claim_id, auth_user_id),
+            ).fetchone()
+            if not row:
+                return None
+            if row["status"] == "claimed":
+                db.execute(
+                    """UPDATE provider_claims SET status='verification_pending',
+                       verification_submitted_at=?, updated_at=? WHERE id=?""",
+                    (now, now, claim_id),
+                )
+            elif row["status"] not in {"verification_pending", "verified"}:
+                raise ValueError("This claim cannot be submitted for verification")
+            updated = db.execute(
+                "SELECT * FROM provider_claims WHERE id=?", (claim_id,)
+            ).fetchone()
+        return dict(updated)
+
+    def verify_provider_claim(
+        self,
+        claim_id: int,
+        auth_user_id: str,
+        verification_method: str,
+    ) -> dict | None:
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM provider_claims WHERE id=? AND auth_user_id=?",
+                (claim_id, auth_user_id),
+            ).fetchone()
+            if not row:
+                return None
+            if row["status"] == "verification_pending":
+                db.execute(
+                    """UPDATE provider_claims SET status='verified', verified_at=?,
+                       verification_method=?, updated_at=? WHERE id=?""",
+                    (now, verification_method, now, claim_id),
+                )
+            elif not (
+                row["status"] == "verified"
+                and row["verification_method"] == verification_method
+            ):
+                raise ValueError("This claim is not awaiting verification")
+            updated = db.execute(
+                "SELECT * FROM provider_claims WHERE id=?", (claim_id,)
+            ).fetchone()
+        return dict(updated)
+
+    def provider_agent_state(self, npi: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM provider_agent_state WHERE npi=?", (npi,)).fetchone()
+        if not row:
+            return None
+        state = dict(row)
+        state["practice_confirmed"] = bool(state["practice_confirmed"])
+        state["preferences"] = (
+            json.loads(state.pop("preferences_json"))
+            if state.get("preferences_json") else None
+        )
+        return state
+
+    def save_provider_agent_preferences(
+        self,
+        npi: str,
+        practice_confirmed: bool,
+        preferences: dict,
+    ) -> dict:
+        now = self._now()
+        payload = json.dumps(preferences, separators=(",", ":"), sort_keys=True)
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO provider_agent_state(
+                     npi, status, practice_confirmed, preferences_json, updated_at
+                   ) VALUES (?, 'inactive', ?, ?, ?)
+                   ON CONFLICT(npi) DO UPDATE SET
+                     practice_confirmed=excluded.practice_confirmed,
+                     preferences_json=excluded.preferences_json,
+                     updated_at=excluded.updated_at""",
+                (npi, int(practice_confirmed), payload, now),
+            )
+        return self.provider_agent_state(npi)
+
+    def activate_provider_agent(self, npi: str) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO provider_agent_state(npi, status, activated_at, updated_at)
+                   VALUES (?, 'active', ?, ?)
+                   ON CONFLICT(npi) DO UPDATE SET status='active',
+                     activated_at=COALESCE(provider_agent_state.activated_at, excluded.activated_at),
+                     updated_at=excluded.updated_at""",
+                (npi, now, now),
+            )
+        return self.provider_agent_state(npi)
+
+    def disable_provider_agent(self, npi: str) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE provider_agent_state SET status='disabled', disabled_at=?, updated_at=?
+                   WHERE npi=?""",
+                (now, now, npi),
+            )
+        return self.provider_agent_state(npi)
 
     def preferences(self) -> list[dict]:
         with self._connect() as db:

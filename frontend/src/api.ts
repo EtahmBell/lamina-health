@@ -1,3 +1,5 @@
+import { getAccessToken } from './authClient.ts'
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 
 export type LabObservation = {
@@ -45,7 +47,8 @@ export type MyAgent = {
   learnings: AgentLearning[]
   calibrations: Record<string, { question: string; answer: string; based_on: string[] }>
 }
-export type AgentStatus = 'reserved' | 'verification_pending' | 'verified' | 'active' | 'disabled'
+export type AgentStatus = 'reserved' | 'claimed' | 'verification_pending' | 'verified' | 'active' | 'disabled'
+export type ClaimStatus = 'claimed' | 'verification_pending' | 'verified' | 'rejected' | 'revoked'
 export type AgentPreferences = {
   areas_of_focus: string[]; cases_accepted: string[]; cases_redirected: string[]
   preferred_pre_referral_workup: string[]; notes: string
@@ -56,6 +59,18 @@ export type PhysicianNetworkProfile = {
   source: 'NPPES' | 'SYNTHETIC'; consult_eligible: boolean; consult_physician_id: string | null
   directory_disclaimer: string
   agent: { id: string; status: AgentStatus; practice_confirmed: boolean; preferences: AgentPreferences | null }
+  synthetic: boolean; lifecycle_status: AgentStatus; claimable: boolean; agent_active: boolean
+  claimed_by_me: boolean; my_claim_id: number | null; my_claim_status: ClaimStatus | null
+}
+export type ProviderClaim = {
+  id: number; npi: string; status: ClaimStatus; claimed_at: string
+  verification_submitted_at: string | null; verified_at: string | null
+  updated_at: string; verification_method: string | null
+}
+export type ProviderClaimState = {
+  npi: string; synthetic: boolean; lifecycle_status: AgentStatus; claimable: boolean
+  agent_active: boolean; claimed_by_me: boolean; my_claim_id: number | null
+  my_claim_status: ClaimStatus | null
 }
 export type ProviderSearchResponse = {
   results: PhysicianNetworkProfile[]; count: number; directory_available: boolean
@@ -90,11 +105,15 @@ export type AgentNetwork = {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, init)
+  const headers = new Headers(init?.headers)
+  const accessToken = await getAccessToken()
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: string } | null
     throw new Error(body?.detail || `Request failed (${response.status})`)
   }
+  if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
@@ -116,11 +135,7 @@ export const addNetworkMember = (npi: string) => request<NetworkMember>('/api/wo
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ npi }),
 })
 export const removeNetworkMember = async (npi: string) => {
-  const response = await fetch(`${API_BASE_URL}/api/workspace/network/members/${encodeURIComponent(npi)}`, { method: 'DELETE' })
-  if (!response.ok) {
-    const body = await response.json().catch(() => null) as { detail?: string } | null
-    throw new Error(body?.detail || `Request failed (${response.status})`)
-  }
+  await request<void>(`/api/workspace/network/members/${encodeURIComponent(npi)}`, { method: 'DELETE' })
 }
 export const updateAgentLearning = (key: string, action: 'confirm' | 'edit' | 'reject', statement?: string) => request<AgentLearning>(`/api/workspace/agent/learnings/${encodeURIComponent(key)}`, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, statement }),
@@ -131,9 +146,26 @@ export const searchProviders = (filters: { q?: string; specialty?: string; locat
   return request<ProviderSearchResponse>(`/api/providers/search?${params}`)
 }
 export const getProvider = (npi: string) => request<PhysicianNetworkProfile>(`/api/providers/${encodeURIComponent(npi)}`)
-export const claimProvider = (npi: string) => request<PhysicianNetworkProfile>(`/api/providers/${encodeURIComponent(npi)}/claim`, { method: 'POST' })
-export const verifyDemoProvider = (npi: string) => request<PhysicianNetworkProfile>(`/api/providers/${encodeURIComponent(npi)}/verify-demo`, { method: 'POST' })
+export const getProviderClaimState = (npi: string) => request<ProviderClaimState>(`/api/providers/${encodeURIComponent(npi)}/claim-state`)
+export const getMyProviderClaims = () => request<ProviderClaim[]>('/api/me/provider-claims')
+export const createProviderClaim = (npi: string) => request<ProviderClaim>(`/api/providers/${encodeURIComponent(npi)}/claim`, { method: 'POST' })
+export const submitProviderVerification = (claimId: number) => request<ProviderClaim>(`/api/provider-claims/${claimId}/submit-verification`, { method: 'POST' })
+export const verifySyntheticDemoClaim = (claimId: number) => request<ProviderClaim>(`/api/provider-claims/${claimId}/verify-demo`, { method: 'POST' })
+export const activateProviderClaim = (claimId: number) => request<PhysicianNetworkProfile>(`/api/provider-claims/${claimId}/activate-agent`, { method: 'POST' })
+export const disableProviderClaim = (claimId: number) => request<PhysicianNetworkProfile>(`/api/provider-claims/${claimId}/disable-agent`, { method: 'POST' })
+
+async function ownedClaimId(npi: string) {
+  const profile = await getProvider(npi)
+  if (!profile.claimed_by_me || !profile.my_claim_id) throw new Error('Sign in as the claim owner to continue')
+  return profile.my_claim_id
+}
+
+/** Compatibility helpers for the existing minimal activation surface. */
+export const claimProvider = async (npi: string) => { await createProviderClaim(npi); return getProvider(npi) }
+export const submitProviderVerificationForNpi = async (npi: string) => { await submitProviderVerification(await ownedClaimId(npi)); return getProvider(npi) }
+export const verifyDemoProvider = async (npi: string) => { await verifySyntheticDemoClaim(await ownedClaimId(npi)); return getProvider(npi) }
 export const saveProviderPreferences = (npi: string, body: AgentPreferences & { practice_confirmed: boolean }) => request<PhysicianNetworkProfile>(`/api/providers/${encodeURIComponent(npi)}/preferences`, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 })
-export const activateProvider = (npi: string) => request<PhysicianNetworkProfile>(`/api/providers/${encodeURIComponent(npi)}/activate`, { method: 'POST' })
+export const activateProvider = async (npi: string) => activateProviderClaim(await ownedClaimId(npi))
+export const disableProvider = async (npi: string) => disableProviderClaim(await ownedClaimId(npi))

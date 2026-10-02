@@ -21,7 +21,7 @@ from backend.workflow import WorkflowStore
 
 def _setup(tmp_path):
     store = WorkflowStore(tmp_path / "workflow.sqlite")
-    providers = ProviderNetwork(NppesDirectory(tmp_path / "missing-nppes.sqlite"))
+    providers = ProviderNetwork(NppesDirectory(tmp_path / "missing-nppes.sqlite"), store)
     return store, providers
 
 
@@ -85,22 +85,24 @@ def test_jordan_and_maria_consults_project_real_edges_and_records(tmp_path, monk
     assert nodes["physician-cha"]["id"] not in edges, "roster-only nodes emit no edge"
 
 
-def test_activation_state_is_read_from_existing_overlay(tmp_path):
+def test_activation_state_is_read_from_persistent_store(tmp_path):
     store, providers = _setup(tmp_path)
     npi = "9900000001"
     assert providers.get(npi).agent.status.value == "reserved"
-    providers.claim(npi)
+    claim = providers.claim(npi, "user-a")
     claimed = project_agent_network(store.history(), providers)
-    assert next(node for node in claimed["nodes"] if node["npi"] == npi)["status"] == "verification_pending"
-    providers.verify_demo(npi)
+    assert next(node for node in claimed["nodes"] if node["npi"] == npi)["status"] == "claimed"
+    providers.submit_verification(claim.id, "user-a")
+    providers.demo_verification_enabled = True
+    providers.verify_demo(claim.id, "user-a")
     verified = project_agent_network(store.history(), providers)
     assert next(node for node in verified["nodes"] if node["npi"] == npi)["status"] == "verified"
-    providers.configure(npi, AgentPreferencesInput(
+    providers.configure(npi, "user-a", AgentPreferencesInput(
         practice_confirmed=True,
         areas_of_focus=["Progressive CKD"],
         preferred_pre_referral_workup=["BMP", "UPCR"],
     ))
-    providers.activate(npi)
+    providers.activate(claim.id, "user-a")
     active = project_agent_network(store.history(), providers)
     jung = next(node for node in active["nodes"] if node["npi"] == npi)
     assert jung["status"] == "active"

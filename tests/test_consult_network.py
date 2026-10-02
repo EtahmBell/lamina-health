@@ -92,6 +92,7 @@ def test_primary_network_result_is_grounded_and_inspectable():
     result = consult_network(patient, PHYSICIANS)
     assert result.recommended_physician.physician_id == "physician-jung"
     assert result.recommended_physician.specialty == "Nephrology"
+    assert result.recommended_physician.availability == "Approximately 8 days"
     assert result.alternatives[0].physician_id == "physician-onadeko"
     ep = next(item for item in result.consultation if item.physician_id == "physician-rossi")
     assert ep.clinical_fit == ClinicalFit.POOR
