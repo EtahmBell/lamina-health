@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from backend.agents import consult_network
 from backend.api import workspace as workspace_api
+from backend.demo_workspace import demo_workspace
 from backend.main import app
 from backend.network_projection import project_agent_network
 from backend.provider_network.directory import NppesDirectory
@@ -18,6 +19,8 @@ from backend.synthetic_data import (
 )
 from backend.workflow import WorkflowStore
 
+WORKSPACE = "test-workspace"
+
 
 def _setup(tmp_path):
     store = WorkflowStore(tmp_path / "workflow.sqlite")
@@ -27,7 +30,7 @@ def _setup(tmp_path):
 
 def test_network_starts_with_center_and_no_invented_relationships(tmp_path):
     store, providers = _setup(tmp_path)
-    network = project_agent_network(store.history(), providers)
+    network = project_agent_network(store.history(WORKSPACE), providers)
     assert network["center"]["name"] == "Dr. Lucy Saru's Agent"
     assert network["center"]["status"] == "active"
     assert network["record_count"] == 0
@@ -44,12 +47,13 @@ def test_network_starts_with_center_and_no_invented_relationships(tmp_path):
 
 def test_jordan_and_maria_consults_project_real_edges_and_records(tmp_path, monkeypatch):
     store, providers = _setup(tmp_path)
-    jordan_id = store.completed(consult_network(PATIENTS[PRIMARY_PATIENT_ID], PHYSICIANS))
-    maria_id = store.completed(consult_network(PATIENTS[MARIA_PATIENT_ID], MARIA_PHYSICIANS))
+    jordan_id = store.completed(WORKSPACE, consult_network(PATIENTS[PRIMARY_PATIENT_ID], PHYSICIANS))
+    maria_id = store.completed(WORKSPACE, consult_network(PATIENTS[MARIA_PATIENT_ID], MARIA_PHYSICIANS))
     monkeypatch.setattr(workspace_api, "workflow_store", store)
     monkeypatch.setattr(workspace_api, "provider_network", providers)
-
+    app.dependency_overrides[demo_workspace] = lambda: WORKSPACE
     response = TestClient(app).get("/api/workspace/network")
+    app.dependency_overrides.clear()
     assert response.status_code == 200
     network = response.json()
     assert network["record_count"] == 2
@@ -90,12 +94,12 @@ def test_activation_state_is_read_from_persistent_store(tmp_path):
     npi = "9900000001"
     assert providers.get(npi).agent.status.value == "reserved"
     claim = providers.claim(npi, "user-a")
-    claimed = project_agent_network(store.history(), providers)
+    claimed = project_agent_network(store.history(WORKSPACE), providers)
     assert next(node for node in claimed["nodes"] if node["npi"] == npi)["status"] == "claimed"
     providers.submit_verification(claim.id, "user-a")
     providers.demo_verification_enabled = True
     providers.verify_demo(claim.id, "user-a")
-    verified = project_agent_network(store.history(), providers)
+    verified = project_agent_network(store.history(WORKSPACE), providers)
     assert next(node for node in verified["nodes"] if node["npi"] == npi)["status"] == "verified"
     providers.configure(npi, "user-a", AgentPreferencesInput(
         practice_confirmed=True,
@@ -103,7 +107,7 @@ def test_activation_state_is_read_from_persistent_store(tmp_path):
         preferred_pre_referral_workup=["BMP", "UPCR"],
     ))
     providers.activate(claim.id, "user-a")
-    active = project_agent_network(store.history(), providers)
+    active = project_agent_network(store.history(WORKSPACE), providers)
     jung = next(node for node in active["nodes"] if node["npi"] == npi)
     assert jung["status"] == "active"
     assert jung["confirmed_preferences"]["areas_of_focus"] == ["Progressive CKD"]

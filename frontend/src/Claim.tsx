@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
+import { safeReturnPath } from './safeReturn.ts'
 import { cleanName } from './demoIdentity.ts'
 import {
   ApiError,
@@ -157,7 +158,9 @@ export function ProviderIdentityPage({ npi, navigate, params }: { npi: string; n
   const [actionError, setActionError] = useState<ActionError | null>(null)
   const [confirmingActivate, setConfirmingActivate] = useState(false)
   const [confirmingDisable, setConfirmingDisable] = useState(false)
-  const backTo = params.get('return')
+  const requestedBackTo = params.get('return')
+  const backTo = safeReturnPath(requestedBackTo, '/claim')
+  const hasSafeBackTo = Boolean(requestedBackTo && requestedBackTo === backTo)
 
   const load = () => getProvider(npi).then((result) => { setProfile(result); setLoadError(null) }).catch((err) => setLoadError(err instanceof Error ? err.message : 'Could not load this identity'))
   useEffect(() => { void load() }, [npi, user]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -198,7 +201,7 @@ export function ProviderIdentityPage({ npi, navigate, params }: { npi: string; n
     : actionError ? <div className="error-banner" role="alert" style={{ whiteSpace: 'pre-line' }}>{actionError.message}</div> : null
 
   return <ClaimShell navigate={navigate}>
-    <button className="text-button back-link" onClick={() => navigate(backTo || '/claim')}>← {backTo ? 'Back' : 'Find your Lamina identity'}</button>
+    <button className="text-button back-link" onClick={() => navigate(backTo)}>← {hasSafeBackTo ? 'Back' : 'Find your Lamina identity'}</button>
     <section className="provider-identity-hero">
       <span className="directory-avatar large">{initials(name)}</span>
       <div><p className="eyebrow">{profile.synthetic ? 'Controlled synthetic physician' : 'NPPES physician profile'}</p><h1>{name}</h1><p>{profile.specialty}</p><p className="muted-note">{location(profile)} · NPI {profile.npi}</p></div>
@@ -289,7 +292,7 @@ export function SignInPage({ navigate, params }: { navigate: Navigate; params: U
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const target = params.get('return') || '/claim/my-identities'
+  const target = safeReturnPath(params.get('return'), '/claim/my-identities')
   useEffect(() => { if (user) navigate(target) }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (event: FormEvent) => {
@@ -320,7 +323,7 @@ export function SignUpPage({ navigate, params }: { navigate: Navigate; params: U
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
-  const target = params.get('return') || '/claim/my-identities'
+  const target = safeReturnPath(params.get('return'), '/claim/my-identities')
   useEffect(() => { if (user) navigate(target) }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (event: FormEvent) => {

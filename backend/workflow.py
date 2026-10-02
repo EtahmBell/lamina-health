@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from backend.config import environment
@@ -12,6 +13,8 @@ from backend.models import ConsultationResult
 
 
 class WorkflowStore:
+    LEGACY_WORKSPACE_ID = "legacy-local-workspace"
+
     def __init__(self, path: Path | None = None) -> None:
         default = Path(__file__).resolve().parents[1] / "data" / "workflow.sqlite"
         self.path = path or Path(environment.get("LAMINA_WORKFLOW_DATABASE", str(default)))
@@ -19,21 +22,29 @@ class WorkflowStore:
         with self._connect() as db:
             db.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS demo_workspaces (
+                  workspace_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+                  last_seen_at TEXT NOT NULL, expires_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS patient_activity (
-                  patient_id TEXT PRIMARY KEY, last_opened TEXT, last_started TEXT,
-                  last_consultation TEXT, consultation_count INTEGER NOT NULL DEFAULT 0
+                  workspace_id TEXT NOT NULL, patient_id TEXT NOT NULL,
+                  last_opened TEXT, last_started TEXT, last_consultation TEXT,
+                  consultation_count INTEGER NOT NULL DEFAULT 0,
+                  PRIMARY KEY(workspace_id, patient_id)
                 );
                 CREATE TABLE IF NOT EXISTS consultations (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT NOT NULL,
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL,
+                  patient_id TEXT NOT NULL,
                   completed_at TEXT NOT NULL, result_json TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS agent_preferences (
-                  key TEXT PRIMARY KEY, statement TEXT NOT NULL,
+                  workspace_id TEXT NOT NULL, key TEXT NOT NULL, statement TEXT NOT NULL,
                   provenance TEXT NOT NULL, status TEXT NOT NULL,
-                  updated_at TEXT NOT NULL
+                  updated_at TEXT NOT NULL, PRIMARY KEY(workspace_id, key)
                 );
                 CREATE TABLE IF NOT EXISTS network_members (
-                  npi TEXT PRIMARY KEY, added_at TEXT NOT NULL
+                  workspace_id TEXT NOT NULL, npi TEXT NOT NULL, added_at TEXT NOT NULL,
+                  PRIMARY KEY(workspace_id, npi)
                 );
                 CREATE TABLE IF NOT EXISTS provider_claims (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +75,15 @@ class WorkflowStore:
                 );
                 """
             )
+            self._migrate_demo_tables(db)
+            db.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS consultations_workspace_id
+                  ON consultations(workspace_id, id DESC);
+                CREATE INDEX IF NOT EXISTS demo_workspaces_expiry
+                  ON demo_workspaces(expires_at);
+                """
+            )
             if "last_started" not in {
                 row["name"] for row in db.execute("PRAGMA table_info(patient_activity)")
             }:
@@ -72,52 +92,189 @@ class WorkflowStore:
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=5)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=5000")
+        db.execute("PRAGMA foreign_keys=ON")
         return db
+
+    @staticmethod
+    def _columns(db: sqlite3.Connection, table: str) -> set[str]:
+        return {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+
+    def _migrate_demo_tables(self, db: sqlite3.Connection) -> None:
+        """Move pre-workspace demo rows into a non-issued legacy workspace."""
+        now = self._now()
+        expiry = (datetime.now(UTC) + timedelta(days=3650)).isoformat(timespec="seconds")
+        migrated = False
+        table_definitions = {
+            "patient_activity": """(
+              workspace_id TEXT NOT NULL, patient_id TEXT NOT NULL,
+              last_opened TEXT, last_started TEXT, last_consultation TEXT,
+              consultation_count INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY(workspace_id, patient_id)
+            )""",
+            "agent_preferences": """(
+              workspace_id TEXT NOT NULL, key TEXT NOT NULL, statement TEXT NOT NULL,
+              provenance TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
+              PRIMARY KEY(workspace_id, key)
+            )""",
+            "network_members": """(
+              workspace_id TEXT NOT NULL, npi TEXT NOT NULL, added_at TEXT NOT NULL,
+              PRIMARY KEY(workspace_id, npi)
+            )""",
+        }
+        copy_columns = {
+            "patient_activity": (
+                "patient_id,last_opened,last_started,last_consultation,consultation_count"
+            ),
+            "agent_preferences": "key,statement,provenance,status,updated_at",
+            "network_members": "npi,added_at",
+        }
+        for table, definition in table_definitions.items():
+            existing_columns = self._columns(db, table)
+            if "workspace_id" in existing_columns:
+                continue
+            legacy = f"{table}_pre_workspace"
+            db.execute(f"ALTER TABLE {table} RENAME TO {legacy}")
+            db.execute(f"CREATE TABLE {table} {definition}")
+            columns = copy_columns[table]
+            selected_columns = columns
+            if table == "patient_activity" and "last_started" not in existing_columns:
+                selected_columns = (
+                    "patient_id,last_opened,NULL,last_consultation,consultation_count"
+                )
+            db.execute(
+                f"INSERT INTO {table}(workspace_id,{columns}) "
+                f"SELECT ?,{selected_columns} FROM {legacy}",
+                (self.LEGACY_WORKSPACE_ID,),
+            )
+            db.execute(f"DROP TABLE {legacy}")
+            migrated = True
+        if "workspace_id" not in self._columns(db, "consultations"):
+            db.execute(
+                "ALTER TABLE consultations ADD COLUMN workspace_id TEXT NOT NULL "
+                f"DEFAULT '{self.LEGACY_WORKSPACE_ID}'"
+            )
+            migrated = True
+        if migrated:
+            db.execute(
+                """INSERT OR IGNORE INTO demo_workspaces(
+                     workspace_id, created_at, last_seen_at, expires_at
+                   ) VALUES (?, ?, ?, ?)""",
+                (self.LEGACY_WORKSPACE_ID, now, now, expiry),
+            )
 
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).isoformat(timespec="seconds")
 
-    def opened(self, patient_id: str) -> None:
+    def resolve_demo_workspace(
+        self, candidate: str | None, ttl_seconds: int
+    ) -> tuple[str, bool]:
+        now_dt = datetime.now(UTC)
+        now = now_dt.isoformat(timespec="seconds")
+        expires = (now_dt + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if candidate:
+                row = db.execute(
+                    "SELECT expires_at FROM demo_workspaces WHERE workspace_id=?",
+                    (candidate,),
+                ).fetchone()
+                if row and row["expires_at"] > now:
+                    db.execute(
+                        "UPDATE demo_workspaces SET last_seen_at=?, expires_at=? "
+                        "WHERE workspace_id=?",
+                        (now, expires, candidate),
+                    )
+                    return candidate, False
+            while True:
+                workspace_id = secrets.token_urlsafe(32)
+                try:
+                    db.execute(
+                        """INSERT INTO demo_workspaces(
+                             workspace_id, created_at, last_seen_at, expires_at
+                           ) VALUES (?, ?, ?, ?)""",
+                        (workspace_id, now, now, expires),
+                    )
+                    return workspace_id, True
+                except sqlite3.IntegrityError:
+                    continue
+
+    def cleanup_expired_demo_workspaces(self) -> int:
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT workspace_id FROM demo_workspaces WHERE expires_at < ? "
+                "AND workspace_id <> ?",
+                (now, self.LEGACY_WORKSPACE_ID),
+            ).fetchall()
+            workspace_ids = [row["workspace_id"] for row in rows]
+            for workspace_id in workspace_ids:
+                for table in (
+                    "patient_activity", "consultations", "agent_preferences", "network_members"
+                ):
+                    db.execute(f"DELETE FROM {table} WHERE workspace_id=?", (workspace_id,))
+                db.execute(
+                    "DELETE FROM demo_workspaces WHERE workspace_id=?", (workspace_id,)
+                )
+        return len(workspace_ids)
+
+    def opened(self, workspace_id: str, patient_id: str) -> None:
         with self._connect() as db:
             db.execute(
-                """INSERT INTO patient_activity(patient_id, last_opened) VALUES (?, ?)
-                   ON CONFLICT(patient_id) DO UPDATE SET last_opened=excluded.last_opened""",
-                (patient_id, self._now()),
+                """INSERT INTO patient_activity(workspace_id, patient_id, last_opened)
+                   VALUES (?, ?, ?) ON CONFLICT(workspace_id, patient_id)
+                   DO UPDATE SET last_opened=excluded.last_opened""",
+                (workspace_id, patient_id, self._now()),
             )
 
-    def started(self, patient_id: str) -> None:
+    def started(self, workspace_id: str, patient_id: str) -> None:
         with self._connect() as db:
             db.execute(
-                """INSERT INTO patient_activity(patient_id, last_started) VALUES (?, ?)
-                   ON CONFLICT(patient_id) DO UPDATE SET last_started=excluded.last_started""",
-                (patient_id, self._now()),
+                """INSERT INTO patient_activity(workspace_id, patient_id, last_started)
+                   VALUES (?, ?, ?) ON CONFLICT(workspace_id, patient_id)
+                   DO UPDATE SET last_started=excluded.last_started""",
+                (workspace_id, patient_id, self._now()),
             )
 
-    def completed(self, result: ConsultationResult) -> int:
+    def completed(self, workspace_id: str, result: ConsultationResult) -> int:
         now = self._now()
         with self._connect() as db:
             cursor = db.execute(
-                "INSERT INTO consultations(patient_id, completed_at, result_json) VALUES (?, ?, ?)",
-                (result.patient_id, now, result.model_dump_json()),
+                """INSERT INTO consultations(
+                     workspace_id, patient_id, completed_at, result_json
+                   ) VALUES (?, ?, ?, ?)""",
+                (workspace_id, result.patient_id, now, result.model_dump_json()),
             )
             db.execute(
-                """INSERT INTO patient_activity(patient_id, last_consultation, consultation_count)
-                   VALUES (?, ?, 1) ON CONFLICT(patient_id) DO UPDATE SET
+                """INSERT INTO patient_activity(
+                     workspace_id, patient_id, last_consultation, consultation_count
+                   ) VALUES (?, ?, ?, 1) ON CONFLICT(workspace_id, patient_id) DO UPDATE SET
                    last_consultation=excluded.last_consultation,
                    consultation_count=patient_activity.consultation_count+1""",
-                (result.patient_id, now),
+                (workspace_id, result.patient_id, now),
             )
             return int(cursor.lastrowid)
 
-    def activity(self, patient_ids: list[str]) -> list[dict]:
+    def activity(self, workspace_id: str, patient_ids: list[str]) -> list[dict]:
         with self._connect() as db:
-            rows = db.execute("SELECT * FROM patient_activity").fetchall()
+            rows = db.execute(
+                "SELECT * FROM patient_activity WHERE workspace_id=?", (workspace_id,)
+            ).fetchall()
             consultations = db.execute(
                 "SELECT id, patient_id, completed_at, result_json "
-                "FROM consultations ORDER BY id DESC"
+                "FROM consultations WHERE workspace_id=? ORDER BY id DESC",
+                (workspace_id,),
             ).fetchall()
-        records = {row["patient_id"]: dict(row) for row in rows}
+        records = {
+            row["patient_id"]: {
+                "patient_id": row["patient_id"],
+                "last_opened": row["last_opened"],
+                "last_started": row["last_started"],
+            }
+            for row in rows
+        }
         consultation_counts: dict[str, int] = {}
         latest: dict[str, sqlite3.Row] = {}
         for consultation in consultations:
@@ -154,19 +311,26 @@ class WorkflowStore:
             for patient_id in patient_ids
         ]
 
-    def reset_demo_case(self, patient_id: str) -> dict:
+    def reset_demo_case(self, workspace_id: str, patient_id: str) -> dict:
         """Remove one demo case's Lamina workflow history, never its clinical source."""
         with self._connect() as db:
             removed = db.execute(
-                "SELECT COUNT(*) FROM consultations WHERE patient_id=?", (patient_id,)
+                "SELECT COUNT(*) FROM consultations WHERE workspace_id=? AND patient_id=?",
+                (workspace_id, patient_id),
             ).fetchone()[0]
-            db.execute("DELETE FROM consultations WHERE patient_id=?", (patient_id,))
+            db.execute(
+                "DELETE FROM consultations WHERE workspace_id=? AND patient_id=?",
+                (workspace_id, patient_id),
+            )
             db.execute(
                 """UPDATE patient_activity SET last_started=NULL,
-                   last_consultation=NULL, consultation_count=0 WHERE patient_id=?""",
-                (patient_id,),
+                   last_consultation=NULL, consultation_count=0
+                   WHERE workspace_id=? AND patient_id=?""",
+                (workspace_id, patient_id),
             )
-            remaining = db.execute("SELECT COUNT(*) FROM consultations").fetchone()[0]
+            remaining = db.execute(
+                "SELECT COUNT(*) FROM consultations WHERE workspace_id=?", (workspace_id,)
+            ).fetchone()[0]
         return {
             "patient_id": patient_id,
             "removed_consultations": removed,
@@ -174,10 +338,12 @@ class WorkflowStore:
             "reset_complete": True,
         }
 
-    def history(self, limit: int = 30) -> list[dict]:
+    def history(self, workspace_id: str, limit: int = 30) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
-                "SELECT * FROM consultations ORDER BY id DESC LIMIT ?", (limit,)
+                """SELECT * FROM consultations WHERE workspace_id=?
+                   ORDER BY id DESC LIMIT ?""",
+                (workspace_id, limit),
             ).fetchall()
         return [
             {"id": row["id"], "patient_id": row["patient_id"],
@@ -186,16 +352,19 @@ class WorkflowStore:
             for row in rows
         ]
 
-    def consultation(self, record_id: int) -> dict | None:
+    def consultation(self, workspace_id: str, record_id: int) -> dict | None:
         with self._connect() as db:
-            row = db.execute("SELECT * FROM consultations WHERE id=?", (record_id,)).fetchone()
+            row = db.execute(
+                "SELECT * FROM consultations WHERE workspace_id=? AND id=?",
+                (workspace_id, record_id),
+            ).fetchone()
         return (
             {"id": row["id"], "patient_id": row["patient_id"],
              "completed_at": row["completed_at"], "result": json.loads(row["result_json"])}
             if row else None
         )
 
-    def network_members(self) -> list[dict]:
+    def network_members(self, workspace_id: str) -> list[dict]:
         """Physician relationships the clinician recorded, oldest first.
 
         Membership is a workspace relationship only. It is deliberately separate
@@ -203,26 +372,33 @@ class WorkflowStore:
         """
         with self._connect() as db:
             rows = db.execute(
-                "SELECT npi, added_at FROM network_members ORDER BY added_at, npi"
+                """SELECT npi, added_at FROM network_members WHERE workspace_id=?
+                   ORDER BY added_at, npi""",
+                (workspace_id,),
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def add_network_member(self, npi: str) -> dict:
+    def add_network_member(self, workspace_id: str, npi: str) -> dict:
         """Idempotent: re-adding an existing relationship keeps the original date."""
         with self._connect() as db:
             db.execute(
-                "INSERT INTO network_members(npi, added_at) VALUES (?, ?) "
-                "ON CONFLICT(npi) DO NOTHING",
-                (npi, self._now()),
+                """INSERT INTO network_members(workspace_id, npi, added_at)
+                   VALUES (?, ?, ?) ON CONFLICT(workspace_id, npi) DO NOTHING""",
+                (workspace_id, npi, self._now()),
             )
             row = db.execute(
-                "SELECT npi, added_at FROM network_members WHERE npi=?", (npi,)
+                """SELECT npi, added_at FROM network_members
+                   WHERE workspace_id=? AND npi=?""",
+                (workspace_id, npi),
             ).fetchone()
         return dict(row)
 
-    def remove_network_member(self, npi: str) -> bool:
+    def remove_network_member(self, workspace_id: str, npi: str) -> bool:
         with self._connect() as db:
-            return db.execute("DELETE FROM network_members WHERE npi=?", (npi,)).rowcount > 0
+            return db.execute(
+                "DELETE FROM network_members WHERE workspace_id=? AND npi=?",
+                (workspace_id, npi),
+            ).rowcount > 0
 
     @staticmethod
     def _claim_dict(row: sqlite3.Row | None) -> dict | None:
@@ -386,23 +562,30 @@ class WorkflowStore:
             )
         return self.provider_agent_state(npi)
 
-    def preferences(self) -> list[dict]:
+    def preferences(self, workspace_id: str) -> list[dict]:
         with self._connect() as db:
-            rows = db.execute("SELECT * FROM agent_preferences ORDER BY key").fetchall()
+            rows = db.execute(
+                """SELECT key, statement, provenance, status, updated_at
+                   FROM agent_preferences WHERE workspace_id=? ORDER BY key""",
+                (workspace_id,),
+            ).fetchall()
         return [dict(row) for row in rows]
 
-    def update_preference(self, key: str, statement: str, status: str) -> dict:
+    def update_preference(
+        self, workspace_id: str, key: str, statement: str, status: str
+    ) -> dict:
         provenance = "Physician-confirmed demo preference" if status == "confirmed" else (
             "Physician-edited draft" if status == "suggested" else "Rejected suggestion"
         )
         now = self._now()
         with self._connect() as db:
             db.execute(
-                """INSERT INTO agent_preferences(key,statement,provenance,status,updated_at)
-                   VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET
+                """INSERT INTO agent_preferences(
+                     workspace_id,key,statement,provenance,status,updated_at
+                   ) VALUES (?,?,?,?,?,?) ON CONFLICT(workspace_id,key) DO UPDATE SET
                    statement=excluded.statement, provenance=excluded.provenance,
                    status=excluded.status, updated_at=excluded.updated_at""",
-                (key, statement, provenance, status, now),
+                (workspace_id, key, statement, provenance, status, now),
             )
         return {"key": key, "statement": statement, "provenance": provenance,
                 "status": status, "updated_at": now}

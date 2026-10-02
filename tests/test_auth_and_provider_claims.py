@@ -277,8 +277,8 @@ def test_schema_upgrade_preserves_existing_workflow_rows(tmp_path: Path) -> None
         )
 
     store = WorkflowStore(database)
-    assert store.network_members()[0]["npi"] == "9900000008"
-    assert store.preferences()[0]["statement"] == "Keep existing preference"
+    assert store.network_members(store.LEGACY_WORKSPACE_ID)[0]["npi"] == "9900000008"
+    assert store.preferences(store.LEGACY_WORKSPACE_ID)[0]["statement"] == "Keep existing preference"
     with sqlite3.connect(database) as db:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"provider_claims", "provider_agent_state"} <= tables

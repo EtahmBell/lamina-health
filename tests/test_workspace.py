@@ -3,6 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from backend import demo_workspace as demo_workspace_module
 from backend.agents import consult_network
 from backend.api import consult as consult_api
 from backend.api import workspace as workspace_api
@@ -23,6 +24,7 @@ def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     store = WorkflowStore(tmp_path / "workflow.sqlite")
     monkeypatch.setattr(consult_api, "workflow_store", store)
     monkeypatch.setattr(workspace_api, "workflow_store", store)
+    monkeypatch.setattr(demo_workspace_module, "workflow_store", store)
     monkeypatch.setattr(consult_api, "data_source", SyntheticClinicalDataSource())
     return TestClient(app)
 

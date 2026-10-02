@@ -7,6 +7,7 @@ const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const network = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+const safeReturn = readFileSync(new URL('../src/safeReturn.ts', import.meta.url), 'utf8')
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to))
 
 const portal = () => slice(app, 'function LandingPage', 'function formatTime')
@@ -174,8 +175,16 @@ test('an unconfigured auth environment shows a calm notice instead of a broken f
 })
 
 test('successful auth navigates to the preserved return target, defaulting to My physician identities', () => {
-  assert.match(claim, /const target = params\.get\('return'\) \|\| '\/claim\/my-identities'/g)
+  assert.match(claim, /const target = safeReturnPath\(params\.get\('return'\), '\/claim\/my-identities'\)/g)
   assert.match(claim, /useEffect\(\(\) => \{ if \(user\) navigate\(target\) \}, \[user\]\)/)
+})
+
+test('auth return targets are restricted to local absolute paths', () => {
+  assert.match(claim, /safeReturnPath\(params\.get\('return'\)/)
+  assert.match(safeReturn, /!value\.startsWith\('\/'\)/)
+  assert.match(safeReturn, /value\.startsWith\('\/\/'\)/)
+  assert.match(safeReturn, /value\.includes\('\\\\'\)/)
+  assert.match(safeReturn, /parsed\.origin === 'https:\/\/lamina\.invalid'/)
 })
 
 test('sign out clears the session and returns to a public claim route', () => {
@@ -259,6 +268,10 @@ test('claim functions still derive identity server-side via the bearer token onl
 
 test('the frontend uses only the Supabase session mechanism, never a manual token store', () => {
   assert.doesNotMatch(claim, /localStorage\.setItem.*token|sessionStorage\.setItem.*token/i)
+})
+
+test('all API requests include the anonymous demo workspace cookie', () => {
+  assert.match(api, /credentials: 'include'/)
 })
 
 test('no fake auth bypass or shortcut from login success to physician verification exists', () => {

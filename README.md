@@ -84,9 +84,17 @@ signing keys. Set `SUPABASE_JWT_ISSUER`, `SUPABASE_JWKS_URL`, and
 `LAMINA_DEMO_VERIFICATION_ENABLED=true` enables the explicitly synthetic-only
 verification shortcut; it never applies to an NPPES identity.
 
-The current Lucy clinical workspace remains available without authentication.
+The Lucy clinical workspace remains available without authentication. Each browser
+receives an opaque, `HttpOnly` demo-workspace cookie; consultations, activity,
+network membership, reset, and Lucy preferences are isolated per cookie while
+provider claims and activation remain global identity state. Browser API requests
+therefore use credentialed CORS with explicit origins.
 Claim, verification, provider-preference, activation, and disable mutations
 require a valid access token.
+
+For deployment cookie settings, CSRF/CORS constraints, expiry cleanup, the required
+persistent SQLite volume, concurrency limits, and the live Supabase checklist, see
+[`docs/PUBLIC_DEPLOYMENT_AUDIT.md`](docs/PUBLIC_DEPLOYMENT_AUDIT.md).
 
 ## Synthetic Medplum / FHIR mode
 

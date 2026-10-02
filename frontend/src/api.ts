@@ -121,7 +121,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const accessToken = await getAccessToken()
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers })
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: 'include',
+  })
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: string } | null
     throw new ApiError(body?.detail || `Request failed (${response.status})`, response.status)

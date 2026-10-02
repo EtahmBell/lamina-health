@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
+from backend import demo_workspace as demo_workspace_module
 from backend.agents import consult_network
 from backend.api import workspace as workspace_api
 from backend.main import app
@@ -17,6 +18,7 @@ from backend.workflow import WorkflowStore
 JUNG_NPI = "9900000001"
 WU_NPI = "9900000008"
 NPPES_NPI = "1234567890"
+WORKSPACE = "test-workspace"
 
 
 def _setup(tmp_path):
@@ -58,26 +60,29 @@ def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     store = WorkflowStore(tmp_path / "workflow.sqlite")
     providers = ProviderNetwork(NppesDirectory(tmp_path / "missing-nppes.sqlite"), store)
     monkeypatch.setattr(workspace_api, "workflow_store", store)
+    monkeypatch.setattr(demo_workspace_module, "workflow_store", store)
     monkeypatch.setattr(workspace_api, "provider_network", providers)
     yield TestClient(app)
 
 
 def test_adding_a_relationship_is_idempotent_and_removable(tmp_path):
     store, _ = _setup(tmp_path)
-    assert store.network_members() == []
-    first = store.add_network_member(JUNG_NPI)
-    again = store.add_network_member(JUNG_NPI)
+    assert store.network_members(WORKSPACE) == []
+    first = store.add_network_member(WORKSPACE, JUNG_NPI)
+    again = store.add_network_member(WORKSPACE, JUNG_NPI)
     assert first["added_at"] == again["added_at"], "re-adding keeps the original relationship"
-    assert [member["npi"] for member in store.network_members()] == [JUNG_NPI]
-    assert store.remove_network_member(JUNG_NPI) is True
-    assert store.remove_network_member(JUNG_NPI) is False
-    assert store.network_members() == []
+    assert [member["npi"] for member in store.network_members(WORKSPACE)] == [JUNG_NPI]
+    assert store.remove_network_member(WORKSPACE, JUNG_NPI) is True
+    assert store.remove_network_member(WORKSPACE, JUNG_NPI) is False
+    assert store.network_members(WORKSPACE) == []
 
 
 def test_membership_marks_a_node_without_creating_an_edge(tmp_path):
     store, providers = _setup(tmp_path)
-    store.add_network_member(WU_NPI)
-    network = project_agent_network(store.history(), providers, store.network_members())
+    store.add_network_member(WORKSPACE, WU_NPI)
+    network = project_agent_network(
+        store.history(WORKSPACE), providers, store.network_members(WORKSPACE)
+    )
     wu = next(node for node in network["nodes"] if node["npi"] == WU_NPI)
     assert wu["in_network"] is True
     assert wu["relationship"] is None, "a recorded relationship must never fabricate an edge"
@@ -92,9 +97,11 @@ def test_membership_marks_a_node_without_creating_an_edge(tmp_path):
 def test_added_nppes_physician_appears_without_a_graph_node(tmp_path):
     store = WorkflowStore(tmp_path / "workflow.sqlite")
     providers = _nppes_providers(tmp_path / "providers.sqlite", store)
-    store.add_network_member(NPPES_NPI)
+    store.add_network_member(WORKSPACE, NPPES_NPI)
 
-    network = project_agent_network(store.history(), providers, store.network_members())
+    network = project_agent_network(
+        store.history(WORKSPACE), providers, store.network_members(WORKSPACE)
+    )
 
     assert len(network["members"]) == 1
     member = network["members"][0]
@@ -107,14 +114,18 @@ def test_added_nppes_physician_appears_without_a_graph_node(tmp_path):
 
 def test_membership_does_not_alter_recorded_consultation_edges(tmp_path):
     store, providers = _setup(tmp_path)
-    baseline = project_agent_network(store.history(), providers)
-    store.add_network_member(WU_NPI)
-    after = project_agent_network(store.history(), providers, store.network_members())
+    baseline = project_agent_network(store.history(WORKSPACE), providers)
+    store.add_network_member(WORKSPACE, WU_NPI)
+    after = project_agent_network(
+        store.history(WORKSPACE), providers, store.network_members(WORKSPACE)
+    )
     assert [node["relationship"] for node in baseline["nodes"]] == [
         node["relationship"] for node in after["nodes"]
     ]
-    store.remove_network_member(WU_NPI)
-    removed = project_agent_network(store.history(), providers, store.network_members())
+    store.remove_network_member(WORKSPACE, WU_NPI)
+    removed = project_agent_network(
+        store.history(WORKSPACE), providers, store.network_members(WORKSPACE)
+    )
     assert [node["relationship"] for node in baseline["nodes"]] == [
         node["relationship"] for node in removed["nodes"]
     ]
@@ -122,16 +133,22 @@ def test_membership_does_not_alter_recorded_consultation_edges(tmp_path):
 
 def test_removing_manual_source_keeps_recommended_destination(tmp_path):
     store, providers = _setup(tmp_path)
-    record_id = store.completed(consult_network(PATIENTS[PRIMARY_PATIENT_ID], PHYSICIANS))
-    store.add_network_member(JUNG_NPI)
+    record_id = store.completed(
+        WORKSPACE, consult_network(PATIENTS[PRIMARY_PATIENT_ID], PHYSICIANS)
+    )
+    store.add_network_member(WORKSPACE, JUNG_NPI)
 
-    both = project_agent_network(store.history(), providers, store.network_members())
+    both = project_agent_network(
+        store.history(WORKSPACE), providers, store.network_members(WORKSPACE)
+    )
     jung = next(node for node in both["nodes"] if node["npi"] == JUNG_NPI)
     assert jung["in_network"] is True
     assert jung["relationship"]["last_recommendation_record_id"] == record_id
 
-    assert store.remove_network_member(JUNG_NPI) is True
-    recommended_only = project_agent_network(store.history(), providers, store.network_members())
+    assert store.remove_network_member(WORKSPACE, JUNG_NPI) is True
+    recommended_only = project_agent_network(
+        store.history(WORKSPACE), providers, store.network_members(WORKSPACE)
+    )
     jung = next(node for node in recommended_only["nodes"] if node["npi"] == JUNG_NPI)
     assert jung["in_network"] is False
     assert jung["relationship"]["recommended_count"] == 1
@@ -142,9 +159,9 @@ def test_membership_leaves_recommendation_output_and_activation_unchanged(tmp_pa
     before = consult_network(PATIENTS[PRIMARY_PATIENT_ID], PHYSICIANS)
     initial_status = providers.get(WU_NPI).agent.status
 
-    store.add_network_member(WU_NPI)
+    store.add_network_member(WORKSPACE, WU_NPI)
     after_add = consult_network(PATIENTS[PRIMARY_PATIENT_ID], PHYSICIANS)
-    store.remove_network_member(WU_NPI)
+    store.remove_network_member(WORKSPACE, WU_NPI)
     after_remove = consult_network(PATIENTS[PRIMARY_PATIENT_ID], PHYSICIANS)
 
     assert before.recommended_physician == after_add.recommended_physician
@@ -154,8 +171,10 @@ def test_membership_leaves_recommendation_output_and_activation_unchanged(tmp_pa
 
 def test_an_unresolvable_directory_record_is_reported_not_invented(tmp_path):
     store, providers = _setup(tmp_path)
-    store.add_network_member("1234567893")
-    network = project_agent_network(store.history(), providers, store.network_members())
+    store.add_network_member(WORKSPACE, "1234567893")
+    network = project_agent_network(
+        store.history(WORKSPACE), providers, store.network_members(WORKSPACE)
+    )
     member = network["members"][0]
     assert member["resolved"] is False
     assert member["status"] is None, "no activation state may be assumed for an unknown record"

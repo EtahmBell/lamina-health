@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from backend.agents import consult_network
+from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.fhir import MedplumError, create_clinical_data_source
 from backend.models import ConsultationRequest, ConsultationResult, PatientRecord
 from backend.synthetic_data import PATIENTS, PHYSICIANS_BY_PATIENT
@@ -24,21 +25,23 @@ def load_patient(patient_id: str) -> PatientRecord:
 
 
 @router.get("/patients", response_model=list[PatientRecord])
-def list_patients() -> list[PatientRecord]:
+def list_patients(_workspace_id: DemoWorkspace) -> list[PatientRecord]:
     return [load_patient(patient_id) for patient_id in PATIENTS]
 
 
 @router.get("/patients/{patient_id}", response_model=PatientRecord)
-def get_patient(patient_id: str) -> PatientRecord:
+def get_patient(patient_id: str, workspace_id: MutableDemoWorkspace) -> PatientRecord:
     patient = load_patient(patient_id)
-    workflow_store.opened(patient_id)
+    workflow_store.opened(workspace_id, patient_id)
     return patient
 
 
 @router.post("/patients/{patient_id}/consultations", response_model=ConsultationResult)
-def create_consultation(patient_id: str, request: ConsultationRequest) -> ConsultationResult:
+def create_consultation(
+    patient_id: str, request: ConsultationRequest, workspace_id: MutableDemoWorkspace
+) -> ConsultationResult:
     patient = load_patient(patient_id)
-    workflow_store.started(patient_id)
+    workflow_store.started(workspace_id, patient_id)
     result = consult_network(patient, PHYSICIANS_BY_PATIENT[patient_id], request.pcp_guidance)
-    workflow_store.completed(result)
+    workflow_store.completed(workspace_id, result)
     return result

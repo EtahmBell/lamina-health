@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.demo_identity import PCP_AGENT_ID, PCP_NAME
+from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.network_projection import project_agent_network
 from backend.provider_network import provider_network
 from backend.provider_network.service import ProviderNotFoundError
@@ -42,8 +43,8 @@ class NetworkMemberRequest(BaseModel):
 
 
 @router.get("/agent")
-def my_agent() -> dict:
-    saved = {item["key"]: item for item in workflow_store.preferences()}
+def my_agent(workspace_id: DemoWorkspace) -> dict:
+    saved = {item["key"]: item for item in workflow_store.preferences(workspace_id)}
     return {
         "id": PCP_AGENT_ID, "physician": PCP_NAME, "specialty": "Primary Care",
         "status": "active", "synthetic": True, "location": "Oakland, CA (synthetic demo)",
@@ -74,69 +75,75 @@ def my_agent() -> dict:
 
 
 @router.put("/agent/learnings/{key}")
-def update_learning(key: str, update: PreferenceUpdate) -> dict:
+def update_learning(
+    key: str, update: PreferenceUpdate, workspace_id: MutableDemoWorkspace
+) -> dict:
     if key not in LEARNINGS:
         raise HTTPException(404, "Unknown demo learning")
-    saved = {item["key"]: item for item in workflow_store.preferences()}
+    saved = {item["key"]: item for item in workflow_store.preferences(workspace_id)}
     statement = (update.statement or saved.get(key, {}).get("statement") or LEARNINGS[key]).strip()
     if update.action == "edit" and not update.statement:
         raise HTTPException(422, "Edited statement required")
     if not statement:
         raise HTTPException(422, "Statement cannot be empty")
     return workflow_store.update_preference(
-        key, statement, "confirmed" if update.action == "confirm" else (
+        workspace_id, key, statement, "confirmed" if update.action == "confirm" else (
             "rejected" if update.action == "reject" else "suggested"
         )
     )
 
 
 @router.get("/activity")
-def patient_activity() -> list[dict]:
-    return workflow_store.activity(list(PATIENTS))
+def patient_activity(workspace_id: DemoWorkspace) -> list[dict]:
+    return workflow_store.activity(workspace_id, list(PATIENTS))
 
 
 @router.post("/demo/reset/jordan")
-def reset_jordan_demo() -> dict:
+def reset_jordan_demo(workspace_id: MutableDemoWorkspace) -> dict:
     """Reset only the controlled Jordan synthetic case's Lamina-owned workflow state."""
-    return workflow_store.reset_demo_case(PRIMARY_PATIENT_ID)
+    return workflow_store.reset_demo_case(workspace_id, PRIMARY_PATIENT_ID)
 
 
 @router.get("/network")
-def agent_network() -> dict:
+def agent_network(workspace_id: DemoWorkspace) -> dict:
     return project_agent_network(
-        workflow_store.history(limit=200), provider_network, workflow_store.network_members()
+        workflow_store.history(workspace_id, limit=200),
+        provider_network,
+        workflow_store.network_members(workspace_id),
     )
 
 
 @router.get("/network/members")
-def network_members() -> list[dict]:
-    return workflow_store.network_members()
+def network_members(workspace_id: DemoWorkspace) -> list[dict]:
+    return workflow_store.network_members(workspace_id)
 
 
 @router.post("/network/members", status_code=201)
-def add_network_member(request: NetworkMemberRequest) -> dict:
+def add_network_member(
+    request: NetworkMemberRequest, workspace_id: MutableDemoWorkspace
+) -> dict:
     """Records a referral relationship. Agent activation state is untouched."""
     try:
         provider_network.get(request.npi)
     except ProviderNotFoundError as error:
         raise HTTPException(404, "Physician profile not found") from error
-    return workflow_store.add_network_member(request.npi)
+    return workflow_store.add_network_member(workspace_id, request.npi)
 
 
 @router.delete("/network/members/{npi}", status_code=204)
-def remove_network_member(npi: str) -> None:
-    if not workflow_store.remove_network_member(npi):
+def remove_network_member(npi: str, workspace_id: MutableDemoWorkspace) -> None:
+    if not workflow_store.remove_network_member(workspace_id, npi):
         raise HTTPException(404, "Physician is not in your network")
 
 
 @router.get("/consultations")
-def consultation_history() -> list[dict]:
-    return workflow_store.history()
+def consultation_history(workspace_id: DemoWorkspace) -> list[dict]:
+    return workflow_store.history(workspace_id)
 
 
 @router.get("/consultations/{record_id}")
-def saved_consultation(record_id: int) -> dict:
-    record = workflow_store.consultation(record_id)
+def saved_consultation(record_id: int, workspace_id: DemoWorkspace) -> dict:
+    record = workflow_store.consultation(workspace_id, record_id)
     if record is None:
         raise HTTPException(404, "Consultation record not found")
     return record
