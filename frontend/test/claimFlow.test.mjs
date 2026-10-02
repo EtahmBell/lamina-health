@@ -28,6 +28,27 @@ test('the Portal keeps Enter workspace primary and adds a secondary physician en
   assert.doesNotMatch(portal(), /Find your AI agent/i)
 })
 
+test('the Portal offers a quiet top-right Sign in for returning account holders', () => {
+  assert.match(app, /function PortalAccountControl/)
+  assert.match(app, /<PortalAccountControl navigate=\{navigate\} \/><SyntheticStatus \/><ProfileControl navigate=\{navigate\} \/>/, 'it sits in the existing top-right utility row, not competing with Enter workspace')
+  const control = slice(app, 'function PortalAccountControl', 'function ProductShell')
+  assert.match(control, /if \(!configured \|\| loading\) return null/, 'nothing renders while auth is unconfigured or still resolving')
+  assert.match(control, />Sign in</)
+})
+
+test('general sign-in (not from a specific claim) defaults to My physician identities', () => {
+  const control = slice(app, 'function PortalAccountControl', 'function ProductShell')
+  assert.match(control, /navigate\(signInPath\('\/claim\/my-identities'\)\)/)
+  const shellSignIn = slice(claim, 'function ClaimShell', 'function LifecycleStepper')
+  assert.match(shellSignIn, /navigate\(signInPath\('\/claim\/my-identities'\)\)/)
+})
+
+test('an authenticated visitor sees account access instead of Sign in, on the Portal and in the claim shell alike', () => {
+  const control = slice(app, 'function PortalAccountControl', 'function ProductShell')
+  assert.match(control, /user\s*\n?\s*\? <button className="text-button portal-account-link" onClick=\{\(\) => navigate\('\/claim\/my-identities'\)\}>My physician identities</)
+  assert.doesNotMatch(control, /PCP_NAME|Dr\. Lucy Saru/, 'the physician account is never rendered as Dr. Lucy Saru')
+})
+
 test('the Lucy demo route table is untouched', () => {
   assert.match(app, /if \(path === '\/home'\) return <HomePage/)
   assert.match(app, /if \(path === '\/patients'\) return <PatientSelector/)
@@ -50,12 +71,48 @@ test('a search result never exposes another claimant\'s identity', () => {
 
 /* --------------------------------------------------------- identity page */
 
-test('claiming while unauthenticated redirects to sign-in and preserves return context, never pre-creates a claim', () => {
+test('claiming while unauthenticated routes to sign-up by default, never pre-creates a claim', () => {
   const reservedBlock = identity().slice(identity().indexOf("status === 'reserved'"), identity().indexOf("status === 'claimed'"))
   assert.match(reservedBlock, /user\s*\n?\s*\? <button className="button-primary" disabled=\{busy\} onClick=\{\(\) => void claim\(\)\}/)
-  assert.match(reservedBlock, /navigate\(signInPath\(returnHere\)\)/)
-  assert.match(claim, /const signInPath = \(returnTo: string\) => `\/claim\/sign-in\?return=\$\{encodeURIComponent\(returnTo\)\}`/)
+  assert.match(reservedBlock, /navigate\(signUpPath\(returnHere\)\)/, 'a new visitor is assumed to need an account, not assumed to have one')
+  assert.doesNotMatch(reservedBlock, /navigate\(signInPath\(returnHere\)\)/, 'Claim this identity must not default to sign-in')
+  assert.match(claim, /export const signUpPath = \(returnTo: string\) => `\/claim\/sign-up\?return=\$\{encodeURIComponent\(returnTo\)\}`/)
   assert.doesNotMatch(reservedBlock.slice(0, reservedBlock.indexOf('user\n')), /createProviderClaim/)
+})
+
+test('claim signup shows the real physician identity being claimed', () => {
+  const signUp = slice(claim, 'export function SignUpPage', 'type OwnedClaim')
+  assert.match(signUp, /const claimingNpi = providerNpiFromReturn\(target\)/)
+  assert.match(signUp, /getProvider\(claimingNpi\)\.then\(setClaimingProfile\)/)
+  assert.match(signUp, /You're claiming/)
+  assert.match(signUp, /displayName\(claimingProfile\.display_name\)/)
+  assert.match(signUp, /claimingProfile\.specialty.*location\(claimingProfile\)/)
+  assert.match(signUp, /NPI \{claimingProfile\.npi\}/)
+  assert.match(signUp, /title=\{claimingNpi \? 'Create your Lamina account' : 'Create account'\}/)
+})
+
+test('a failed provider-context lookup never blocks account creation', () => {
+  const signUp = slice(claim, 'export function SignUpPage', 'type OwnedClaim')
+  assert.match(signUp, /\.catch\(\(\) => setClaimingProfile\(null\)\)/)
+})
+
+test('claim signup offers "Already have a Lamina account? Sign in" back to sign-in, preserving the return target', () => {
+  const signUp = slice(claim, 'export function SignUpPage', 'type OwnedClaim')
+  assert.match(signUp, /Already have a Lamina account\?/)
+  assert.match(signUp, /navigate\(signInPath\(target\)\)/)
+})
+
+test('a safe return target survives both the sign-up and sign-in round trip', () => {
+  const signIn = slice(claim, 'export function SignInPage', 'export function SignUpPage')
+  const signUp = slice(claim, 'export function SignUpPage', 'type OwnedClaim')
+  for (const page of [signIn, signUp]) {
+    assert.match(page, /const target = safeReturnPath\(params\.get\('return'\), '\/claim\/my-identities'\)/)
+    assert.match(page, /useEffect\(\(\) => \{ if \(user\) navigate\(target\) \}, \[user\]\)/)
+  }
+  /* sign-up's own "Sign in" link and sign-in's own "Create account" link both
+     carry the same target forward, so the identity is never dropped mid-flow */
+  assert.match(signUp, /navigate\(signInPath\(target\)\)/)
+  assert.match(signIn, /navigate\(signUpPath\(target\)\)/)
 })
 
 test('an authenticated owner can claim; the action calls the real claim endpoint', () => {
@@ -68,10 +125,25 @@ test('a claim the user does not own shows no action, never ownership metadata', 
   assert.doesNotMatch(claimedBlock, /auth_user_id|email|claimant/i)
 })
 
-test('submit verification is reachable only for the owner while claimed', () => {
+test('submit verification is reachable only for the owner while claimed, with an explicit "Verify your physician identity" step', () => {
   assert.match(identity(), /status === 'claimed' && profile\.claimed_by_me/)
   assert.match(identity(), /void submitVerification\(\)/)
   assert.match(claim, /submitProviderVerification\(profile\.my_claim_id as number\)/)
+  const claimedBlock = identity().slice(identity().indexOf("status === 'claimed' && profile.claimed_by_me"), identity().indexOf("status === 'claimed' && !profile.claimed_by_me"))
+  assert.match(claimedBlock, /Verify your physician identity/)
+  assert.match(claimedBlock, /Lamina must confirm that the person claiming this NPI is the physician associated with it\./)
+})
+
+test('email confirmation never implies physician verification; the two concepts stay visually distinct', () => {
+  const signUp = slice(claim, 'export function SignUpPage', 'type OwnedClaim')
+  assert.match(signUp, /Account created\. Check your email to confirm your account, then sign in\./)
+  assert.doesNotMatch(signUp, /physician.?(is )?verified/i, 'account/email copy must never claim physician verification')
+  const pendingBlock = identity().slice(identity().indexOf("status === 'verification_pending'"), identity().indexOf("status === 'verified'"))
+  assert.match(pendingBlock, /We're confirming your identity against professional provider information/)
+  assert.match(pendingBlock, /You can return here at any time\./)
+  /* the only path to an actually-verified lifecycle state is backend-driven:
+     real submission (NPPES, blocked) or the explicitly labelled demo path */
+  assert.doesNotMatch(claim, /signUp\([^)]*\)[\s\S]{0,200}verified/i)
 })
 
 test('a real NPPES identity has no demo-verify, activate, or skip control at verification_pending', () => {

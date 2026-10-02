@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
 import { consultNetwork, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, resetJordanDemo, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type Patient, type PatientActivity } from './api.ts'
-import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, SignUpPage } from './Claim.tsx'
+import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient, specialtiesConsulted } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
@@ -40,6 +40,17 @@ function ProfileControl({ navigate }: { navigate: Navigate }) {
   return <button className="profile-control" onClick={() => navigate('/profile')} aria-label="Open clinician profile"><span>LS</span><strong>{PCP_NAME}</strong></button>
 }
 
+/** A quiet utility for returning physician-account holders — distinct from
+ * Dr. Lucy Saru's demo-workspace identity, and never competing with Enter
+ * workspace. Renders nothing while auth is unconfigured or still loading. */
+function PortalAccountControl({ navigate }: { navigate: Navigate }) {
+  const { configured, loading, user } = useAuth()
+  if (!configured || loading) return null
+  return user
+    ? <button className="text-button portal-account-link" onClick={() => navigate('/claim/my-identities')}>My physician identities</button>
+    : <button className="text-button portal-account-link" onClick={() => navigate(signInPath('/claim/my-identities'))}>Sign in</button>
+}
+
 function ProductShell({ children, navigate, section }: { children: React.ReactNode; navigate: Navigate; section: string }) {
   return <div className="app-shell">
     <aside className="sidebar">
@@ -56,7 +67,7 @@ function ProductShell({ children, navigate, section }: { children: React.ReactNo
 
 function LandingPage({ navigate }: { navigate: Navigate }) {
   return <main className="landing-page">
-    <header className="landing-header"><Brand /><div className="landing-header-actions"><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>
+    <header className="landing-header"><Brand /><div className="landing-header-actions"><PortalAccountControl navigate={navigate} /><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>
     <section className="landing-content">
       <p className="eyebrow">Primary care workspace</p>
       <h1>{timeAwareGreeting(PCP_NAME)}</h1>

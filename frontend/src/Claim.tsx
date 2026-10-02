@@ -43,9 +43,12 @@ type Navigate = (path: string) => void
 const displayName = (value: string) => cleanName(physicianDisplayName(value))
 const initials = (name: string) => name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')
 const location = (profile: PhysicianNetworkProfile) => `${profile.city || 'Location not listed'}${profile.state ? `, ${profile.state}` : ''}`
-const providerPath = (npi: string) => `/claim/provider/${encodeURIComponent(npi)}`
-const signInPath = (returnTo: string) => `/claim/sign-in?return=${encodeURIComponent(returnTo)}`
-const signUpPath = (returnTo: string) => `/claim/sign-up?return=${encodeURIComponent(returnTo)}`
+export const providerPath = (npi: string) => `/claim/provider/${encodeURIComponent(npi)}`
+export const signInPath = (returnTo: string) => `/claim/sign-in?return=${encodeURIComponent(returnTo)}`
+export const signUpPath = (returnTo: string) => `/claim/sign-up?return=${encodeURIComponent(returnTo)}`
+/** A /claim/provider/:npi path embedded in a return target, so the sign-up
+ * screen can show what identity is being claimed without a second query param. */
+const providerNpiFromReturn = (returnTo: string) => returnTo.match(/^\/claim\/provider\/([^/?]+)/)?.[1] ?? null
 
 /** A claim/verification/activation action failed. Session expiry gets its own
  * calm recovery path instead of a raw error string. */
@@ -80,7 +83,7 @@ function ClaimShell({ children, navigate }: { children: React.ReactNode; navigat
           <span className="claim-account-chip" title={user.email ?? undefined}>{user.email ?? 'Account'}</span>
           <button className="text-button" onClick={() => void handleSignOut()}>Sign out</button>
         </>}
-        {configured && !loading && !user && <button className="text-button" onClick={() => navigate(signInPath('/claim'))}>Sign in</button>}
+        {configured && !loading && !user && <button className="text-button" onClick={() => navigate(signInPath('/claim/my-identities'))}>Sign in</button>}
       </nav>
     </header>
     <main className="claim-main page-shell">{children}</main>
@@ -218,14 +221,18 @@ export function ProviderIdentityPage({ npi, navigate, params }: { npi: string; n
           : authLoading
             ? <p className="muted-note">Checking your session…</p>
             : configured
-              ? <button className="button-primary" onClick={() => navigate(signInPath(returnHere))}>Claim this identity <span>→</span></button>
+              /* A new visitor clicking Claim is assumed to be a new Lamina user by
+               * default — route to account creation, not sign-in. Someone who
+               * already has an account can say so from that screen. */
+              ? <button className="button-primary" onClick={() => navigate(signUpPath(returnHere))}>Claim this identity <span>→</span></button>
               : <p className="muted-note">Authentication is not configured in this environment, so identities cannot be claimed yet.</p>
       )}
 
-      {status === 'claimed' && profile.claimed_by_me && <>
-        <p className="muted-note">Verification is required before a physician agent can be activated.</p>
+      {status === 'claimed' && profile.claimed_by_me && <div className="verify-identity-step">
+        <h3>Verify your physician identity</h3>
+        <p>Before a physician agent can be activated, Lamina must confirm that the person claiming this NPI is the physician associated with it.</p>
         <button className="button-primary" disabled={busy} onClick={() => void submitVerification()}>{busy ? 'Submitting…' : 'Submit for verification'} <span>→</span></button>
-      </>}
+      </div>}
       {status === 'claimed' && !profile.claimed_by_me && <p className="muted-note">This identity has an active claim in progress.</p>}
 
       {status === 'verification_pending' && profile.claimed_by_me && (
@@ -236,7 +243,7 @@ export function ProviderIdentityPage({ npi, navigate, params }: { npi: string; n
           </div>
           : <div className="production-verification">
             <strong>Verification pending</strong>
-            <p>Lamina must verify that you are the physician associated with this NPI before the agent can be activated.</p>
+            <p>We're confirming your identity against professional provider information before your physician agent can be activated. You can return here at any time.</p>
             <p>Real physician verification is not yet connected in this demonstration.</p>
           </div>
       )}
@@ -324,7 +331,12 @@ export function SignUpPage({ navigate, params }: { navigate: Navigate; params: U
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const target = safeReturnPath(params.get('return'), '/claim/my-identities')
+  const claimingNpi = providerNpiFromReturn(target)
+  const [claimingProfile, setClaimingProfile] = useState<PhysicianNetworkProfile | null>(null)
   useEffect(() => { if (user) navigate(target) }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** Purely contextual — shows the real physician identity being claimed. A
+   * failed lookup just omits the context block; it never blocks sign-up. */
+  useEffect(() => { if (claimingNpi) getProvider(claimingNpi).then(setClaimingProfile).catch(() => setClaimingProfile(null)) }, [claimingNpi])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError(''); setInfo('')
@@ -332,16 +344,24 @@ export function SignUpPage({ navigate, params }: { navigate: Navigate; params: U
     setBusy(true)
     try {
       const result = await signUp(email, password)
+      /* Email confirmation proves ownership of this login email only — it is
+       * never physician verification, and that distinction stays explicit. */
       if (result.session) navigate(target)
-      else setInfo('Check your email to confirm your account, then sign in.')
+      else setInfo('Account created. Check your email to confirm your account, then sign in.')
     }
     catch (err) { setError(err instanceof Error ? err.message : 'Account creation failed') }
     finally { setBusy(false) }
   }
 
-  return <AuthCard navigate={navigate} eyebrow="Physician account" title="Create account" footer={
-    <p className="auth-switch">Already have an account? <button className="text-button" onClick={() => navigate(signInPath(target))}>Sign in →</button></p>
+  return <AuthCard navigate={navigate} eyebrow="Physician account" title={claimingNpi ? 'Create your Lamina account' : 'Create account'} footer={
+    <p className="auth-switch">Already have a Lamina account? <button className="text-button" onClick={() => navigate(signInPath(target))}>Sign in →</button></p>
   }>
+    {claimingProfile && <div className="claim-context" aria-label="Physician identity being claimed">
+      <p className="eyebrow">You're claiming</p>
+      <strong>{displayName(claimingProfile.display_name)}</strong>
+      <span>{claimingProfile.specialty} · {location(claimingProfile)}</span>
+      <small>NPI {claimingProfile.npi}</small>
+    </div>}
     {!configured && <p className="muted-note">Authentication is not configured in this environment.</p>}
     {configured && <form className="auth-form" onSubmit={submit}>
       <label><span>Email</span><input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>

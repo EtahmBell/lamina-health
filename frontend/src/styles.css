@@ -856,3 +856,17 @@ button.lam-row:hover { background: #fff9f1; }
 .auth-switch .text-button { margin-left: 4px; }
 
 .claim-link { color: var(--text-secondary); }
+
+/* Claim-correction pass: sign-up-by-default with visible provider context,
+   a clearer verify-your-identity step, and a quiet portal account utility. */
+.portal-account-link { color: var(--text-secondary); font-size: .66rem; }
+.portal-account-link:hover { color: var(--accent-hover); }
+
+.claim-context { margin: -4px 0 22px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; background: #f8f3eb; padding: 13px 15px; }
+.claim-context .eyebrow { margin: 0 0 5px; }
+.claim-context strong { display: block; font-family: var(--font-display); font-size: .92rem; }
+.claim-context span { display: block; margin-top: 3px; color: var(--clinical); font-size: .68rem; }
+.claim-context small { display: block; margin-top: 3px; color: var(--text-secondary); font-size: .58rem; }
+
+.verify-identity-step h3 { margin: 0 0 7px; color: var(--clinical); font-family: var(--font-ui); font-size: .62rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.verify-identity-step p { margin: 0 0 14px; color: var(--text-secondary); font-size: var(--type-meta); line-height: 1.5; max-width: 54ch; }
