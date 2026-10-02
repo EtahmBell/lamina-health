@@ -84,7 +84,7 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 .directory-search-panel { display: grid; grid-template-columns: 1.35fr 1fr 1fr auto; align-items: end; gap: 10px; margin-top: 18px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); padding: 17px; box-shadow: var(--shadow-soft); }.directory-search-panel label > span, .preferences-form label > span { display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: .57rem; font-weight: 600; letter-spacing: .04em; }.directory-search-panel input, .preferences-form input, .preferences-form textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fffdf9; padding: 0 11px; outline: none; color: var(--text-primary); font: inherit; font-size: .69rem; }.directory-search-panel input, .preferences-form input { height: 41px; }.directory-search-panel input:focus, .preferences-form input:focus, .preferences-form textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgb(184 92 50 / 10%); }.directory-search-panel .button-primary { height: 41px; white-space: nowrap; }
 .activation-demo-banner { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 16px; border: 1px solid rgb(63 107 85 / 24%); border-radius: 12px; background: #edf3ee; padding: 15px 17px; }.activation-demo-banner > div { display: flex; align-items: center; gap: 13px; }.activation-demo-banner small, .activation-demo-banner strong, .activation-demo-banner p { display: block; }.activation-demo-banner small { color: var(--success); font-size: .53rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }.activation-demo-banner strong { margin-top: 3px; color: var(--clinical); font-family: var(--font-display); font-size: .86rem; }.activation-demo-banner p { margin: 3px 0 0; color: var(--text-secondary); font-size: .59rem; line-height: 1.4; }
 .directory-results-heading { display: flex; align-items: flex-end; justify-content: space-between; margin: 32px 2px 11px; }.directory-results-heading h2 { margin: 0; font-size: 1.2rem; }.directory-results-heading > span { color: var(--text-secondary); font-size: .58rem; text-transform: uppercase; }.directory-avatar { width: 46px; height: 46px; display: grid; flex: 0 0 46px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--clinical); box-shadow: 0 0 0 1px var(--border); color: white; font-family: var(--font-display); font-size: .67rem; font-weight: 700; }.directory-avatar.large { width: 72px; height: 72px; flex-basis: 72px; font-size: .95rem; }
-.agent-status-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; background: #f2f0eb; padding: 6px 8px; color: var(--text-secondary); font-size: .55rem; font-weight: 600; white-space: nowrap; }.agent-status-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); }.agent-status-badge.verification_pending { background: #f8eddf; color: #8a571f; }.agent-status-badge.verification_pending i { background: var(--warning); }.agent-status-badge.verified, .agent-status-badge.active { border-color: rgb(63 107 85 / 25%); background: #edf3ee; color: var(--success); }.agent-status-badge.verified i, .agent-status-badge.active i { background: var(--success); }.agent-status-badge.disabled { background: #f4e8e5; color: var(--danger); }.directory-loading { min-height: 240px; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--text-secondary); font-size: .68rem; }
+.agent-status-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; background: #f2f0eb; padding: 6px 8px; color: var(--text-secondary); font-size: .55rem; font-weight: 600; white-space: nowrap; }.agent-status-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); }.agent-status-badge.verification_pending { background: #f8eddf; color: #8a571f; }.agent-status-badge.claimed { border-color: rgb(184 92 50 / 25%); background: #fdf3e8; color: var(--accent-hover); }.agent-status-badge.claimed i { background: var(--accent); }.agent-status-badge.verification_pending i { background: var(--warning); }.agent-status-badge.verified, .agent-status-badge.active { border-color: rgb(63 107 85 / 25%); background: #edf3ee; color: var(--success); }.agent-status-badge.verified i, .agent-status-badge.active i { background: var(--success); }.agent-status-badge.disabled { background: #f4e8e5; color: var(--danger); }.directory-loading { min-height: 240px; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--text-secondary); font-size: .68rem; }
 .provider-profile-hero { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 22px; }.profile-identity { display: flex; align-items: center; gap: 17px; }.profile-identity h1 { font-size: clamp(2rem, 4vw, 3.1rem); }.profile-identity p:last-child { margin: 7px 0 0; color: var(--clinical); font-size: .75rem; font-weight: 600; }
 .profile-facts { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 25px; border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-soft); }.profile-facts > div { padding: 15px; }.profile-facts > div + div { border-left: 1px solid var(--border); }.profile-facts span, .profile-facts strong { display: block; }.profile-facts span { color: var(--text-secondary); font-size: .53rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }.profile-facts strong { margin-top: 5px; color: var(--clinical); font-family: var(--font-display); font-size: .76rem; line-height: 1.4; }.profile-provenance { margin-top: 11px; border-left: 3px solid var(--clinical); background: #f2f0eb; padding: 11px 14px; }.profile-provenance.synthetic { border-left-color: var(--success); background: #edf3ee; }.profile-provenance strong { color: var(--clinical); font-size: .63rem; }.profile-provenance p { margin: 3px 0 0; color: var(--text-secondary); font-size: .59rem; line-height: 1.4; }
 .agent-activation-card { margin-top: 20px; border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 15px; background: var(--surface); padding: 23px; box-shadow: var(--shadow-soft); }.agent-activation-card > header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }.agent-activation-card header h2, .agent-activation-card header p { margin: 0; }.agent-activation-card header h2 { font-size: 1.5rem; }.agent-activation-card header p:last-child { margin-top: 5px; color: var(--text-secondary); font-size: .67rem; }.agent-activation-card header .directory-network-glyph { width: 58px; height: 58px; flex-basis: 58px; }.agent-activation-card header .directory-network-glyph::before { inset: 15px; }.agent-activation-card header .directory-network-glyph::after { inset: 22px; }.agent-activation-card header .directory-network-glyph i:nth-child(1) { top: 9px; left: 25px; }.agent-activation-card header .directory-network-glyph i:nth-child(2) { top: 25px; right: 9px; }.agent-activation-card header .directory-network-glyph i:nth-child(3) { bottom: 9px; left: 25px; }.agent-activation-card header .directory-network-glyph i:nth-child(4) { top: 25px; left: 9px; }.agent-activation-card header .directory-network-glyph b { top: 25px; left: 25px; }
@@ -800,3 +800,59 @@ button.lam-row:hover { background: #fff9f1; }
   .graph-filter button { transition: none; }
   .agent-network-node { animation: none; }
 }
+
+/* Pass 2.2B: physician identity discovery, claim, verification and activation.
+   A separate product pathway from the public unauthenticated Lucy demo — its
+   own lightweight shell, never the clinical-workspace sidebar. */
+
+.physician-identity-entry { margin-top: 22px; border: 1px solid var(--border); border-radius: 12px; background: rgb(255 252 247 / 82%); padding: 13px 22px; color: var(--clinical); cursor: pointer; text-align: center; box-shadow: var(--shadow-soft); }
+.physician-identity-entry:hover { border-color: rgb(184 92 50 / 45%); background: #fff9f1; }
+.physician-identity-entry span { display: block; color: var(--text-secondary); font-size: .62rem; }
+.physician-identity-entry strong { display: block; margin-top: 4px; font-family: var(--font-display); font-weight: 600; font-size: .82rem; }
+.physician-identity-entry strong b { margin-left: 5px; color: var(--accent); font-weight: 700; }
+
+.claim-shell { min-height: 100vh; background: var(--background); }
+.claim-header { display: flex; align-items: center; justify-content: space-between; height: 72px; padding: 0 38px; border-bottom: 1px solid rgb(216 210 199 / 70%); background: var(--surface); }
+.claim-header-actions { display: flex; align-items: center; gap: 16px; }
+.claim-auth-status { color: var(--text-secondary); font-size: .62rem; }
+.claim-account-chip { border: 1px solid var(--border); border-radius: 999px; background: #f2f0eb; padding: 5px 11px; color: var(--clinical); font-size: .64rem; font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.claim-main { padding-top: 40px; }
+
+/* Lifecycle status + stepper, reusing the existing activation-steps grammar
+   with Identity/Claim/Verification/Agent semantics. */
+.provider-identity-hero { display: flex; align-items: center; gap: 18px; margin-bottom: 22px; }
+.lamina-identity-card { border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 15px; background: var(--surface); padding: 23px; box-shadow: var(--shadow-soft); }
+.lamina-identity-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.lamina-identity-card > header h2 { margin: 3px 0 0; font-size: 1.4rem; }
+.lamina-identity-card > header p:last-child { margin: 6px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; max-width: 54ch; }
+.lamina-identity-card .error-banner { margin-top: 16px; }
+
+/* Verified-and-owned review surface: identity recap, agent mark, then activation. */
+.agent-review { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 18px; }
+.agent-review h3 { margin: 18px 0 9px; color: var(--clinical); font-family: var(--font-ui); font-size: .62rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.agent-review h3:first-child { margin-top: 0; }
+.agent-review dl { display: grid; gap: 0; margin: 0; }
+.agent-review dl > div { display: grid; grid-template-columns: minmax(120px, 30%) minmax(0, 1fr); gap: 14px; padding: 9px 2px; }
+.agent-review dl > div + div { border-top: 1px solid rgb(222 216 206 / 60%); }
+.agent-review dt { color: var(--text-secondary); font-size: var(--type-meta); }
+.agent-review dd { margin: 0; color: var(--clinical); font-size: var(--type-body); }
+.agent-review-mark { display: flex; align-items: center; gap: 13px; border: 1px solid var(--border); border-radius: 11px; background: #f8f3eb; padding: 13px 15px; }
+.agent-review-mark strong { display: block; font-family: var(--font-display); font-size: .86rem; }
+.agent-review-mark span { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .6rem; }
+.agent-review ul { margin: 0; padding-left: 18px; color: var(--clinical); font-size: var(--type-body); line-height: 1.8; }
+.agent-review > .button-primary { margin-top: 18px; }
+.agent-account-action { margin-top: 15px; }
+
+/* Auth forms: restrained, Lamina-native, never a consumer-SaaS template. */
+.auth-card { max-width: 400px; margin: 10vh auto 0; text-align: left; }
+.auth-card .eyebrow { margin: 0 0 6px; }
+.auth-card h1 { margin: 0 0 24px; font-size: 2.1rem; }
+.auth-form { display: grid; gap: 15px; }
+.auth-form label > span { display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: .6rem; font-weight: 600; letter-spacing: .04em; }
+.auth-form input { width: 100%; height: 44px; border: 1px solid var(--border); border-radius: 9px; background: #fffdf9; padding: 0 13px; outline: none; color: var(--text-primary); font: inherit; font-size: .76rem; }
+.auth-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgb(184 92 50 / 10%); }
+.auth-form .button-primary { justify-content: center; margin-top: 4px; }
+.auth-switch { margin-top: 20px; color: var(--text-secondary); font-size: .68rem; }
+.auth-switch .text-button { margin-left: 4px; }
+
+.claim-link { color: var(--text-secondary); }

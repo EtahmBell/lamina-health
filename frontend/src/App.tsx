@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
-import { LaminaMark } from './LaminaMark.tsx'
+import { useAuth } from './AuthProvider.tsx'
 import { consultNetwork, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, resetJordanDemo, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type Patient, type PatientActivity } from './api.ts'
+import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, SignUpPage } from './Claim.tsx'
+import { LaminaMark } from './LaminaMark.tsx'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient, specialtiesConsulted } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
@@ -64,6 +66,10 @@ function LandingPage({ navigate }: { navigate: Navigate }) {
         <NetworkMark active />
         <span className="landing-agent-label">YOUR AGENT · ACTIVE</span>
         <strong>Enter workspace</strong><small>Current work and recent agent activity</small>
+      </button>
+      <button className="physician-identity-entry" onClick={() => navigate('/claim')}>
+        <span>Are you a physician?</span>
+        <strong>Find your Lamina identity <b>→</b></strong>
       </button>
     </section>
     <p className="landing-footnote">Lamina helps primary care teams find the right specialist, required workup, and appropriate access.</p>
@@ -272,6 +278,7 @@ function DemoResetControl() {
 }
 
 function ProfilePage({ navigate }: { navigate: Navigate }) {
+  const { user } = useAuth()
   const [agent, setAgent] = useState<MyAgent | null>(null)
   const [error, setError] = useState('')
   useEffect(() => { getMyAgent().then(setAgent).catch((err: Error) => setError(err.message)) }, [])
@@ -317,6 +324,7 @@ function ProfilePage({ navigate }: { navigate: Navigate }) {
         <dl><div><dt>Environment</dt><dd>Synthetic data · no PHI</dd></div></dl>
         <DemoResetControl />
       </section>
+      {user && <p className="muted-note profile-identity-link">This workspace's Dr. Lucy Saru is a separate concept from your signed-in physician account. <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities →</button></p>}
       <p className="muted-note">Read-only for this demonstration. Account settings, credentialing, and production practice verification are not implemented.</p>
     </>}
   </main></ProductShell>
@@ -578,6 +586,12 @@ export default function App() {
   if (historyPatientId) return <PatientConsultationsPage patientId={historyPatientId} navigate={navigate} />
   const recordId = path.match(/^\/consultations\/(\d+)$/)?.[1]
   if (recordId) return <ConsultationRecordPage id={Number(recordId)} focusEventId={params.get('event')} navigate={navigate} />
+  if (path === '/claim') return <PhysicianIdentitySearchPage navigate={navigate} />
+  if (path === '/claim/my-identities') return <MyIdentitiesPage navigate={navigate} />
+  if (path === '/claim/sign-in') return <SignInPage navigate={navigate} params={params} />
+  if (path === '/claim/sign-up') return <SignUpPage navigate={navigate} params={params} />
+  const claimNpi = path.match(/^\/claim\/provider\/([^/]+)$/)?.[1]
+  if (claimNpi) return <ProviderIdentityPage npi={claimNpi} navigate={navigate} params={params} />
   if (path === '/network') return <ProductShell navigate={navigate} section="network"><PhysicianDirectoryPage navigate={navigate} /></ProductShell>
   const networkNpi = path.match(/^\/network\/([^/]+)$/)?.[1]
   if (networkNpi) return <ProductShell navigate={navigate} section="network"><PhysicianProfilePage npi={networkNpi} navigate={navigate} /></ProductShell>

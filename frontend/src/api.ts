@@ -104,6 +104,19 @@ export type AgentNetwork = {
   record_count: number; relationship_source: string; status_note: string
 }
 
+/** Carries the HTTP status alongside the backend's `detail` message, so claim
+ * screens can tell 401 (sign in again) apart from 409 (conflict) apart from a
+ * generic failure — without the frontend re-deriving any state the backend
+ * already decided. */
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const accessToken = await getAccessToken()
@@ -111,7 +124,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: string } | null
-    throw new Error(body?.detail || `Request failed (${response.status})`)
+    throw new ApiError(body?.detail || `Request failed (${response.status})`, response.status)
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>

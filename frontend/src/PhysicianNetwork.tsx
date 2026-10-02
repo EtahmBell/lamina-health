@@ -1,17 +1,11 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
 import { LaminaMark } from './LaminaMark.tsx'
 import {
-  activateProvider,
   addNetworkMember,
-  claimProvider,
   getAgentNetwork,
   getProvider,
   removeNetworkMember,
-  saveProviderPreferences,
   searchProviders,
-  submitProviderVerificationForNpi,
-  verifyDemoProvider,
-  type AgentPreferences,
   type AgentNetwork,
   type AgentStatus,
   type NetworkAgent,
@@ -56,6 +50,7 @@ function DirectoryResult({ profile, navigate, inNetwork, busy, onAdd, onRemove }
         ? <><span className="relationship-chip">In your network</span><button className="text-button quiet-remove" disabled={busy} onClick={onRemove}>Remove</button></>
         : <button className="button-secondary add-to-network" disabled={busy} onClick={onAdd}>Add to my network <span>→</span></button>}
       <button className="text-button" onClick={() => navigate(`/network/${profile.npi}`)}>View profile →</button>
+      {profile.agent.status === 'reserved' && profile.claimable && <button className="text-button claim-link" onClick={() => navigate(`/claim/provider/${encodeURIComponent(profile.npi)}`)}>Claim this identity →</button>}
     </span>
   </div>
 }
@@ -218,23 +213,23 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
   </main>
 }
 
-const splitList = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean)
-const joinList = (value: string[]) => value.join(', ')
-
+/**
+ * A read-only Physician Network context view. Claiming, verification and
+ * activation all happen in the one canonical identity flow at /claim — see
+ * Claim.tsx. This page only links into it (§31/§32: one claim experience,
+ * never a second one built inside Physician Network).
+ */
 export function PhysicianProfilePage({ npi, navigate }: { npi: string; navigate: Navigate }) {
   const [profile, setProfile] = useState<PhysicianNetworkProfile | null>(null)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [confirmed, setConfirmed] = useState(false)
-  const [draft, setDraft] = useState<AgentPreferences>({ areas_of_focus: ['Resistant hypertension', 'Progressive CKD'], cases_accepted: ['Stage 3–4 CKD', 'Resistant hypertension'], cases_redirected: ['Dialysis access surgery'], preferred_pre_referral_workup: ['BMP', 'UPCR'], notes: '' })
 
-  useEffect(() => { getProvider(npi).then((result) => { setProfile(result); setConfirmed(result.agent.practice_confirmed); if (result.agent.preferences) setDraft(result.agent.preferences) }).catch((loadError: Error) => setError(loadError.message)) }, [npi])
-  const act = async (action: () => Promise<PhysicianNetworkProfile>) => { setBusy(true); setError(null); try { setProfile(await action()) } catch (actionError) { setError(actionError instanceof Error ? actionError.message : 'Action failed') } finally { setBusy(false) } }
+  useEffect(() => { getProvider(npi).then(setProfile).catch((loadError: Error) => setError(loadError.message)) }, [npi])
   if (!profile) return <main className="page-shell physician-profile-page"><button className="text-button back-link" onClick={() => navigate('/network')}>← Physician Network</button>{error ? <div className="error-banner">{error}</div> : <div className="directory-loading"><NetworkGlyph active /><p>Opening physician profile…</p></div>}</main>
 
   const synthetic = profile.source === 'SYNTHETIC'
   const copy = statusCopy[profile.agent.status]
   const name = physicianDisplayName(profile.display_name)
+  const claimPath = `/claim/provider/${encodeURIComponent(profile.npi)}`
   return <main className="page-shell physician-profile-page">
     <button className="text-button back-link" onClick={() => navigate('/network')}>← Physician Network</button>
     <section className="provider-profile-hero"><div className="profile-identity"><span className="directory-avatar large">{name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')}</span><div><p className="eyebrow">{synthetic ? 'Controlled synthetic physician' : 'NPPES physician profile'}</p><h1>{name}</h1><p>{profile.specialty}</p></div></div><StatusBadge status={profile.agent.status} /></section>
@@ -243,20 +238,10 @@ export function PhysicianProfilePage({ npi, navigate }: { npi: string; navigate:
     {error && <div className="error-banner" role="alert">{error}</div>}
 
     <section className="agent-activation-card"><header><div><p className="eyebrow">Lamina Agent</p><h2>{copy.label}</h2><p>{copy.detail}</p></div><NetworkGlyph active={profile.agent.status === 'active'} /></header>
-      {profile.agent.status === 'reserved' && <p className="reserved-agent-explanation">{synthetic ? 'This controlled synthetic physician has a reserved agent profile. The demo claim flow lets you verify and configure how it represents its practice.' : 'This public directory identity has a reserved Lamina agent, but the physician has not joined, activated, or authorised it. Production identity verification is not available in this demo.'}</p>}
-      <ol className="activation-steps"><li className={profile.agent.status !== 'reserved' ? 'complete' : 'current'}><span>1</span><div><strong>Claim profile</strong><small>Begin an identity claim</small></div></li><li className={['verified', 'active', 'disabled'].includes(profile.agent.status) ? 'complete' : ['claimed', 'verification_pending'].includes(profile.agent.status) ? 'current' : ''}><span>2</span><div><strong>Verify identity</strong><small>{synthetic ? 'Synthetic demo verification' : 'Production verification required'}</small></div></li><li className={profile.agent.practice_confirmed ? 'complete' : profile.agent.status === 'verified' ? 'current' : ''}><span>3</span><div><strong>Practice & preferences</strong><small>Physician-controlled settings</small></div></li><li className={profile.agent.status === 'active' ? 'complete' : ''}><span>4</span><div><strong>Activate Agent</strong><small>Enable the configured identity</small></div></li></ol>
-
-      {profile.agent.status === 'reserved' && <button className="button-primary" disabled={busy} onClick={() => void act(() => claimProvider(npi))}>{synthetic ? 'Start demo claim' : 'Start profile claim'} <span>→</span></button>}
-      {profile.agent.status === 'claimed' && profile.claimed_by_me && <button className="button-primary" disabled={busy} onClick={() => void act(() => submitProviderVerificationForNpi(npi))}>Submit verification <span>→</span></button>}
-      {profile.agent.status === 'verification_pending' && synthetic && <div className="demo-verification"><p><strong>Demo verification only.</strong> No credentialing or real identity check is performed.</p><button className="button-primary" disabled={busy} onClick={() => void act(() => verifyDemoProvider(npi))}>Verify synthetic identity <span>→</span></button></div>}
-      {profile.agent.status === 'verification_pending' && !synthetic && <div className="production-verification"><strong>Verification request recorded</strong><p>This public NPPES identity remains unverified. Production identity verification is intentionally not implemented in this demo.</p><button className="button-secondary" onClick={() => navigate('/network/9900000001')}>Use synthetic activation demo</button></div>}
-      {profile.agent.status === 'verified' && <form className="preferences-form" onSubmit={(event) => { event.preventDefault(); void act(() => saveProviderPreferences(npi, { ...draft, practice_confirmed: confirmed })) }}><h3>Configure physician preferences</h3><p>These structured preferences describe practice fit; they are not automatically applied to national matching.</p><label className="confirm-practice"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span><strong>Confirm practice information</strong><small>{profile.organization || profile.city}, {profile.state}</small></span></label><PreferenceField label="Areas of focus" value={joinList(draft.areas_of_focus)} onChange={(value) => setDraft({ ...draft, areas_of_focus: splitList(value) })} /><PreferenceField label="Cases accepted" value={joinList(draft.cases_accepted)} onChange={(value) => setDraft({ ...draft, cases_accepted: splitList(value) })} /><PreferenceField label="Cases redirected" value={joinList(draft.cases_redirected)} onChange={(value) => setDraft({ ...draft, cases_redirected: splitList(value) })} /><PreferenceField label="Preferred pre-referral workup" value={joinList(draft.preferred_pre_referral_workup)} onChange={(value) => setDraft({ ...draft, preferred_pre_referral_workup: splitList(value) })} /><label><span>Optional notes</span><textarea value={draft.notes} maxLength={500} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} placeholder="Anything referring clinicians should know" /></label><button className="button-primary" disabled={busy || !confirmed || !draft.areas_of_focus.length}>Save preferences <span>→</span></button></form>}
-      {profile.agent.status === 'verified' && profile.agent.preferences && <div className="activate-ready"><span>✓</span><div><strong>Configuration saved</strong><p>Practice information and structured preferences are ready.</p></div><button className="button-primary" disabled={busy} onClick={() => void act(() => activateProvider(npi))}>Activate Agent <span>→</span></button></div>}
-      {profile.agent.status === 'active' && profile.agent.preferences && <ActivePreferences preferences={profile.agent.preferences} />}
+      {profile.agent.status === 'reserved' && profile.claimable
+        ? <button className="button-primary" onClick={() => navigate(claimPath)}>Claim this identity <span>→</span></button>
+        : <button className="button-secondary" onClick={() => navigate(claimPath)}>{profile.claimed_by_me ? 'Manage your claim' : 'View claim status'} <span>→</span></button>}
     </section>
     <section className="consult-boundary-card"><div><p className="eyebrow">Clinical network boundary</p><h2>{profile.consult_eligible ? 'Controlled consult identity' : 'Not eligible for Consult Network'}</h2><p>{profile.consult_eligible ? 'This synthetic physician’s richer practice footprint is already used in the Jordan Lee demo.' : 'National NPPES records are directory identities only and are not candidates for clinical recommendation.'}</p></div><button className="button-secondary" onClick={() => navigate('/patients/patient-ckd-htn-001')}>Return to Consult Network</button></section>
   </main>
 }
-
-function PreferenceField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label><span>{label} <em>Comma separated</em></span><input value={value} onChange={(event) => onChange(event.target.value)} /></label> }
-function ActivePreferences({ preferences }: { preferences: AgentPreferences }) { return <div className="active-preferences"><div className="activation-success"><span>✓</span><div><strong>Physician agent active</strong><p>Activated locally for this synthetic demonstration.</p></div></div><div className="preference-summary"><div><span>Areas of focus</span><strong>{preferences.areas_of_focus.join(' · ')}</strong></div><div><span>Cases accepted</span><strong>{preferences.cases_accepted.join(' · ') || 'Not specified'}</strong></div><div><span>Cases redirected</span><strong>{preferences.cases_redirected.join(' · ') || 'Not specified'}</strong></div><div><span>Pre-referral workup</span><strong>{preferences.preferred_pre_referral_workup.join(' · ') || 'Not specified'}</strong></div>{preferences.notes && <div className="wide"><span>Notes</span><strong>{preferences.notes}</strong></div>}</div></div> }
