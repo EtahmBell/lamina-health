@@ -22,7 +22,7 @@ test('the agent identity hero sits before optional guidance in source order', ()
 
 test('the primary CTA sits in the hero row and is enabled with empty optional context', () => {
   const page = patientPage()
-  assert.match(page, /network-hero[\s\S]*consult-button consult-button-hero[\s\S]*disabled=\{consulting\}[\s\S]*Consult network for referral/)
+  assert.match(page, /network-hero[\s\S]*consult-button consult-button-hero[\s\S]*disabled=\{consulting\}[\s\S]*Consult network[\s\S]*for referral/)
   assert.doesNotMatch(page, /disabled=\{consulting \|\| !context/, 'the CTA is never gated on the optional field having a value')
 })
 

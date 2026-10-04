@@ -561,7 +561,7 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
       : <section className="network-action brief-action">
         <div className="network-hero">
           <div className="network-copy"><NetworkMark active={consulting} resolved={Boolean(consultation)} /><div><p className="eyebrow">{PCP_AGENT_NAME}</p><h2>{priorConsultation ? 'Ready for another network consultation.' : 'Ready for network consultation.'}</h2>{!priorConsultation && <p>Consult the physician-agent network to identify an appropriate referral destination and required next steps.</p>}</div></div>
-          <button className="consult-button consult-button-hero" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button>
+          <button className="consult-button consult-button-hero" disabled={consulting} onClick={runConsult}>{consulting ? <>Consulting… <span className="consult-button-arrow">→</span></> : <>Consult network <span className="consult-button-tail">for referral<span className="consult-button-arrow">→</span></span></>}</button>
         </div>
         <div className="network-optional">
           <p className="optional-guidance-label">Optional guidance</p>

@@ -931,7 +931,11 @@ button.lam-row:hover { background: #fff9f1; }
 .network-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .brief-action .network-copy { align-items: flex-start; }
 .brief-action .network-copy h2 { font-size: 1.3rem; }
-.consult-button-hero { min-width: 238px; padding: 16px 22px; font-size: .92rem; box-shadow: 0 10px 26px rgb(184 92 50 / 20%); }
+/* A single inline text flow (not flex space-between) so the arrow stays
+   glued to "referral" and the only breakable space is after "network". */
+.consult-button-hero { display: block; flex-shrink: 0; width: auto; min-width: 0; max-width: 100%; padding: 15px 26px; font-size: 1.0625rem; line-height: 1.35; text-align: center; white-space: normal; box-shadow: 0 10px 26px rgb(184 92 50 / 20%); }
+.consult-button-tail { white-space: nowrap; }
+.consult-button-arrow { display: inline-block; margin-left: 16px; }
 
 /* Optional guidance reads as a secondary, clearly-labeled enhancement layer
    below the hero, not a second setup step the clinician must pass through. */
@@ -959,5 +963,5 @@ button.lam-row:hover { background: #fff9f1; }
 
 @media (max-width: 700px) {
   .network-hero { flex-direction: column; align-items: stretch; gap: 16px; }
-  .consult-button-hero { width: 100%; justify-content: center; }
+  .consult-button-hero { width: 100%; }
 }
