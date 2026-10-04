@@ -51,20 +51,19 @@ test('the never-consulted banner explains why the network is being consulted', (
 /* ------------------------------------------------------------------- §5 */
 
 test('optional-context suggestion chips are derived only from real patient fields', () => {
-  assert.match(app, /import \{ contextSuggestions \} from '\.\/contextSuggestions\.ts'/)
+  assert.match(app, /import \{ accessSuggestions, specialtySuggestion \} from '\.\/contextSuggestions\.ts'/)
   const page = patientPage()
-  assert.match(page, /const suggestions = contextSuggestions\(patient\)/)
-  assert.match(page, /const sourcedSuggestions = suggestions\.filter\(\(item\) => item\.sourced\)/)
-  assert.match(page, /const genericSuggestions = suggestions\.filter\(\(item\) => !item\.sourced\)/)
-  assert.match(page, /From the patient record/)
-  assert.match(page, /You might also add/, 'a non-data-derived suggestion is visually distinguished as clinician-addable, not a known fact')
+  assert.match(page, /const specialty = specialtySuggestion\(patientId\)/)
+  assert.match(page, /const access = accessSuggestions\(patient\)/)
+  assert.match(page, /<span>Specialty<\/span>/)
+  assert.match(page, /<span>Access<\/span>/, 'access/logistics suggestions are grouped separately from specialty-direction guidance')
   assert.match(page, /addSuggestion\(item\.text\)/)
 })
 
 test('the optional-context field remains optional with suggestions only appending into it', () => {
   const page = patientPage()
-  assert.match(page, /Optional<\/em>/)
-  assert.match(page, /setContext\(\(prev\) => \(prev\.split/)
+  assert.match(page, /Optional guidance/)
+  assert.match(page, /setContext\(\(prev\) => \{/)
 })
 
 /* ------------------------------------------------------------------- §6 */

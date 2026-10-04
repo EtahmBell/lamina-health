@@ -7,7 +7,7 @@ import { LaminaMark } from './LaminaMark.tsx'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient, specialtiesConsulted } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
-import { contextSuggestions } from './contextSuggestions.ts'
+import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, cleanName, patientName } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients.ts'
@@ -163,7 +163,7 @@ function ConsultationsPage({ navigate }: { navigate: Navigate }) {
   const groups = groupConsultationsByPatient(records)
   return <ProductShell navigate={navigate} section="consultations"><main className="page-shell history-page"><p className="eyebrow">Patient consult records</p><h1>Consultations</h1><p className="page-intro">Completed specialty-care consultations from this Lamina workspace, grouped by patient.</p><p className="page-fineprint">No referral has been submitted.</p>
     {loading && <p className="muted-note">Loading consultations…</p>}{error && <div className="error-banner" role="alert">{error}</div>}
-    {!loading && !error && !groups.length && <div className="empty-state history-empty"><NetworkMark /><h2>No consultations yet</h2><p>Completed physician-network consultations will appear here.</p><button className="button-primary" onClick={() => navigate('/patients')}>Select patient →</button></div>}
+    {!loading && !error && !groups.length && <div className="empty-state history-empty"><NetworkMark /><h2>No network consultations yet</h2><p>Completed physician-network consultations will appear here.</p><button className="button-primary" onClick={() => navigate('/patients')}>Select a patient →</button></div>}
     {groups.length > 0 && <div className="lam-list">{groups.map((group) => <button className="lam-row" key={group.patientId} onClick={() => navigate(`/consultations/patient/${group.patientId}`)}><span className="lam-row-mark patient-row-avatar">{group.initials}</span><span className="lam-row-main"><strong>{group.patientLabel}</strong><span>{group.count} consultation{group.count === 1 ? '' : 's'}</span><small>Latest: {formatTime(group.latest.completed_at)}</small><small>Latest outcome: {group.latestPhysician} · {group.latestSpecialty}</small></span><span className="lam-row-action">View consultation history <b>→</b></span></button>)}</div>}
   </main></ProductShell>
 }
@@ -466,7 +466,6 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const [networkCollapsed, setNetworkCollapsed] = useState(false)
   const [openNetworkSignal, setOpenNetworkSignal] = useState(0)
   const demoPatient = DEMO_PATIENTS.find((item) => item.id === patientId)
-  const anemiaCase = patientId === MARIA_ID
   const loadActivity = () => getPatientActivity()
     .then((records) => setActivity(records.find((item) => item.patient_id === patientId) ?? null))
     .catch(() => setActivity(null))
@@ -527,13 +526,20 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
     { label: 'Insurance', value: patient.insurance },
     { label: 'Clinical source', value: clinicalSource },
   ]
-  const suggestions = contextSuggestions(patient)
-  const sourcedSuggestions = suggestions.filter((item) => item.sourced)
-  const genericSuggestions = suggestions.filter((item) => !item.sourced)
-  const addSuggestion = (text: string) => setContext((prev) => (prev.split(/,\s*/).includes(text) ? prev : prev ? `${prev}, ${text}` : text))
-  const suggestionChips = <div className="context-suggestions">
-    {sourcedSuggestions.length > 0 && <div className="context-suggestion-group"><span>From the patient record</span><div className="context-chip-row">{sourcedSuggestions.map((item) => <button type="button" key={item.id} className="context-chip" onClick={() => addSuggestion(item.text)}>{item.text}</button>)}</div></div>}
-    {genericSuggestions.length > 0 && <div className="context-suggestion-group"><span>You might also add</span><div className="context-chip-row">{genericSuggestions.map((item) => <button type="button" key={item.id} className="context-chip generic" onClick={() => addSuggestion(item.text)}>{item.text}</button>)}</div></div>}
+  const specialty = specialtySuggestion(patientId)
+  const access = accessSuggestions(patient)
+  const addedPhrases = context.split(/\.\s*/).map((part) => part.trim()).filter(Boolean)
+  const addSuggestion = (text: string) => setContext((prev) => {
+    const already = prev.split(/\.\s*/).map((part) => part.trim()).filter(Boolean).includes(text)
+    return already ? prev : prev ? `${prev}. ${text}` : text
+  })
+  const chip = (item: { id: string; text: string; sourced: boolean }) => {
+    const added = addedPhrases.includes(item.text)
+    return <button type="button" key={item.id} className={`context-chip ${item.sourced ? '' : 'generic'} ${added ? 'added' : ''}`} aria-pressed={added} onClick={() => addSuggestion(item.text)}>{item.text}</button>
+  }
+  const suggestionChips = (specialty || access.length > 0) && <div className="context-suggestions">
+    {specialty && <div className="context-suggestion-group"><span>Specialty</span><div className="context-chip-row">{chip(specialty)}</div></div>}
+    {access.length > 0 && <div className="context-suggestion-group"><span>Access</span><div className="context-chip-row">{access.map(chip)}</div></div>}
   </div>
   return <ProductShell navigate={navigate} section="patients"><main className="page-shell patient-page"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
     <header className="patient-identity"><h1>{demoPatient?.name ?? cleanName(patient.display_name)}</h1><p>{patient.age} years · {patient.location}</p></header>
@@ -549,10 +555,20 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
           <div className="prior-consult-actions"><button className="button-primary" onClick={() => navigate(consultationPath(activity?.latest_consultation_id as number))}>View consultation <span>→</span></button></div>
         </section>
         {reconsulting
-          ? <section className="reconsult-panel"><div className="network-controls"><div className="network-field"><label><span>What changed? <em>Optional</em></span><input value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="New symptoms, updated labs, new preference…" /></label>{suggestionChips}</div><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button></div></section>
+          ? <section className="reconsult-panel"><div className="network-optional"><p className="optional-guidance-label">Optional guidance</p><div className="network-field"><label htmlFor="patient-context-input">Add what changed, if anything, since the last consultation.</label><input id="patient-context-input" value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="Add a referral question, specialty preference, or care constraint" /></div>{suggestionChips}</div><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button></section>
           : <p className="reconsult-prompt"><span>New information or want another network review?</span><button className="text-button" onClick={() => setReconsulting(true)}>Re-consult the network →</button></p>}
       </>
-      : <section className="network-action brief-action"><div className="network-copy"><NetworkMark active={consulting} resolved={Boolean(consultation)} /><div><p className="eyebrow">{PCP_AGENT_NAME}</p><h2>{priorConsultation ? 'Ready for another network consultation.' : 'Ready for network consultation.'}</h2>{!priorConsultation && <p>Consult the physician-agent network to identify an appropriate referral destination and required next steps.</p>}</div></div><div className="network-controls"><div className="network-field"><label><span>{priorConsultation ? <>What changed? <em>Optional</em></> : <>Anything your agent should consider? <em>Optional</em></>}</span><input value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder={anemiaCase ? 'e.g. Patient strongly prefers telehealth' : 'e.g. Considering nephrology vs cardiology'} /></label>{suggestionChips}</div><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button></div></section>}
+      : <section className="network-action brief-action">
+        <div className="network-hero">
+          <div className="network-copy"><NetworkMark active={consulting} resolved={Boolean(consultation)} /><div><p className="eyebrow">{PCP_AGENT_NAME}</p><h2>{priorConsultation ? 'Ready for another network consultation.' : 'Ready for network consultation.'}</h2>{!priorConsultation && <p>Consult the physician-agent network to identify an appropriate referral destination and required next steps.</p>}</div></div>
+          <button className="consult-button consult-button-hero" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button>
+        </div>
+        <div className="network-optional">
+          <p className="optional-guidance-label">Optional guidance</p>
+          <div className="network-field"><label htmlFor="patient-context-input">{priorConsultation ? 'Add what changed, if anything, since the last consultation.' : 'Add context only if you want to guide the network consultation.'}</label><input id="patient-context-input" value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="Add a referral question, specialty preference, or care constraint" /></div>
+          {suggestionChips}
+        </div>
+      </section>}
     <p className="agent-task"><b>Agent task</b><span>Evaluate appropriate specialty, required workup, and viable access options using the available clinical context.</span></p>
     {(consulting || (consultation && !networkCollapsed)) && <ConsultationNetwork result={consultation} visibleCount={visibleMessageCount} consulting={consulting} networkAgents={networkAgents} completion={completion} />}
     {consultation && !consulting && networkCollapsed && <NetworkConsultationSummary result={consultation} onViewNetwork={() => setOpenNetworkSignal((count) => count + 1)} />}

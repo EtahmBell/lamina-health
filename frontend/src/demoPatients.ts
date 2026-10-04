@@ -5,7 +5,7 @@ export type DemoPatientSummary = {
   age: number
   location: string
   reason: string
-  status: 'Ready to consult' | 'Not yet consulted' | 'Consultation complete'
+  status: 'Ready for network' | 'Not yet consulted' | 'Consultation complete'
   implemented: boolean
   recent: boolean
 }
@@ -18,7 +18,7 @@ export const DEMO_PATIENTS: DemoPatientSummary[] = [
     age: 62,
     location: 'Oakland, CA',
     reason: 'Resistant hypertension with progressive renal dysfunction',
-    status: 'Ready to consult',
+    status: 'Ready for network',
     implemented: true,
     recent: true,
   },
@@ -29,7 +29,7 @@ export const DEMO_PATIENTS: DemoPatientSummary[] = [
     age: 54,
     location: 'Oakland, CA',
     reason: 'Persistent iron-deficiency anaemia despite oral iron',
-    status: 'Ready to consult',
+    status: 'Ready for network',
     implemented: true,
     recent: true,
   },

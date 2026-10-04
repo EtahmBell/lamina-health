@@ -125,7 +125,7 @@ test('the patient page leads with a compact identity then the consult action', (
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b))
   assert.ok(page.includes('{patient.age} years · {patient.location}'))
-  assert.match(page, /Anything your agent should consider\?/)
+  assert.match(page, /Add context only if you want to guide the network consultation\./)
 })
 
 test('the clinical overview is built from available patient data only', () => {

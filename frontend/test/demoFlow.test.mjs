@@ -81,7 +81,7 @@ test('the patient page reads canonical consultation state, not activity counters
 
 test('a never-consulted patient keeps the first-time consult banner', () => {
   assert.match(patientPage(), /priorConsultation \? 'Ready for another network consultation\.' : 'Ready for network consultation\.'/)
-  assert.match(patientPage(), /Anything your agent should consider\?/)
+  assert.match(patientPage(), /Add context only if you want to guide the network consultation\./)
   assert.match(patientPage(), /onClick=\{runConsult\}/)
 })
 
@@ -99,7 +99,7 @@ test('re-consulting is available but secondary, and reveals optional context', (
   const prior = slice(app, 'showPriorConsult', 'className="agent-task"')
   assert.match(prior, /New information or want another network review\?/)
   assert.match(prior, /setReconsulting\(true\)\}>Re-consult the network/)
-  assert.match(prior, /reconsulting[\s\S]*reconsult-panel[\s\S]*What changed\?/)
+  assert.match(prior, /reconsulting[\s\S]*reconsult-panel[\s\S]*Add what changed, if anything, since the last consultation\./)
   assert.match(prior, /onClick=\{runConsult\}/, 'the existing append-only consultation flow is reused')
   const promptIndex = prior.indexOf('reconsult-prompt')
   const actionIndex = prior.indexOf('prior-consult-actions')

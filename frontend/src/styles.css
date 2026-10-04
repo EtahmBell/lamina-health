@@ -919,3 +919,45 @@ button.lam-row:hover { background: #fff9f1; }
 /* §12 Optional, concise note when the recommended physician's agent was
    itself party to a clarification — never a dominant standalone block. */
 .clarification-note { margin: 8px 0 0; color: var(--text-secondary); font-size: .63rem; font-style: italic; line-height: 1.5; }
+
+/* ==========================================================================
+   PCP frontend polish pass: a compact, top-aligned consult banner with the
+   referral CTA as the clear hero and a genuinely optional guidance layer.
+   ========================================================================== */
+
+/* The hero row (agent identity + primary CTA) sits above the optional
+   guidance layer instead of being vertically centered against it. */
+.network-action.brief-action { flex-direction: column; align-items: stretch; gap: 20px; padding: 24px 26px 22px; }
+.network-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.brief-action .network-copy { align-items: flex-start; }
+.brief-action .network-copy h2 { font-size: 1.3rem; }
+.consult-button-hero { min-width: 238px; padding: 16px 22px; font-size: .92rem; box-shadow: 0 10px 26px rgb(184 92 50 / 20%); }
+
+/* Optional guidance reads as a secondary, clearly-labeled enhancement layer
+   below the hero, not a second setup step the clinician must pass through. */
+.network-optional { border-top: 1px solid var(--border); padding-top: 18px; }
+.optional-guidance-label { margin: 0 0 9px; color: var(--text-secondary); font-size: .58rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.network-optional .network-field { display: block; }
+.network-optional .network-field label { display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: .7rem; font-weight: 400; line-height: 1.4; cursor: text; }
+.network-optional .network-field input { width: 100%; max-width: 560px; height: 42px; border: 1px solid var(--border); border-radius: 8px; background: #fffdf9; padding: 0 12px; outline: none; color: var(--text-primary); font-size: .7rem; }
+.network-optional .network-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgb(184 92 50 / 10%); }
+.network-optional .context-suggestions { margin-top: 14px; }
+
+/* The re-consult panel gets the same optional-guidance treatment, secondary
+   to the previous-consultation card above it. */
+.reconsult-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; margin: 13px 0 18px; border-left: 3px solid var(--accent); padding: 15px 0 15px 17px; }
+.reconsult-panel .network-optional { width: 100%; border-top: 0; padding-top: 0; }
+
+/* A subtle, non-color-only selected state for suggestion chips already
+   folded into the context field. */
+.context-chip.added { border-color: var(--success); background: #edf3ee; color: var(--success); font-weight: 700; }
+.context-chip.added::before { content: "✓ "; }
+
+/* The Consultations empty-state CTA shares the centered content's axis
+   instead of defaulting to a left-aligned flex box. */
+.empty-state .button-primary { margin: 6px auto 0; }
+
+@media (max-width: 700px) {
+  .network-hero { flex-direction: column; align-items: stretch; gap: 16px; }
+  .consult-button-hero { width: 100%; justify-content: center; }
+}
