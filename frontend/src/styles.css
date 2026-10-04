@@ -965,3 +965,81 @@ button.lam-row:hover { background: #fff9f1; }
   .network-hero { flex-direction: column; align-items: stretch; gap: 16px; }
   .consult-button-hero { width: 100%; }
 }
+
+/* ==========================================================================
+   Pass 3B — Specialist mode: the other side of the same Lamina network.
+   ========================================================================== */
+
+/* Perspective switch: the existing clinician pill opens a small, explicitly
+   labeled menu — never implying account impersonation. */
+.perspective-switch { position: relative; }
+.perspective-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: 240px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 10px; box-shadow: 0 16px 36px rgb(36 52 71 / 16%); }
+.perspective-menu-label { margin: 2px 8px 8px; color: var(--text-secondary); font-size: .54rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.perspective-option { display: flex; align-items: center; gap: 9px; width: 100%; border: 0; border-radius: 8px; background: transparent; padding: 9px 8px; color: var(--clinical); cursor: pointer; text-align: left; }
+.perspective-option:hover, .perspective-option:focus-visible { background: #f5f1e9; }
+.perspective-option.active strong { color: var(--accent-hover); }
+.perspective-option-check { display: grid; place-items: center; width: 14px; flex: 0 0 14px; color: var(--accent); font-size: .68rem; }
+.perspective-option strong { display: block; font-size: .7rem; font-weight: 600; }
+.perspective-option small { display: block; margin-top: 1px; color: var(--text-secondary); font-size: .58rem; }
+.perspective-menu-divider { margin: 6px 4px; border-top: 1px solid var(--border); }
+@media (max-width: 600px) { .perspective-menu { right: -8px; width: 220px; } }
+
+/* Specialist Home empty state: the richer, demo-aware variant. */
+.specialist-empty { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); margin-top: 26px; }
+.specialist-demo-helper { max-width: 420px; margin: 18px auto 0; padding-top: 18px; border-top: 1px solid var(--border); }
+.specialist-demo-helper p { margin: 0 0 12px; color: var(--text-secondary); font-size: .67rem; line-height: 1.5; }
+
+/* Outcome badges: text-led, never color-only, never styled as a failure. */
+.specialist-outcome-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; background: #f2f0eb; padding: 6px 10px; color: var(--text-secondary); font-size: .58rem; font-weight: 700; white-space: nowrap; }
+.specialist-outcome-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); }
+.specialist-outcome-badge.recommended { border-color: rgb(63 107 85 / 25%); background: #edf3ee; color: var(--success); }
+.specialist-outcome-badge.recommended i { background: var(--success); }
+.specialist-outcome-badge.alternative, .specialist-outcome-badge.redirected { border-color: rgb(184 92 50 / 22%); background: #fdf3e8; color: var(--accent-hover); }
+.specialist-outcome-badge.alternative i, .specialist-outcome-badge.redirected i { background: var(--accent); }
+
+/* Case detail: patient/referrer header, role card, section rhythm. */
+.specialist-case-page .eyebrow { margin: 4px 0 2px; }
+.specialist-case-page h1 { margin: 0 0 4px; }
+.specialist-case-meta { margin: 0; color: var(--text-secondary); font-size: .72rem; }
+.specialist-case-referrer { margin: 10px 0 0; color: var(--clinical); font-size: .74rem; }
+.specialist-case-referrer b { font-weight: 600; }
+.specialist-role-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 22px; border: 1px solid var(--border); border-left: 4px solid var(--clinical); border-radius: 13px; background: var(--surface); padding: 17px 20px; box-shadow: var(--shadow-soft); }
+.specialist-role-card .section-label { flex: 0 0 100%; margin: 0; }
+.specialist-referral-note { flex: 0 0 100%; margin: 2px 0 0; color: var(--text-secondary); font-size: .62rem; }
+.specialist-section { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border); }
+.specialist-section h2 { margin: 0 0 10px; font-size: 1.1rem; }
+.specialist-section > p { margin: 0 0 10px; color: var(--clinical); font-size: .78rem; line-height: 1.55; }
+.specialist-section-note { color: var(--text-secondary); font-size: .67rem; line-height: 1.5; }
+.specialist-fact-group { margin-top: 14px; }
+.specialist-fact-group .section-label { display: block; margin-bottom: 6px; }
+.specialist-said-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 14px; }
+.specialist-said-grid > div { border: 1px solid var(--border); border-radius: 9px; padding: 11px 14px; }
+.specialist-said-grid span, .specialist-fact-group > span { color: var(--text-secondary); font-size: .55rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.specialist-said-grid strong { display: block; margin-top: 5px; color: var(--clinical); font-size: .74rem; }
+.specialist-workup-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.specialist-workup-chips span { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 7px 11px; color: var(--clinical); font-size: .68rem; font-weight: 600; }
+.specialist-clarification-line { margin: 8px 0 0; border-left: 3px solid var(--accent); padding: 2px 0 2px 12px; color: var(--clinical); font-size: .72rem; line-height: 1.5; }
+
+/* Review / calibration: reuses the existing recommendation-feedback and
+   learning-card grammar so it reads as the same Lamina pattern. */
+.specialist-review { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border); }
+.specialist-review h2 { margin: 4px 0 14px; font-size: 1.1rem; }
+.specialist-reviewed-note { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--success); font-size: .72rem; font-weight: 600; }
+.specialist-reviewed-note b { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--success); color: #fff; font-size: .55rem; }
+.specialist-review .learning-card { margin-top: 16px; }
+
+/* Network context: compact and static, never the live/animated graph. */
+.specialist-network-detail { display: grid; gap: 10px; margin-top: 14px; }
+.specialist-participant-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.specialist-participant-row strong { font-size: .76rem; }
+.specialist-participant-row small { color: var(--text-secondary); font-size: .6rem; }
+.specialist-participant-row p { grid-column: 1 / -1; margin: 4px 0 0; color: var(--clinical); font-size: .68rem; line-height: 1.5; }
+
+/* Specialist My Agent: honest, restrained demo framing — the navy border
+   (vs. the PCP rust) is a quiet signal this is the other perspective. */
+.specialist-agent-note { border-left-color: var(--clinical); }
+
+@media (max-width: 700px) {
+  .specialist-said-grid { grid-template-columns: 1fr; }
+  .specialist-participant-row { grid-template-columns: 1fr; }
+}

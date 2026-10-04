@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
 import { consultNetwork, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, resetJordanDemo, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type Patient, type PatientActivity } from './api.ts'
@@ -9,10 +9,11 @@ import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
 import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
-import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, cleanName, patientName } from './demoIdentity.ts'
+import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, cleanName, patientName } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients.ts'
 import { timeAwareGreeting } from './greeting.ts'
 import { PhysicianDirectoryPage, PhysicianProfilePage } from './PhysicianNetwork.tsx'
+import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
 
 type Navigate = (path: string) => void
@@ -37,8 +38,49 @@ const navItems = [
   { id: 'network', title: 'Physician Network', icon: '⌁', path: '/network' },
 ] as const
 
+const SPECIALIST_NAV_ITEMS = [
+  { id: 'specialist-home', title: 'Home', icon: '⌂', path: '/specialist/home' },
+  { id: 'specialist-cases', title: 'Cases', icon: '◫', path: '/specialist/cases' },
+  { id: 'specialist-agent', title: 'My Agent', icon: '◇', path: '/specialist/agent' },
+] as const
+
 function ProfileControl({ navigate }: { navigate: Navigate }) {
   return <button className="profile-control" onClick={() => navigate('/profile')} aria-label="Open clinician profile"><span>LS</span><strong>{PCP_NAME}</strong></button>
+}
+
+const DEMO_PERSPECTIVES = [
+  { id: 'pcp' as const, name: PCP_NAME, role: 'Referring physician', initials: 'LS', path: '/home' },
+  { id: 'specialist' as const, name: SPECIALIST_NAME, role: 'Specialist', initials: 'IJ', path: '/specialist/home' },
+]
+
+/** The same top-right identity control, now also a restrained switch between
+ * the two controlled demo perspectives — never a real account/session change. */
+function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; perspective: 'pcp' | 'specialist' }) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onClick = (event: MouseEvent) => { if (containerRef.current && !containerRef.current.contains(event.target as Node)) setOpen(false) }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  const current = DEMO_PERSPECTIVES.find((item) => item.id === perspective) ?? DEMO_PERSPECTIVES[0]
+  const switchTo = (path: string) => { setOpen(false); navigate(path) }
+  return <div className="perspective-switch" ref={containerRef}>
+    <button className="profile-control" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label="Switch demo perspective">
+      <span>{current.initials}</span><strong>{current.name}</strong>
+    </button>
+    {open && <div className="perspective-menu" role="menu" aria-label="Demo perspective">
+      <p className="perspective-menu-label">Demo perspective</p>
+      {DEMO_PERSPECTIVES.map((item) => <button key={item.id} role="menuitemradio" aria-checked={item.id === perspective} className={`perspective-option ${item.id === perspective ? 'active' : ''}`} onClick={() => switchTo(item.path)}>
+        <span className="perspective-option-check" aria-hidden="true">{item.id === perspective ? '✓' : ''}</span>
+        <span><strong>{item.name}</strong><small>{item.role}</small></span>
+      </button>)}
+      {perspective === 'pcp' && <><div className="perspective-menu-divider" role="separator" /><button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate('/profile') }}>Profile</button></>}
+    </div>}
+  </div>
 }
 
 /** A quiet utility for returning physician-account holders — distinct from
@@ -52,17 +94,20 @@ function PortalAccountControl({ navigate }: { navigate: Navigate }) {
     : <button className="text-button portal-account-link" onClick={() => navigate(signInPath('/claim/my-identities'))}>Sign in</button>
 }
 
-function ProductShell({ children, navigate, section }: { children: React.ReactNode; navigate: Navigate; section: string }) {
+function ProductShell({ children, navigate, section, perspective = 'pcp' }: { children: React.ReactNode; navigate: Navigate; section: string; perspective?: 'pcp' | 'specialist' }) {
+  const items = perspective === 'specialist' ? SPECIALIST_NAV_ITEMS : navItems
   return <div className="app-shell">
     <aside className="sidebar">
       <div><button className="brand-button" onClick={() => navigate('/')} aria-label="Return to Lamina portal"><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
         <nav aria-label="Primary navigation">
-          {navItems.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span><b>{item.title}</b></span></button>)}
+          {items.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span><b>{item.title}</b></span></button>)}
         </nav>
       </div>
-      <button className="sidebar-clinician" onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><NetworkMark active /><div><span>Your physician agent</span><strong>{PCP_AGENT_NAME}</strong><small>Active · Primary Care</small></div></button>
+      {perspective === 'specialist'
+        ? <button className="sidebar-clinician" onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><NetworkMark /><div><span>Your physician agent</span><strong>{SPECIALIST_AGENT_NAME}</strong><small>Synthetic demo profile · {SPECIALIST_SPECIALTY}</small></div></button>
+        : <button className="sidebar-clinician" onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><NetworkMark active /><div><span>Your physician agent</span><strong>{PCP_AGENT_NAME}</strong><small>Active · Primary Care</small></div></button>}
     </aside>
-    <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>{children}</div>
+    <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><PerspectiveSwitch navigate={navigate} perspective={perspective} /></div></header>{children}</div>
   </div>
 }
 
@@ -654,6 +699,11 @@ export default function App() {
   if (path === '/claim/sign-up') return <SignUpPage navigate={navigate} params={params} />
   const claimNpi = path.match(/^\/claim\/provider\/([^/]+)$/)?.[1]
   if (claimNpi) return <ProviderIdentityPage npi={claimNpi} navigate={navigate} params={params} />
+  if (path === '/specialist' || path === '/specialist/home') return <ProductShell navigate={navigate} section="specialist-home" perspective="specialist"><SpecialistHomePage navigate={navigate} /></ProductShell>
+  if (path === '/specialist/cases') return <ProductShell navigate={navigate} section="specialist-cases" perspective="specialist"><SpecialistCasesPage navigate={navigate} /></ProductShell>
+  const specialistRecordId = path.match(/^\/specialist\/cases\/(\d+)$/)?.[1]
+  if (specialistRecordId) return <ProductShell navigate={navigate} section="specialist-cases" perspective="specialist"><SpecialistCaseDetailPage recordId={Number(specialistRecordId)} navigate={navigate} /></ProductShell>
+  if (path === '/specialist/agent') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><SpecialistAgentPage navigate={navigate} /></ProductShell>
   if (path === '/network') return <ProductShell navigate={navigate} section="network"><PhysicianDirectoryPage navigate={navigate} /></ProductShell>
   const networkNpi = path.match(/^\/network\/([^/]+)$/)?.[1]
   if (networkNpi) return <ProductShell navigate={navigate} section="network"><PhysicianProfilePage npi={networkNpi} navigate={navigate} /></ProductShell>

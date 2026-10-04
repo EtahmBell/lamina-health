@@ -35,7 +35,7 @@ test('the portal greeting is time-aware and the stale question is gone', () => {
 /* ------------------------------------------------------------------- shell */
 
 test('workspace sidebar keeps Home as a dashboard destination', () => {
-  const navigation = slice('const navItems', 'function ProfileControl')
+  const navigation = slice('const navItems', 'const SPECIALIST_NAV_ITEMS')
   assert.deepEqual(navigation.match(/title: '[^']+'/g), [
     "title: 'Home'", "title: 'Patients'", "title: 'Consultations'", "title: 'My Agent'", "title: 'Physician Network'",
   ])
@@ -48,7 +48,7 @@ test('workspace logo returns every shell screen to the portal', () => {
 })
 
 test('workspace header keeps right controls without a generic page label', () => {
-  assert.match(shell(), /className="workspace-bar-actions"><SyntheticStatus \/><ProfileControl navigate=\{navigate\} \/>/)
+  assert.match(shell(), /className="workspace-bar-actions"><SyntheticStatus \/><PerspectiveSwitch navigate=\{navigate\} perspective=\{perspective\} \/>/)
   assert.doesNotMatch(shell(), /section === 'home'/)
 })
 
