@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.consult import router as consult_router
+from backend.api.specialist import router as specialist_router
 from backend.api.workspace import router as workspace_router
 from backend.demo_workspace import configured_cors_origins
 from backend.provider_network import router as provider_network_router
@@ -17,6 +18,7 @@ app.add_middleware(
 )
 app.include_router(consult_router)
 app.include_router(workspace_router)
+app.include_router(specialist_router)
 app.include_router(provider_network_router)
 
 

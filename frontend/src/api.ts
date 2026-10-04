@@ -103,6 +103,62 @@ export type AgentNetwork = {
   nodes: NetworkAgent[]; edges: AgentRelationship[]; members: NetworkMemberProfile[]
   record_count: number; relationship_source: string; status_note: string
 }
+export type SpecialistOutcome = 'recommended' | 'alternative' | 'redirected' | 'consulted_not_selected'
+export type SpecialistReviewState = { reviewed: boolean; reviewed_at: string | null }
+export type SpecialistCaseSummary = SpecialistReviewState & {
+  consultation_id: string; consultation_record_id: number; patient_id: string
+  patient_name: string; patient_age: number | null; patient_location: string | null
+  referring_physician: string; referring_agent: string; consulted_at: string
+  referral_question: string; specialist_outcome: SpecialistOutcome
+  specialist_response_summary: string; recommendation_physician: string
+  recommendation_specialty: string; was_recommended: boolean; clarification_count: number
+  event_ids: string[]; availability: string
+}
+export type SpecialistAgentInteraction = {
+  event_id: string; sequence: number; direction: 'from_specialist_agent' | 'to_specialist_agent'
+  message_type: ConsultationMessage['message_type']; summary: string
+  supporting_evidence: Evidence[]; related_patient_facts: string[]
+  metadata: Record<string, string | number | boolean>
+}
+export type SpecialistCalibration = {
+  key: string; consultation_record_id: number; question: string; statement: string
+  based_on: string[]; status: 'suggested' | 'confirmed' | 'rejected'
+  provenance: string; updated_at: string | null
+}
+export type SpecialistCaseDetail = SpecialistCaseSummary & {
+  case_context: {
+    patient: { id: string; name: string; age: number | null; location: string | null; synthetic: true }
+    referring_physician: { name: string; specialty: string; agent_id: string; agent_name: string }
+    consultation_purpose: string; referral_question: string | null
+  }
+  agent_received: { summary: string; facts: string[]; signals: string[]; source: string }
+  agent_response: {
+    interactions: SpecialistAgentInteraction[]; fit: 'strong' | 'moderate' | 'poor'
+    accepts_case: boolean; required_workup: string[]; access: string; explicit_rules_used: string[]
+  }
+  network_outcome: {
+    specialist_outcome: SpecialistOutcome; recommended_physician: string
+    recommended_specialty: string; was_recommended: boolean; final_synthesis: string
+    recommendation_rationale: string; synthesis_event_id: string | null
+  }
+  network_context: {
+    participants: Array<{
+      agent_id: string; physician_id: string; physician_name: string; specialty: string
+      interaction_outcome: SpecialistOutcome; agent_response_summary: string; event_ids: string[]
+    }>
+    source: string
+  }
+  calibration: SpecialistCalibration; disclaimer: string
+}
+export type SpecialistWorkspace = {
+  physician: {
+    npi: string; physician_id: string; physician: string; specialty: string; location: string
+    agent_id: string; agent_name: string; synthetic: true; status: 'reserved'
+    perspective: 'controlled_demo'; disclaimer: string
+  }
+  recent_cases: SpecialistCaseSummary[]; latest_case_activity: string | null
+  recommended_case_count: number; unreviewed_case_count: number; case_count: number
+}
 
 /** Carries the HTTP status alongside the backend's `detail` message, so claim
  * screens can tell 401 (sign in again) apart from 409 (conflict) apart from a
@@ -148,6 +204,18 @@ export type DemoResetResult = {
 /** Clears one demo case's Lamina workflow history. Synthetic clinical data is untouched. */
 export const resetJordanDemo = () => request<DemoResetResult>('/api/workspace/demo/reset/jordan', { method: 'POST' })
 export const getAgentNetwork = () => request<AgentNetwork>('/api/workspace/network')
+export const getSpecialistWorkspace = () => request<SpecialistWorkspace>('/api/workspace/specialist')
+export const getSpecialistCases = () => request<SpecialistCaseSummary[]>('/api/workspace/specialist/cases')
+export const getSpecialistCase = (consultationRecordId: number) => request<SpecialistCaseDetail>(`/api/workspace/specialist/cases/${consultationRecordId}`)
+export const markSpecialistCaseReviewed = (consultationRecordId: number) => request<SpecialistReviewState>(`/api/workspace/specialist/cases/${consultationRecordId}/review`, { method: 'PUT' })
+export const updateSpecialistCalibration = (
+  consultationRecordId: number,
+  learningKey: string,
+  action: 'confirm' | 'edit' | 'reject',
+  statement?: string,
+) => request<SpecialistCalibration>(`/api/workspace/specialist/cases/${consultationRecordId}/calibrations/${encodeURIComponent(learningKey)}`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, statement }),
+})
 export const addNetworkMember = (npi: string) => request<NetworkMember>('/api/workspace/network/members', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ npi }),
 })

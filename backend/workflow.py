@@ -46,6 +46,27 @@ class WorkflowStore:
                   workspace_id TEXT NOT NULL, npi TEXT NOT NULL, added_at TEXT NOT NULL,
                   PRIMARY KEY(workspace_id, npi)
                 );
+                CREATE TABLE IF NOT EXISTS specialist_case_reviews (
+                  workspace_id TEXT NOT NULL,
+                  consultation_record_id INTEGER NOT NULL,
+                  specialist_npi TEXT NOT NULL,
+                  reviewed_at TEXT NOT NULL,
+                  PRIMARY KEY(workspace_id, consultation_record_id, specialist_npi)
+                );
+                CREATE TABLE IF NOT EXISTS specialist_calibrations (
+                  workspace_id TEXT NOT NULL,
+                  specialist_npi TEXT NOT NULL,
+                  learning_key TEXT NOT NULL,
+                  consultation_record_id INTEGER NOT NULL,
+                  statement TEXT NOT NULL,
+                  provenance TEXT NOT NULL,
+                  status TEXT NOT NULL CHECK(status IN ('suggested', 'confirmed', 'rejected')),
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  PRIMARY KEY(
+                    workspace_id, specialist_npi, learning_key, consultation_record_id
+                  )
+                );
                 CREATE TABLE IF NOT EXISTS provider_claims (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   auth_user_id TEXT NOT NULL,
@@ -82,6 +103,10 @@ class WorkflowStore:
                   ON consultations(workspace_id, id DESC);
                 CREATE INDEX IF NOT EXISTS demo_workspaces_expiry
                   ON demo_workspaces(expires_at);
+                CREATE INDEX IF NOT EXISTS specialist_reviews_workspace
+                  ON specialist_case_reviews(workspace_id, specialist_npi);
+                CREATE INDEX IF NOT EXISTS specialist_calibrations_workspace
+                  ON specialist_calibrations(workspace_id, specialist_npi);
                 """
             )
             if "last_started" not in {
@@ -212,7 +237,8 @@ class WorkflowStore:
             workspace_ids = [row["workspace_id"] for row in rows]
             for workspace_id in workspace_ids:
                 for table in (
-                    "patient_activity", "consultations", "agent_preferences", "network_members"
+                    "patient_activity", "consultations", "agent_preferences", "network_members",
+                    "specialist_case_reviews", "specialist_calibrations",
                 ):
                     db.execute(f"DELETE FROM {table} WHERE workspace_id=?", (workspace_id,))
                 db.execute(
@@ -314,6 +340,13 @@ class WorkflowStore:
     def reset_demo_case(self, workspace_id: str, patient_id: str) -> dict:
         """Remove one demo case's Lamina workflow history, never its clinical source."""
         with self._connect() as db:
+            record_ids = [
+                row["id"]
+                for row in db.execute(
+                    "SELECT id FROM consultations WHERE workspace_id=? AND patient_id=?",
+                    (workspace_id, patient_id),
+                ).fetchall()
+            ]
             removed = db.execute(
                 "SELECT COUNT(*) FROM consultations WHERE workspace_id=? AND patient_id=?",
                 (workspace_id, patient_id),
@@ -322,6 +355,17 @@ class WorkflowStore:
                 "DELETE FROM consultations WHERE workspace_id=? AND patient_id=?",
                 (workspace_id, patient_id),
             )
+            for record_id in record_ids:
+                db.execute(
+                    "DELETE FROM specialist_case_reviews "
+                    "WHERE workspace_id=? AND consultation_record_id=?",
+                    (workspace_id, record_id),
+                )
+                db.execute(
+                    "DELETE FROM specialist_calibrations "
+                    "WHERE workspace_id=? AND consultation_record_id=?",
+                    (workspace_id, record_id),
+                )
             db.execute(
                 """UPDATE patient_activity SET last_started=NULL,
                    last_consultation=NULL, consultation_count=0
@@ -363,6 +407,96 @@ class WorkflowStore:
              "completed_at": row["completed_at"], "result": json.loads(row["result_json"])}
             if row else None
         )
+
+    def specialist_reviews(self, workspace_id: str, specialist_npi: str) -> dict[int, str]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT consultation_record_id, reviewed_at
+                   FROM specialist_case_reviews
+                   WHERE workspace_id=? AND specialist_npi=?""",
+                (workspace_id, specialist_npi),
+            ).fetchall()
+        return {int(row["consultation_record_id"]): row["reviewed_at"] for row in rows}
+
+    def mark_specialist_case_reviewed(
+        self, workspace_id: str, consultation_record_id: int, specialist_npi: str
+    ) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO specialist_case_reviews(
+                     workspace_id, consultation_record_id, specialist_npi, reviewed_at
+                   ) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(workspace_id, consultation_record_id, specialist_npi)
+                   DO UPDATE SET reviewed_at=excluded.reviewed_at""",
+                (workspace_id, consultation_record_id, specialist_npi, now),
+            )
+        return {"reviewed": True, "reviewed_at": now}
+
+    def specialist_calibrations(
+        self, workspace_id: str, specialist_npi: str
+    ) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT learning_key, consultation_record_id, statement, provenance,
+                          status, created_at, updated_at
+                   FROM specialist_calibrations
+                   WHERE workspace_id=? AND specialist_npi=?
+                   ORDER BY updated_at, learning_key""",
+                (workspace_id, specialist_npi),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_specialist_calibration(
+        self,
+        workspace_id: str,
+        specialist_npi: str,
+        consultation_record_id: int,
+        learning_key: str,
+        statement: str,
+        status: str,
+    ) -> dict:
+        provenance = (
+            "Specialist-confirmed synthetic demo learning"
+            if status == "confirmed"
+            else "Specialist-edited synthetic demo draft"
+            if status == "suggested"
+            else "Specialist-rejected synthetic demo suggestion"
+        )
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO specialist_calibrations(
+                     workspace_id, specialist_npi, learning_key,
+                     consultation_record_id, statement, provenance, status,
+                     created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(
+                     workspace_id, specialist_npi, learning_key, consultation_record_id
+                   ) DO UPDATE SET statement=excluded.statement,
+                     provenance=excluded.provenance, status=excluded.status,
+                     updated_at=excluded.updated_at""",
+                (
+                    workspace_id,
+                    specialist_npi,
+                    learning_key,
+                    consultation_record_id,
+                    statement,
+                    provenance,
+                    status,
+                    now,
+                    now,
+                ),
+            )
+            row = db.execute(
+                """SELECT learning_key, consultation_record_id, statement, provenance,
+                          status, created_at, updated_at
+                   FROM specialist_calibrations
+                   WHERE workspace_id=? AND specialist_npi=? AND learning_key=?
+                     AND consultation_record_id=?""",
+                (workspace_id, specialist_npi, learning_key, consultation_record_id),
+            ).fetchone()
+        return dict(row)
 
     def network_members(self, workspace_id: str) -> list[dict]:
         """Physician relationships the clinician recorded, oldest first.
