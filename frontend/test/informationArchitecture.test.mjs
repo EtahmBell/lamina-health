@@ -120,7 +120,7 @@ test('the editorial referral brief is gone from the patient page', () => {
 
 test('the patient page leads with a compact identity then the consult action', () => {
   const page = patientPage()
-  const order = ['patient-identity', 'Ready to consult the network.', 'Agent task', 'Clinical overview']
+  const order = ['patient-identity', 'Ready for network consultation.', 'Agent task', 'Clinical overview']
   const positions = order.map((token) => page.indexOf(token))
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b))

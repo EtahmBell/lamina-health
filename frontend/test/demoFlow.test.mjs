@@ -80,14 +80,14 @@ test('the patient page reads canonical consultation state, not activity counters
 })
 
 test('a never-consulted patient keeps the first-time consult banner', () => {
-  assert.match(patientPage(), /priorConsultation \? 'Ready to re-consult the network\.' : 'Ready to consult the network\.'/)
+  assert.match(patientPage(), /priorConsultation \? 'Ready for another network consultation\.' : 'Ready for network consultation\.'/)
   assert.match(patientPage(), /Anything your agent should consider\?/)
   assert.match(patientPage(), /onClick=\{runConsult\}/)
 })
 
 test('a previously consulted patient surfaces the latest consultation instead', () => {
   const prior = slice(app, 'showPriorConsult', 'className="agent-task"')
-  assert.match(prior, /Previous consultation available\./)
+  assert.match(prior, /Previous network consultation available\./)
   assert.match(prior, /cleanName\(activity\?\.latest_recommended_physician \|\| ''\)/)
   assert.match(prior, /activity\.latest_recommended_specialty/)
   assert.match(prior, /formatTime\(activity\.latest_consulted_at\)/)
@@ -164,7 +164,7 @@ test('completion only follows a live run, never a reopened consultation', () => 
 })
 
 test('completion timing holds, then guides the user to the recommendation', () => {
-  const run = slice(app, 'const runConsult = async', 'if (loading) return')
+  const run = slice(app, 'const scrollToRecommendation', 'if (loading) return')
   assert.match(run, /await delay\(calm \? 0 : 350\)/)
   assert.match(run, /await delay\(calm \? 600 : 1000\)/)
   assert.match(run, /document\.querySelector<HTMLElement>\('\.recommendations'\)/)
@@ -176,11 +176,12 @@ test('completion timing holds, then guides the user to the recommendation', () =
 })
 
 test('reduced motion skips the animation without losing the outcome', () => {
-  const run = slice(app, 'const runConsult = async', 'if (loading) return')
+  const run = slice(app, 'const scrollToRecommendation', 'if (loading) return')
   assert.match(app, /const prefersReducedMotion = \(\) => window\.matchMedia\?\.\('\(prefers-reduced-motion: reduce\)'\)\.matches/)
   assert.match(run, /const calm = prefersReducedMotion\(\)/)
-  assert.match(run, /behavior: calm \? 'auto' : 'smooth'/)
-  assert.match(run, /if \(calm\) \{ setCompletion\('idle'\); return \}/, 'no fade-out animation under reduced motion')
+  assert.match(run, /scrollToRecommendation\('auto'\)/)
+  assert.match(run, /scrollToRecommendation\('smooth'\)/)
+  assert.match(run, /if \(calm\) \{ setCompletion\('idle'\); setNetworkCollapsed\(true\); scrollToRecommendation\('auto'\); return \}/, 'no fade-out animation under reduced motion')
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{\s*\.consult-complete, \.consult-complete\.leaving \{ animation: none; \}/)
 })
 
