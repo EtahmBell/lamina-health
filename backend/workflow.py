@@ -125,6 +125,44 @@ class WorkflowStore:
                   updated_at TEXT NOT NULL,
                   published_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS physician_interests (
+                  workspace_id TEXT NOT NULL, persona_id TEXT NOT NULL,
+                  interest_id TEXT NOT NULL, interest_type TEXT NOT NULL,
+                  title TEXT NOT NULL, detail TEXT, provenance TEXT NOT NULL,
+                  confirmed INTEGER NOT NULL DEFAULT 1,
+                  shareable INTEGER NOT NULL DEFAULT 1,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                  PRIMARY KEY(workspace_id, persona_id, interest_id)
+                );
+                CREATE TABLE IF NOT EXISTS training_session_questions (
+                  workspace_id TEXT NOT NULL, session_id INTEGER NOT NULL,
+                  persona_id TEXT NOT NULL, question_id TEXT NOT NULL,
+                  root_question_id TEXT NOT NULL, parent_question_id TEXT,
+                  branch_depth INTEGER NOT NULL DEFAULT 0,
+                  branch_path_json TEXT NOT NULL DEFAULT '[]',
+                  triggering_answer TEXT, priority INTEGER NOT NULL DEFAULT 0,
+                  status TEXT NOT NULL DEFAULT 'assigned', created_at TEXT NOT NULL,
+                  PRIMARY KEY(workspace_id, session_id, question_id)
+                );
+                CREATE TABLE IF NOT EXISTS profile_enrichment_jobs (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  workspace_id TEXT NOT NULL, persona_id TEXT NOT NULL,
+                  status TEXT NOT NULL, provider TEXT NOT NULL,
+                  found_count INTEGER NOT NULL DEFAULT 0, message TEXT,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS profile_candidate_facts (
+                  candidate_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+                  persona_id TEXT NOT NULL, job_id INTEGER NOT NULL,
+                  category TEXT NOT NULL, proposed_title TEXT NOT NULL,
+                  proposed_detail TEXT, source_type TEXT NOT NULL,
+                  source_title TEXT NOT NULL, source_url TEXT,
+                  retrieved_at TEXT NOT NULL,
+                  model_generated_summary INTEGER NOT NULL DEFAULT 0,
+                  confidence TEXT, review_status TEXT NOT NULL,
+                  reviewed_at TEXT,
+                  PRIMARY KEY(workspace_id, persona_id, candidate_id)
+                );
                 CREATE TABLE IF NOT EXISTS provider_claims (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   auth_user_id TEXT NOT NULL,
@@ -155,6 +193,7 @@ class WorkflowStore:
                 """
             )
             self._migrate_demo_tables(db)
+            self._migrate_engagement_tables(db)
             db.executescript(
                 """
                 CREATE INDEX IF NOT EXISTS consultations_workspace_id
@@ -173,6 +212,14 @@ class WorkflowStore:
                   ON proposed_agent_learnings(workspace_id, persona_id, id DESC);
                 CREATE INDEX IF NOT EXISTS practice_updates_workspace
                   ON practice_updates(workspace_id, persona_id, id DESC);
+                CREATE INDEX IF NOT EXISTS interests_workspace
+                  ON physician_interests(workspace_id, persona_id);
+                CREATE INDEX IF NOT EXISTS training_questions_workspace
+                  ON training_session_questions(workspace_id, persona_id, session_id);
+                CREATE INDEX IF NOT EXISTS enrichment_jobs_workspace
+                  ON profile_enrichment_jobs(workspace_id, persona_id, id DESC);
+                CREATE INDEX IF NOT EXISTS candidate_facts_workspace
+                  ON profile_candidate_facts(workspace_id, persona_id, job_id);
                 """
             )
             if "last_started" not in {
@@ -254,13 +301,41 @@ class WorkflowStore:
                 (self.LEGACY_WORKSPACE_ID, now, now, expiry),
             )
 
+    def _migrate_engagement_tables(self, db: sqlite3.Connection) -> None:
+        """Add Pass 5 engagement fields without replacing existing rows."""
+        additions = {
+            "training_sessions": {
+                "mode": "TEXT NOT NULL DEFAULT 'daily'",
+                "question_limit": "INTEGER NOT NULL DEFAULT 5",
+            },
+            "practice_updates": {
+                "post_type": "TEXT",
+                "authored_by": "TEXT NOT NULL DEFAULT 'physician'",
+                "drafted_by": "TEXT NOT NULL DEFAULT 'physician'",
+                "physician_approved": "INTEGER NOT NULL DEFAULT 0",
+                "visibility": "TEXT NOT NULL DEFAULT 'network'",
+                "source_input_json": "TEXT",
+                "synthetic_case": "INTEGER NOT NULL DEFAULT 0",
+                "case_safety_label": "TEXT",
+            },
+        }
+        for table, columns in additions.items():
+            existing = self._columns(db, table)
+            for column, definition in columns.items():
+                if column not in existing:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        db.execute("UPDATE practice_updates SET post_type=update_type WHERE post_type IS NULL")
+        db.execute(
+            """UPDATE practice_updates SET drafted_by='lamina_agent'
+               WHERE agent_drafted=1 AND drafted_by='physician'"""
+        )
+        db.execute("UPDATE practice_updates SET physician_approved=1 WHERE status='published'")
+
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).isoformat(timespec="seconds")
 
-    def resolve_demo_workspace(
-        self, candidate: str | None, ttl_seconds: int
-    ) -> tuple[str, bool]:
+    def resolve_demo_workspace(self, candidate: str | None, ttl_seconds: int) -> tuple[str, bool]:
         now_dt = datetime.now(UTC)
         now = now_dt.isoformat(timespec="seconds")
         expires = (now_dt + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
@@ -303,15 +378,24 @@ class WorkflowStore:
             workspace_ids = [row["workspace_id"] for row in rows]
             for workspace_id in workspace_ids:
                 for table in (
-                    "patient_activity", "consultations", "agent_preferences", "network_members",
-                    "specialist_case_reviews", "specialist_calibrations",
-                    "physician_profile_items", "training_responses", "training_sessions",
-                    "proposed_agent_learnings", "practice_updates",
+                    "patient_activity",
+                    "consultations",
+                    "agent_preferences",
+                    "network_members",
+                    "specialist_case_reviews",
+                    "specialist_calibrations",
+                    "physician_profile_items",
+                    "training_responses",
+                    "training_sessions",
+                    "training_session_questions",
+                    "proposed_agent_learnings",
+                    "practice_updates",
+                    "physician_interests",
+                    "profile_candidate_facts",
+                    "profile_enrichment_jobs",
                 ):
                     db.execute(f"DELETE FROM {table} WHERE workspace_id=?", (workspace_id,))
-                db.execute(
-                    "DELETE FROM demo_workspaces WHERE workspace_id=?", (workspace_id,)
-                )
+                db.execute("DELETE FROM demo_workspaces WHERE workspace_id=?", (workspace_id,))
         return len(workspace_ids)
 
     def opened(self, workspace_id: str, patient_id: str) -> None:
@@ -458,9 +542,12 @@ class WorkflowStore:
                 (workspace_id, limit),
             ).fetchall()
         return [
-            {"id": row["id"], "patient_id": row["patient_id"],
-             "completed_at": row["completed_at"],
-             "result": json.loads(row["result_json"])}
+            {
+                "id": row["id"],
+                "patient_id": row["patient_id"],
+                "completed_at": row["completed_at"],
+                "result": json.loads(row["result_json"]),
+            }
             for row in rows
         ]
 
@@ -471,9 +558,14 @@ class WorkflowStore:
                 (workspace_id, record_id),
             ).fetchone()
         return (
-            {"id": row["id"], "patient_id": row["patient_id"],
-             "completed_at": row["completed_at"], "result": json.loads(row["result_json"])}
-            if row else None
+            {
+                "id": row["id"],
+                "patient_id": row["patient_id"],
+                "completed_at": row["completed_at"],
+                "result": json.loads(row["result_json"]),
+            }
+            if row
+            else None
         )
 
     def specialist_reviews(self, workspace_id: str, specialist_npi: str) -> dict[int, str]:
@@ -586,6 +678,7 @@ class WorkflowStore:
         title: str,
         detail: str | None,
         shareable: bool,
+        provenance: str = "physician_entered",
     ) -> dict:
         now = self._now()
         with self._connect() as db:
@@ -593,10 +686,10 @@ class WorkflowStore:
                 """INSERT INTO physician_profile_items(
                      workspace_id, persona_id, item_id, category, title, detail,
                      provenance, shareable, created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, 'physician_entered', ?, ?, ?)
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(workspace_id, persona_id, item_id) DO UPDATE SET
                      category=excluded.category, title=excluded.title,
-                     detail=excluded.detail, provenance='physician_entered',
+                     detail=excluded.detail, provenance=excluded.provenance,
                      shareable=excluded.shareable, updated_at=excluded.updated_at""",
                 (
                     workspace_id,
@@ -605,6 +698,7 @@ class WorkflowStore:
                     category,
                     title,
                     detail,
+                    provenance,
                     int(shareable),
                     now,
                     now,
@@ -619,14 +713,80 @@ class WorkflowStore:
             ).fetchone()
         return {**dict(row), "shareable": bool(row["shareable"])}
 
-    def start_training_session(self, workspace_id: str, persona_id: str) -> dict:
+    def physician_interests(self, workspace_id: str, persona_id: str) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT interest_id AS id, interest_type, title, detail,
+                          provenance, confirmed, shareable, created_at, updated_at
+                   FROM physician_interests
+                   WHERE workspace_id=? AND persona_id=? ORDER BY created_at, interest_id""",
+                (workspace_id, persona_id),
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                "confirmed": bool(row["confirmed"]),
+                "shareable": bool(row["shareable"]),
+            }
+            for row in rows
+        ]
+
+    def upsert_physician_interest(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        interest_id: str,
+        interest_type: str,
+        title: str,
+        detail: str | None,
+        confirmed: bool,
+        shareable: bool,
+    ) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO physician_interests(
+                     workspace_id, persona_id, interest_id, interest_type, title,
+                     detail, provenance, confirmed, shareable, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, 'physician_entered', ?, ?, ?, ?)
+                   ON CONFLICT(workspace_id, persona_id, interest_id) DO UPDATE SET
+                     interest_type=excluded.interest_type, title=excluded.title,
+                     detail=excluded.detail, provenance='physician_entered',
+                     confirmed=excluded.confirmed, shareable=excluded.shareable,
+                     updated_at=excluded.updated_at""",
+                (
+                    workspace_id,
+                    persona_id,
+                    interest_id,
+                    interest_type,
+                    title,
+                    detail,
+                    int(confirmed),
+                    int(shareable),
+                    now,
+                    now,
+                ),
+            )
+        return next(
+            item
+            for item in self.physician_interests(workspace_id, persona_id)
+            if item["id"] == interest_id
+        )
+
+    def start_training_session(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        mode: str = "daily",
+        question_limit: int = 5,
+    ) -> dict:
         now = self._now()
         with self._connect() as db:
             cursor = db.execute(
                 """INSERT INTO training_sessions(
-                     workspace_id, persona_id, status, created_at
-                   ) VALUES (?, ?, 'active', ?)""",
-                (workspace_id, persona_id, now),
+                     workspace_id, persona_id, status, created_at, mode, question_limit
+                   ) VALUES (?, ?, 'active', ?, ?, ?)""",
+                (workspace_id, persona_id, now, mode, question_limit),
             )
             session_id = int(cursor.lastrowid)
         return {
@@ -635,14 +795,15 @@ class WorkflowStore:
             "status": "active",
             "created_at": now,
             "completed_at": None,
+            "mode": mode,
+            "question_limit": question_limit,
         }
 
-    def training_session(
-        self, workspace_id: str, persona_id: str, session_id: int
-    ) -> dict | None:
+    def training_session(self, workspace_id: str, persona_id: str, session_id: int) -> dict | None:
         with self._connect() as db:
             row = db.execute(
-                """SELECT id, persona_id, status, created_at, completed_at
+                """SELECT id, persona_id, status, created_at, completed_at,
+                          mode, question_limit
                    FROM training_sessions
                    WHERE workspace_id=? AND persona_id=? AND id=?""",
                 (workspace_id, persona_id, session_id),
@@ -652,12 +813,70 @@ class WorkflowStore:
     def training_sessions(self, workspace_id: str, persona_id: str) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
-                """SELECT id, persona_id, status, created_at, completed_at
+                """SELECT id, persona_id, status, created_at, completed_at,
+                          mode, question_limit
                    FROM training_sessions WHERE workspace_id=? AND persona_id=?
                    ORDER BY id DESC""",
                 (workspace_id, persona_id),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def assign_training_question(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        session_id: int,
+        question: dict,
+        priority: int,
+    ) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT OR IGNORE INTO training_session_questions(
+                     workspace_id, session_id, persona_id, question_id,
+                     root_question_id, parent_question_id, branch_depth,
+                     branch_path_json, triggering_answer, priority, status, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'assigned', ?)""",
+                (
+                    workspace_id,
+                    session_id,
+                    persona_id,
+                    question["id"],
+                    question.get("root_question_id", question["id"]),
+                    question.get("parent_question_id"),
+                    question.get("branch_depth", 0),
+                    json.dumps(question.get("branch_path", [])),
+                    question.get("branch_condition"),
+                    priority,
+                    now,
+                ),
+            )
+        return next(
+            item
+            for item in self.training_session_questions(workspace_id, persona_id, session_id)
+            if item["question_id"] == question["id"]
+        )
+
+    def training_session_questions(
+        self, workspace_id: str, persona_id: str, session_id: int
+    ) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT question_id, root_question_id, parent_question_id,
+                          branch_depth, branch_path_json, triggering_answer,
+                          priority, status, created_at
+                   FROM training_session_questions
+                   WHERE workspace_id=? AND persona_id=? AND session_id=?
+                   ORDER BY priority DESC, created_at, question_id""",
+                (workspace_id, persona_id, session_id),
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                "branch_path": json.loads(row["branch_path_json"]),
+            }
+            for row in rows
+        ]
 
     def save_training_response(
         self,
@@ -700,10 +919,8 @@ class WorkflowStore:
     def training_responses(
         self, workspace_id: str, persona_id: str, session_id: int | None = None
     ) -> list[dict]:
-        query = (
-            """SELECT session_id, question_id, answer_json, skipped, answered_at
+        query = """SELECT session_id, question_id, answer_json, skipped, answered_at
                FROM training_responses WHERE workspace_id=? AND persona_id=?"""
-        )
         parameters: tuple = (workspace_id, persona_id)
         if session_id is not None:
             query += " AND session_id=?"
@@ -826,6 +1043,133 @@ class WorkflowStore:
             ).fetchone()
         return dict(row) if updated and row else None
 
+    def create_enrichment_job(self, workspace_id: str, persona_id: str, provider: str) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            cursor = db.execute(
+                """INSERT INTO profile_enrichment_jobs(
+                     workspace_id, persona_id, status, provider, created_at, updated_at
+                   ) VALUES (?, ?, 'running', ?, ?, ?)""",
+                (workspace_id, persona_id, provider, now, now),
+            )
+            job_id = int(cursor.lastrowid)
+        return self.enrichment_job(workspace_id, persona_id, job_id)
+
+    def enrichment_job(self, workspace_id: str, persona_id: str, job_id: int) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT id, persona_id, status, provider, found_count, message,
+                          created_at, updated_at
+                   FROM profile_enrichment_jobs
+                   WHERE workspace_id=? AND persona_id=? AND id=?""",
+                (workspace_id, persona_id, job_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def latest_enrichment(self, workspace_id: str, persona_id: str) -> dict:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT id FROM profile_enrichment_jobs
+                   WHERE workspace_id=? AND persona_id=? ORDER BY id DESC LIMIT 1""",
+                (workspace_id, persona_id),
+            ).fetchone()
+        if not row:
+            return {"status": "idle", "provider": None, "found_count": 0, "candidates": []}
+        job = self.enrichment_job(workspace_id, persona_id, row["id"])
+        assert job is not None
+        job["candidates"] = self.profile_candidate_facts(workspace_id, persona_id)
+        return job
+
+    def complete_enrichment_job(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        job_id: int,
+        candidates: list[dict],
+        message: str | None = None,
+    ) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            for candidate in candidates:
+                db.execute(
+                    """INSERT OR REPLACE INTO profile_candidate_facts(
+                         candidate_id, workspace_id, persona_id, job_id, category,
+                         proposed_title, proposed_detail, source_type, source_title,
+                         source_url, retrieved_at, model_generated_summary,
+                         confidence, review_status, reviewed_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'suggested', NULL)""",
+                    (
+                        candidate["candidate_id"],
+                        workspace_id,
+                        persona_id,
+                        job_id,
+                        candidate["category"],
+                        candidate["proposed_title"],
+                        candidate.get("proposed_detail"),
+                        candidate["source_type"],
+                        candidate["source_title"],
+                        candidate.get("source_url"),
+                        candidate.get("retrieved_at", now),
+                        int(candidate.get("model_generated_summary", False)),
+                        candidate.get("confidence"),
+                    ),
+                )
+            db.execute(
+                """UPDATE profile_enrichment_jobs
+                   SET status='complete', found_count=?, message=?, updated_at=?
+                   WHERE workspace_id=? AND persona_id=? AND id=?""",
+                (len(candidates), message, now, workspace_id, persona_id, job_id),
+            )
+        result = self.enrichment_job(workspace_id, persona_id, job_id)
+        assert result is not None
+        result["candidates"] = self.profile_candidate_facts(workspace_id, persona_id)
+        return result
+
+    def profile_candidate_facts(self, workspace_id: str, persona_id: str) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT candidate_id, category, proposed_title, proposed_detail,
+                          source_type, source_title, source_url, retrieved_at,
+                          model_generated_summary, confidence, review_status, reviewed_at
+                   FROM profile_candidate_facts
+                   WHERE workspace_id=? AND persona_id=? ORDER BY job_id, candidate_id""",
+                (workspace_id, persona_id),
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                "model_generated_summary": bool(row["model_generated_summary"]),
+            }
+            for row in rows
+        ]
+
+    def review_profile_candidate(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        candidate_id: str,
+        status: str,
+        title: str | None = None,
+        detail: str | None = None,
+    ) -> dict | None:
+        now = self._now()
+        with self._connect() as db:
+            updated = db.execute(
+                """UPDATE profile_candidate_facts
+                   SET review_status=?,
+                       proposed_title=COALESCE(?, proposed_title),
+                       proposed_detail=COALESCE(?, proposed_detail), reviewed_at=?
+                   WHERE workspace_id=? AND persona_id=? AND candidate_id=?""",
+                (status, title, detail, now, workspace_id, persona_id, candidate_id),
+            ).rowcount
+        if not updated:
+            return None
+        return next(
+            item
+            for item in self.profile_candidate_facts(workspace_id, persona_id)
+            if item["candidate_id"] == candidate_id
+        )
+
     def create_practice_update(
         self,
         workspace_id: str,
@@ -835,14 +1179,20 @@ class WorkflowStore:
         body: str,
         provenance: str,
         agent_drafted: bool = False,
+        source_input: dict | None = None,
+        synthetic_case: bool = False,
+        case_safety_label: str | None = None,
     ) -> dict:
         now = self._now()
         with self._connect() as db:
             cursor = db.execute(
                 """INSERT INTO practice_updates(
                      workspace_id, persona_id, update_type, title, body, provenance,
-                     status, agent_drafted, created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)""",
+                     status, agent_drafted, created_at, updated_at, post_type,
+                     authored_by, drafted_by, physician_approved, visibility,
+                     source_input_json, synthetic_case, case_safety_label
+                   ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, 'physician',
+                     ?, 0, 'network', ?, ?, ?)""",
                 (
                     workspace_id,
                     persona_id,
@@ -853,26 +1203,43 @@ class WorkflowStore:
                     int(agent_drafted),
                     now,
                     now,
+                    update_type,
+                    "lamina_agent" if agent_drafted else "physician",
+                    json.dumps(source_input) if source_input is not None else None,
+                    int(synthetic_case),
+                    case_safety_label,
                 ),
             )
             update_id = int(cursor.lastrowid)
         return self.practice_update(workspace_id, persona_id, update_id)
 
-    def practice_update(
-        self, workspace_id: str, persona_id: str, update_id: int
-    ) -> dict | None:
+    def practice_update(self, workspace_id: str, persona_id: str, update_id: int) -> dict | None:
         with self._connect() as db:
             row = db.execute(
-                """SELECT id, persona_id, update_type AS type, title, body,
-                          provenance, status, agent_drafted, created_at,
+                """SELECT id, persona_id, post_type AS type, title, body,
+                          provenance, status, agent_drafted, authored_by, drafted_by,
+                          physician_approved, visibility, source_input_json,
+                          synthetic_case, case_safety_label, created_at,
                           updated_at, published_at
                    FROM practice_updates
                    WHERE workspace_id=? AND persona_id=? AND id=?""",
                 (workspace_id, persona_id, update_id),
             ).fetchone()
-        return (
-            {**dict(row), "agent_drafted": bool(row["agent_drafted"])} if row else None
-        )
+        return self._post_dict(row)
+
+    @staticmethod
+    def _post_dict(row: sqlite3.Row | None) -> dict | None:
+        if not row:
+            return None
+        result = dict(row)
+        source_input_json = result.pop("source_input_json")
+        return {
+            **result,
+            "agent_drafted": bool(row["agent_drafted"]),
+            "physician_approved": bool(row["physician_approved"]),
+            "synthetic_case": bool(row["synthetic_case"]),
+            "source_input": json.loads(source_input_json) if source_input_json else None,
+        }
 
     def practice_updates(
         self,
@@ -880,12 +1247,12 @@ class WorkflowStore:
         persona_id: str | None = None,
         status: str | None = None,
     ) -> list[dict]:
-        query = (
-            """SELECT id, persona_id, update_type AS type, title, body,
-                      provenance, status, agent_drafted, created_at,
+        query = """SELECT id, persona_id, post_type AS type, title, body,
+                      provenance, status, agent_drafted, authored_by, drafted_by,
+                      physician_approved, visibility, source_input_json,
+                      synthetic_case, case_safety_label, created_at,
                       updated_at, published_at
                FROM practice_updates WHERE workspace_id=?"""
-        )
         parameters: tuple = (workspace_id,)
         if persona_id is not None:
             query += " AND persona_id=?"
@@ -896,7 +1263,7 @@ class WorkflowStore:
         query += " ORDER BY COALESCE(published_at, updated_at) DESC, id DESC"
         with self._connect() as db:
             rows = db.execute(query, parameters).fetchall()
-        return [{**dict(row), "agent_drafted": bool(row["agent_drafted"])} for row in rows]
+        return [self._post_dict(row) for row in rows]
 
     def edit_practice_update(
         self,
@@ -906,13 +1273,31 @@ class WorkflowStore:
         update_type: str,
         title: str,
         body: str,
+        source_input: dict | None = None,
+        synthetic_case: bool | None = None,
+        case_safety_label: str | None = None,
     ) -> dict | None:
         now = self._now()
         with self._connect() as db:
             updated = db.execute(
-                """UPDATE practice_updates SET update_type=?, title=?, body=?, updated_at=?
+                """UPDATE practice_updates SET update_type=?, post_type=?, title=?,
+                     body=?, source_input_json=COALESCE(?, source_input_json),
+                     synthetic_case=COALESCE(?, synthetic_case),
+                     case_safety_label=COALESCE(?, case_safety_label), updated_at=?
                    WHERE workspace_id=? AND persona_id=? AND id=? AND status='draft'""",
-                (update_type, title, body, now, workspace_id, persona_id, update_id),
+                (
+                    update_type,
+                    update_type,
+                    title,
+                    body,
+                    json.dumps(source_input) if source_input is not None else None,
+                    int(synthetic_case) if synthetic_case is not None else None,
+                    case_safety_label,
+                    now,
+                    workspace_id,
+                    persona_id,
+                    update_id,
+                ),
             ).rowcount
         return self.practice_update(workspace_id, persona_id, update_id) if updated else None
 
@@ -926,12 +1311,15 @@ class WorkflowStore:
                 """UPDATE practice_updates
                    SET status=?,
                      published_at=CASE WHEN ?='published' THEN ? ELSE published_at END,
+                     physician_approved=CASE WHEN ?='published' THEN 1
+                                             ELSE physician_approved END,
                      updated_at=?
                    WHERE workspace_id=? AND persona_id=? AND id=?""",
                 (
                     status,
                     status,
                     published_at,
+                    status,
                     now,
                     workspace_id,
                     persona_id,
@@ -971,10 +1359,13 @@ class WorkflowStore:
 
     def remove_network_member(self, workspace_id: str, npi: str) -> bool:
         with self._connect() as db:
-            return db.execute(
-                "DELETE FROM network_members WHERE workspace_id=? AND npi=?",
-                (workspace_id, npi),
-            ).rowcount > 0
+            return (
+                db.execute(
+                    "DELETE FROM network_members WHERE workspace_id=? AND npi=?",
+                    (workspace_id, npi),
+                ).rowcount
+                > 0
+            )
 
     @staticmethod
     def _claim_dict(row: sqlite3.Row | None) -> dict | None:
@@ -1147,11 +1538,11 @@ class WorkflowStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def update_preference(
-        self, workspace_id: str, key: str, statement: str, status: str
-    ) -> dict:
-        provenance = "Physician-confirmed demo preference" if status == "confirmed" else (
-            "Physician-edited draft" if status == "suggested" else "Rejected suggestion"
+    def update_preference(self, workspace_id: str, key: str, statement: str, status: str) -> dict:
+        provenance = (
+            "Physician-confirmed demo preference"
+            if status == "confirmed"
+            else ("Physician-edited draft" if status == "suggested" else "Rejected suggestion")
         )
         now = self._now()
         with self._connect() as db:
@@ -1163,8 +1554,13 @@ class WorkflowStore:
                    status=excluded.status, updated_at=excluded.updated_at""",
                 (workspace_id, key, statement, provenance, status, now),
             )
-        return {"key": key, "statement": statement, "provenance": provenance,
-                "status": status, "updated_at": now}
+        return {
+            "key": key,
+            "statement": statement,
+            "provenance": provenance,
+            "status": status,
+            "updated_at": now,
+        }
 
 
 workflow_store = WorkflowStore()

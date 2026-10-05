@@ -21,6 +21,7 @@ from .service import (
     ClaimNotFoundError,
     DemoVerificationDisabledError,
     DemoVerificationForbiddenError,
+    ProviderDirectoryUnavailableError,
     ProviderNetwork,
     ProviderNotFoundError,
 )
@@ -36,6 +37,8 @@ def _run(action):
         return action()
     except ProviderNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except ProviderDirectoryUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except ClaimNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (DemoVerificationForbiddenError, DemoVerificationDisabledError) as error:

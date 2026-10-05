@@ -24,6 +24,13 @@ class ProviderSource(StrEnum):
     SYNTHETIC = "SYNTHETIC"
 
 
+class DirectorySearchStatus(StrEnum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    INVALID_QUERY = "invalid_query"
+    NO_RESULTS = "no_results"
+
+
 class ClaimStatus(StrEnum):
     CLAIMED = "claimed"
     VERIFICATION_PENDING = "verification_pending"
@@ -118,5 +125,7 @@ class ProviderSearchResponse(StrictModel):
     count: int
     directory_available: bool
     directory_records: int
+    directory_status: DirectorySearchStatus = DirectorySearchStatus.AVAILABLE
+    directory_backend: Literal["local_snapshot", "live_api", "unavailable"] = "unavailable"
+    directory_message: str | None = None
     data_mode: Literal["read_only_nppes_with_synthetic_demo"]
-

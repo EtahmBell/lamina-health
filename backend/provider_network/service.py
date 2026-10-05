@@ -4,7 +4,7 @@ from backend.config import environment
 from backend.synthetic_data import ALL_PHYSICIANS, SYNTHETIC_PHYSICIAN_NPIS
 from backend.workflow import WorkflowStore, workflow_store
 
-from .directory import NppesDirectory
+from .directory import DirectoryUnavailableError, NppesDirectory
 from .lifecycle import project_lifecycle
 from .models import (
     AgentPreferences,
@@ -21,6 +21,10 @@ from .models import (
 
 
 class ProviderNotFoundError(LookupError):
+    pass
+
+
+class ProviderDirectoryUnavailableError(RuntimeError):
     pass
 
 
@@ -91,7 +95,14 @@ class ProviderNetwork:
         )
 
     def _resolve(self, npi: str) -> PhysicianNetworkProfile:
-        profile = self.synthetic.get(npi) or self.directory.get(npi)
+        profile = self.synthetic.get(npi)
+        if profile is None:
+            try:
+                profile = self.directory.get(npi)
+            except DirectoryUnavailableError as error:
+                raise ProviderDirectoryUnavailableError(
+                    "The NPPES directory is temporarily unavailable"
+                ) from error
         if not profile:
             raise ProviderNotFoundError("Physician profile not found")
         return profile
@@ -109,11 +120,16 @@ class ProviderNetwork:
         return claim
 
     def search(
-        self, query: str = "", specialty: str = "", location: str = "", limit: int = 20,
+        self,
+        query: str = "",
+        specialty: str = "",
+        location: str = "",
+        limit: int = 20,
         auth_user_id: str | None = None,
     ) -> ProviderSearchResponse:
-        terms = " ".join(value.strip() for value in (query, specialty, location) if value.strip())
-        normalized = terms.casefold()
+        normalized = " ".join(
+            value.strip() for value in (query, specialty, location) if value.strip()
+        ).casefold()
         synthetic: list[PhysicianNetworkProfile] = []
         for profile in self.synthetic.values():
             searchable = (
@@ -126,25 +142,26 @@ class ProviderNetwork:
             ):
                 synthetic.append(self._with_state(profile, auth_user_id))
         remaining = max(0, limit - len(synthetic))
+        directory = self.directory.search_diagnostic(query, specialty, location, max(1, remaining))
         nppes = [
-            self._with_state(profile, auth_user_id)
-            for profile in self.directory.search(terms, remaining)
+            self._with_state(profile, auth_user_id) for profile in directory.profiles[:remaining]
         ]
         results = (synthetic + nppes)[:limit]
         return ProviderSearchResponse(
             results=results,
             count=len(results),
-            directory_available=self.directory.available,
-            directory_records=self.directory.count(),
+            directory_available=directory.status.value not in {"unavailable"},
+            directory_records=directory.total,
+            directory_status=directory.status,
+            directory_backend=directory.backend,
+            directory_message=directory.message,
             data_mode="read_only_nppes_with_synthetic_demo",
         )
 
     def get(self, npi: str, auth_user_id: str | None = None) -> PhysicianNetworkProfile:
         return self._with_state(self._resolve(npi), auth_user_id)
 
-    def claim_state(
-        self, npi: str, auth_user_id: str | None = None
-    ) -> ProviderClaimState:
+    def claim_state(self, npi: str, auth_user_id: str | None = None) -> ProviderClaimState:
         profile = self.get(npi, auth_user_id)
         return ProviderClaimState(
             npi=profile.npi,

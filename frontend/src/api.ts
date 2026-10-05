@@ -75,6 +75,8 @@ export type ProviderClaimState = {
 export type ProviderSearchResponse = {
   results: PhysicianNetworkProfile[]; count: number; directory_available: boolean
   directory_records: number; data_mode: 'read_only_nppes_with_synthetic_demo'
+  directory_status: 'available' | 'unavailable' | 'invalid_query' | 'no_results'
+  directory_backend: 'local_snapshot' | 'live_api' | 'unavailable'; directory_message: string | null
 }
 export type AgentRelationship = {
   source_agent: string; target_agent: string; relationship_type: 'recommended' | 'redirected' | 'consulted'
@@ -160,7 +162,7 @@ export type SpecialistWorkspace = {
   recommended_case_count: number; unreviewed_case_count: number; case_count: number
 }
 export type DemoPhysicianPerspective = 'lucy' | 'iain'
-export type ProfileProvenance = 'synthetic_demo' | 'nppes' | 'physician_entered' | 'imported' | 'confirmed_by_physician'
+export type ProfileProvenance = 'synthetic_demo' | 'nppes' | 'physician_entered' | 'imported' | 'confirmed_by_physician' | 'confirmed_public_candidate'
 export type ProfileCategory = 'about' | 'training' | 'experience' | 'affiliations' | 'clinical_interests' | 'skills_or_procedures' | 'research' | 'publications' | 'teaching' | 'languages' | 'locations' | 'professional_links'
 export type ControlledPhysicianIdentity = {
   id: string; physician_id: string | null; npi: string | null; name: string
@@ -170,8 +172,13 @@ export type ProfileItem = {
   id: string; category: ProfileCategory; title: string; detail: string | null
   provenance: ProfileProvenance; shareable: boolean; created_at: string; updated_at: string
 }
+export type PhysicianInterestType = 'clinical_interest' | 'case_interest' | 'research_interest' | 'teaching_interest'
+export type PhysicianInterest = {
+  id: string; interest_type: PhysicianInterestType; title: string; detail: string | null
+  provenance: string; confirmed: boolean; shareable: boolean; created_at: string; updated_at: string
+}
 export type ProfessionalProfile = {
-  physician: ControlledPhysicianIdentity; items: ProfileItem[]
+  physician: ControlledPhysicianIdentity; items: ProfileItem[]; interests: PhysicianInterest[]
   sections: Record<ProfileCategory, ProfileItem[]>
   completeness: {
     completed_section_count: number; total_section_count: number; incomplete_sections: ProfileCategory[]
@@ -190,6 +197,7 @@ export type PracticeRepresentation = {
     specialty: string; clinical_focus: string[]; good_fit: string[]; not_a_fit: string[]
     referral_requirements: string[]; preferred_workup: string[]; access_facts: string[]
     explicit_rules: string[]; confirmed_learnings: PracticeLearning[]
+    interests: PhysicianInterest[]; interest_safety: string
   }
   gaps: {
     unanswered_questions: TrainingQuestion[]; unconfirmed_rules: PracticeLearning[]
@@ -204,14 +212,17 @@ export type PracticeRepresentation = {
 export type TrainingQuestionType = 'yes_no' | 'yes_no_depends' | 'single_choice' | 'multi_select' | 'short_text'
 export type TrainingQuestion = {
   id: string; physician_persona: DemoPhysicianPerspective
-  source_type: 'profile_confirmation' | 'existing_practice_rule' | 'canonical_case' | 'network_question' | 'explicit_synthetic_demo'
+  source_type: 'profile_confirmation' | 'existing_practice_rule' | 'canonical_case' | 'network_question' | 'explicit_synthetic_demo' | 'initialization' | 'unresolved_branch'
   source_reference: string | null; prompt: string; question_type: TrainingQuestionType
   answer_options: string[]; why_this_matters: string; status: 'unanswered' | 'answered' | 'skipped'
   asked_count: number | null; synthetic: true; created_at: string
+  root_question_id: string; parent_question_id: string | null; branch_depth: number
+  branch_path: string[]; branch_condition: string | null; terminal: boolean
+  generated_from: string; priority: number
 }
 export type TrainingResponse = {
   session_id: number; question_id: string; answer: string | string[] | null
-  skipped: boolean; answered_at: string
+  skipped: boolean; answered_at: string; next_question?: TrainingQuestion | null
 }
 export type ProposedLearning = {
   id: number; persona_id: DemoPhysicianPerspective; source_type: string; source_reference: string
@@ -222,17 +233,48 @@ export type TrainingSession = {
   id: number; persona_id: DemoPhysicianPerspective; status: 'active' | 'completed'
   created_at: string; completed_at: string | null; questions?: TrainingQuestion[]
   responses?: TrainingResponse[]; proposed_learnings?: ProposedLearning[]
+  mode?: 'initialization' | 'daily' | 'extended'; question_limit?: number
+}
+export type TrainingQueueSummary = {
+  recommended_today: number; unanswered_total: number; available_total: number
+  answered_today: number; daily_limit: number; extended_limit: number
+  availability_model: 'lazy_grounded_sources'
 }
 export type TrainingWorkspace = {
   physician: ControlledPhysicianIdentity; questions: TrainingQuestion[]
   sessions: TrainingSession[]; responses: TrainingResponse[]; proposed_learnings: ProposedLearning[]
+  queue_summary: TrainingQueueSummary
 }
+export type PostType = 'profile_update' | 'practice_update' | 'referral_guidance' | 'share_paper' | 'research_update' | 'teaching_update' | 'interesting_case' | 'availability' | 'professional_update' | 'other'
 export type PracticeUpdateType = 'practice_focus' | 'referral_guidance' | 'availability' | 'publication' | 'research' | 'teaching' | 'location' | 'professional_update'
 export type PracticeUpdate = {
   id: number | string; persona_id?: DemoPhysicianPerspective; physician_persona?: string
   type: PracticeUpdateType; title: string; body: string; provenance: string
   status: 'draft' | 'published' | 'archived'; agent_drafted?: boolean
   created_at: string; updated_at?: string; published_at: string | null; synthetic?: true
+  authored_by?: 'physician'; drafted_by?: 'physician' | 'lamina_agent'
+  physician_approved?: boolean; visibility?: 'network'; source_input?: Record<string, unknown> | null
+  synthetic_case?: boolean; case_safety_label?: string | null
+}
+export type ProfessionalPost = Omit<PracticeUpdate, 'type'> & { type: PostType }
+export type AgentInitialization = {
+  initialized_sections: string[]; incomplete_sections: string[]
+  high_value_questions_remaining: number; blocking: false; meaning: string
+}
+export type ProfileCandidateFact = {
+  candidate_id: string; category: ProfileCategory; proposed_title: string
+  proposed_detail: string | null; source_type: string; source_title: string
+  source_url: string | null; retrieved_at: string; model_generated_summary: boolean
+  confidence: string | null; review_status: 'suggested' | 'confirmed' | 'edited' | 'rejected'
+  reviewed_at: string | null
+}
+export type ProfileEnrichmentJob = {
+  id?: number; status: 'idle' | 'running' | 'complete' | 'failed'; provider: string | null
+  found_count: number; message?: string | null; candidates: ProfileCandidateFact[]
+}
+export type PostDraftRequest = {
+  type: PostType; source_material: Record<string, unknown>
+  case_origin?: 'synthetic_demo' | 'real_patient'
 }
 export type NetworkFeedItem = PracticeUpdate & {
   physician: ControlledPhysicianIdentity; relationship_basis: Array<'explicit_network_member' | 'canonical_agent_interaction'>
@@ -309,6 +351,11 @@ export const updateSpecialistCalibration = (
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, statement }),
 })
 export const getProfessionalProfile = (perspective: DemoPhysicianPerspective) => request<ProfessionalProfile>(physicianPerspectivePath('/api/workspace/physician/profile', perspective))
+export const getPhysicianInterests = (perspective: DemoPhysicianPerspective) => request<PhysicianInterest[]>(physicianPerspectivePath('/api/workspace/physician/interests', perspective))
+export const savePhysicianInterest = (perspective: DemoPhysicianPerspective, interest: Omit<PhysicianInterest, 'id' | 'provenance' | 'created_at' | 'updated_at'>, interestId?: string) => request<PhysicianInterest>(physicianPerspectivePath(interestId ? `/api/workspace/physician/interests/${encodeURIComponent(interestId)}` : '/api/workspace/physician/interests', perspective), {
+  method: interestId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(interest),
+})
+export const getAgentInitialization = (perspective: DemoPhysicianPerspective) => request<AgentInitialization>(physicianPerspectivePath('/api/workspace/physician/initialization', perspective))
 export const updateProfessionalProfileItem = (
   perspective: DemoPhysicianPerspective,
   itemId: string,
@@ -318,7 +365,8 @@ export const updateProfessionalProfileItem = (
 })
 export const getPracticeRepresentation = (perspective: DemoPhysicianPerspective) => request<PracticeRepresentation>(physicianPerspectivePath('/api/workspace/physician/agent-representation', perspective))
 export const getPhysicianTraining = (perspective: DemoPhysicianPerspective) => request<TrainingWorkspace>(physicianPerspectivePath('/api/workspace/physician/training', perspective))
-export const startTrainingSession = (perspective: DemoPhysicianPerspective) => request<TrainingSession>(physicianPerspectivePath('/api/workspace/physician/training/sessions', perspective), { method: 'POST' })
+export const startTrainingSession = (perspective: DemoPhysicianPerspective, options?: { mode?: 'initialization' | 'daily' | 'extended'; limit?: number }) => request<TrainingSession>(physicianPerspectivePath('/api/workspace/physician/training/sessions', perspective), { method: 'POST', headers: options ? { 'Content-Type': 'application/json' } : undefined, body: options ? JSON.stringify(options) : undefined })
+export const resumeTrainingSession = (perspective: DemoPhysicianPerspective, sessionId: number) => request<TrainingSession>(physicianPerspectivePath(`/api/workspace/physician/training/sessions/${sessionId}`, perspective))
 export const answerTrainingQuestion = (
   perspective: DemoPhysicianPerspective,
   sessionId: number,
@@ -345,6 +393,15 @@ export const editPracticeUpdate = (perspective: DemoPhysicianPerspective, update
 })
 export const publishPracticeUpdate = (perspective: DemoPhysicianPerspective, updateId: number) => request<PracticeUpdate>(physicianPerspectivePath(`/api/workspace/physician/updates/${updateId}/publish`, perspective), { method: 'PUT' })
 export const dismissPracticeUpdate = (perspective: DemoPhysicianPerspective, updateId: number) => request<PracticeUpdate>(physicianPerspectivePath(`/api/workspace/physician/updates/${updateId}/dismiss`, perspective), { method: 'PUT' })
+export const enrichPhysicianProfile = (perspective: DemoPhysicianPerspective) => request<ProfileEnrichmentJob>(physicianPerspectivePath('/api/workspace/physician/profile/enrich', perspective), { method: 'POST' })
+export const getProfileEnrichment = (perspective: DemoPhysicianPerspective) => request<ProfileEnrichmentJob>(physicianPerspectivePath('/api/workspace/physician/profile/enrichment', perspective))
+export const reviewProfileCandidate = (perspective: DemoPhysicianPerspective, candidateId: string, input: { action: 'confirm' | 'edit_confirm' | 'reject'; title?: string; detail?: string; shareable?: boolean }) => request<{ candidate: ProfileCandidateFact; profile_item: ProfileItem | null }>(physicianPerspectivePath(`/api/workspace/physician/profile/enrichment/${encodeURIComponent(candidateId)}`, perspective), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const getProfessionalPosts = (perspective: DemoPhysicianPerspective) => request<ProfessionalPost[]>(physicianPerspectivePath('/api/workspace/physician/posts', perspective))
+export const createProfessionalPost = (perspective: DemoPhysicianPerspective, post: { type: PostType; title: string; body: string; case_origin?: 'synthetic_demo' | 'real_patient' }) => request<ProfessionalPost>(physicianPerspectivePath('/api/workspace/physician/posts', perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(post) })
+export const draftProfessionalPost = (perspective: DemoPhysicianPerspective, input: PostDraftRequest) => request<{ post: ProfessionalPost; draft_provider: string }>(physicianPerspectivePath('/api/workspace/physician/posts/draft', perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const editProfessionalPost = (perspective: DemoPhysicianPerspective, postId: number, post: { type: PostType; title: string; body: string; case_origin?: 'synthetic_demo' | 'real_patient' }) => request<ProfessionalPost>(physicianPerspectivePath(`/api/workspace/physician/posts/${postId}`, perspective), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(post) })
+export const publishProfessionalPost = (perspective: DemoPhysicianPerspective, postId: number) => request<ProfessionalPost>(physicianPerspectivePath(`/api/workspace/physician/posts/${postId}/publish`, perspective), { method: 'PUT' })
+export const dismissProfessionalPost = (perspective: DemoPhysicianPerspective, postId: number) => request<ProfessionalPost>(physicianPerspectivePath(`/api/workspace/physician/posts/${postId}/dismiss`, perspective), { method: 'PUT' })
 export const getNetworkFeed = (perspective: DemoPhysicianPerspective) => request<NetworkFeed>(physicianPerspectivePath('/api/workspace/network/feed', perspective))
 export const getNetworkPhysicianProfile = (controlledId: string) => request<NetworkPhysicianProfile>(`/api/workspace/network/physicians/${encodeURIComponent(controlledId)}/profile`)
 export const addNetworkMember = (npi: string) => request<NetworkMember>('/api/workspace/network/members', {

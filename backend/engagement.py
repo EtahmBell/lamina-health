@@ -6,6 +6,7 @@ ranking.  Engagement improves representation detail only.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from backend.demo_identity import PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME
@@ -85,9 +86,51 @@ PERSONAS: dict[str, dict[str, Any]] = {
     },
 }
 EDITABLE_PERSONAS = {"lucy", "iain"}
-PERSONA_BY_AGENT_ID = {
-    persona["agent_id"]: persona_id for persona_id, persona in PERSONAS.items()
+INTEREST_TYPES = {
+    "clinical_interest",
+    "case_interest",
+    "research_interest",
+    "teaching_interest",
 }
+INITIALIZATION_SECTIONS = (
+    "professional_identity",
+    "clinical_focus",
+    "case_interests",
+    "referral_preferences",
+    "workup_preferences",
+    "access_practice_context",
+)
+TRAINING_DAILY_LIMIT = 5
+TRAINING_EXTENDED_LIMIT = 25
+MAX_BRANCH_DEPTH = 3
+QUESTION_BANK_AVAILABLE = 128
+_CALIBRATION_TOPICS = (
+    "clinical trajectory",
+    "case severity",
+    "diagnostic uncertainty",
+    "prior workup",
+    "medication response",
+    "comorbidity context",
+    "access constraints",
+    "referral timing",
+    "co-management",
+    "follow-up expectations",
+    "redirection boundary",
+    "communication preference",
+)
+_CALIBRATION_CONTEXTS = (
+    "a new referral",
+    "an urgent question",
+    "a stable chronic case",
+    "a progressively worsening case",
+    "a case with incomplete records",
+    "a case after initial treatment",
+    "a remote consultation",
+    "a co-managed case",
+    "a case with access barriers",
+    "a follow-up consultation",
+)
+PERSONA_BY_AGENT_ID = {persona["agent_id"]: persona_id for persona_id, persona in PERSONAS.items()}
 
 
 def _item(
@@ -153,6 +196,44 @@ BASE_PROFILE_ITEMS: dict[str, list[dict[str, Any]]] = {
             "Iron-deficiency anaemia source evaluation",
         ),
         _item("sofia-location-oakland", "locations", "Oakland, CA"),
+    ],
+}
+
+BASE_INTERESTS: dict[str, list[dict[str, Any]]] = {
+    "lucy": [
+        {
+            "id": "lucy-care-coordination",
+            "interest_type": "clinical_interest",
+            "title": "Specialty-care coordination",
+            "detail": "Longitudinal coordination across primary and specialty care.",
+            "provenance": "synthetic_demo",
+            "confirmed": True,
+            "shareable": True,
+            "created_at": BASE_TIMESTAMP,
+            "updated_at": BASE_TIMESTAMP,
+        }
+    ],
+    "iain": [
+        {
+            "id": f"iain-case-interest-{index}",
+            "interest_type": "case_interest",
+            "title": title,
+            "detail": None,
+            "provenance": "synthetic_demo",
+            "confirmed": True,
+            "shareable": True,
+            "created_at": BASE_TIMESTAMP,
+            "updated_at": BASE_TIMESTAMP,
+        }
+        for index, title in enumerate(
+            (
+                "Resistant hypertension with renal dysfunction",
+                "Proteinuric CKD",
+                "Cardiorenal disease",
+                "Difficult-to-control blood pressure in CKD",
+            ),
+            start=1,
+        )
     ],
 }
 
@@ -255,6 +336,123 @@ TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
+BRANCH_QUESTIONS: dict[str, dict[str, Any]] = {
+    "iain-branch-progressive-renal": {
+        "id": "iain-branch-progressive-renal",
+        "physician_persona": "iain",
+        "root_question_id": "iain-resistant-htn-normal-kidney",
+        "parent_question_id": "iain-resistant-htn-normal-kidney",
+        "branch_depth": 1,
+        "branch_path": ["iain-resistant-htn-normal-kidney:Depends"],
+        "branch_condition": "Depends",
+        "source_type": "unresolved_branch",
+        "source_reference": "synthetic-network-resistant-htn",
+        "prompt": "Does progressive renal dysfunction make the case appropriate?",
+        "question_type": "yes_no_depends",
+        "answer_options": ["Yes", "Depends", "No"],
+        "why_this_matters": "Narrows the renal feature that changes referral fit.",
+        "terminal": False,
+        "synthetic": True,
+        "created_at": BASE_TIMESTAMP,
+    },
+    "iain-branch-proteinuria-absence": {
+        "id": "iain-branch-proteinuria-absence",
+        "physician_persona": "iain",
+        "root_question_id": "iain-resistant-htn-normal-kidney",
+        "parent_question_id": "iain-branch-progressive-renal",
+        "branch_depth": 2,
+        "branch_path": [
+            "iain-resistant-htn-normal-kidney:Depends",
+            "iain-branch-progressive-renal:Yes",
+        ],
+        "branch_condition": "Yes",
+        "source_type": "unresolved_branch",
+        "source_reference": "synthetic-network-resistant-htn",
+        "prompt": "Does absence of proteinuria change that?",
+        "question_type": "yes_no_depends",
+        "answer_options": ["Yes", "Depends", "No"],
+        "why_this_matters": "Clarifies whether proteinuria is a boundary or merely context.",
+        "terminal": False,
+        "synthetic": True,
+        "created_at": BASE_TIMESTAMP,
+    },
+    "iain-branch-declining-egfr-normal-upcr": {
+        "id": "iain-branch-declining-egfr-normal-upcr",
+        "physician_persona": "iain",
+        "root_question_id": "iain-resistant-htn-normal-kidney",
+        "parent_question_id": "iain-branch-proteinuria-absence",
+        "branch_depth": 3,
+        "branch_path": [
+            "iain-resistant-htn-normal-kidney:Depends",
+            "iain-branch-progressive-renal:Yes",
+            "iain-branch-proteinuria-absence:Depends",
+        ],
+        "branch_condition": "Depends",
+        "source_type": "unresolved_branch",
+        "source_reference": "synthetic-network-resistant-htn",
+        "prompt": "If eGFR is declining but UPCR is normal, would you still see the patient?",
+        "question_type": "yes_no",
+        "answer_options": ["Yes", "No"],
+        "why_this_matters": "Locates the final referral boundary without assuming proteinuria.",
+        "terminal": True,
+        "synthetic": True,
+        "created_at": BASE_TIMESTAMP,
+    },
+}
+
+INITIALIZATION_QUESTIONS: dict[str, list[dict[str, Any]]] = {}
+_INITIALIZATION_PROMPTS = {
+    "lucy": (
+        ("identity", "How should your agent describe your primary-care practice?"),
+        ("focus", "Which clinical focus should your agent emphasize first?"),
+        ("case-interest", "Which case types are you especially interested in coordinating?"),
+        ("good-fit", "What makes a specialty referral a good fit for your workflow?"),
+        ("redirect", "Which cases do you usually redirect before specialist outreach?"),
+        ("workup", "What information should be gathered before a referral question?"),
+        ("trajectory", "How should clinical trajectory affect referral urgency?"),
+        ("access", "Which access constraints should your agent represent?"),
+        ("communication", "What communication style do you prefer from specialists?"),
+        ("follow-up", "What follow-up information should return to primary care?"),
+    ),
+    "iain": (
+        ("identity", "How should your agent describe your nephrology practice?"),
+        ("focus", "Which nephrology focus should your agent emphasize first?"),
+        ("case-interest", "Which renal case types are you especially interested in seeing?"),
+        ("good-fit", "What makes a CKD referral a particularly good fit?"),
+        ("redirect", "Which hypertension cases do you usually redirect?"),
+        ("workup", "Which studies are most useful before nephrology review?"),
+        ("trajectory", "How should eGFR trajectory affect referral fit?"),
+        ("proteinuria", "How should proteinuria affect referral fit?"),
+        ("access", "Which access constraints should your agent represent?"),
+        ("co-management", "When is cardiology co-management most useful?"),
+    ),
+}
+for _persona_id, _prompts in _INITIALIZATION_PROMPTS.items():
+    INITIALIZATION_QUESTIONS[_persona_id] = [
+        {
+            "id": f"{_persona_id}-initialization-{key}",
+            "physician_persona": _persona_id,
+            "source_type": "initialization",
+            "source_reference": f"initialization:{key}",
+            "prompt": prompt,
+            "question_type": "short_text",
+            "answer_options": [],
+            "why_this_matters": "Fills a high-value agent initialization gap.",
+            "asked_count": None,
+            "synthetic": True,
+            "terminal": True,
+            "created_at": BASE_TIMESTAMP,
+        }
+        for key, prompt in _prompts
+    ]
+
+BRANCH_TRANSITIONS = {
+    ("iain-resistant-htn-normal-kidney", "Depends"): "iain-branch-progressive-renal",
+    ("iain-branch-progressive-renal", "Yes"): "iain-branch-proteinuria-absence",
+    ("iain-branch-progressive-renal", "Depends"): "iain-branch-proteinuria-absence",
+    ("iain-branch-proteinuria-absence", "Depends"): "iain-branch-declining-egfr-normal-upcr",
+}
+
 SYNTHETIC_FEED_FIXTURES = [
     {
         "id": "fixture-onadeko-referral-guidance",
@@ -301,13 +499,23 @@ def profile_items(persona_id: str, overlays: list[dict]) -> list[dict]:
     return sorted(merged.values(), key=lambda item: (item["category"], item["id"]))
 
 
-def project_professional_profile(persona_id: str, overlays: list[dict]) -> dict:
+def physician_interests(persona_id: str, overlays: list[dict]) -> list[dict]:
+    merged = {item["id"]: item for item in BASE_INTERESTS.get(persona_id, [])}
+    merged.update({item["id"]: item for item in overlays})
+    return sorted(merged.values(), key=lambda item: (item["interest_type"], item["id"]))
+
+
+def project_professional_profile(
+    persona_id: str, overlays: list[dict], interest_overlays: list[dict] | None = None
+) -> dict:
     items = profile_items(persona_id, overlays)
+    interests = physician_interests(persona_id, interest_overlays or [])
     completed = sorted({item["category"] for item in items})
     incomplete = [category for category in PROFILE_CATEGORIES if category not in completed]
     return {
         "physician": PERSONAS[persona_id],
         "items": items,
+        "interests": interests,
         "sections": {
             category: [item for item in items if item["category"] == category]
             for category in PROFILE_CATEGORIES
@@ -323,10 +531,76 @@ def project_professional_profile(persona_id: str, overlays: list[dict]) -> dict:
 
 
 def question_by_id(persona_id: str, question_id: str) -> dict | None:
-    return next(
+    question = next(
         (item for item in TRAINING_QUESTIONS[persona_id] if item["id"] == question_id),
         None,
     )
+    if question is None:
+        question = BRANCH_QUESTIONS.get(question_id)
+    if question is None:
+        question = next(
+            (item for item in INITIALIZATION_QUESTIONS[persona_id] if item["id"] == question_id),
+            None,
+        )
+    if question is None and question_id.startswith(f"{persona_id}-bank-"):
+        question = next(
+            (
+                item
+                for item in generated_training_questions(persona_id)
+                if item["id"] == question_id
+            ),
+            None,
+        )
+    if question and question["physician_persona"] == persona_id:
+        return normalize_question(question)
+    return None
+
+
+def generated_training_questions(persona_id: str):
+    """Yield a large deterministic bank from grounded calibration dimensions."""
+    for topic_index, topic in enumerate(_CALIBRATION_TOPICS):
+        for context_index, context in enumerate(_CALIBRATION_CONTEXTS):
+            yield {
+                "id": f"{persona_id}-bank-{topic_index:02d}-{context_index:02d}",
+                "physician_persona": persona_id,
+                "source_type": "practice_gap",
+                "source_reference": f"calibration:{topic}:{context}",
+                "prompt": f"For {context}, how should your agent represent {topic}?",
+                "question_type": "short_text",
+                "answer_options": [],
+                "why_this_matters": (
+                    "Clarifies a bounded representation gap using a reusable "
+                    "practice-calibration dimension."
+                ),
+                "asked_count": None,
+                "synthetic": True,
+                "terminal": True,
+                "created_at": BASE_TIMESTAMP,
+            }
+
+
+def normalize_question(question: dict) -> dict:
+    source_priority = {
+        "unresolved_branch": 95,
+        "canonical_case": 90,
+        "network_question": 85,
+        "existing_practice_rule": 70,
+        "initialization": 60,
+        "practice_gap": 55,
+        "profile_confirmation": 40,
+        "explicit_synthetic_demo": 35,
+    }
+    return {
+        **question,
+        "root_question_id": question.get("root_question_id", question["id"]),
+        "parent_question_id": question.get("parent_question_id"),
+        "branch_depth": question.get("branch_depth", 0),
+        "branch_path": question.get("branch_path", []),
+        "branch_condition": question.get("branch_condition"),
+        "terminal": question.get("terminal", True),
+        "generated_from": question.get("source_type"),
+        "priority": source_priority.get(question.get("source_type", ""), 50),
+    }
 
 
 def project_training_questions(persona_id: str, responses: list[dict]) -> list[dict]:
@@ -335,7 +609,7 @@ def project_training_questions(persona_id: str, responses: list[dict]) -> list[d
         latest[response["question_id"]] = response
     return [
         {
-            **question,
+            **normalize_question(question),
             "status": (
                 "skipped"
                 if latest.get(question["id"], {}).get("skipped")
@@ -348,7 +622,75 @@ def project_training_questions(persona_id: str, responses: list[dict]) -> list[d
     ]
 
 
+def next_branch_question(
+    persona_id: str, question_id: str, answer: str, assigned_ids: set[str]
+) -> dict | None:
+    child_id = BRANCH_TRANSITIONS.get((question_id, answer))
+    if not child_id or child_id in assigned_ids:
+        return None
+    child = question_by_id(persona_id, child_id)
+    if not child or child["branch_depth"] > MAX_BRANCH_DEPTH:
+        return None
+    if child_id in {part.split(":", 1)[0] for part in child["branch_path"]}:
+        return None
+    return child
+
+
+def training_queue_summary(questions: list[dict], responses: list[dict]) -> dict:
+    unanswered = [item for item in questions if item["status"] == "unanswered"]
+    today = datetime.now(UTC).date().isoformat()
+    answered_today = sum(
+        1 for item in responses if str(item.get("answered_at", "")).startswith(today)
+    )
+    return {
+        "recommended_today": min(TRAINING_DAILY_LIMIT, len(unanswered)),
+        "unanswered_total": len(unanswered),
+        "available_total": QUESTION_BANK_AVAILABLE,
+        "answered_today": answered_today,
+        "daily_limit": TRAINING_DAILY_LIMIT,
+        "extended_limit": TRAINING_EXTENDED_LIMIT,
+        "availability_model": "lazy_grounded_sources",
+    }
+
+
+def project_initialization(profile: dict, interests: list[dict], questions: list[dict]) -> dict:
+    completed = {"professional_identity", "clinical_focus"}
+    if any(item["interest_type"] == "case_interest" for item in interests):
+        completed.add("case_interests")
+    if profile["sections"].get("locations"):
+        completed.add("access_practice_context")
+    answered = {item["id"] for item in questions if item["status"] == "answered"}
+    if answered:
+        completed.update({"referral_preferences", "workup_preferences"})
+    incomplete = [item for item in INITIALIZATION_SECTIONS if item not in completed]
+    return {
+        "initialized_sections": [item for item in INITIALIZATION_SECTIONS if item in completed],
+        "incomplete_sections": incomplete,
+        "high_value_questions_remaining": sum(
+            1 for item in questions if item["status"] == "unanswered"
+        ),
+        "blocking": False,
+        "meaning": "Progressive representation setup; incomplete sections do not block Lamina use.",
+    }
+
+
 def proposed_learning_statement(question_id: str, answer: str | list[str]) -> str:
+    if question_id == "iain-branch-declining-egfr-normal-upcr":
+        return {
+            "Yes": (
+                "Progressive renal dysfunction can make resistant-hypertension "
+                "cases appropriate for nephrology even without proteinuria."
+            ),
+            "No": (
+                "Normal protein quantification may change the fit of resistant-"
+                "hypertension cases despite declining eGFR."
+            ),
+        }[str(answer)]
+    if question_id in {
+        "iain-branch-progressive-renal",
+        "iain-branch-proteinuria-absence",
+    }:
+        return f"Branch response for {question_id}: {answer}."
     if question_id == "iain-resistant-htn-normal-kidney":
         return {
             "Yes": "Dr. Jung sees resistant hypertension even when kidney function is normal.",
@@ -371,6 +713,19 @@ def proposed_learning_statement(question_id: str, answer: str | list[str]) -> st
         return f"Dr. Saru uses gastroenterology-first routing for persistent iron deficiency without source evaluation: {answer}."
     if question_id == "lucy-referral-context":
         return f"Dr. Saru wants referral questions to include {', '.join(answer)}."
+    question = next(
+        (
+            item
+            for items in INITIALIZATION_QUESTIONS.values()
+            for item in items
+            if item["id"] == question_id
+        ),
+        None,
+    )
+    if question:
+        return f"For {question['prompt']} The physician answered: {answer}."
+    if "-bank-" in question_id:
+        return f"The physician supplied this practice-calibration guidance: {answer}."
     raise KeyError(question_id)
 
 
@@ -427,6 +782,7 @@ def project_practice_representation(
     learnings: list[dict],
     profile: dict,
     existing_learnings: list[dict] | None = None,
+    interests: list[dict] | None = None,
 ) -> dict:
     base = base_practice_representation(persona_id)
     confirmed = [item for item in learnings if item["status"] == "confirmed"]
@@ -439,6 +795,13 @@ def project_practice_representation(
         "physician": PERSONAS[persona_id],
         "sections": {
             **base,
+            "interests": [
+                item for item in (interests or profile.get("interests", [])) if item["confirmed"]
+            ],
+            "interest_safety": (
+                "Interests describe cases the physician wants to see; they are not "
+                "acceptance rules, guarantees, expertise claims, or ranking signals."
+            ),
             "confirmed_learnings": [
                 *[_practice_learning(item, "existing_calibration") for item in confirmed_existing],
                 *[_practice_learning(item, "training_response") for item in confirmed],

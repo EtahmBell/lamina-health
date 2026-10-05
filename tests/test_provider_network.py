@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.provider_network import api as provider_api
-from backend.provider_network.directory import NppesDirectory
+from backend.provider_network.directory import DirectoryUnavailableError, NppesDirectory
 from backend.provider_network.models import AgentPreferencesInput, AgentStatus
 from backend.provider_network.service import (
     DemoVerificationForbiddenError,
@@ -107,3 +107,80 @@ def test_provider_api_search_and_status(tmp_path: Path, monkeypatch: pytest.Monk
     assert result["source"] == "SYNTHETIC"
     assert result["agent"]["status"] == "reserved"
     assert result["consult_physician_id"] == "physician-jung"
+
+
+class MockNppesTransport:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+
+    def search(self, query: str, specialty: str, location: str, limit: int):
+        if self.fail:
+            raise DirectoryUnavailableError("upstream detail must remain private")
+        return ([self._record()], 1)
+
+    def get(self, npi: str):
+        if self.fail:
+            raise DirectoryUnavailableError("upstream detail must remain private")
+        return self._record() if npi == "1234567890" else None
+
+    @staticmethod
+    def _record() -> dict:
+        return {
+            "number": "1234567890",
+            "enumeration_type": "NPI-1",
+            "basic": {"first_name": "Jane", "last_name": "Smith", "credential": "MD"},
+            "taxonomies": [{"primary": True, "code": "207RN0300X", "desc": "Nephrology"}],
+            "addresses": [
+                {
+                    "address_purpose": "LOCATION",
+                    "city": "Palo Alto",
+                    "state": "CA",
+                    "telephone_number": "6505550100",
+                }
+            ],
+        }
+
+
+def test_live_transport_normalizes_to_reserved_identity(tmp_path: Path) -> None:
+    directory = NppesDirectory(None, MockNppesTransport())
+    network = ProviderNetwork(directory, WorkflowStore(tmp_path / "workflow.sqlite"))
+
+    response = network.search(query="Jane Smith")
+
+    assert response.directory_backend == "live_api"
+    assert response.directory_status == "available"
+    assert response.results[0].source == "NPPES"
+    assert response.results[0].agent.status == AgentStatus.RESERVED
+
+
+def test_external_failure_is_explicit_and_never_fabricates_result(tmp_path: Path) -> None:
+    directory = NppesDirectory(None, MockNppesTransport(fail=True))
+    network = ProviderNetwork(directory, WorkflowStore(tmp_path / "workflow.sqlite"))
+
+    response = network.search(query="A real physician who is not synthetic")
+
+    assert response.results == []
+    assert response.directory_status == "unavailable"
+    assert response.directory_available is False
+    assert response.directory_message == "The NPPES directory is temporarily unavailable"
+
+
+def test_invalid_and_no_results_are_distinct_directory_states(tmp_path: Path) -> None:
+    directory = NppesDirectory(None, MockNppesTransport())
+    network = ProviderNetwork(directory, WorkflowStore(tmp_path / "workflow.sqlite"))
+
+    invalid = network.search()
+    no_results_directory = NppesDirectory(
+        None,
+        type(
+            "EmptyTransport",
+            (),
+            {"search": lambda self, *args: ([], 0), "get": lambda self, npi: None},
+        )(),
+    )
+    no_results = ProviderNetwork(
+        no_results_directory, WorkflowStore(tmp_path / "empty-workflow.sqlite")
+    ).search(query="Nobody Here")
+
+    assert invalid.directory_status == "invalid_query"
+    assert no_results.directory_status == "no_results"
