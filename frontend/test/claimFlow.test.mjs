@@ -318,7 +318,7 @@ test('Add to my network and Claim this identity stay separate actions in search 
 })
 
 test('Profile links to My physician identities only when a real account session exists, and never represents Lucy as that account', () => {
-  const profileFn = slice(app, 'function ProfilePage', 'function UnfinishedPatient')
+  const profileFn = slice(app, 'function SettingsPage', 'function UnfinishedPatient')
   assert.match(profileFn, /const \{ user \} = useAuth\(\)/)
   assert.match(profileFn, /\{user && <p className="muted-note profile-identity-link">/)
   assert.match(profileFn, /separate concept from your signed-in physician account/)

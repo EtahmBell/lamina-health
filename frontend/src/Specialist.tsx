@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 import {
   ApiError,
+  getAgentInitialization,
   getNetworkFeed,
+  getPhysicianTraining,
   getPracticeRepresentation,
   getSpecialistCase,
   getSpecialistCases,
   getSpecialistWorkspace,
   markSpecialistCaseReviewed,
   updateSpecialistCalibration,
+  type AgentInitialization,
   type NetworkFeed,
   type NetworkFeedItem,
   type PracticeRepresentation,
@@ -15,9 +18,10 @@ import {
   type SpecialistCaseSummary,
   type SpecialistOutcome,
   type SpecialistWorkspace,
+  type TrainingQueueSummary,
 } from './api.ts'
 import { eventDomId } from './agentActivity.ts'
-import { ImproveAgentCard, NetworkFeedSection, PracticeRepresentationPanel, networkProfilePath, trainingPath } from './Engagement.tsx'
+import { ImproveAgentCard, InitializationCard, NetworkFeedSection, PracticeRepresentationPanel, networkProfilePath, trainingPath } from './Engagement.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 
 type Navigate = (path: string) => void
@@ -94,10 +98,16 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
   const [error, setError] = useState('')
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
+  const [queueSummary, setQueueSummary] = useState<TrainingQueueSummary | null>(null)
+  const [resumeSessionId, setResumeSessionId] = useState<number | null>(null)
   useEffect(() => {
     getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message))
     getPracticeRepresentation('iain').then(setRepresentation).catch(() => {})
     getNetworkFeed('iain').then(setFeed).catch(() => {})
+    getPhysicianTraining('iain').then((trainingWorkspace) => {
+      setQueueSummary(trainingWorkspace.queue_summary)
+      setResumeSessionId(trainingWorkspace.sessions.find((item) => item.status === 'active')?.id ?? null)
+    }).catch(() => {})
   }, [])
   const needsReview = workspace?.recent_cases.filter((item) => !item.reviewed) ?? []
   const recent = workspace?.recent_cases ?? []
@@ -116,11 +126,11 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
         <div className="lam-list needs-attention">{needsReview.map((item) => <SpecialistCurrentWorkRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
       </section>}
     </>}
-    <ImproveAgentCard representation={representation} navigate={navigate} trainPath={trainingPath('iain')} />
+    <ImproveAgentCard representation={representation} queueSummary={queueSummary} resumeSessionId={resumeSessionId} navigate={navigate} trainPath={trainingPath('iain')} />
+    <NetworkFeedSection feed={feed} navigate={navigate} perspective="iain" />
     {workspace && workspace.case_count > 0 && <section className="home-patients"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
       <div className="lam-list quiet">{recent.slice(0, 5).map((item) => <SpecialistActivityRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
     </section>}
-    <NetworkFeedSection feed={feed} navigate={navigate} perspective="iain" />
   </main>
 }
 
@@ -304,11 +314,19 @@ export function SpecialistAgentPage({ navigate }: { navigate: Navigate }) {
   const [workspace, setWorkspace] = useState<SpecialistWorkspace | null>(null)
   const [cases, setCases] = useState<SpecialistCaseSummary[] | null>(null)
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
+  const [queueSummary, setQueueSummary] = useState<TrainingQueueSummary | null>(null)
+  const [resumeSessionId, setResumeSessionId] = useState<number | null>(null)
+  const [initialization, setInitialization] = useState<AgentInitialization | null>(null)
   const [error, setError] = useState('')
   useEffect(() => {
     getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message))
     getSpecialistCases().then(setCases).catch(() => setCases([]))
     getPracticeRepresentation('iain').then(setRepresentation).catch(() => {})
+    getAgentInitialization('iain').then(setInitialization).catch(() => {})
+    getPhysicianTraining('iain').then((trainingWorkspace) => {
+      setQueueSummary(trainingWorkspace.queue_summary)
+      setResumeSessionId(trainingWorkspace.sessions.find((item) => item.status === 'active')?.id ?? null)
+    }).catch(() => {})
   }, [])
   return <main className="page-shell agent-page">
     {error && <div className="error-banner" role="alert">{error}</div>}
@@ -327,7 +345,8 @@ export function SpecialistAgentPage({ navigate }: { navigate: Navigate }) {
         <p>{workspace.physician.disclaimer}. This is a controlled demo persona for {workspace.physician.specialty.toLowerCase()} — not a verified or activated physician agent.</p>
       </div>
 
-      <ImproveAgentCard representation={representation} navigate={navigate} trainPath={trainingPath('iain')} />
+      <ImproveAgentCard representation={representation} queueSummary={queueSummary} resumeSessionId={resumeSessionId} navigate={navigate} trainPath={trainingPath('iain')} />
+      <InitializationCard initialization={initialization} navigate={navigate} trainPath={trainingPath('iain')} />
       {representation && <PracticeRepresentationPanel representation={representation} />}
 
       <section className="agent-panel"><p className="eyebrow">Practice footprint</p><h2>What other agents see</h2>

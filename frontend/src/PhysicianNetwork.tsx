@@ -197,6 +197,8 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
       </form>
       {error && <div className="error-banner" role="alert">{error}</div>}
       <div className="directory-results-heading quiet"><h3>{filters.q || filters.specialty || filters.location ? 'Matching physicians' : 'Synthetic demo physicians'}</h3><span>{response?.count ?? 0} shown{response?.directory_available ? ` · ${response.directory_records.toLocaleString()} directory records` : ''}</span></div>
+      {response?.directory_status === 'unavailable' && <p className="directory-status-notice" role="status">{response.directory_message ?? 'The national provider directory is temporarily unavailable.'} Your Lamina network remains accessible.</p>}
+      {response?.directory_status === 'invalid_query' && <p className="directory-status-notice" role="status">{response.directory_message ?? 'Try a more specific name, specialty, or location.'}</p>}
       {loading ? <div className="directory-loading"><NetworkGlyph active /><p>Searching physician identities…</p></div> : <><div className="lam-list quiet">{visibleResults.map((profile) => <DirectoryResult
         key={profile.npi}
         profile={profile}
@@ -205,7 +207,7 @@ export function PhysicianDirectoryPage({ navigate }: { navigate: Navigate }) {
         busy={pendingNpi === profile.npi}
         onAdd={() => void changeMembership(profile.npi, () => addNetworkMember(profile.npi))}
         onRemove={() => void changeMembership(profile.npi, () => removeNetworkMember(profile.npi))}
-      />)}{results.length === 0 && <div className="empty-state"><NetworkGlyph /><h2>No physicians found</h2><p>Try fewer terms or search by a city, state, or specialty.</p></div>}</div>{hiddenResults > 0 && <button className="text-button results-expand" onClick={() => setShowAllResults(true)}>Show {hiddenResults} more result{hiddenResults === 1 ? '' : 's'} →</button>}</>}
+      />)}{results.length === 0 && response?.directory_status !== 'unavailable' && response?.directory_status !== 'invalid_query' && <div className="empty-state"><NetworkGlyph /><h2>No physicians found</h2><p>Try fewer terms or search by a city, state, or specialty.</p></div>}</div>{hiddenResults > 0 && <button className="text-button results-expand" onClick={() => setShowAllResults(true)}>Show {hiddenResults} more result{hiddenResults === 1 ? '' : 's'} →</button>}</>}
     </section>
 
     <section className="network-visual-section"><div className="network-section-heading"><div><h2>Network visualization</h2></div><p>Select a physician agent to inspect its practice footprint, activation state, and relationship to yours. Edges appear only for completed Lamina consultations.</p></div>

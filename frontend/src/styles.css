@@ -1176,4 +1176,73 @@ button.lam-row:hover { background: #fff9f1; }
 .professional-profile-card .agent-state.quiet { color: var(--text-secondary); }
 .professional-profile-card .agent-state.quiet i { display: none; }
 .professional-profile-link-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; background: #f8f3eb; padding: 16px 18px; }
+.profile-interest-disclaimer { display: block; margin-top: 6px; color: var(--text-secondary); font-size: .6rem; line-height: 1.5; }
+
+/* ---------------------------------------------- Pass 5B: profile tabs & sections */
+.profile-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+.profile-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 9px 4px; color: var(--text-secondary); cursor: pointer; font-family: var(--font-ui); font-size: .76rem; font-weight: 600; margin-right: 18px; }
+.profile-tabs button.active { border-bottom-color: var(--accent); color: var(--clinical); }
+.profile-overview-tab, .profile-background-tab, .profile-research-tab, .profile-updates-tab { margin-top: 4px; }
+.profile-overview-fact { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 18px; }
+.profile-overview-fact p { margin: 6px 0 0; color: var(--text-secondary); font-size: .74rem; }
+.profile-item-extra-actions { margin-top: 8px; }
+.profile-section-explainer { max-width: 620px; margin: 0 0 12px; color: var(--text-secondary); font-size: .68rem; line-height: 1.55; }
+
+/* ----------------------------------------------------------- Pass 5B: interests */
+.interests-panel .interest-group { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
+.interests-panel .interest-group:first-of-type { margin-top: 0; border-top: 0; padding-top: 0; }
+.interest-group.primary .profile-section-heading h3 { color: var(--accent-hover); }
+.interest-group h3 { margin: 0; font-size: .88rem; }
+.interest-item-list { display: grid; gap: 2px; margin-top: 8px; }
+.interest-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border-top: 1px solid rgb(222 216 206 / 60%); padding: 10px 2px; }
+.interest-row:first-child { border-top: 0; }
+.interest-row strong { display: block; color: var(--clinical); font-size: .78rem; }
+.interest-row p { margin: 4px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.interest-training-hint { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
+
+/* --------------------------------------------------------- Pass 5B: enrichment */
+.enrichment-panel .button-secondary { margin-top: 4px; }
+.enrichment-candidate .enrichment-category { display: block; margin-top: 8px; color: var(--accent-hover); font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.enrichment-candidate p { margin: 8px 0; }
+.enrichment-candidate .enrichment-detail { color: var(--text-secondary); font-size: .72rem; }
+.enrichment-candidate .enrichment-edit-input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; font: inherit; font-size: .78rem; background: var(--surface); }
+
+/* ---------------------------------------------------- Pass 5B: initialization */
+.initialization-card { border-left-color: var(--accent-hover); }
+
+/* -------------------------------------------------------- Pass 5B: post flow */
+.post-trigger { display: inline-flex; }
+.post-flow-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgb(36 30 24 / 45%); padding: 24px; }
+.post-flow-dialog { position: relative; width: min(100%, 560px); max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 30px 32px; box-shadow: 0 24px 60px rgb(36 52 71 / 18%); }
+.post-flow-close { position: absolute; top: 16px; right: 18px; font-size: 1.1rem; line-height: 1; color: var(--text-secondary); }
+.post-flow-dialog h2 { margin: 4px 0 18px; font-size: 1.1rem; }
+.post-intent-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.post-intent-option { border: 1px solid var(--border); border-radius: 10px; background: #f8f3eb; padding: 14px 16px; color: var(--clinical); cursor: pointer; text-align: left; font-family: var(--font-ui); font-size: .74rem; font-weight: 600; }
+.post-intent-option:hover { border-color: var(--accent); }
+.post-synthetic-notice { margin: 0 0 14px; border-left: 3px solid var(--accent); background: #fdf3e8; padding: 9px 13px; color: var(--clinical); font-size: .66rem; border-radius: 0 8px 8px 0; }
+.post-flow-dialog label { display: block; margin-top: 14px; color: var(--text-secondary); font-size: .6rem; font-weight: 600; }
+.post-flow-dialog label em { font-weight: 400; font-style: normal; color: #a39c8c; }
+.post-flow-dialog input, .post-flow-dialog textarea { width: 100%; margin-top: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; font: inherit; font-size: .76rem; background: var(--surface); }
+.post-flow-dialog textarea { min-height: 90px; }
+.post-flow-actions { display: flex; align-items: center; gap: 10px; margin-top: 20px; }
+.post-drafted-label { display: inline-block; margin: 0 0 14px; border-radius: 999px; background: #f2f0eb; padding: 4px 11px; color: var(--accent-hover); font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.post-preview-card { margin-top: 0; }
+
+/* --------------------------------------------------- Pass 5B: network pulse */
+.network-pulse-subtitle { margin: 2px 0 0; color: var(--text-secondary); font-size: .68rem; }
+.full-feed-grid { margin-top: 18px; }
+
+/* ------------------------------------------------------- Pass 5B: training */
+.training-branch-note { margin: 0 0 16px; border-left: 3px solid var(--success); background: #edf3ee; padding: 9px 13px; color: var(--clinical); font-size: .68rem; border-radius: 0 8px 8px 0; }
+.training-branch-context { margin: -6px 0 16px; color: var(--text-secondary); font-size: .6rem; font-style: italic; }
+.training-keep-going { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 18px; }
+.training-keep-going p { margin: 0 0 10px; color: var(--text-secondary); font-size: .72rem; }
+
+/* ----------------------------------------------- Pass 5B: directory status */
+.directory-status-notice { margin: 10px 0; border-left: 3px solid var(--accent); background: #fdf3e8; padding: 9px 13px; color: var(--clinical); font-size: .68rem; border-radius: 0 8px 8px 0; }
+
+@media (max-width: 720px) {
+  .post-intent-grid { grid-template-columns: 1fr; }
+  .post-flow-dialog { padding: 24px 20px; }
+}
 .professional-profile-link-card h2 { margin: 3px 0 0; font-size: .92rem; }

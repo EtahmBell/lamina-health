@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, resetJordanDemo, updateAgentLearning, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation } from './api.ts'
+import { consultNetwork, getAgentInitialization, getAgentNetwork, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPhysicianTraining, getPracticeRepresentation, resetJordanDemo, updateAgentLearning, type AgentInitialization, type AgentLearning, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type TrainingQueueSummary } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient, specialtiesConsulted } from './agentActivity.ts'
@@ -11,7 +11,7 @@ import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, cleanName, patientName } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients.ts'
-import { ImproveAgentCard, NetworkFeedSection, NetworkPhysicianProfilePage, PracticeRepresentationPanel, ProfessionalProfilePage, TrainingPage, networkProfilePath, professionalProfilePath, trainingPath } from './Engagement.tsx'
+import { FullNetworkFeedPage, ImproveAgentCard, InitializationCard, NetworkFeedSection, NetworkPhysicianProfilePage, PracticeRepresentationPanel, ProfessionalProfilePage, TrainingPage, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { PhysicianDirectoryPage, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
@@ -37,6 +37,7 @@ const navItems = [
   { id: 'consultations', title: 'Cases', icon: '◫', path: '/consultations' },
   { id: 'agent', title: 'My Agent', icon: '◇', path: '/agent' },
   { id: 'network', title: 'Physician Network', icon: '⌁', path: '/network' },
+  { id: 'profile', title: 'Profile', icon: '◐', path: '/profile' },
 ] as const
 
 const SPECIALIST_NAV_ITEMS = [
@@ -45,6 +46,7 @@ const SPECIALIST_NAV_ITEMS = [
   { id: 'specialist-cases', title: 'Cases', icon: '◫', path: '/specialist/cases' },
   { id: 'specialist-agent', title: 'My Agent', icon: '◇', path: '/specialist/agent' },
   { id: 'specialist-network', title: 'Physician Network', icon: '⌁', path: '/specialist/network' },
+  { id: 'specialist-profile', title: 'Profile', icon: '◐', path: '/specialist/profile' },
 ] as const
 
 function ProfileControl({ navigate }: { navigate: Navigate }) {
@@ -81,7 +83,7 @@ function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; pers
         <span className="perspective-option-check" aria-hidden="true">{item.id === perspective ? '✓' : ''}</span>
         <span><strong>{item.name}</strong><small>{item.role}</small></span>
       </button>)}
-      <div className="perspective-menu-divider" role="separator" /><button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate(perspective === 'pcp' ? '/profile' : professionalProfilePath('iain')) }}>Profile</button>
+      <div className="perspective-menu-divider" role="separator" /><button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate(settingsPath) }}>Settings &amp; demo</button>
     </div>}
   </div>
 }
@@ -153,6 +155,13 @@ function eventTimestamp(value: string) {
   return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(', ', ' · ')
 }
 
+function NetworkFeedRoute({ personaId, navigate }: { personaId: 'lucy' | 'iain'; navigate: Navigate }) {
+  const [feed, setFeed] = useState<NetworkFeed | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => { getNetworkFeed(personaId).then(setFeed).catch((err: Error) => setError(err.message)) }, [personaId])
+  return <FullNetworkFeedPage feed={feed} navigate={navigate} perspective={personaId} error={error} />
+}
+
 function HomePage({ navigate }: { navigate: Navigate }) {
   const [records, setRecords] = useState<ConsultationRecord[]>([])
   const [agent, setAgent] = useState<MyAgent | null>(null)
@@ -160,12 +169,18 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const [error, setError] = useState(false)
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
+  const [queueSummary, setQueueSummary] = useState<TrainingQueueSummary | null>(null)
+  const [resumeSessionId, setResumeSessionId] = useState<number | null>(null)
   useEffect(() => {
     Promise.all([getConsultationHistory(), getMyAgent()])
       .then(([consultations, currentAgent]) => { setRecords(consultations); setAgent(currentAgent) })
       .catch(() => setError(true)).finally(() => setLoading(false))
     getPracticeRepresentation('lucy').then(setRepresentation).catch(() => {})
     getNetworkFeed('lucy').then(setFeed).catch(() => {})
+    getPhysicianTraining('lucy').then((workspace) => {
+      setQueueSummary(workspace.queue_summary)
+      setResumeSessionId(workspace.sessions.find((item) => item.status === 'active')?.id ?? null)
+    }).catch(() => {})
   }, [])
   const ordered = [...records].sort((a, b) => b.completed_at.localeCompare(a.completed_at))
   const latestByPatient = ordered.filter((record, index) => ordered.findIndex((item) => item.patient_id === record.patient_id) === index)
@@ -180,11 +195,11 @@ function HomePage({ navigate }: { navigate: Navigate }) {
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
       {workCount > 0 && <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{workCount}</span></div><div className="lam-list needs-attention">{currentWork.map((record) => <button className="lam-row" key={record.id} onClick={() => navigate(consultationPath(record.id))}><span className="lam-row-mark patient-row-avatar">{DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials}</span><span className="lam-row-main"><strong>{patientName(record.patient_id)}</strong><span>{record.result.recommended_physician.specialty} recommended{record.patient_id === MARIA_ID ? ' first' : ''}</span><small>{cleanName(record.result.recommended_physician.physician_name)} · Workup identified</small></span><span className="lam-row-action">Review consultation <b>→</b></span></button>)}{pending.length > 0 && <button className="lam-row" onClick={() => navigate(calibrationPath())}><NetworkMark /><span className="lam-row-main"><strong>{pending.length} agent learning{pending.length === 1 ? '' : 's'}</strong><span>Ready for your confirmation</span><small>Proposed learnings are not used as physician-confirmed rules.</small></span><span className="lam-row-action">Review calibration <b>→</b></span></button>}</div></section>}
-      <ImproveAgentCard representation={representation} navigate={navigate} trainPath={trainingPath('lucy')} />
+      <ImproveAgentCard representation={representation} queueSummary={queueSummary} resumeSessionId={resumeSessionId} navigate={navigate} trainPath={trainingPath('lucy')} />
+      <NetworkFeedSection feed={feed} navigate={navigate} perspective="lucy" />
       <section className="home-main-grid"><div className="home-activity"><div className="home-section-heading"><div><h2>Recent agent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=activity')}>View all activity →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span><em className="activity-kind">{item.kind === 'interaction' ? 'Agent interaction' : 'Consultation milestone'}</em><strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</div>
         <aside className="home-agent-card"><div className="home-agent-title"><NetworkMark active /><div><p className="eyebrow">Your Agent</p><h2>{PCP_AGENT_NAME}</h2><span><i /> Active</span></div></div><dl><div><dt>Last activity</dt><dd>{lastRecord ? `Consulted ${lastRecord.result.consultation.length} physician agents for ${patientName(lastRecord.patient_id)}` : 'No consultations yet'}{lastRecord && <small>{eventTimestamp(lastRecord.completed_at)}</small>}</dd></div><div><dt>Proposed learnings</dt><dd>{pending.length ? `${pending.length} awaiting your confirmation` : 'None awaiting review'}</dd></div></dl><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View My Agent →</button></aside>
       </section>
-      <NetworkFeedSection feed={feed} navigate={navigate} perspective="lucy" />
     </>}
   </main></ProductShell>
 }
@@ -280,9 +295,10 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
+  const [initialization, setInitialization] = useState<AgentInitialization | null>(null)
   const refresh = () => getMyAgent().then(setAgent).catch((err: Error) => setError(err.message))
   const refreshRepresentation = () => getPracticeRepresentation('lucy').then(setRepresentation).catch(() => {})
-  useEffect(() => { refresh(); refreshRepresentation(); getConsultationHistory().then(setRecords).catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refresh(); refreshRepresentation(); getConsultationHistory().then(setRecords).catch(() => {}); getAgentInitialization('lucy').then(setInitialization).catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isAgentTab(tabParam)) setTab(tabParam) }, [tabParam])
   useEffect(() => { setFocusedLearning(learningParam); if (learningParam) setSelected(learningParam) }, [learningParam])
   useEffect(() => { if (editing) document.getElementById(`edit-${editing}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }, [editing])
@@ -303,7 +319,7 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
     {error && <div className="error-banner" role="alert">{error}</div>}{!agent && !error && <p className="muted-note">Opening your agent…</p>}
     {agent && <><section className="agent-hero"><div className="agent-hero-mark"><NetworkMark active /></div><div><p className="eyebrow">Your physician agent</p><h1>{PCP_AGENT_NAME}</h1><p>Primary Care · Represents how you practise across the Lamina network.</p><span className="agent-state"><i /> ACTIVE</span></div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-      {tab === 'overview' && <div className="agent-overview"><div className="agent-overview-intro"><p className="eyebrow">Practice snapshot</p><h2>Primary care in Oakland, coordinating specialty referrals.</h2><p>Your agent uses bounded patient context, current synthetic referral rules, and the physician network to help choose an appropriate first destination.</p><button className="button-primary" onClick={() => selectTab('calibration')}>Test my agent →</button></div><div className="agent-overview-side"><div className="agent-summary-panel"><p className="eyebrow">Agent summary</p><button onClick={() => selectTab('knowledge')}><span>What is it using?</span><strong>{agent.known.length} attributed knowledge sources</strong><small>View knowledge and access →</small></button><button onClick={() => selectTab('train')}><span>What could I teach it?</span><strong>{representation ? `${representation.completeness.questions_waiting} question${representation.completeness.questions_waiting === 1 ? '' : 's'} waiting` : 'Loading…'}</strong><small>Open training →</small></button><button onClick={() => selectTab('activity')}><span>What has it done?</span><strong>{records[0] ? `Last consultation: ${patientName(records[0].patient_id)}` : 'No agent activity yet'}</strong><small>View activity →</small></button><button onClick={() => selectTab('calibration')}><span>How do I correct it?</span><strong>{pending ? `${pending} proposed learning${pending === 1 ? '' : 's'} need confirmation` : 'No new preferences to review'}</strong><small>Open calibration →</small></button></div><ConsultationFootprint records={records} /></div></div>}
+      {tab === 'overview' && <div className="agent-overview"><div className="agent-overview-intro"><p className="eyebrow">Practice snapshot</p><h2>Primary care in Oakland, coordinating specialty referrals.</h2><p>Your agent uses bounded patient context, current synthetic referral rules, and the physician network to help choose an appropriate first destination.</p><button className="button-primary" onClick={() => selectTab('calibration')}>Test my agent →</button><InitializationCard initialization={initialization} navigate={navigate} trainPath={trainingPath('lucy')} /></div><div className="agent-overview-side"><div className="agent-summary-panel"><p className="eyebrow">Agent summary</p><button onClick={() => selectTab('knowledge')}><span>What is it using?</span><strong>{agent.known.length} attributed knowledge sources</strong><small>View knowledge and access →</small></button><button onClick={() => selectTab('train')}><span>What could I teach it?</span><strong>{representation ? `${representation.completeness.questions_waiting} question${representation.completeness.questions_waiting === 1 ? '' : 's'} waiting` : 'Loading…'}</strong><small>Open training →</small></button><button onClick={() => selectTab('activity')}><span>What has it done?</span><strong>{records[0] ? `Last consultation: ${patientName(records[0].patient_id)}` : 'No agent activity yet'}</strong><small>View activity →</small></button><button onClick={() => selectTab('calibration')}><span>How do I correct it?</span><strong>{pending ? `${pending} proposed learning${pending === 1 ? '' : 's'} need confirmation` : 'No new preferences to review'}</strong><small>Open calibration →</small></button></div><ConsultationFootprint records={records} /></div></div>}
       {tab === 'knowledge' && <div className="agent-section-grid"><section className="agent-panel"><p className="eyebrow">Inspectable practice profile</p><h2>What my agent knows</h2><p className="panel-intro">Every fact has a source. Demo rules are not physician-confirmed preferences.</p><div className="agent-facts">{agent.known.map((fact, index) => <div key={`${fact.label}-${index}`}><span>{fact.label}</span><strong>{fact.value}</strong><small>Source: {fact.source}</small></div>)}</div></section>
       <section className="agent-panel access-panel"><p className="eyebrow">Clear boundaries</p><h2>What my agent can access</h2><div className="agent-access">{agent.access.map((item) => <div key={item.label}><strong>{item.label}</strong><span>{item.detail}</span></div>)}</div></section>
       {representation && <PracticeRepresentationPanel representation={representation} />}</div>}
@@ -356,7 +372,9 @@ function DemoResetControl() {
   </div>
 }
 
-function ProfilePage({ navigate }: { navigate: Navigate }) {
+/** Account/privacy/demo surface — deliberately separate from the Professional
+ * Profile, which is now the primary-nav "Profile" destination. */
+function SettingsPage({ navigate }: { navigate: Navigate }) {
   const { user } = useAuth()
   const [agent, setAgent] = useState<MyAgent | null>(null)
   const [error, setError] = useState('')
@@ -381,24 +399,14 @@ function ProfilePage({ navigate }: { navigate: Navigate }) {
       { label: 'Scheduling', value: access('Scheduling') },
     ] },
   ] : []
-  return <ProductShell navigate={navigate} section="profile"><main className="page-shell profile-page">
+  return <ProductShell navigate={navigate} section="settings"><main className="page-shell profile-page">
     {error && <div className="error-banner" role="alert">{error}</div>}
-    {!agent && !error && <p className="muted-note">Opening your profile…</p>}
+    {!agent && !error && <p className="muted-note">Opening settings…</p>}
     {agent && <>
       <header className="profile-hero">
         <span className="clinician-avatar large">LS</span>
-        <div><p className="eyebrow">Clinician profile</p><h1>{agent.physician}</h1><p className="profile-role">{agent.specialty} · {agent.location}</p></div>
+        <div><p className="eyebrow">Settings &amp; demo</p><h1>{agent.physician}</h1><p className="profile-role">{agent.specialty} · {agent.location}</p></div>
       </header>
-      <section className="profile-agent-card">
-        <NetworkMark active />
-        <div><p className="eyebrow">Your physician agent</p><strong>{PCP_AGENT_NAME}</strong><span className="agent-state"><i /> ACTIVE</span></div>
-        <button className="button-primary" onClick={() => navigate('/agent?tab=overview')}>View My Agent →</button>
-      </section>
-      <section className="profile-agent-card professional-profile-card">
-        <NetworkMark />
-        <div><p className="eyebrow">Professional profile</p><strong>Background, experience, and practice updates</strong><span className="agent-state quiet">Helps Lamina understand your practice</span></div>
-        <button className="button-secondary" onClick={() => navigate(professionalProfilePath('lucy'))}>View professional profile →</button>
-      </section>
       {sections.map((section) => <section className="profile-section" key={section.title}>
         <h2>{section.title}</h2>
         <dl>{section.rows.filter((row) => row.value).map((row) => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>
@@ -715,9 +723,10 @@ export default function App() {
   if (path === '/patients') return <PatientSelector navigate={navigate} />
   if (path === '/consultations') return <ConsultationsPage navigate={navigate} />
   if (path === '/agent') return <MyAgentPage navigate={navigate} params={params} />
-  if (path === '/agent/train') return <ProductShell navigate={navigate} section="agent"><TrainingPage personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} exitPath="/agent?tab=train" /></ProductShell>
-  if (path === '/profile') return <ProfilePage navigate={navigate} />
-  if (path === '/profile/professional') return <ProductShell navigate={navigate} section="profile"><ProfessionalProfilePage personaId="lucy" navigate={navigate} /></ProductShell>
+  if (path === '/agent/train') return <ProductShell navigate={navigate} section="agent"><TrainingPage personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} exitPath="/agent?tab=train" params={params} /></ProductShell>
+  if (path === '/profile' || path === '/profile/professional') return <ProductShell navigate={navigate} section="profile"><ProfessionalProfilePage personaId="lucy" navigate={navigate} /></ProductShell>
+  if (path === '/settings') return <SettingsPage navigate={navigate} />
+  if (path === networkUpdatesPath('lucy')) return <ProductShell navigate={navigate} section="network"><NetworkFeedRoute personaId="lucy" navigate={navigate} /></ProductShell>
   const networkProfileControlledId = path.match(/^\/network\/profile\/([^/]+)$/)?.[1]
   if (networkProfileControlledId) return <ProductShell navigate={navigate} section="network"><NetworkPhysicianProfilePage controlledId={networkProfileControlledId} navigate={navigate} backPath="/home" /></ProductShell>
   const historyPatientId = path.match(/^\/consultations\/patient\/([^/]+)$/)?.[1]
@@ -735,10 +744,11 @@ export default function App() {
   const specialistRecordId = path.match(/^\/specialist\/cases\/(\d+)$/)?.[1]
   if (specialistRecordId) return <ProductShell navigate={navigate} section="specialist-cases" perspective="specialist"><SpecialistCaseDetailPage recordId={Number(specialistRecordId)} navigate={navigate} /></ProductShell>
   if (path === '/specialist/agent') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><SpecialistAgentPage navigate={navigate} /></ProductShell>
-  if (path === '/specialist/agent/train') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><TrainingPage personaId="iain" agentName={SPECIALIST_AGENT_NAME} navigate={navigate} exitPath="/specialist/agent" /></ProductShell>
+  if (path === '/specialist/agent/train') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><TrainingPage personaId="iain" agentName={SPECIALIST_AGENT_NAME} navigate={navigate} exitPath="/specialist/agent" params={params} /></ProductShell>
   if (path === '/specialist/profile') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><ProfessionalProfilePage personaId="iain" navigate={navigate} /></ProductShell>
   if (path === '/specialist/patients') return <ProductShell navigate={navigate} section="specialist-patients" perspective="specialist"><SpecialistPatientsPage navigate={navigate} /></ProductShell>
   if (path === '/specialist/network') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} /></ProductShell>
+  if (path === '/specialist/network/updates') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkFeedRoute personaId="iain" navigate={navigate} /></ProductShell>
   const specialistNetworkProfileId = path.match(/^\/specialist\/network\/profile\/([^/]+)$/)?.[1]
   if (specialistNetworkProfileId) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkPhysicianProfilePage controlledId={specialistNetworkProfileId} navigate={navigate} backPath="/specialist/home" /></ProductShell>
   if (path === '/network') return <ProductShell navigate={navigate} section="network"><PhysicianDirectoryPage navigate={navigate} /></ProductShell>

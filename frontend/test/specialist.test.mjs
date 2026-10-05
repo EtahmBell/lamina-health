@@ -59,9 +59,9 @@ test('no client-selectable specialist persona exists anywhere in the frontend', 
   assert.match(api, /export const getSpecialistCases = \(\) => request<SpecialistCaseSummary\[\]>\('\/api\/workspace\/specialist\/cases'\)/)
 })
 
-test('profile access is available from the perspective menu for both personas (Pass 4B: unified physician app)', () => {
+test('Settings & demo is reachable from the perspective menu for both personas (Pass 5B: Profile is now a primary-nav destination)', () => {
   const control = perspectiveSwitch()
-  assert.match(control, /navigate\(perspective === 'pcp' \? '\/profile' : professionalProfilePath\('iain'\)\)/)
+  assert.match(control, /navigate\(settingsPath\) \}\}>Settings &amp; demo</)
 })
 
 test('the demo perspective menu never references Supabase auth or identity claiming', () => {
@@ -75,9 +75,9 @@ test('PCP shell navigation and Lucy sidebar card are unchanged aside from the he
   assert.match(shell(), /Active · Primary Care/)
 })
 
-test('specialist shell now matches the unified physician-app navigation (Pass 4B)', () => {
+test('specialist shell now matches the unified physician-app navigation, including Profile (Pass 5B)', () => {
   const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'function ProfileControl')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'"])
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'", "title: 'Profile'"])
 })
 
 test('the specialist sidebar card never claims Active status for a reserved provider', () => {

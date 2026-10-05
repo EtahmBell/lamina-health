@@ -8,7 +8,7 @@ const network = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to))
 const directory = () => slice(network, 'export function PhysicianDirectoryPage', 'const splitList')
-const profile = () => slice(app, 'function ProfilePage', 'function UnfinishedPatient')
+const profile = () => slice(app, 'function SettingsPage', 'function UnfinishedPatient')
 const footprint = () => slice(app, 'function ConsultationFootprint', 'const AGENT_TABS')
 
 /* ---------------------------------------------------------- network hero */
@@ -127,12 +127,11 @@ test('specialty counts come from the recommended specialty of each record', () =
 
 /* --------------------------------------------------------------- profile */
 
-test('Profile keeps the physician and agent identities as the hero', () => {
+test('Settings & demo keeps the physician identity as the hero (Pass 5B: promotional agent/profile cards moved to their own primary-nav destinations)', () => {
   assert.match(profile(), /className="clinician-avatar large">LS<\/span>/)
   assert.match(profile(), /<h1>\{agent\.physician\}<\/h1>/)
-  assert.match(profile(), /profile-agent-card/)
-  assert.match(profile(), /<NetworkMark active \/>/)
-  assert.match(profile(), /navigate\('\/agent\?tab=overview'\)\}>View My Agent/)
+  assert.match(profile(), /Settings &amp; demo/)
+  assert.doesNotMatch(profile(), /profile-agent-card/, 'the My Agent promotional card now lives only on its own nav destination')
 })
 
 test('Profile shows only real fields and no fake settings chrome', () => {

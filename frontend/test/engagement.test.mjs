@@ -21,9 +21,9 @@ test('unified navigation: Lucy nav now reads Cases instead of Consultations', ()
   assert.match(app, /id: 'consultations', title: 'Cases', icon: '◫', path: '\/consultations'/)
 })
 
-test('specialist nav now matches the unified physician app: Home/Patients/Cases/My Agent/Physician Network', () => {
+test('specialist nav now matches the unified physician app, including Profile as a 6th item (Pass 5B)', () => {
   const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'function ProfileControl')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'"])
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'", "title: 'Profile'"])
 })
 
 /* --------------------------------------------------------------- routing */
@@ -59,10 +59,10 @@ test('specialist network page is derived from the feed, never Lucy\'s private ro
 
 /* ---------------------------------------------------------------- training */
 
-test('training never auto-answers: it starts a real session and reads unanswered questions from it', () => {
+test('training never auto-answers: it starts a real session (with mode) and reads unanswered questions from it', () => {
   const page = trainingPageFn()
-  assert.match(page, /startTrainingSession\(personaId\)/)
-  assert.match(page, /setQueue\(started\.questions \?\? \[\]\)/)
+  assert.match(page, /startTrainingSession\(personaId, \{ mode: modeParam \}\)/)
+  assert.match(page, /const remaining = \(started\.questions \?\? \[\]\)\.filter\(\(item\) => !answeredIds\.has\(item\.id\)\)/)
 })
 
 test('each answer is persisted via the canonical response endpoint before advancing', () => {
@@ -130,10 +130,10 @@ test('Improve your agent never shows a referral score, ranking, or quality metri
   assert.match(card, /question/)
 })
 
-test('Home (both personas) and My Agent (Lucy) surface Improve your agent', () => {
-  assert.match(homePageFn(), /<ImproveAgentCard representation=\{representation\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} \/>/)
+test('Home (both personas) surfaces Improve your agent, including resume-session awareness', () => {
+  assert.match(homePageFn(), /<ImproveAgentCard representation=\{representation\} queueSummary=\{queueSummary\} resumeSessionId=\{resumeSessionId\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} \/>/)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------------- Cases */')
-  assert.match(specialistHome, /<ImproveAgentCard representation=\{representation\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} \/>/)
+  assert.match(specialistHome, /<ImproveAgentCard representation=\{representation\} queueSummary=\{queueSummary\} resumeSessionId=\{resumeSessionId\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} \/>/)
 })
 
 /* -------------------------------------------------------------- My Agent */
@@ -176,16 +176,16 @@ test('provenance is honest: never claims Verified for a synthetic demo item', ()
   assert.match(engagement, /'Synthetic demo profile'/)
 })
 
-/* --------------------------------------------------------- practice updates */
+/* --------------------------------------------------------- posts & updates */
 
-test('agent-drafted updates are framed as a suggestion, not an autonomous post, and start as drafts', () => {
-  assert.match(engagement, /update\.agent_drafted && <span className="practice-update-agent-drafted">Suggested update<\/span>/)
+test('agent-drafted posts are framed as a suggestion, not an autonomous post, and start as drafts', () => {
+  assert.match(engagement, /post\.drafted_by === 'lamina_agent' && <span className="practice-update-agent-drafted">Drafted with your Lamina agent<\/span>/)
   assert.doesNotMatch(engagement, /[Yy]our agent posted/)
 })
 
 test('publishing is always an explicit physician action, never automatic', () => {
-  assert.match(engagement, /await publishPracticeUpdate\(personaId, Number\(update\.id\)\)/)
-  assert.doesNotMatch(engagement, /publishPracticeUpdate\([^)]*\)[\s\S]{0,40}useEffect/)
+  assert.match(engagement, /await publishProfessionalPost\(personaId, Number\(post\.id\)\)/)
+  assert.doesNotMatch(engagement, /publishProfessionalPost\([^)]*\)[\s\S]{0,40}useEffect/)
 })
 
 /* ------------------------------------------------------------- network feed */

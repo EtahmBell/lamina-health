@@ -10,8 +10,8 @@ const slice = (source, from, to) => source.slice(source.indexOf(from), source.in
 const patientPage = () => slice(app, 'function PatientWorkspace', 'export default function App')
 const playback = () => slice(app, 'function ConsultationNetwork', 'const messageLabel')
 const patientsList = () => slice(app, 'function PatientSelector', 'function ConsultationsPage')
-const resetControl = () => slice(app, 'function DemoResetControl', 'function ProfilePage')
-const profile = () => slice(app, 'function ProfilePage', 'function UnfinishedPatient')
+const resetControl = () => slice(app, 'function DemoResetControl', 'function SettingsPage')
+const profile = () => slice(app, 'function SettingsPage', 'function UnfinishedPatient')
 /** Every declaration block declared for a selector, in source order. */
 const rulesFor = (selector) => [...styles.matchAll(
   new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'g'),

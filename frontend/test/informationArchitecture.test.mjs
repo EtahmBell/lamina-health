@@ -11,7 +11,7 @@ const shell = () => slice('function ProductShell', 'function LandingPage')
 const home = () => slice('function HomePage', 'function PatientSelector')
 const patients = () => slice('function PatientSelector', 'function ConsultationsPage')
 const consultationsIndex = () => slice('function ConsultationsPage', 'function PatientConsultationsPage')
-const myAgent = () => slice('function MyAgentPage', 'function ProfilePage')
+const myAgent = () => slice('function MyAgentPage', 'function SettingsPage')
 const consultationLog = () => slice('function ConsultationLog', 'function RecommendationView')
 const recommendation = () => slice('function RecommendationView', 'function PatientWorkspace')
 const patientPage = () => slice('function PatientWorkspace', 'export default function App')
@@ -37,7 +37,7 @@ test('the portal greeting is time-aware and the stale question is gone', () => {
 test('workspace sidebar keeps Home as a dashboard destination', () => {
   const navigation = slice('const navItems', 'const SPECIALIST_NAV_ITEMS')
   assert.deepEqual(navigation.match(/title: '[^']+'/g), [
-    "title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'",
+    "title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'", "title: 'Profile'",
   ])
   assert.match(navigation, /title: 'Home'.*path: '\/home'/s)
 })
