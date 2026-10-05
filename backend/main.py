@@ -15,7 +15,12 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Accept", "Authorization", "Content-Type"],
+    allow_headers=[
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "X-Lamina-Workspace-Bootstrap",
+    ],
 )
 app.include_router(consult_router)
 app.include_router(workspace_router)

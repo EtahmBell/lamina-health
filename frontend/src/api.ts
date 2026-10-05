@@ -1,6 +1,13 @@
 import { getAccessToken } from './authClient.ts'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
+const workspaceBootstrapToken = Array.from(
+  globalThis.crypto.getRandomValues(new Uint8Array(32)),
+  (value) => value.toString(16).padStart(2, '0'),
+).join('')
+let workspaceProvisioned = false
+
+const isWorkspaceScopedPath = (path: string) => path.startsWith('/api/workspace') || path.startsWith('/api/patients')
 
 export type LabObservation = {
   date: string
@@ -306,6 +313,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const accessToken = await getAccessToken()
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  const workspaceScoped = isWorkspaceScopedPath(path)
+  if (workspaceScoped && !workspaceProvisioned) {
+    headers.set('X-Lamina-Workspace-Bootstrap', workspaceBootstrapToken)
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers,
@@ -315,6 +326,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await response.json().catch(() => null) as { detail?: string } | null
     throw new ApiError(body?.detail || `Request failed (${response.status})`, response.status)
   }
+  if (workspaceScoped) workspaceProvisioned = true
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }

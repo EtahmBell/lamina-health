@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend import demo_workspace as demo_workspace_module
 from backend.api import consult as consult_api
+from backend.api import engagement as engagement_api
 from backend.api import workspace as workspace_api
 from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
@@ -23,9 +25,130 @@ def isolated_app(tmp_path, monkeypatch: pytest.MonkeyPatch) -> WorkflowStore:
     store = WorkflowStore(tmp_path / "workflow.sqlite")
     monkeypatch.setattr(consult_api, "workflow_store", store)
     monkeypatch.setattr(workspace_api, "workflow_store", store)
+    monkeypatch.setattr(engagement_api, "workflow_store", store)
     monkeypatch.setattr(demo_workspace_module, "workflow_store", store)
     monkeypatch.setattr(consult_api, "data_source", SyntheticClinicalDataSource())
     return store
+
+
+def _first_contact(
+    method: str, path: str, bootstrap: str, json: dict | None = None
+) -> tuple[int, dict | list, str]:
+    with TestClient(app) as client:
+        response = client.request(
+            method,
+            path,
+            headers={"X-Lamina-Workspace-Bootstrap": bootstrap},
+            json=json,
+        )
+        return (
+            response.status_code,
+            response.json(),
+            response.cookies.get("lamina_demo_workspace"),
+        )
+
+
+def _cookie_bound_client(workspace_id: str) -> TestClient:
+    client = TestClient(app)
+    client.cookies.set(
+        "lamina_demo_workspace",
+        workspace_id,
+        domain="testserver.local",
+        path="/",
+    )
+    return client
+
+
+def test_two_concurrent_first_contacts_converge_for_training(
+    isolated_app: WorkflowStore,
+) -> None:
+    bootstrap = "a" * 64
+    calls = (
+        ("POST", "/api/workspace/physician/training/sessions?perspective=iain", {}),
+        ("GET", "/api/workspace/physician/training?perspective=iain", None),
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda call: _first_contact(call[0], call[1], bootstrap, call[2]),
+                calls,
+            )
+        )
+
+    assert [status for status, _, _ in results] == [201, 200]
+    workspace_ids = {workspace_id for _, _, workspace_id in results}
+    assert len(workspace_ids) == 1
+    workspace_id = workspace_ids.pop()
+    with sqlite3.connect(isolated_app.path) as database:
+        assert database.execute("SELECT COUNT(*) FROM demo_workspaces").fetchone()[0] == 1
+        stored_hash = database.execute(
+            "SELECT bootstrap_hash FROM demo_workspace_bootstraps"
+        ).fetchone()[0]
+        assert stored_hash != bootstrap
+        assert len(stored_hash) == 64
+    session = results[0][1]
+    with _cookie_bound_client(workspace_id) as client:
+        resumed = client.get(
+            f"/api/workspace/physician/training/sessions/{session['id']}?perspective=iain"
+        )
+    assert resumed.status_code == 200
+    assert resumed.json()["id"] == session["id"]
+
+
+def test_five_mixed_first_contacts_share_all_created_state(
+    isolated_app: WorkflowStore,
+) -> None:
+    bootstrap = "b" * 64
+    calls = (
+        ("GET", "/api/patients", None),
+        ("GET", "/api/workspace/activity", None),
+        (
+            "POST",
+            "/api/workspace/physician/interests?perspective=iain",
+            {"interest_type": "case_interest", "title": "Concurrent test interest"},
+        ),
+        ("POST", "/api/workspace/physician/training/sessions?perspective=iain", {}),
+        ("GET", "/api/workspace/physician/profile?perspective=iain", None),
+    )
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(
+            executor.map(
+                lambda call: _first_contact(call[0], call[1], bootstrap, call[2]),
+                calls,
+            )
+        )
+
+    assert all(status in {200, 201} for status, _, _ in results)
+    workspace_ids = {workspace_id for _, _, workspace_id in results}
+    assert len(workspace_ids) == 1
+    workspace_id = workspace_ids.pop()
+    with sqlite3.connect(isolated_app.path) as database:
+        assert database.execute("SELECT COUNT(*) FROM demo_workspaces").fetchone()[0] == 1
+    session = results[3][1]
+    with _cookie_bound_client(workspace_id) as client:
+        interests = client.get(
+            "/api/workspace/physician/interests?perspective=iain"
+        ).json()
+        resumed = client.get(
+            f"/api/workspace/physician/training/sessions/{session['id']}?perspective=iain"
+        )
+    assert any(item["title"] == "Concurrent test interest" for item in interests)
+    assert resumed.status_code == 200
+
+
+def test_independent_bootstrap_tokens_never_share_a_workspace(
+    isolated_app: WorkflowStore,
+) -> None:
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda token: _first_contact("GET", "/api/patients", token),
+                ("c" * 64, "d" * 64),
+            )
+        )
+    assert results[0][2] != results[1][2]
+    with sqlite3.connect(isolated_app.path) as database:
+        assert database.execute("SELECT COUNT(*) FROM demo_workspaces").fetchone()[0] == 2
 
 
 def test_two_visitors_are_isolated_end_to_end(isolated_app: WorkflowStore) -> None:
@@ -88,7 +211,9 @@ def test_cookie_loss_creates_fresh_workspace_without_touching_identity(
         assert "SameSite=lax" in first.headers["set-cookie"]
         client.post(f"/api/patients/{PRIMARY_PATIENT_ID}/consultations", json={})
         client.cookies.clear()
-        second = client.get("/api/patients")
+        second = client.get(
+            "/api/patients", headers={"X-Lamina-Workspace-Bootstrap": "e" * 64}
+        )
         assert second.status_code == 200
         assert client.cookies.get("lamina_demo_workspace") != first_cookie
         assert client.get("/api/workspace/consultations").json() == []
@@ -122,6 +247,41 @@ def test_valid_cookie_is_reused_and_invalid_cookie_is_replaced(
         )
         assert replacement != "caller-controlled-invalid"
         assert len(replacement) >= 40
+
+
+def test_expired_cookie_gets_fresh_workspace_even_with_a_bootstrap_header(
+    isolated_app: WorkflowStore,
+) -> None:
+    workspace_id, _ = isolated_app.resolve_demo_workspace(None, 3600)
+    with sqlite3.connect(isolated_app.path) as database:
+        database.execute(
+            "UPDATE demo_workspaces SET expires_at=? WHERE workspace_id=?",
+            ("2000-01-01T00:00:00+00:00", workspace_id),
+        )
+    with _cookie_bound_client(workspace_id) as client:
+        response = client.get(
+            "/api/patients", headers={"X-Lamina-Workspace-Bootstrap": "f" * 64}
+        )
+        replacement = client.cookies.get(
+            "lamina_demo_workspace", domain="testserver.local", path="/"
+        )
+    assert response.status_code == 200
+    assert replacement != workspace_id
+
+
+def test_expired_bootstrap_mapping_is_replaced_without_reusing_workspace(
+    isolated_app: WorkflowStore,
+) -> None:
+    bootstrap = "g" * 64
+    first = _first_contact("GET", "/api/patients", bootstrap)
+    with sqlite3.connect(isolated_app.path) as database:
+        database.execute(
+            "UPDATE demo_workspaces SET expires_at=? WHERE workspace_id=?",
+            ("2000-01-01T00:00:00+00:00", first[2]),
+        )
+    second = _first_contact("GET", "/api/patients", bootstrap)
+    assert second[0] == 200
+    assert second[2] != first[2]
 
 
 def test_cross_origin_demo_mutation_is_rejected(isolated_app: WorkflowStore) -> None:
@@ -161,11 +321,15 @@ def test_credentialed_cors_is_explicit(isolated_app: WorkflowStore) -> None:
             headers={
                 "Origin": "http://localhost:5173",
                 "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "X-Lamina-Workspace-Bootstrap",
             },
         )
         assert allowed.status_code == 200
         assert allowed.headers["access-control-allow-origin"] == "http://localhost:5173"
         assert allowed.headers["access-control-allow-credentials"] == "true"
+        assert "X-Lamina-Workspace-Bootstrap" in allowed.headers[
+            "access-control-allow-headers"
+        ]
 
         denied = client.options(
             "/api/workspace/activity",
@@ -193,7 +357,9 @@ def test_production_cookie_is_secure_and_cross_site_capable(
 def test_expired_workspace_cleanup_removes_only_demo_state(
     isolated_app: WorkflowStore,
 ) -> None:
-    workspace_id, _ = isolated_app.resolve_demo_workspace(None, 3600)
+    workspace_id, _ = isolated_app.resolve_demo_workspace(
+        None, 3600, bootstrap_hash="a" * 64
+    )
     isolated_app.add_network_member(workspace_id, JUNG_NPI)
     claim, _ = isolated_app.claim_provider("auth-user-a", JUNG_NPI)
     with sqlite3.connect(isolated_app.path) as database:
@@ -205,3 +371,8 @@ def test_expired_workspace_cleanup_removes_only_demo_state(
     assert isolated_app.cleanup_expired_demo_workspaces() == 1
     assert isolated_app.network_members(workspace_id) == []
     assert isolated_app.active_provider_claim(JUNG_NPI)["id"] == claim["id"]
+    with sqlite3.connect(isolated_app.path) as database:
+        assert database.execute(
+            "SELECT COUNT(*) FROM demo_workspace_bootstraps WHERE workspace_id=?",
+            (workspace_id,),
+        ).fetchone()[0] == 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Annotated, Literal
@@ -13,6 +14,8 @@ from backend.workflow import workflow_store
 
 DEFAULT_COOKIE_NAME = "lamina_demo_workspace"
 _OPAQUE_ID = re.compile(r"^[A-Za-z0-9_-]{40,64}$")
+_BOOTSTRAP_TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+BOOTSTRAP_HEADER = "x-lamina-workspace-bootstrap"
 
 
 def configured_cors_origins() -> list[str]:
@@ -35,6 +38,7 @@ class DemoWorkspaceSettings:
     same_site: Literal["lax", "strict", "none"]
     domain: str | None
     ttl_seconds: int
+    bootstrap_ttl_seconds: int
 
     @classmethod
     def from_environment(cls) -> DemoWorkspaceSettings:
@@ -47,12 +51,20 @@ class DemoWorkspaceSettings:
         ttl_hours = int(environment.get("LAMINA_DEMO_WORKSPACE_TTL_HOURS", "168"))
         if ttl_hours < 1:
             raise RuntimeError("LAMINA_DEMO_WORKSPACE_TTL_HOURS must be at least 1")
+        bootstrap_ttl_seconds = int(
+            environment.get("LAMINA_DEMO_BOOTSTRAP_TTL_SECONDS", "120")
+        )
+        if not 30 <= bootstrap_ttl_seconds <= 600:
+            raise RuntimeError(
+                "LAMINA_DEMO_BOOTSTRAP_TTL_SECONDS must be between 30 and 600"
+            )
         return cls(
             cookie_name=environment.get("LAMINA_DEMO_COOKIE_NAME", DEFAULT_COOKIE_NAME),
             secure=secure,
             same_site=same_site,
             domain=environment.get("LAMINA_DEMO_COOKIE_DOMAIN") or None,
             ttl_seconds=ttl_hours * 60 * 60,
+            bootstrap_ttl_seconds=bootstrap_ttl_seconds,
         )
 
 
@@ -74,11 +86,23 @@ def demo_workspace(
     response: Response,
 ) -> str:
     settings = DemoWorkspaceSettings.from_environment()
-    candidate = request.cookies.get(settings.cookie_name)
+    raw_candidate = request.cookies.get(settings.cookie_name)
+    candidate = raw_candidate
     if candidate and not _OPAQUE_ID.fullmatch(candidate):
         candidate = None
+    bootstrap_token = (
+        request.headers.get(BOOTSTRAP_HEADER) if raw_candidate is None else None
+    )
+    bootstrap_hash = (
+        hashlib.sha256(bootstrap_token.encode("ascii")).hexdigest()
+        if bootstrap_token and _BOOTSTRAP_TOKEN.fullmatch(bootstrap_token)
+        else None
+    )
     workspace_id, created = workflow_store.resolve_demo_workspace(
-        candidate, settings.ttl_seconds
+        candidate,
+        settings.ttl_seconds,
+        bootstrap_hash,
+        settings.bootstrap_ttl_seconds,
     )
     if created or candidate != workspace_id:
         _set_cookie(response, workspace_id, settings)

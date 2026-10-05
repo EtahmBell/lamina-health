@@ -32,6 +32,13 @@ test('one shared request layer attaches the access token', () => {
   assert.doesNotMatch(api, /X-Demo-User|X-User-Id/)
 })
 
+test('first workspace requests share one in-memory opaque bootstrap token', () => {
+  assert.match(api, /crypto\.getRandomValues\(new Uint8Array\(32\)\)/)
+  assert.match(api, /X-Lamina-Workspace-Bootstrap/)
+  assert.match(api, /workspaceScoped && !workspaceProvisioned/)
+  assert.doesNotMatch(api, /localStorage|sessionStorage/)
+})
+
 test('claim APIs derive identity server-side and keep the Lucy demo public', () => {
   const claimFunctions = api.slice(api.indexOf('getProviderClaimState'))
   assert.doesNotMatch(claimFunctions, /auth_user_id|authUserId|email:/)

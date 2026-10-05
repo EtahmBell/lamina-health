@@ -26,6 +26,14 @@ class WorkflowStore:
                   workspace_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
                   last_seen_at TEXT NOT NULL, expires_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS demo_workspace_bootstraps (
+                  bootstrap_hash TEXT PRIMARY KEY,
+                  workspace_id TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  expires_at TEXT NOT NULL,
+                  FOREIGN KEY(workspace_id) REFERENCES demo_workspaces(workspace_id)
+                    ON DELETE CASCADE
+                );
                 CREATE TABLE IF NOT EXISTS patient_activity (
                   workspace_id TEXT NOT NULL, patient_id TEXT NOT NULL,
                   last_opened TEXT, last_started TEXT, last_consultation TEXT,
@@ -200,6 +208,8 @@ class WorkflowStore:
                   ON consultations(workspace_id, id DESC);
                 CREATE INDEX IF NOT EXISTS demo_workspaces_expiry
                   ON demo_workspaces(expires_at);
+                CREATE INDEX IF NOT EXISTS demo_workspace_bootstraps_expiry
+                  ON demo_workspace_bootstraps(expires_at);
                 CREATE INDEX IF NOT EXISTS specialist_reviews_workspace
                   ON specialist_case_reviews(workspace_id, specialist_npi);
                 CREATE INDEX IF NOT EXISTS specialist_calibrations_workspace
@@ -335,10 +345,19 @@ class WorkflowStore:
     def _now() -> str:
         return datetime.now(UTC).isoformat(timespec="seconds")
 
-    def resolve_demo_workspace(self, candidate: str | None, ttl_seconds: int) -> tuple[str, bool]:
+    def resolve_demo_workspace(
+        self,
+        candidate: str | None,
+        ttl_seconds: int,
+        bootstrap_hash: str | None = None,
+        bootstrap_ttl_seconds: int = 120,
+    ) -> tuple[str, bool]:
         now_dt = datetime.now(UTC)
         now = now_dt.isoformat(timespec="seconds")
         expires = (now_dt + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
+        bootstrap_expires = (
+            now_dt + timedelta(seconds=bootstrap_ttl_seconds)
+        ).isoformat(timespec="seconds")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if candidate:
@@ -353,6 +372,30 @@ class WorkflowStore:
                         (now, expires, candidate),
                     )
                     return candidate, False
+            elif bootstrap_hash:
+                db.execute(
+                    "DELETE FROM demo_workspace_bootstraps WHERE expires_at <= ?",
+                    (now,),
+                )
+                row = db.execute(
+                    """SELECT b.workspace_id, w.expires_at AS workspace_expires_at
+                       FROM demo_workspace_bootstraps b
+                       JOIN demo_workspaces w ON w.workspace_id=b.workspace_id
+                       WHERE b.bootstrap_hash=? AND b.expires_at>?""",
+                    (bootstrap_hash, now),
+                ).fetchone()
+                if row and row["workspace_expires_at"] > now:
+                    db.execute(
+                        "UPDATE demo_workspaces SET last_seen_at=?, expires_at=? "
+                        "WHERE workspace_id=?",
+                        (now, expires, row["workspace_id"]),
+                    )
+                    return str(row["workspace_id"]), False
+                if row:
+                    db.execute(
+                        "DELETE FROM demo_workspace_bootstraps WHERE bootstrap_hash=?",
+                        (bootstrap_hash,),
+                    )
             while True:
                 workspace_id = secrets.token_urlsafe(32)
                 try:
@@ -362,14 +405,25 @@ class WorkflowStore:
                            ) VALUES (?, ?, ?, ?)""",
                         (workspace_id, now, now, expires),
                     )
-                    return workspace_id, True
                 except sqlite3.IntegrityError:
                     continue
+                break
+            if bootstrap_hash and not candidate:
+                db.execute(
+                    """INSERT INTO demo_workspace_bootstraps(
+                         bootstrap_hash, workspace_id, created_at, expires_at
+                       ) VALUES (?, ?, ?, ?)""",
+                    (bootstrap_hash, workspace_id, now, bootstrap_expires),
+                )
+            return workspace_id, True
 
     def cleanup_expired_demo_workspaces(self) -> int:
         now = self._now()
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "DELETE FROM demo_workspace_bootstraps WHERE expires_at < ?", (now,)
+            )
             rows = db.execute(
                 "SELECT workspace_id FROM demo_workspaces WHERE expires_at < ? "
                 "AND workspace_id <> ?",
