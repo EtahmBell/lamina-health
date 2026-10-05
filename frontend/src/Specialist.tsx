@@ -1,17 +1,23 @@
 import { useEffect, useState } from 'react'
 import {
   ApiError,
+  getNetworkFeed,
+  getPracticeRepresentation,
   getSpecialistCase,
   getSpecialistCases,
   getSpecialistWorkspace,
   markSpecialistCaseReviewed,
   updateSpecialistCalibration,
+  type NetworkFeed,
+  type NetworkFeedItem,
+  type PracticeRepresentation,
   type SpecialistCaseDetail,
   type SpecialistCaseSummary,
   type SpecialistOutcome,
   type SpecialistWorkspace,
 } from './api.ts'
 import { eventDomId } from './agentActivity.ts'
+import { ImproveAgentCard, NetworkFeedSection, PracticeRepresentationPanel, networkProfilePath, trainingPath } from './Engagement.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 
 type Navigate = (path: string) => void
@@ -86,7 +92,13 @@ function SpecialistActivityRow({ item, navigate }: { item: SpecialistCaseSummary
 export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
   const [workspace, setWorkspace] = useState<SpecialistWorkspace | null>(null)
   const [error, setError] = useState('')
-  useEffect(() => { getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message)) }, [])
+  const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
+  const [feed, setFeed] = useState<NetworkFeed | null>(null)
+  useEffect(() => {
+    getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message))
+    getPracticeRepresentation('iain').then(setRepresentation).catch(() => {})
+    getNetworkFeed('iain').then(setFeed).catch(() => {})
+  }, [])
   const needsReview = workspace?.recent_cases.filter((item) => !item.reviewed) ?? []
   const recent = workspace?.recent_cases ?? []
   return <main className="page-shell home-page">
@@ -103,10 +115,12 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
       {needsReview.length > 0 && <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{needsReview.length}</span></div>
         <div className="lam-list needs-attention">{needsReview.map((item) => <SpecialistCurrentWorkRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
       </section>}
-      <section className="home-patients"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
-        <div className="lam-list quiet">{recent.slice(0, 5).map((item) => <SpecialistActivityRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
-      </section>
     </>}
+    <ImproveAgentCard representation={representation} navigate={navigate} trainPath={trainingPath('iain')} />
+    {workspace && workspace.case_count > 0 && <section className="home-patients"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
+      <div className="lam-list quiet">{recent.slice(0, 5).map((item) => <SpecialistActivityRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
+    </section>}
+    <NetworkFeedSection feed={feed} navigate={navigate} perspective="iain" />
   </main>
 }
 
@@ -289,10 +303,12 @@ export function SpecialistCaseDetailPage({ recordId, navigate }: { recordId: num
 export function SpecialistAgentPage({ navigate }: { navigate: Navigate }) {
   const [workspace, setWorkspace] = useState<SpecialistWorkspace | null>(null)
   const [cases, setCases] = useState<SpecialistCaseSummary[] | null>(null)
+  const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [error, setError] = useState('')
   useEffect(() => {
     getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message))
     getSpecialistCases().then(setCases).catch(() => setCases([]))
+    getPracticeRepresentation('iain').then(setRepresentation).catch(() => {})
   }, [])
   return <main className="page-shell agent-page">
     {error && <div className="error-banner" role="alert">{error}</div>}
@@ -310,6 +326,9 @@ export function SpecialistAgentPage({ navigate }: { navigate: Navigate }) {
         <h2>A synthetic, workspace-isolated agent.</h2>
         <p>{workspace.physician.disclaimer}. This is a controlled demo persona for {workspace.physician.specialty.toLowerCase()} — not a verified or activated physician agent.</p>
       </div>
+
+      <ImproveAgentCard representation={representation} navigate={navigate} trainPath={trainingPath('iain')} />
+      {representation && <PracticeRepresentationPanel representation={representation} />}
 
       <section className="agent-panel"><p className="eyebrow">Practice footprint</p><h2>What other agents see</h2>
         <div className="agent-facts">
@@ -329,5 +348,47 @@ export function SpecialistAgentPage({ navigate }: { navigate: Navigate }) {
         </button>)}
       </section>
     </>}
+  </main>
+}
+
+/* ------------------------------------------------------------------ Patients */
+
+export function SpecialistPatientsPage({ navigate }: { navigate: Navigate }) {
+  return <main className="page-shell selector-page">
+    <header className="selector-header"><div><p className="eyebrow">Specialist patients</p><h1>Patients</h1><p>People you actually care for, connected to this workspace.</p></div></header>
+    <div className="empty-state specialist-empty">
+      <NetworkMark />
+      <h2>No patient panel connected in this specialist demo</h2>
+      <p>Cases where your agent participates appear under Cases.</p>
+      <button className="button-secondary" onClick={() => navigate('/specialist/cases')}>View Cases →</button>
+    </div>
+  </main>
+}
+
+/* ------------------------------------------------------------ Physician Network */
+
+function dedupePhysicians(items: NetworkFeedItem[]) {
+  const seen = new Map<string, NetworkFeedItem['physician']>()
+  for (const item of items) seen.set(item.physician.id, item.physician)
+  return [...seen.values()]
+}
+
+export function SpecialistNetworkPage({ navigate }: { navigate: Navigate }) {
+  const [feed, setFeed] = useState<NetworkFeed | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => { getNetworkFeed('iain').then(setFeed).catch((err: Error) => setError(err.message)) }, [])
+  const physicians = feed ? dedupePhysicians(feed.items) : []
+  return <main className="page-shell history-page">
+    <p className="eyebrow">Specialist network</p>
+    <h1>Physician Network</h1>
+    <p className="page-intro">Physicians relevant to your practice — explicitly added to your network, or whose agents have interacted with yours.</p>
+    {error && <div className="error-banner" role="alert">{error}</div>}
+    {!feed && !error && <p className="muted-note">Loading network…</p>}
+    {feed && physicians.length === 0 && <div className="empty-state history-empty"><NetworkMark /><h2>No relevant physicians yet</h2><p>Physicians appear here once your agent participates in a network consultation, or once a professional connection is added.</p></div>}
+    {physicians.length > 0 && <div className="lam-list">{physicians.map((physician) => <button className="lam-row" key={physician.id} onClick={() => navigate(networkProfilePath('iain', physician.id))}>
+      <span className="lam-row-mark patient-row-avatar">{physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')}</span>
+      <span className="lam-row-main"><strong>{physician.name}</strong><span>{physician.specialty}</span><small>{physician.location}</small></span>
+      <span className="lam-row-action">View professional profile <b>→</b></span>
+    </button>)}</div>}
   </main>
 }

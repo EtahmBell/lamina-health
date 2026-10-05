@@ -12,6 +12,8 @@ import {
   type PhysicianNetworkProfile,
   type ProviderSearchResponse,
 } from './api.ts'
+import { ENGAGEMENT_PERSONA_BY_NPI } from './demoIdentity.ts'
+import { networkProfilePath } from './Engagement.tsx'
 import { DEFAULT_GRAPH_FILTER, GRAPH_FILTERS, graphVisibility, type GraphFilter } from './graphFilter.ts'
 import { membershipLabel, networkRoster, physicianDisplayName, rosterSize, type NetworkRelationship } from './networkRoster.ts'
 
@@ -236,6 +238,7 @@ export function PhysicianProfilePage({ npi, navigate }: { npi: string; navigate:
     <div className="profile-facts"><div><span>Practice location</span><strong>{profile.city || 'Not listed'}{profile.state ? `, ${profile.state}` : ''}</strong></div><div><span>Organisation</span><strong>{profile.organization || 'Not listed in directory'}</strong></div><div><span>NPI</span><strong>{profile.npi}</strong></div>{profile.phone && <div><span>Practice phone</span><strong>{profile.phone}</strong></div>}</div>
     <div className={`profile-provenance ${synthetic ? 'synthetic' : ''}`}><strong>{synthetic ? 'Synthetic demo profile' : 'Public directory record'}</strong><p>{profile.directory_disclaimer}</p></div>
     {error && <div className="error-banner" role="alert">{error}</div>}
+    {ENGAGEMENT_PERSONA_BY_NPI[profile.npi] && <section className="professional-profile-link-card"><div><p className="eyebrow">Professional identity</p><h2>How their agent represents their practice</h2></div><button className="button-secondary" onClick={() => navigate(networkProfilePath('lucy', ENGAGEMENT_PERSONA_BY_NPI[profile.npi]))}>View professional profile →</button></section>}
 
     <section className="agent-activation-card"><header><div><p className="eyebrow">Lamina Agent</p><h2>{copy.label}</h2><p>{copy.detail}</p></div><NetworkGlyph active={profile.agent.status === 'active'} /></header>
       {profile.agent.status === 'reserved' && profile.claimable

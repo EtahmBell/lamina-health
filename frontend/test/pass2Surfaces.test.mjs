@@ -110,8 +110,8 @@ test('the visualization carries no quality, performance or ranking metric', () =
   assert.match(footprint(), /<em>\{item\.count\}<\/em>/)
 })
 
-test('the existing My Agent tabs are untouched', () => {
-  assert.match(app, /\['overview', 'knowledge', 'calibration', 'activity'\]/)
+test('the existing My Agent tabs are untouched, with Train added alongside them', () => {
+  assert.match(app, /\['overview', 'knowledge', 'train', 'calibration', 'activity'\]/)
   assert.match(app, /Proposed · needs confirmation/)
   assert.match(app, /navigate\(activityPath\(event\)\)/)
 })
@@ -150,10 +150,7 @@ test('Profile shows only real fields and no fake settings chrome', () => {
 
 /* ----------------------------------------------------------------- scope */
 
-test('no specialist mode or analytics dashboard leaked into Pass 2', () => {
-  for (const source of [app, network]) {
-    assert.doesNotMatch(source, /specialist mode|role selector|persona|Cases nav/i)
-  }
+test('no analytics dashboard leaked into Pass 2 (specialist mode arrived deliberately in later passes)', () => {
   assert.match(styles, /\.agent-footprint/)
   assert.doesNotMatch(styles, /\.kpi-|\.metric-tile/)
 })

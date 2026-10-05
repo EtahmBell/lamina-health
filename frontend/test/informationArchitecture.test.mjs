@@ -37,7 +37,7 @@ test('the portal greeting is time-aware and the stale question is gone', () => {
 test('workspace sidebar keeps Home as a dashboard destination', () => {
   const navigation = slice('const navItems', 'const SPECIALIST_NAV_ITEMS')
   assert.deepEqual(navigation.match(/title: '[^']+'/g), [
-    "title: 'Home'", "title: 'Patients'", "title: 'Consultations'", "title: 'My Agent'", "title: 'Physician Network'",
+    "title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'",
   ])
   assert.match(navigation, /title: 'Home'.*path: '\/home'/s)
 })
@@ -242,10 +242,10 @@ test('Calibration can be addressed directly by query state', () => {
 
 /* -------------------------------------------------------------- pass scope */
 
-test('My Agent still exposes the four inspectable layers and no Pass 2 work leaked in', () => {
-  assert.match(source, /\['overview', 'knowledge', 'calibration', 'activity'\]/)
+test('My Agent still exposes its inspectable layers, now including Train', () => {
+  assert.match(source, /\['overview', 'knowledge', 'train', 'calibration', 'activity'\]/)
   const identity = readFileSync(new URL('../src/demoIdentity.ts', import.meta.url), 'utf8')
   assert.match(identity, /PCP_NAME = 'Dr\. Lucy Saru'/)
   assert.match(identity, /PCP_AGENT_NAME = "Dr\. Lucy Saru's Agent"/)
-  assert.doesNotMatch(source, /specialist mode|Build your network|role selector/i)
+  assert.doesNotMatch(source, /Build your network|role selector/i)
 })
