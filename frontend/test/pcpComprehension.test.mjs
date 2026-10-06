@@ -11,7 +11,7 @@ const consultationNetwork = () => slice('function ConsultationNetwork', 'functio
 const networkSummary = () => slice('function NetworkConsultationSummary', 'const messageLabel')
 const recommendation = () => slice('function RecommendationView', 'function PatientWorkspace')
 const patientPage = () => slice('function PatientWorkspace', 'export default function App')
-const recordPage = () => slice('function ConsultationRecordPage', 'function ConsultationFootprint')
+const recordPage = () => slice('function ConsultationRecordPage', 'const AGENT_TABS')
 
 /* ------------------------------------------------------------- §1, §2, §17 */
 

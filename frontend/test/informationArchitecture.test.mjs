@@ -242,8 +242,8 @@ test('Calibration can be addressed directly by query state', () => {
 
 /* -------------------------------------------------------------- pass scope */
 
-test('My Agent still exposes its inspectable layers, now including Train', () => {
-  assert.match(source, /\['overview', 'knowledge', 'train', 'calibration', 'activity'\]/)
+test('My Agent exposes the simplified Overview/Practice/Train/Chat/Activity model', () => {
+  assert.match(source, /\['overview', 'practice', 'train', 'chat', 'activity'\]/)
   const identity = readFileSync(new URL('../src/demoIdentity.ts', import.meta.url), 'utf8')
   assert.match(identity, /PCP_NAME = 'Dr\. Lucy Saru'/)
   assert.match(identity, /PCP_AGENT_NAME = "Dr\. Lucy Saru's Agent"/)

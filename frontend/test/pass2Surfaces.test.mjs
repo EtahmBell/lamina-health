@@ -9,7 +9,6 @@ const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to))
 const directory = () => slice(network, 'export function PhysicianDirectoryPage', 'const splitList')
 const profile = () => slice(app, 'function SettingsPage', 'function UnfinishedPatient')
-const footprint = () => slice(app, 'function ConsultationFootprint', 'const AGENT_TABS')
 
 /* ---------------------------------------------------------- network hero */
 
@@ -94,24 +93,12 @@ test('added physicians outside the consult roster are disclosed, not faked into 
 
 /* -------------------------------------------------------------- my agent */
 
-test('My Agent gains exactly one visualization, derived from consultation records', () => {
-  assert.match(footprint(), /specialtiesConsulted\(records\)/)
-  assert.match(footprint(), /<h3 id="agent-footprint-heading">Specialties consulted<\/h3>/)
-  assert.match(footprint(), /Completed consultations in this workspace, by recommended specialty\./)
-  assert.match(footprint(), /No consultation activity yet\./)
-  assert.equal((app.match(/<ConsultationFootprint/g) || []).length, 1)
+test('My Agent uses the simplified Pass 6C tab set, with no separate visualization dashboard', () => {
+  assert.match(app, /const AGENT_TABS = \['overview', 'practice', 'train', 'chat', 'activity'\] as const/)
+  assert.doesNotMatch(app, /function ConsultationFootprint/, 'the specialties-consulted chart was removed as part of the My Agent simplification')
 })
 
-test('the visualization carries no quality, performance or ranking metric', () => {
-  for (const banned of [/accuracy/i, /success rate/i, /response quality/i, /efficiency/i, /\bscore\b/i, /\brank/i, /this month/i]) {
-    assert.doesNotMatch(footprint(), banned)
-  }
-  assert.match(footprint(), /aria-hidden="true"/, 'the bar is decoration; the count is real text')
-  assert.match(footprint(), /<em>\{item\.count\}<\/em>/)
-})
-
-test('the existing My Agent tabs are untouched, with Train added alongside them', () => {
-  assert.match(app, /\['overview', 'knowledge', 'train', 'calibration', 'activity'\]/)
+test('case-raised preferences still confirm/edit/reject without a separate Calibration tab', () => {
   assert.match(app, /Proposed · needs confirmation/)
   assert.match(app, /navigate\(activityPath\(event\)\)/)
 })

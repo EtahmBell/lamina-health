@@ -1246,3 +1246,92 @@ button.lam-row:hover { background: #fff9f1; }
   .post-flow-dialog { padding: 24px 20px; }
 }
 .professional-profile-link-card h2 { margin: 3px 0 0; font-size: .92rem; }
+
+/* -------------------------------------------------------------- Pass 6C: utility */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* ------------------------------------------------------ Pass 6C: Overview tab */
+.agent-overview-v2 { display: flex; flex-direction: column; gap: 18px; max-width: 760px; }
+.agent-portrait-card { border-left: 3px solid var(--accent); background: rgb(255 252 247 / 55%); padding: 26px 28px; }
+.agent-portrait-card .eyebrow { margin: 0 0 8px; }
+.agent-portrait-text { margin: 0; max-width: 620px; color: var(--clinical); font-family: var(--font-display); font-size: 1.05rem; line-height: 1.6; }
+.agent-stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.agent-stats-row > div { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 16px 14px; text-align: center; }
+.agent-stats-row em { display: block; color: var(--clinical); font-family: var(--font-display); font-size: 1.6rem; font-style: normal; font-variant-numeric: tabular-nums; }
+.agent-stats-row span { display: block; margin-top: 4px; color: var(--text-secondary); font-size: .62rem; }
+.agent-last-trained { margin: 0; color: var(--text-secondary); font-size: .66rem; }
+.agent-overview-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
+.initialization-steps { display: grid; gap: 6px; margin: 10px 0 14px; padding: 0; list-style: none; }
+.initialization-steps li { position: relative; padding-left: 16px; color: var(--clinical); font-size: .72rem; }
+.initialization-steps li::before { content: '–'; position: absolute; left: 0; color: var(--accent-hover); }
+@media (max-width: 720px) { .agent-stats-row { grid-template-columns: repeat(2, 1fr); } }
+
+/* ------------------------------------------------------- Pass 6C: Practice tab */
+.practice-tab { max-width: 760px; }
+.practice-tab h2 { margin: 3px 0 16px; }
+.practice-review-link { margin: 0 0 18px; }
+.practice-tab-group { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px; }
+.practice-tab-group:first-of-type { margin-top: 0; border-top: 0; padding-top: 0; }
+.practice-tab-group.case-interests .section-label { color: var(--accent-hover); }
+.practice-representation-note { margin-top: 22px; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.practice-legacy-review { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 20px; }
+
+/* ----------------------------------------------------------- Pass 6C: Train tab */
+.train-tab-v2 { max-width: 640px; }
+.train-primary-card { margin-top: 10px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 12px; background: var(--surface); padding: 22px 24px; }
+.train-primary-card h3 { margin: 4px 0 14px; font-size: 1.15rem; }
+.train-history-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 20px 0 0; color: var(--text-secondary); font-size: .68rem; }
+.train-history { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 16px; }
+.train-history-row { display: grid; grid-template-columns: 70px 90px 1fr; align-items: baseline; gap: 12px; padding: 10px 0; border-top: 1px solid rgb(222 216 206 / 60%); }
+.train-history-row:first-of-type { border-top: 0; }
+.train-history-row strong { color: var(--clinical); font-size: .72rem; }
+.train-history-row span { color: var(--text-secondary); font-size: .66rem; }
+.train-history-row small { color: var(--text-secondary); font-size: .66rem; }
+@media (max-width: 600px) { .train-history-row { grid-template-columns: 1fr; gap: 2px; } }
+
+/* --------------------------------------------------- Pass 6C: training completion */
+.training-completion-findings { margin: 0 0 20px; color: var(--text-secondary); font-size: .74rem; line-height: 1.5; }
+.training-focused-subtitle { margin: 0; color: var(--text-secondary); font-size: .74rem; }
+
+/* ---------------------------------------------------------------- Pass 6C: Chat */
+.chat-tab { max-width: 720px; }
+.chat-boundary-note { margin: 2px 0 20px; color: var(--text-secondary); font-size: .62rem; text-transform: uppercase; letter-spacing: .04em; }
+.chat-case-cards { margin-bottom: 22px; }
+.chat-case-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 10px; }
+.chat-case-card { border: 1px solid var(--border); border-radius: 12px; background: #f8f3eb; padding: 16px 18px; text-align: left; cursor: pointer; }
+.chat-case-card:hover { border-color: var(--accent); }
+.chat-case-card strong { display: block; color: var(--clinical); font-family: var(--font-display); font-size: .86rem; }
+.chat-case-card span { display: block; margin: 6px 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.chat-case-card b { color: var(--accent-hover); font-size: .64rem; font-weight: 700; }
+.chat-thread { display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px; }
+.chat-case-context { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; background: #fdf3e8; padding: 14px 16px; }
+.chat-case-context strong { display: block; margin: 4px 0 8px; color: var(--clinical); font-size: .82rem; }
+.chat-message { max-width: 85%; border-radius: 12px; padding: 13px 16px; font-size: .78rem; line-height: 1.55; }
+.chat-message.physician { align-self: flex-end; background: #f2f0eb; color: var(--clinical); }
+.chat-message.agent { align-self: flex-start; max-width: 100%; border: 1px solid var(--border); background: var(--surface); }
+.chat-agent-label { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; color: var(--accent-hover); font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.chat-agent-label .network-motif { width: 18px; height: 18px; }
+.chat-message.agent p { margin: 0; color: var(--clinical); }
+.chat-uncertainty { margin: 10px 0 0; border-left: 3px solid var(--accent); background: #fdf3e8; padding: 9px 12px; color: var(--clinical); font-size: .68rem; line-height: 1.5; border-radius: 0 8px 8px 0; }
+.chat-grounding { margin: 10px 0 0; color: var(--text-secondary); font-size: .62rem; }
+.chat-feedback { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: .64rem; }
+.chat-feedback-done { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: .64rem; }
+.chat-focused-prompt { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.chat-focused-prompt p { margin: 4px 0 10px; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.chat-starter-prompts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.chat-starter-prompt { border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 8px 14px; color: var(--clinical); cursor: pointer; font-size: .64rem; }
+.chat-starter-prompt:hover:not(:disabled) { border-color: var(--accent); }
+.chat-starter-prompt:disabled { opacity: .5; cursor: default; }
+.chat-composer { display: flex; gap: 10px; }
+.chat-composer input { flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 12px 15px; font: inherit; font-size: .78rem; background: var(--surface); }
+@media (max-width: 720px) {
+  .chat-case-grid { grid-template-columns: 1fr; }
+  .chat-message { max-width: 100%; }
+  .chat-composer { flex-direction: column; }
+}
+
+/* ------------------------------------------------------------- Pass 6C: Activity */
+.agent-activity-rows { display: flex; flex-direction: column; }
+.agent-activity-row.static { cursor: default; }
+.agent-activity-row.static:hover { background: transparent; }
+.agent-activity-row.training .activity-kind, .agent-activity-row.update .activity-kind { color: var(--accent-hover); }

@@ -1,27 +1,32 @@
 import { useEffect, useState } from 'react'
 import {
   ApiError,
-  getAgentInitialization,
+  getAgentOverview,
   getNetworkFeed,
   getPhysicianTraining,
   getPracticeRepresentation,
+  getProfessionalPosts,
   getSpecialistCase,
   getSpecialistCases,
   getSpecialistWorkspace,
+  getTrainingHistory,
   markSpecialistCaseReviewed,
+  resumeTrainingSession,
   updateSpecialistCalibration,
-  type AgentInitialization,
+  type AgentOverview,
   type NetworkFeed,
   type NetworkFeedItem,
   type PracticeRepresentation,
+  type ProfessionalPost,
   type SpecialistCaseDetail,
   type SpecialistCaseSummary,
   type SpecialistOutcome,
   type SpecialistWorkspace,
   type TrainingQueueSummary,
+  type TrainProjection,
 } from './api.ts'
 import { eventDomId } from './agentActivity.ts'
-import { ImproveAgentCard, InitializationCard, NetworkFeedSection, PracticeRepresentationPanel, networkProfilePath, trainingPath } from './Engagement.tsx'
+import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, ImproveAgentCard, NetworkFeedSection, PracticeTab, TrainTab, networkProfilePath, trainingPath, type AgentActivityRow } from './Engagement.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 
 type Navigate = (path: string) => void
@@ -310,24 +315,55 @@ export function SpecialistCaseDetailPage({ recordId, navigate }: { recordId: num
 
 /* ------------------------------------------------------------- My Agent */
 
-export function SpecialistAgentPage({ navigate }: { navigate: Navigate }) {
+const AGENT_TABS = ['overview', 'practice', 'train', 'chat', 'activity'] as const
+type AgentTab = typeof AGENT_TABS[number]
+
+export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
+  const tabParam = params?.get('tab') ?? null
   const [workspace, setWorkspace] = useState<SpecialistWorkspace | null>(null)
   const [cases, setCases] = useState<SpecialistCaseSummary[] | null>(null)
+  const [posts, setPosts] = useState<ProfessionalPost[]>([])
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
-  const [queueSummary, setQueueSummary] = useState<TrainingQueueSummary | null>(null)
-  const [resumeSessionId, setResumeSessionId] = useState<number | null>(null)
-  const [initialization, setInitialization] = useState<AgentInitialization | null>(null)
+  const [overview, setOverview] = useState<AgentOverview | null>(null)
+  const [trainProjection, setTrainProjection] = useState<TrainProjection | null>(null)
+  const [resumeAnsweredCount, setResumeAnsweredCount] = useState<number | null>(null)
+  const [tab, setTab] = useState<AgentTab>(() => ((AGENT_TABS as readonly string[]).includes(tabParam ?? '') ? (tabParam as AgentTab) : 'overview'))
   const [error, setError] = useState('')
   useEffect(() => {
     getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message))
     getSpecialistCases().then(setCases).catch(() => setCases([]))
     getPracticeRepresentation('iain').then(setRepresentation).catch(() => {})
-    getAgentInitialization('iain').then(setInitialization).catch(() => {})
-    getPhysicianTraining('iain').then((trainingWorkspace) => {
-      setQueueSummary(trainingWorkspace.queue_summary)
-      setResumeSessionId(trainingWorkspace.sessions.find((item) => item.status === 'active')?.id ?? null)
-    }).catch(() => {})
+    getAgentOverview('iain').then(setOverview).catch(() => {})
+    getTrainingHistory('iain').then(setTrainProjection).catch(() => {})
+    getProfessionalPosts('iain').then(setPosts).catch(() => {})
   }, [])
+  useEffect(() => { if ((AGENT_TABS as readonly string[]).includes(tabParam ?? '')) setTab(tabParam as AgentTab) }, [tabParam])
+  useEffect(() => {
+    const activeId = trainProjection?.current_session?.id
+    if (!activeId) { setResumeAnsweredCount(null); return }
+    resumeTrainingSession('iain', activeId).then((session) => setResumeAnsweredCount((session.responses ?? []).filter((item) => !item.skipped).length)).catch(() => {})
+  }, [trainProjection?.current_session?.id])
+  const selectTab = (next: AgentTab) => { setTab(next); window.history.replaceState({}, '', `/specialist/agent?tab=${next}`) }
+  const reviewHref = trainProjection ? (() => {
+    const entry = findPendingReviewHistoryEntry(trainProjection.recent_training_history)
+    return entry ? `${trainingPath('iain')}?review=${entry.session_id}` : null
+  })() : null
+  const activityRows: AgentActivityRow[] = [
+    ...(cases ?? []).slice(0, 12).map((item) => ({
+      id: `case-${item.consultation_record_id}`, kind: 'interaction' as const,
+      title: `Responded to ${item.patient_name}'s network consultation`,
+      detail: item.was_recommended ? 'You were recommended as the referral destination' : `${SPECIALIST_OUTCOME_LABELS[item.specialist_outcome]} · ${item.recommendation_physician} recommended`,
+      time: item.consulted_at, onClick: () => navigate(specialistCasePath(item.consultation_record_id)),
+    })),
+    ...(trainProjection?.recent_training_history ?? []).filter((entry) => entry.lifecycle_state !== 'active').map((entry) => ({
+      id: `training-${entry.session_id}`, kind: 'training' as const,
+      title: 'Completed agent training', detail: `${entry.target_count} question${entry.target_count === 1 ? '' : 's'}`,
+      time: entry.completed_at ?? entry.started_at,
+    })),
+    ...posts.filter((item) => item.status === 'published').map((item) => ({
+      id: `post-${item.id}`, kind: 'update' as const, title: 'Published practice update', detail: item.title, time: item.published_at ?? item.created_at,
+    })),
+  ].sort((a, b) => b.time.localeCompare(a.time))
   return <main className="page-shell agent-page">
     {error && <div className="error-banner" role="alert">{error}</div>}
     {!workspace && !error && <p className="muted-note">Opening your agent…</p>}
@@ -339,33 +375,13 @@ export function SpecialistAgentPage({ navigate }: { navigate: Navigate }) {
         <span className="agent-status-badge reserved"><i />Reserved synthetic profile</span>
       </div></section>
 
-      <div className="agent-overview-intro specialist-agent-note">
-        <p className="eyebrow">Controlled specialist demo</p>
-        <h2>A synthetic, workspace-isolated agent.</h2>
-        <p>{workspace.physician.disclaimer}. This is a controlled demo persona for {workspace.physician.specialty.toLowerCase()} — not a verified or activated physician agent.</p>
-      </div>
+      <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
 
-      <ImproveAgentCard representation={representation} queueSummary={queueSummary} resumeSessionId={resumeSessionId} navigate={navigate} trainPath={trainingPath('iain')} />
-      <InitializationCard initialization={initialization} navigate={navigate} trainPath={trainingPath('iain')} />
-      {representation && <PracticeRepresentationPanel representation={representation} />}
-
-      <section className="agent-panel"><p className="eyebrow">Practice footprint</p><h2>What other agents see</h2>
-        <div className="agent-facts">
-          <div><span>Specialty</span><strong>{workspace.physician.specialty}</strong></div>
-          <div><span>Location</span><strong>{workspace.physician.location}</strong></div>
-          <div><span>Network participation</span><strong>{workspace.case_count} network case{workspace.case_count === 1 ? '' : 's'}</strong></div>
-          <div><span>Recommended outcome</span><strong>{workspace.recommended_case_count} of {workspace.case_count}</strong></div>
-        </div>
-      </section>
-
-      <section className="agent-panel agent-activity"><div className="panel-header"><div><p className="eyebrow">Recent case activity</p><h2>Cases involving your agent</h2></div></div>
-        {!cases?.length && <p className="agent-empty-note">No case activity yet.</p>}
-        {cases?.slice(0, 8).map((item) => <button className="agent-activity-row" key={item.consultation_record_id} onClick={() => navigate(specialistCasePath(item.consultation_record_id))}>
-          <NetworkMark resolved={item.reviewed} />
-          <span><em className="activity-kind">{item.reviewed ? 'Reviewed' : 'Needs review'}</em><strong>{item.patient_name}</strong><small>{SPECIALIST_OUTCOME_LABELS[item.specialist_outcome]} · {item.referring_physician}</small><i>{formatTime(item.consulted_at)}</i></span>
-          <b>→</b>
-        </button>)}
-      </section>
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} onViewPractice={() => selectTab('practice')} />}
+      {tab === 'practice' && representation && <PracticeTab representation={representation} reviewHref={reviewHref} navigate={navigate} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} resumeAnsweredCount={resumeAnsweredCount} navigate={navigate} trainPath={trainingPath('iain')} />}
+      {tab === 'chat' && <ChatTab personaId="iain" agentName={workspace.physician.agent_name} navigate={navigate} trainPath={trainingPath('iain')} />}
+      {tab === 'activity' && <section className="agent-panel agent-activity"><div className="panel-header"><div><p className="eyebrow">Your agent's actions</p><h2>Recent activity</h2></div></div><AgentActivityList rows={activityRows} /></section>}
     </>}
   </main>
 }

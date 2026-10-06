@@ -108,9 +108,9 @@ test('finishing a session never silently converts answers into truth: it calls f
   assert.match(page, /Review what your agent learned\./)
 })
 
-test('the session summary is grounded in actual answered-question counts, never a ranking or score claim', () => {
+test('the completion screen is grounded in actual answered-question counts, never a ranking or score claim', () => {
   const page = trainingPageFn()
-  assert.match(page, /is better prepared to answer \{answeredCount\} referral question/)
+  assert.match(page, /You answered \{answered\} question/)
   assert.doesNotMatch(engagement, /ranking increased|more discoverable|score improved|referral score/i)
 })
 
@@ -138,17 +138,18 @@ test('Home (both personas) surfaces Improve your agent, including resume-session
 
 /* -------------------------------------------------------------- My Agent */
 
-test('My Agent gained a Train tab additively, preserving the existing four tabs and their deep links', () => {
-  assert.match(app, /const AGENT_TABS = \['overview', 'knowledge', 'train', 'calibration', 'activity'\] as const/)
+test('My Agent uses the simplified Pass 6C tabs, with legacy Knowledge/Calibration deep links preserved via alias', () => {
+  assert.match(app, /const AGENT_TABS = \['overview', 'practice', 'train', 'chat', 'activity'\] as const/)
+  assert.match(app, /const LEGACY_AGENT_TAB_ALIASES: Record<string, AgentTab> = \{ knowledge: 'practice', calibration: 'practice' \}/)
   assert.match(myAgentPageFn(), /learningParam = params\.get\('learning'\)/)
   assert.match(myAgentPageFn(), /recordParam = params\.get\('record'\)/)
 })
 
-test('Train tab previews unresolved questions and unconfirmed rules without duplicating the calibration UI', () => {
+test('Practice tab shows confirmed truth and links pending training review into Train, not a recreated Calibration UI', () => {
   const page = myAgentPageFn()
-  const trainBlock = slice(page, "tab === 'train'", "tab === 'calibration'")
-  assert.match(trainBlock, /train-tab-preview/)
-  assert.doesNotMatch(trainBlock, /learning-actions/, 'the train tab links to calibration rather than re-implementing confirm/edit/reject')
+  assert.match(page, /tab === 'practice' && representation && <PracticeTab/)
+  assert.doesNotMatch(engagement, /export function PracticeRepresentationPanel/, 'the old flat representation panel was replaced by the tabbed PracticeTab')
+  assert.match(engagement, /reviewHref && <p className="practice-review-link">/)
 })
 
 /* ----------------------------------------------------------- profile editing */

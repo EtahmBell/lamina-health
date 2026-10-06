@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ApiError,
   answerTrainingQuestion,
+  chatWithAgent,
+  completeTrainingReview,
   createPracticeUpdate,
   createProfessionalPost,
   dismissPracticeUpdate,
@@ -12,6 +14,8 @@ import {
   enrichPhysicianProfile,
   finishTrainingSession,
   getAgentInitialization,
+  getAgentOverview,
+  getAgentTestCases,
   getNetworkFeed,
   getNetworkPhysicianProfile,
   getPhysicianInterests,
@@ -20,16 +24,23 @@ import {
   getProfessionalPosts,
   getProfessionalProfile,
   getProfileEnrichment,
+  getTrainingHistory,
   publishPracticeUpdate,
   publishProfessionalPost,
   resumeTrainingSession,
   reviewProfileCandidate,
   savePhysicianInterest,
+  startFocusedTraining,
   startTrainingSession,
+  submitAgentChatFeedback,
   updateProfessionalProfileItem,
   updateProposedLearning,
+  type AgentChatResponse,
   type AgentInitialization,
+  type AgentOverview,
+  type AgentTestCase,
   type DemoPhysicianPerspective,
+  type FocusedTrainingSeed,
   type NetworkFeed,
   type NetworkFeedItem,
   type PhysicianInterest,
@@ -45,10 +56,13 @@ import {
   type ProfileEnrichmentJob,
   type ProfileItem,
   type ProposedLearning,
+  type TrainingCompletionSummary,
+  type TrainingHistoryEntry,
   type TrainingQuestion,
   type TrainingQueueSummary,
   type TrainingResponse,
   type TrainingSession,
+  type TrainProjection,
 } from './api.ts'
 import { patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -60,6 +74,17 @@ function NetworkMark({ active = false, resolved = false }: { active?: boolean; r
 }
 
 const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+/** Calm relative-day label for training/activity timestamps, e.g. "today", "yesterday", "Oct 3". */
+function relativeDayLabel(value: string) {
+  const date = new Date(value)
+  const now = new Date()
+  const startOf = (item: Date) => new Date(item.getFullYear(), item.getMonth(), item.getDate()).getTime()
+  const diffDays = Math.round((startOf(now) - startOf(date)) / 86400000)
+  if (diffDays === 0) return 'today'
+  if (diffDays === 1) return 'yesterday'
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
 
 /* -------------------------------------------------------------------- paths */
 
@@ -132,27 +157,6 @@ export function FullNetworkFeedPage({ feed, navigate, perspective, error }: { fe
   </main>
 }
 
-/* ---------------------------------------------------- Practice representation */
-
-export function PracticeRepresentationPanel({ representation }: { representation: PracticeRepresentation }) {
-  const sections = representation.sections
-  const group = (label: string, items: string[]) => items.length > 0 && <div key={label}><span className="section-label">{label}</span><ul className="clinical-list">{items.map((item) => <li key={item}>{item}</li>)}</ul></div>
-  const caseInterests = sections.interests.filter((item) => item.interest_type === 'case_interest')
-  return <section className="practice-representation-panel">
-    <p className="eyebrow">How the network sees your practice</p>
-    <h2>How your agent represents you</h2>
-    {group('Clinical focus', sections.clinical_focus)}
-    {caseInterests.length > 0 && <div><span className="section-label">Case interests</span><ul className="clinical-list">{caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul></div>}
-    {group('Good-fit cases', sections.good_fit)}
-    {group('Usually not a fit', sections.not_a_fit)}
-    {group('Referral guidance', sections.preferred_workup)}
-    {group('Confirmed rules', sections.explicit_rules)}
-    {sections.confirmed_learnings.length > 0 && <div><span className="section-label">Confirmed from training</span><ul className="clinical-list">{sections.confirmed_learnings.map((item) => <li key={item.id}>{item.statement}</li>)}</ul></div>}
-    <p className="practice-representation-note">{representation.completeness.meaning}</p>
-    {sections.interest_safety && <p className="practice-representation-note">{sections.interest_safety}</p>}
-  </section>
-}
-
 /* --------------------------------------------------------------------- Train */
 
 function questionSource(question: TrainingQuestion): { tag: string; detail: string } {
@@ -167,7 +171,12 @@ function questionSource(question: TrainingQuestion): { tag: string; detail: stri
       return { tag: 'Agent initialization', detail: 'Help define your practice' }
     case 'unresolved_branch':
     case 'practice_gap':
+    case 'deterministic_branch':
       return { tag: 'Practice gap', detail: 'Your agent is missing guidance here' }
+    case 'bounded_practice_context':
+      return { tag: 'Practice context', detail: 'Helps your agent understand bounded practice context' }
+    case 'agent_chat_correction':
+      return { tag: 'From a chat correction', detail: "Based on your \"Not quite\" feedback in Chat" }
     default:
       return { tag: 'Referral guidance', detail: 'Help your agent answer this consistently' }
   }
@@ -189,35 +198,46 @@ function TrainingLearningCard({ learning, editing, draft, onEdit, onCancelEdit, 
   </article>
 }
 
-type TrainingPhase = 'loading' | 'empty' | 'questions' | 'reviewing' | 'error'
-type TrainingMode = 'initialization' | 'daily' | 'extended'
+type TrainingPhase = 'loading' | 'empty' | 'questions' | 'completed' | 'reviewing' | 'review_complete' | 'error'
+type TrainingMode = 'initialization' | 'daily'
 
 export function TrainingPage({ personaId, agentName, navigate, exitPath, params }: { personaId: DemoPhysicianPerspective; agentName: string; navigate: Navigate; exitPath: string; params?: URLSearchParams }) {
   const modeParam = (params?.get('mode') as TrainingMode | null) ?? 'daily'
   const resumeParam = params?.get('resume')
+  const reviewParam = params?.get('review')
   const [phase, setPhase] = useState<TrainingPhase>('loading')
   const [session, setSession] = useState<TrainingSession | null>(null)
   const [queue, setQueue] = useState<TrainingQuestion[]>([])
   const [index, setIndex] = useState(0)
-  const [answeredOffset, setAnsweredOffset] = useState(0)
+  const [answeredCount, setAnsweredCount] = useState(0)
+  const [answerTarget, setAnswerTarget] = useState(10)
   const [cardState, setCardState] = useState<'idle' | 'leaving'>('idle')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [multiSelected, setMultiSelected] = useState<string[]>([])
   const [textAnswer, setTextAnswer] = useState('')
-  const [finishResult, setFinishResult] = useState<{ responses: TrainingResponse[] } | null>(null)
+  const [completionSummary, setCompletionSummary] = useState<TrainingCompletionSummary | null>(null)
   const [learnings, setLearnings] = useState<ProposedLearning[]>([])
   const [editingLearningId, setEditingLearningId] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [branchNote, setBranchNote] = useState<string | null>(null)
-  const [queueSummary, setQueueSummary] = useState<TrainingQueueSummary | null>(null)
   const starterRef = useRef<{ key: string; promise: ReturnType<typeof startTrainingSession> } | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    const key = `${personaId}:${modeParam}:${resumeParam ?? ''}`
+    const key = `${personaId}:${modeParam}:${resumeParam ?? ''}:${reviewParam ?? ''}`
     setPhase('loading'); setIndex(0); setCardState('idle'); setBranchNote(null)
-    setFinishResult(null); setLearnings([]); setMultiSelected([]); setTextAnswer(''); setError('')
+    setCompletionSummary(null); setLearnings([]); setMultiSelected([]); setTextAnswer(''); setError('')
+    if (reviewParam) {
+      Promise.all([resumeTrainingSession(personaId, Number(reviewParam)), getPhysicianTraining(personaId)]).then(([resumedSession, workspace]) => {
+        if (cancelled) return
+        const prefix = `session:${reviewParam}:`
+        setSession(resumedSession)
+        setLearnings(workspace.proposed_learnings.filter((item) => item.source_reference.startsWith(prefix)))
+        setPhase('reviewing')
+      }).catch((err: unknown) => { if (!cancelled) { setError(err instanceof Error ? err.message : 'Could not open this review'); setPhase('error') } })
+      return () => { cancelled = true }
+    }
     if (!starterRef.current || starterRef.current.key !== key) {
       starterRef.current = { key, promise: resumeParam ? resumeTrainingSession(personaId, Number(resumeParam)) : startTrainingSession(personaId, { mode: modeParam }) }
     }
@@ -225,29 +245,27 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     starter.then((started) => {
       if (cancelled) return
       const answeredIds = new Set((started.responses ?? []).map((item) => item.question_id))
-      setAnsweredOffset(answeredIds.size)
+      const answeredSoFar = (started.responses ?? []).filter((item) => !item.skipped).length
       const remaining = (started.questions ?? []).filter((item) => !answeredIds.has(item.id))
       setSession(started)
       setQueue(remaining)
+      setAnsweredCount(answeredSoFar)
+      setAnswerTarget(started.answer_target ?? 10)
       setPhase(remaining.length > 0 ? 'questions' : 'empty')
     }).catch((err: unknown) => { if (!cancelled) { setError(err instanceof Error ? err.message : 'Could not start training'); setPhase('error') } })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [personaId, modeParam, resumeParam])
-
-  useEffect(() => {
-    if (!session) return
-    getPhysicianTraining(personaId).then((workspace) => setQueueSummary(workspace.queue_summary)).catch(() => {})
-  }, [personaId, phase, session])
+  }, [personaId, modeParam, resumeParam, reviewParam])
 
   const current = queue[index]
+  const isFocused = session?.mode === 'focused'
 
   const finish = async (activeSession: TrainingSession) => {
     try {
       const result = await finishTrainingSession(personaId, activeSession.id)
-      setFinishResult({ responses: result.responses ?? [] })
       setLearnings(result.proposed_learnings ?? [])
-      setPhase('reviewing')
+      setCompletionSummary(result.completion_summary ?? null)
+      setPhase(activeSession.mode === 'focused' ? 'reviewing' : 'completed')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not finish training')
       setPhase('error')
@@ -276,6 +294,8 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     setBusy(true); setError('')
     try {
       const response = await answerTrainingQuestion(personaId, session.id, current.id, skipped ? { skipped: true } : { answer: answer ?? undefined })
+      setAnsweredCount(response.answered_count ?? answeredCount + 1)
+      setAnswerTarget(response.answer_target ?? answerTarget)
       const nextQuestion = response.next_question
       if (response.questions_complete) {
         advance(session, response.deferred_branch ? 'Follow-up saved for your next session.' : null, true)
@@ -284,13 +304,30 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
         advance(session, null, false)
       } else {
         const resolvedBranch = current.branch_depth > 0
-        advance(session, resolvedBranch ? 'Got it. Lamina can propose a practice rule from these answers.' : null, index + 1 >= queue.length)
+        advance(session, resolvedBranch ? (isFocused ? 'Got it.' : 'Got it. Lamina can propose a practice rule from these answers.') : null, index + 1 >= queue.length)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save your answer')
     } finally {
       setBusy(false)
     }
+  }
+
+  const trainTenMore = async () => {
+    setBusy(true); setError('')
+    try {
+      const started = await startTrainingSession(personaId, { mode: 'daily' })
+      starterRef.current = { key: `${personaId}:daily::`, promise: Promise.resolve(started) }
+      setSession(started)
+      setQueue(started.questions ?? [])
+      setAnsweredCount(0)
+      setAnswerTarget(started.answer_target ?? 10)
+      setLearnings([]); setCompletionSummary(null); setIndex(0); setCardState('idle'); setBranchNote(null)
+      setPhase((started.questions ?? []).length > 0 ? 'questions' : 'empty')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start a new training session')
+      setPhase('error')
+    } finally { setBusy(false) }
   }
 
   useEffect(() => {
@@ -326,6 +363,18 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     }
   }
 
+  const finishReview = async () => {
+    if (!session) return
+    const pendingRemaining = learnings.filter((item) => item.status === 'suggested').length
+    setBusy(true); setError('')
+    try {
+      await completeTrainingReview(personaId, session.id, pendingRemaining > 0)
+      setPhase('review_complete')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not complete the review')
+    } finally { setBusy(false) }
+  }
+
   if (phase === 'loading') return <main className="training-shell"><div className="page-state embedded"><div className="loading-line" /><p>Preparing training…</p></div></main>
   if (phase === 'error') return <main className="training-shell training-empty"><div className="error-banner" role="alert">{error}</div><button className="button-secondary" onClick={() => navigate(exitPath)}>← Back</button></main>
   if (phase === 'empty') return <main className="training-shell training-empty">
@@ -335,26 +384,45 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     <button className="button-primary" onClick={() => navigate(exitPath)}>Back to My Agent <span>→</span></button>
   </main>
 
-  if (phase === 'reviewing') {
-    const answeredCount = (finishResult?.responses ?? []).filter((item) => !item.skipped).length
-    const askedSoFar = (queueSummary?.answered_today ?? 0)
-    const moreAvailable = queueSummary ? Math.max(0, queueSummary.available_total - askedSoFar) : 0
+  if (phase === 'completed') {
+    const answered = completionSummary?.answered_count ?? answeredCount
+    const proposedCount = completionSummary?.proposed_learning_count ?? learnings.length
     return <main className="training-shell training-review">
       <p className="eyebrow">Train your agent</p>
-      <h1>{modeParam === 'daily' ? 'Daily questions complete' : 'Training complete'}</h1>
-      <p className="training-review-intro">Review what your agent learned.</p>
+      <h1>Thanks for training your agent.</h1>
+      <p className="training-review-intro">You answered {answered} question{answered === 1 ? '' : 's'}.</p>
+      {completionSummary && <p className="training-completion-findings">Lamina found: {proposedCount} possible practice learning{proposedCount === 1 ? '' : 's'}{completionSummary.unresolved_question_count > 0 ? ` · ${completionSummary.unresolved_question_count} question saved for your next session` : ''}.</p>}
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      <div className="training-summary">
+        {proposedCount > 0 && <button className="button-primary" onClick={() => setPhase('reviewing')}>Review what my agent learned <span>→</span></button>}
+        <button className="button-secondary" onClick={() => navigate(exitPath)}>Done for now</button>
+      </div>
+    </main>
+  }
+
+  if (phase === 'reviewing') {
+    return <main className="training-shell training-review">
+      <p className="eyebrow">Train your agent</p>
+      <h1>Review what your agent learned.</h1>
       {error && <p className="demo-reset-error" role="alert">{error}</p>}
       {learnings.length === 0
         ? <p className="agent-empty-note">No new proposed learnings from this session.</p>
         : <div className="learning-grid">{learnings.map((learning) => <TrainingLearningCard key={learning.id} learning={learning} busy={busy} editing={editingLearningId === learning.id} draft={draft} onEdit={() => { setEditingLearningId(learning.id); setDraft(learning.statement) }} onCancelEdit={() => setEditingLearningId(null)} onDraftChange={setDraft} onAction={actOnLearning} />)}</div>}
       <div className="training-summary">
-        <p>{agentName} is better prepared to answer {answeredCount} referral question{answeredCount === 1 ? '' : 's'}.</p>
-        <button className="button-primary" onClick={() => navigate(exitPath)}>Back to My Agent <span>→</span></button>
+        <button className="button-primary" disabled={busy} onClick={finishReview}>Done reviewing <span>→</span></button>
       </div>
-      {moreAvailable > 0 && <div className="training-keep-going">
-        <p>Want to keep going? {moreAvailable} more question{moreAvailable === 1 ? '' : 's'} available.</p>
-        <button className="button-secondary" onClick={() => navigate(`${trainingPath(personaId)}?mode=extended`)}>Keep training <span>→</span></button>
-      </div>}
+    </main>
+  }
+
+  if (phase === 'review_complete') {
+    return <main className="training-shell training-review">
+      <p className="eyebrow">Train your agent</p>
+      <h1>Training complete.</h1>
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      <div className="training-summary">
+        <button className="button-primary" disabled={busy} onClick={trainTenMore}>Train 10 more <span>→</span></button>
+        <button className="button-secondary" onClick={() => navigate(exitPath)}>Back to My Agent</button>
+      </div>
     </main>
   }
 
@@ -362,12 +430,13 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
   const source = questionSource(current)
   const hasDepends = current.question_type === 'yes_no_depends'
   const isFollowUp = current.branch_depth > 0
-  const answerTarget = session?.answer_target ?? queue.length
-  const progressNumber = Math.min(answerTarget, answeredOffset + index + 1)
+  const displayNumber = Math.min(answerTarget, answeredCount + 1)
   return <main className={`training-shell training-active ${cardState}`}>
     <div className="training-header">
-      <p className="eyebrow">Train your agent</p>
-      <div className="training-progress-row"><span>Question {progressNumber} of {answerTarget}</span><div className="training-progress-bar" role="progressbar" aria-valuenow={progressNumber} aria-valuemin={1} aria-valuemax={answerTarget}><span style={{ width: `${Math.round(((progressNumber - 1) / answerTarget) * 100)}%` }} /></div></div>
+      <p className="eyebrow">{isFocused ? 'Focused training' : 'Train your agent'}</p>
+      {isFocused
+        ? <p className="training-focused-subtitle">Let's clarify this case.</p>
+        : <div className="training-progress-row"><span>Question {displayNumber} of {answerTarget}</span><div className="training-progress-bar" role="progressbar" aria-valuenow={displayNumber} aria-valuemin={1} aria-valuemax={answerTarget}><span style={{ width: `${Math.round(((displayNumber - 1) / answerTarget) * 100)}%` }} /></div></div>}
       <button className="text-button training-exit" onClick={() => navigate(exitPath)}>Exit</button>
     </div>
     {branchNote && <p className="training-branch-note" role="status">{branchNote}</p>}
@@ -723,14 +792,268 @@ export function EnrichmentPanel({ personaId, onConfirmed }: { personaId: DemoPhy
 /* -------------------------------------------------------------- Initialization */
 
 export function InitializationCard({ initialization, navigate, trainPath }: { initialization: AgentInitialization | null; navigate: Navigate; trainPath: string }) {
-  if (!initialization || initialization.incomplete_sections.length === 0) return null
-  const total = initialization.initialized_sections.length + initialization.incomplete_sections.length
+  if (!initialization || initialization.initialized) return null
+  const remaining = initialization.required_steps.filter((step) => !initialization.completed_steps.some((item) => item.id === step.id))
   return <section className="improve-agent-card initialization-card">
-    <p className="eyebrow">Build your professional presence</p>
-    <h2>{initialization.initialized_sections.length} of {total} areas initialized</h2>
-    <p className="improve-agent-stat">{initialization.meaning}</p>
+    <p className="eyebrow">Set up your agent</p>
+    <h2>Build your agent's starting picture of your practice.</h2>
+    {remaining.length > 0 && <ul className="initialization-steps">{remaining.map((step) => <li key={step.id}>{step.label}</li>)}</ul>}
     <button className="button-primary" onClick={() => navigate(`${trainPath}?mode=initialization`)}>Continue setup <span>→</span></button>
   </section>
+}
+
+/* ------------------------------------------------------------- My Agent: Overview */
+
+export function AgentOverviewPanel({ overview, trainProjection, navigate, trainPath, onViewPractice }: {
+  overview: AgentOverview | null; trainProjection: TrainProjection | null
+  navigate: Navigate; trainPath: string; onViewPractice: () => void
+}) {
+  if (!overview) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
+  const firstName = overview.physician.name.replace(/^Dr\.\s*/, '').split(/\s+/)[0]
+  const resumeId = trainProjection?.current_session?.id ?? null
+  const primary = overview.next_action === 'complete_initialization'
+    ? { label: 'Continue setup', href: `${trainPath}?mode=initialization` }
+    : overview.next_action === 'resume_training' && resumeId
+      ? { label: 'Resume training', href: `${trainPath}?resume=${resumeId}` }
+      : overview.next_action === 'train'
+        ? { label: 'Train my agent', href: `${trainPath}?mode=daily` }
+        : null
+  return <div className="agent-overview-v2">
+    <section className="agent-portrait-card">
+      <p className="eyebrow">Hi, Dr. {firstName}.</p>
+      <p className="agent-portrait-text">{overview.portrait}</p>
+    </section>
+    <div className="agent-stats-row">
+      <div><em>{overview.stats.questions_answered_total}</em><span>Questions answered</span></div>
+      <div><em>{overview.stats.confirmed_practice_learnings}</em><span>Practice rules confirmed</span></div>
+      <div><em>{overview.stats.case_interests_count}</em><span>Case interests</span></div>
+      <div><em>{overview.stats.network_cases_count}</em><span>Network cases</span></div>
+    </div>
+    {overview.last_trained_at && <p className="agent-last-trained">Last trained {relativeDayLabel(overview.last_trained_at)}</p>}
+    <InitializationCard initialization={overview.initialization} navigate={navigate} trainPath={trainPath} />
+    <div className="agent-overview-actions">
+      {primary && <button className="button-primary" onClick={() => navigate(primary.href)}>{primary.label} <span>→</span></button>}
+      {!primary && <p className="agent-empty-note">Your agent is up to date.</p>}
+      <button className="text-button" onClick={onViewPractice}>View my practice representation →</button>
+    </div>
+  </div>
+}
+
+/* ------------------------------------------------------------- My Agent: Activity */
+
+export type AgentActivityRow = {
+  id: string; kind: 'interaction' | 'milestone' | 'training' | 'update'
+  title: string; detail: string; time: string; onClick?: () => void
+}
+const ACTIVITY_KIND_LABELS: Record<AgentActivityRow['kind'], string> = {
+  interaction: 'Agent interaction', milestone: 'Consultation milestone', training: 'Training', update: 'Practice update',
+}
+
+export function AgentActivityList({ rows }: { rows: AgentActivityRow[] }) {
+  if (rows.length === 0) return <p className="agent-empty-note">No agent activity yet. Activity will appear as your agent participates in the Lamina network.</p>
+  return <div className="agent-activity-rows">{rows.map((row) => {
+    const content = <><NetworkMark resolved={row.kind === 'milestone'} /><span><em className="activity-kind">{ACTIVITY_KIND_LABELS[row.kind]}</em><strong>{row.title}</strong><small>{row.detail}</small><i>{relativeDayLabel(row.time)}</i></span>{row.onClick && <b>→</b>}</>
+    return row.onClick
+      ? <button className={`agent-activity-row ${row.kind}`} key={row.id} onClick={row.onClick}>{content}</button>
+      : <div className={`agent-activity-row ${row.kind} static`} key={row.id}>{content}</div>
+  })}</div>
+}
+
+/* -------------------------------------------------------------- My Agent: Practice */
+
+export function PracticeTab({ representation, reviewHref, navigate, extra }: {
+  representation: PracticeRepresentation; reviewHref?: string | null; navigate: Navigate; extra?: ReactNode
+}) {
+  const sections = representation.sections
+  const group = (label: string, items: string[]) => items.length > 0 && <div className="practice-tab-group" key={label}><span className="section-label">{label}</span><ul className="clinical-list">{items.map((item) => <li key={item}>{item}</li>)}</ul></div>
+  const caseInterests = sections.interests.filter((item) => item.interest_type === 'case_interest')
+  const otherInterests = sections.interests.filter((item) => item.interest_type !== 'case_interest')
+  return <div className="practice-tab">
+    <p className="eyebrow">Practice representation</p>
+    <h2>How your agent represents your practice</h2>
+    {reviewHref && <p className="practice-review-link"><button className="text-button" onClick={() => navigate(reviewHref)}>Review training results →</button></p>}
+    {group('Clinical focus', sections.clinical_focus)}
+    {caseInterests.length > 0 && <div className="practice-tab-group case-interests"><span className="section-label">Areas you're especially interested in seeing</span><ul className="clinical-list">{caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul>{sections.interest_safety && <small className="profile-interest-disclaimer">{sections.interest_safety}</small>}</div>}
+    {otherInterests.length > 0 && <div className="practice-tab-group"><span className="section-label">Other confirmed interests</span><ul className="clinical-list">{otherInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul></div>}
+    {group('Usually a good fit', sections.good_fit)}
+    {group('Usually not a fit', sections.not_a_fit)}
+    {group('Referral preferences', sections.referral_requirements)}
+    {group('Preferred workup', sections.preferred_workup)}
+    {group('Access / practice context', sections.access_facts)}
+    {group('Confirmed practice rules', sections.explicit_rules)}
+    {sections.confirmed_learnings.length > 0 && <div className="practice-tab-group" key="confirmed-learnings"><span className="section-label">Confirmed learnings</span><ul className="clinical-list">{sections.confirmed_learnings.map((item) => <li key={item.id}>{item.statement}</li>)}</ul></div>}
+    {extra}
+    <p className="practice-representation-note">{representation.completeness.meaning}</p>
+  </div>
+}
+
+/* ----------------------------------------------------------------- My Agent: Train */
+
+function trainHistorySummaryLine(entry: TrainingHistoryEntry) {
+  const parts: string[] = []
+  if (entry.confirmed_count) parts.push(`${entry.confirmed_count} learning${entry.confirmed_count === 1 ? '' : 's'} confirmed`)
+  if (entry.edited_count) parts.push(`${entry.edited_count} learning${entry.edited_count === 1 ? '' : 's'} edited`)
+  if (parts.length > 0) return parts.join(' · ')
+  if (entry.proposed_count > entry.confirmed_count + entry.edited_count + entry.rejected_count) return 'Review pending'
+  return 'No new practice rules'
+}
+
+export function findPendingReviewHistoryEntry(history: TrainingHistoryEntry[]): TrainingHistoryEntry | null {
+  return history.find((item) => item.proposed_count > item.confirmed_count + item.edited_count + item.rejected_count) ?? null
+}
+
+export function TrainTab({ trainProjection, resumeAnsweredCount, navigate, trainPath }: {
+  trainProjection: TrainProjection | null; resumeAnsweredCount: number | null
+  navigate: Navigate; trainPath: string
+}) {
+  if (!trainProjection) return <div className="page-state embedded"><div className="loading-line" /><p>Opening training…</p></div>
+  const reviewEntry = findPendingReviewHistoryEntry(trainProjection.recent_training_history)
+  return <div className="train-tab-v2">
+    <p className="eyebrow">Train your agent</p>
+    <h2>Train your agent</h2>
+    <p className="panel-intro">Answer a few quick questions about how you practice. Your answers help Lamina represent your preferences more accurately.</p>
+    {trainProjection.current_session
+      ? <div className="train-primary-card">
+        <p className="section-label">Training in progress</p>
+        <h3>{resumeAnsweredCount ?? 0} of {trainProjection.current_session.answer_target ?? 10} answered</h3>
+        <button className="button-primary" onClick={() => navigate(`${trainPath}?resume=${trainProjection.current_session!.id}`)}>Resume training <span>→</span></button>
+      </div>
+      : reviewEntry
+        ? <div className="train-primary-card">
+          <p className="section-label">Training complete</p>
+          <h3>Review what your agent learned</h3>
+          <button className="button-primary" onClick={() => navigate(`${trainPath}?review=${reviewEntry.session_id}`)}>Review learnings <span>→</span></button>
+        </div>
+        : trainProjection.more_training_available
+          ? <div className="train-primary-card">
+            <p className="section-label">Today's training</p>
+            <h3>10 questions</h3>
+            <button className="button-primary" onClick={() => navigate(`${trainPath}?mode=daily`)}>Start training <span>→</span></button>
+          </div>
+          : <p className="agent-empty-note">Your agent is caught up for now.</p>}
+    {(trainProjection.questions_answered_total > 0 || trainProjection.recent_training_history.length > 0) && <div className="train-history-summary">
+      <span>{trainProjection.questions_answered_total} questions answered</span>
+      <span>{trainProjection.sessions_completed} session{trainProjection.sessions_completed === 1 ? '' : 's'} completed</span>
+      {trainProjection.last_trained_at && <span>Last trained {relativeDayLabel(trainProjection.last_trained_at)}</span>}
+    </div>}
+    {trainProjection.recent_training_history.length > 0 && <div className="train-history">
+      <p className="section-label">Training history</p>
+      {trainProjection.recent_training_history.map((entry) => <div className="train-history-row" key={entry.session_id}>
+        <strong>{relativeDayLabel(entry.started_at)}</strong>
+        <span>{entry.target_count} question{entry.target_count === 1 ? '' : 's'}</span>
+        <small>{trainHistorySummaryLine(entry)}</small>
+      </div>)}
+    </div>}
+  </div>
+}
+
+/* ------------------------------------------------------------------ My Agent: Chat */
+
+const CHAT_STARTER_PROMPTS = [
+  'What kinds of cases am I most interested in?',
+  'What have you learned about how I practice?',
+  'When would I choose nephrology over cardiology?',
+  'What do I usually want before a referral?',
+  'Where are you still unsure about me?',
+]
+
+type ChatMessage = {
+  id: string; role: 'physician' | 'agent'; text: string
+  response?: AgentChatResponse; feedbackState?: 'reflects' | 'not_quite'
+  focusedSeed?: FocusedTrainingSeed | null
+}
+
+function ChatMessageBubble({ message, agentName, onFeedback, onStartFocused, busy }: {
+  message: ChatMessage; agentName: string
+  onFeedback: (message: ChatMessage, value: 'reflects' | 'not_quite') => void
+  onStartFocused: (seed: FocusedTrainingSeed) => void
+  busy: boolean
+}) {
+  if (message.role === 'physician') return <p className="chat-message physician">{message.text}</p>
+  const response = message.response
+  return <div className="chat-message agent">
+    <span className="chat-agent-label"><LaminaMark active /> {agentName}</span>
+    <p>{message.text}</p>
+    {response?.uncertainty && <p className="chat-uncertainty">{response.uncertainty}</p>}
+    {response && (response.based_on.length > 0 || response.evidence_summary.length > 0) && <p className="chat-grounding">Based on: {response.based_on.length > 0 ? `${response.based_on.length} confirmed practice rule${response.based_on.length === 1 ? '' : 's'}` : response.evidence_summary.join(', ')}</p>}
+    {!message.feedbackState && <div className="chat-feedback"><span>Does this reflect how you would practice?</span><button className="text-button" onClick={() => onFeedback(message, 'reflects')}>Yes, that's right</button><button className="text-button" onClick={() => onFeedback(message, 'not_quite')}>Not quite</button></div>}
+    {message.feedbackState === 'reflects' && <p className="chat-feedback-done">Thanks — noted.</p>}
+    {message.feedbackState === 'not_quite' && message.focusedSeed && <div className="chat-focused-prompt">
+      <p className="section-label">Teach your agent about this</p>
+      <p>I can ask a few focused questions to understand what you would do instead.</p>
+      <button className="button-secondary" disabled={busy} onClick={() => onStartFocused(message.focusedSeed!)}>Start focused training <span>→</span></button>
+    </div>}
+  </div>
+}
+
+export function ChatTab({ personaId, agentName, navigate, trainPath }: {
+  personaId: DemoPhysicianPerspective; agentName: string; navigate: Navigate; trainPath: string
+}) {
+  const [cases, setCases] = useState<AgentTestCase[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [activeCase, setActiveCase] = useState<AgentTestCase | null>(null)
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => { getAgentTestCases(personaId).then(setCases).catch(() => {}) }, [personaId])
+
+  const send = async (text: string, mode: 'practice_question' | 'synthetic_case', testCaseId?: string) => {
+    const trimmed = text.trim()
+    if (!trimmed || busy) return
+    setBusy(true); setError('')
+    setMessages((prev) => [...prev, { id: `u-${crypto.randomUUID()}`, role: 'physician', text: trimmed }])
+    setInput('')
+    try {
+      const response = await chatWithAgent(personaId, { mode, message: trimmed, controlled_test_case_id: testCaseId, origin: mode === 'synthetic_case' ? 'synthetic_demo' : 'practice' })
+      setMessages((prev) => [...prev, { id: response.response_id, role: 'agent', text: response.answer, response }])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reach your agent')
+    } finally { setBusy(false) }
+  }
+
+  const tryCase = (testCase: AgentTestCase) => { setActiveCase(testCase); void send('How would I handle this?', 'synthetic_case', testCase.id) }
+
+  const feedback = async (message: ChatMessage, value: 'reflects' | 'not_quite') => {
+    setMessages((prev) => prev.map((item) => (item.id === message.id ? { ...item, feedbackState: value } : item)))
+    try {
+      const result = await submitAgentChatFeedback(personaId, message.id, value)
+      if (value === 'not_quite') setMessages((prev) => prev.map((item) => (item.id === message.id ? { ...item, focusedSeed: result.focused_training_seed } : item)))
+    } catch { /* feedback is best-effort in this demo */ }
+  }
+
+  const startFocused = async (seed: FocusedTrainingSeed) => {
+    setBusy(true); setError('')
+    try {
+      const session = await startFocusedTraining(personaId, seed.seed_id)
+      navigate(`${trainPath}?resume=${session.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start focused training')
+    } finally { setBusy(false) }
+  }
+
+  return <div className="chat-tab">
+    <p className="eyebrow">Chat</p>
+    <h2>Talk to your agent</h2>
+    <p className="panel-intro">Ask about how it understands your practice, or try it on a synthetic case.</p>
+    <p className="chat-boundary-note">Synthetic · no PHI. Use synthetic or hypothetical cases in this demo.</p>
+    {messages.length === 0 && cases.length > 0 && <section className="chat-case-cards">
+      <p className="section-label">Try your agent on a case</p>
+      <div className="chat-case-grid">{cases.map((item) => <button key={item.id} className="chat-case-card" onClick={() => tryCase(item)}>
+        <strong>{item.title}</strong><span>{item.summary}</span><b>Try this case →</b>
+      </button>)}</div>
+    </section>}
+    {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
+      {activeCase && <div className="chat-case-context"><span className="section-label">Synthetic case</span><strong>{activeCase.title}</strong><ul className="clinical-list">{activeCase.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
+      {messages.map((message) => <ChatMessageBubble key={message.id} message={message} agentName={agentName} onFeedback={feedback} onStartFocused={startFocused} busy={busy} />)}
+    </div>}
+    {error && <p className="demo-reset-error" role="alert">{error}</p>}
+    <div className="chat-starter-prompts">{CHAT_STARTER_PROMPTS.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" disabled={busy} onClick={() => send(prompt, 'practice_question')}>{prompt}</button>)}</div>
+    <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input, 'practice_question') }}>
+      <label htmlFor="chat-input" className="sr-only">Ask your agent about your practice</label>
+      <input id="chat-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask your agent about your practice…" disabled={busy} />
+      <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
+    </form>
+  </div>
 }
 
 const PROFILE_TABS = ['overview', 'background', 'research', 'interests', 'updates'] as const
