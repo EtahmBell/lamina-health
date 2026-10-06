@@ -6,6 +6,7 @@ ranking.  Engagement improves representation detail only.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -103,33 +104,139 @@ INITIALIZATION_SECTIONS = (
 TRAINING_DAILY_LIMIT = 5
 TRAINING_EXTENDED_LIMIT = 25
 MAX_BRANCH_DEPTH = 3
-QUESTION_BANK_AVAILABLE = 128
-_CALIBRATION_TOPICS = (
-    "clinical trajectory",
-    "case severity",
-    "diagnostic uncertainty",
-    "prior workup",
-    "medication response",
-    "comorbidity context",
-    "access constraints",
-    "referral timing",
-    "co-management",
-    "follow-up expectations",
-    "redirection boundary",
-    "communication preference",
-)
-_CALIBRATION_CONTEXTS = (
-    "a new referral",
-    "an urgent question",
-    "a stable chronic case",
-    "a progressively worsening case",
-    "a case with incomplete records",
-    "a case after initial treatment",
-    "a remote consultation",
-    "a co-managed case",
-    "a case with access barriers",
-    "a follow-up consultation",
-)
+QUESTION_BANK_AVAILABLE = 104
+_CALIBRATION_DIMENSIONS = {
+    "diagnosis_phenotype": (
+        "the suspected diagnosis is not yet confirmed",
+        "the phenotype is atypical",
+        "the referral question spans two specialties",
+        "the main diagnosis changed recently",
+        "the presentation is recurrent",
+        "the diagnosis is established but the cause is unclear",
+        "the presentation does not match the usual pattern",
+        "the referring clinician is asking for diagnostic clarification",
+    ),
+    "disease_severity": (
+        "symptoms are mild but persistent",
+        "objective findings are moderate",
+        "severity is increasing despite stable symptoms",
+        "the case is stable but clinically complex",
+        "there is a marked abnormality without acute symptoms",
+        "severity has crossed the usual referral threshold",
+        "the record contains conflicting severity signals",
+        "severity is uncertain because testing is incomplete",
+    ),
+    "trajectory": (
+        "the condition is worsening quickly",
+        "the condition is worsening slowly",
+        "the condition is stable after a recent decline",
+        "measurements fluctuate without a clear trend",
+        "a previously stable condition has changed",
+        "the trend is concerning despite one reassuring result",
+        "the trajectory is unknown because prior records are missing",
+        "the referring clinician reports progression before repeat testing",
+    ),
+    "comorbidity": (
+        "a major cardiovascular comorbidity is present",
+        "multiple chronic conditions complicate the question",
+        "pregnancy changes the care context",
+        "frailty changes the practical care plan",
+        "another specialist is already involved",
+        "medication choices are limited by comorbidity",
+        "the comorbidity may explain part of the presentation",
+        "the main condition is stable but the comorbidity is worsening",
+    ),
+    "prior_workup": (
+        "the basic workup is complete",
+        "one preferred study is missing",
+        "outside records are not yet available",
+        "the workup is old but otherwise complete",
+        "initial testing was inconclusive",
+        "the referring clinician cannot obtain a preferred test",
+        "a prior specialist evaluation reached no conclusion",
+        "the workup suggests more than one plausible cause",
+    ),
+    "required_labs": (
+        "current baseline labs are available",
+        "a key trend is available but the latest value is missing",
+        "the latest result is normal despite a concerning trend",
+        "a preferred confirmatory test is pending",
+        "results come from different laboratories",
+        "only a single measurement is available",
+        "the requested laboratory study is difficult to obtain",
+        "the core laboratory set is complete but imaging is pending",
+    ),
+    "treatment_history": (
+        "first-line treatment has not been tried",
+        "first-line treatment was not tolerated",
+        "several standard options have failed",
+        "the response to treatment is unclear",
+        "treatment adherence is uncertain",
+        "a recent treatment change has not had time to take effect",
+        "treatment improved symptoms but not objective findings",
+        "the current regimen is constrained by adverse effects",
+    ),
+    "geography_access": (
+        "the patient lives far from the practice",
+        "only a video visit is practical initially",
+        "transportation is unreliable",
+        "the preferred site has a long wait",
+        "an alternate site can see the patient sooner",
+        "insurance limits the available location",
+        "the patient can travel once but not repeatedly",
+        "local testing is available but specialist travel is difficult",
+    ),
+    "procedure_need": (
+        "a procedure may be needed soon",
+        "the referral is only for a procedure",
+        "a procedure was attempted previously",
+        "the need for a procedure is uncertain",
+        "the procedure is available only at one site",
+        "the patient wants a discussion before deciding on a procedure",
+        "another specialist recommended a procedure",
+        "the procedure question depends on updated testing",
+    ),
+    "care_setting": (
+        "the question arises after an emergency visit",
+        "the patient was recently discharged",
+        "the patient is currently managed in primary care",
+        "the request comes from another specialist",
+        "the case is suitable for an e-consult",
+        "the patient may need in-person assessment",
+        "the care team is asking for co-management",
+        "the question concerns transition back to primary care",
+    ),
+    "age_context": (
+        "the patient is a young adult",
+        "the patient is an older adult with preserved function",
+        "age changes the likely differential",
+        "life stage affects treatment priorities",
+        "the presentation began much earlier than usual",
+        "the condition is newly recognized late in life",
+        "caregiver involvement changes follow-up feasibility",
+        "age-specific norms make the result borderline",
+    ),
+    "exclusion_conditions": (
+        "an exclusion condition is suspected but unconfirmed",
+        "a competing diagnosis is more likely",
+        "the main reason for referral falls outside your scope",
+        "the case needs a different specialty first",
+        "the issue can usually remain in primary care",
+        "the available evidence argues against your specialty",
+        "a safety concern requires urgent care instead",
+        "the referral goal is administrative rather than clinical",
+    ),
+    "interests": (
+        "the case closely matches a stated clinical interest",
+        "the case is adjacent to a research interest",
+        "the case could support a teaching discussion",
+        "the case is uncommon but within your practice",
+        "the case fits a developing area of interest",
+        "the case is routine but high value for coordination",
+        "the case aligns with a multidisciplinary interest",
+        "the case does not match your interests but fits your scope",
+    ),
+}
 PERSONA_BY_AGENT_ID = {persona["agent_id"]: persona_id for persona_id, persona in PERSONAS.items()}
 
 
@@ -403,28 +510,166 @@ BRANCH_QUESTIONS: dict[str, dict[str, Any]] = {
 INITIALIZATION_QUESTIONS: dict[str, list[dict[str, Any]]] = {}
 _INITIALIZATION_PROMPTS = {
     "lucy": (
-        ("identity", "How should your agent describe your primary-care practice?"),
-        ("focus", "Which clinical focus should your agent emphasize first?"),
-        ("case-interest", "Which case types are you especially interested in coordinating?"),
-        ("good-fit", "What makes a specialty referral a good fit for your workflow?"),
-        ("redirect", "Which cases do you usually redirect before specialist outreach?"),
-        ("workup", "What information should be gathered before a referral question?"),
-        ("trajectory", "How should clinical trajectory affect referral urgency?"),
-        ("access", "Which access constraints should your agent represent?"),
-        ("communication", "What communication style do you prefer from specialists?"),
-        ("follow-up", "What follow-up information should return to primary care?"),
+        (
+            "identity",
+            "Do you provide longitudinal primary care across multiple chronic conditions?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "care_setting",
+        ),
+        (
+            "focus",
+            "Should your agent emphasize specialty-care coordination as a core practice focus?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "interests",
+        ),
+        (
+            "case-interest",
+            "Do complex cases involving more than one specialty fit your coordination practice?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "diagnosis_phenotype",
+        ),
+        (
+            "good-fit",
+            "Does a clearly stated specialist question make a referral a better fit?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "prior_workup",
+        ),
+        (
+            "redirect",
+            "Do you usually redirect cases when the basic workup is missing?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "prior_workup",
+        ),
+        (
+            "workup",
+            "Which context is most useful before referral?",
+            "multi_select",
+            [
+                "Current labs",
+                "Trend over time",
+                "Medication history",
+                "Prior specialist evaluation",
+                "Home measurements",
+            ],
+            "required_labs",
+        ),
+        (
+            "trajectory",
+            "Does a rapidly worsening trajectory increase referral urgency?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "trajectory",
+        ),
+        (
+            "access",
+            "Which access constraints should your agent represent?",
+            "multi_select",
+            [
+                "Travel distance",
+                "Visit modality",
+                "Insurance",
+                "Scheduling urgency",
+                "Caregiver availability",
+            ],
+            "geography_access",
+        ),
+        (
+            "communication",
+            "Which specialist communication style do you prefer?",
+            "single_choice",
+            ["Concise recommendation", "Recommendation with rationale", "Shared-care plan"],
+            "communication_preference",
+        ),
+        (
+            "follow-up",
+            "Should specialists return a specific follow-up plan to primary care?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "follow_up",
+        ),
     ),
     "iain": (
-        ("identity", "How should your agent describe your nephrology practice?"),
-        ("focus", "Which nephrology focus should your agent emphasize first?"),
-        ("case-interest", "Which renal case types are you especially interested in seeing?"),
-        ("good-fit", "What makes a CKD referral a particularly good fit?"),
-        ("redirect", "Which hypertension cases do you usually redirect?"),
-        ("workup", "Which studies are most useful before nephrology review?"),
-        ("trajectory", "How should eGFR trajectory affect referral fit?"),
-        ("proteinuria", "How should proteinuria affect referral fit?"),
-        ("access", "Which access constraints should your agent represent?"),
-        ("co-management", "When is cardiology co-management most useful?"),
+        (
+            "identity",
+            "Do progressive CKD and resistant hypertension represent a core part of your practice?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "interests",
+        ),
+        (
+            "focus",
+            "Would you see a CKD referral when the underlying cause remains uncertain?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "diagnosis_phenotype",
+        ),
+        (
+            "case-interest",
+            "Do cardiorenal cases generally fit your practice?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "comorbidity",
+        ),
+        (
+            "good-fit",
+            "Does a documented decline in eGFR make a CKD referral a better fit?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "trajectory",
+        ),
+        (
+            "redirect",
+            "Do you usually redirect hypertension referrals with no renal findings?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "exclusion_conditions",
+        ),
+        (
+            "workup",
+            "Which studies are most useful before nephrology review?",
+            "multi_select",
+            ["BMP", "UPCR", "Urinalysis", "Renal imaging", "Home BP log"],
+            "required_labs",
+        ),
+        (
+            "trajectory",
+            "Does rapid eGFR decline change referral urgency?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "trajectory",
+        ),
+        (
+            "proteinuria",
+            "Can progressive renal dysfunction fit your practice even when proteinuria is absent?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "disease_severity",
+        ),
+        (
+            "access",
+            "Which access constraints should your agent represent?",
+            "multi_select",
+            [
+                "Travel distance",
+                "Video-first option",
+                "Insurance",
+                "Scheduling urgency",
+                "Local laboratory access",
+            ],
+            "geography_access",
+        ),
+        (
+            "co-management",
+            "When cardiorenal disease is present, do you typically favor cardiology co-management?",
+            "yes_no_depends",
+            ["Yes", "Depends", "No"],
+            "care_setting",
+        ),
     ),
 }
 for _persona_id, _prompts in _INITIALIZATION_PROMPTS.items():
@@ -435,15 +680,16 @@ for _persona_id, _prompts in _INITIALIZATION_PROMPTS.items():
             "source_type": "initialization",
             "source_reference": f"initialization:{key}",
             "prompt": prompt,
-            "question_type": "short_text",
-            "answer_options": [],
+            "question_type": question_type,
+            "answer_options": answer_options,
+            "dimension_being_narrowed": dimension,
             "why_this_matters": "Fills a high-value agent initialization gap.",
             "asked_count": None,
             "synthetic": True,
             "terminal": True,
             "created_at": BASE_TIMESTAMP,
         }
-        for key, prompt in _prompts
+        for key, prompt, question_type, answer_options, dimension in _prompts
     ]
 
 BRANCH_TRANSITIONS = {
@@ -558,23 +804,25 @@ def question_by_id(persona_id: str, question_id: str) -> dict | None:
 
 def generated_training_questions(persona_id: str):
     """Yield a large deterministic bank from grounded calibration dimensions."""
-    for topic_index, topic in enumerate(_CALIBRATION_TOPICS):
-        for context_index, context in enumerate(_CALIBRATION_CONTEXTS):
+    practice = "primary-care coordination" if persona_id == "lucy" else "nephrology"
+    for dimension_index, (dimension, conditions) in enumerate(_CALIBRATION_DIMENSIONS.items()):
+        for condition_index, condition in enumerate(conditions):
             yield {
-                "id": f"{persona_id}-bank-{topic_index:02d}-{context_index:02d}",
+                "id": f"{persona_id}-bank-{dimension_index:02d}-{condition_index:02d}",
                 "physician_persona": persona_id,
                 "source_type": "practice_gap",
-                "source_reference": f"calibration:{topic}:{context}",
-                "prompt": f"For {context}, how should your agent represent {topic}?",
-                "question_type": "short_text",
-                "answer_options": [],
+                "source_reference": f"calibration:{dimension}:{condition_index}",
+                "prompt": (f"Would this case fit your {practice} practice if {condition}?"),
+                "question_type": "yes_no_depends",
+                "answer_options": ["Yes", "Depends", "No"],
                 "why_this_matters": (
-                    "Clarifies a bounded representation gap using a reusable "
-                    "practice-calibration dimension."
+                    f"Clarifies the physician's {dimension.replace('_', ' ')} boundary."
                 ),
+                "dimension_being_narrowed": dimension,
+                "question_objective": "Locate a bounded practice-fit decision boundary.",
                 "asked_count": None,
                 "synthetic": True,
-                "terminal": True,
+                "terminal": False,
                 "created_at": BASE_TIMESTAMP,
             }
 
@@ -636,8 +884,138 @@ def next_branch_question(
     return child
 
 
+_BRANCH_NARROWING = {
+    "diagnosis_phenotype": (
+        "Would the case fit if the referring question were limited to diagnostic clarification?",
+        "Would it still fit if the diagnosis remained unconfirmed after the basic workup?",
+    ),
+    "disease_severity": (
+        "Would objective progression make the case appropriate despite limited symptoms?",
+        "Would it still fit if the latest single measurement were reassuring?",
+    ),
+    "trajectory": (
+        "Would documented progression over multiple measurements make the case appropriate?",
+        "Would it still fit if the latest measurement were stable?",
+    ),
+    "comorbidity": (
+        "Would the case fit if the comorbidity directly constrained usual management?",
+        "Would it still fit if another specialist were already co-managing the patient?",
+    ),
+    "prior_workup": (
+        "Would the case fit if all basic testing were complete except one preferred study?",
+        "Would it still fit if that study could not be obtained locally?",
+    ),
+    "required_labs": (
+        "Would a documented trend be enough if the newest laboratory result were pending?",
+        "Would it still be enough if the last result were more than three months old?",
+    ),
+    "treatment_history": (
+        "Would intolerance of first-line treatment make the case appropriate?",
+        "Would it still fit before another standard option had been tried?",
+    ),
+    "geography_access": (
+        "Would a video-first visit make the case practical for your practice?",
+        "Would it still fit if all follow-up also had to be remote?",
+    ),
+    "procedure_need": (
+        "Would the case fit if the immediate question were whether a procedure is indicated?",
+        "Would it still fit if the procedure had to occur at another site?",
+    ),
+    "care_setting": (
+        "Would an initial e-consult be sufficient to determine next steps?",
+        "Would it still fit if an in-person examination were likely afterward?",
+    ),
+    "age_context": (
+        "Would age alter your threshold for accepting the case?",
+        "Would it still fit if functional status were preserved?",
+    ),
+    "exclusion_conditions": (
+        "Would you accept the case after the competing diagnosis was excluded?",
+        "Would it still fit if another specialty needed to evaluate first?",
+    ),
+    "interests": (
+        "Would the case fit even if it were outside your stated interests but within scope?",
+        "Would it still fit if it required multidisciplinary co-management?",
+    ),
+    "communication_preference": (
+        "Would a concise recommendation plus rationale meet your communication needs?",
+        "Would you also require a shared follow-up plan?",
+    ),
+    "follow_up": (
+        "Would a specific follow-up interval be sufficient for return to primary care?",
+        "Would you also require explicit re-referral triggers?",
+    ),
+}
+
+
+def deterministic_branch_question(
+    persona_id: str, parent: dict, assigned_ids: set[str]
+) -> dict | None:
+    """Create one grounded child for a ternary Depends when no static child exists."""
+    depth = int(parent.get("branch_depth", 0)) + 1
+    if parent.get("question_type") != "yes_no_depends" or depth > MAX_BRANCH_DEPTH:
+        return None
+    dimension = parent.get("dimension_being_narrowed") or "diagnosis_phenotype"
+    prompts = _BRANCH_NARROWING.get(dimension, _BRANCH_NARROWING["diagnosis_phenotype"])
+    prompt = (
+        prompts[depth - 1]
+        if depth <= len(prompts)
+        else (
+            f"If {dimension.replace('_', ' ')} were the only remaining uncertainty, "
+            "would you accept the case?"
+        )
+    )
+    digest = hashlib.sha256(f"{persona_id}:{parent['id']}:{depth}:{prompt}".encode()).hexdigest()[
+        :12
+    ]
+    question_id = f"{persona_id}-branch-generated-{digest}"
+    if question_id in assigned_ids:
+        return None
+    root_id = parent.get("root_question_id", parent["id"])
+    branch_path = [*parent.get("branch_path", []), f"{parent['id']}:Depends"]
+    return normalize_question(
+        {
+            "id": question_id,
+            "physician_persona": persona_id,
+            "root_question_id": root_id,
+            "parent_question_id": parent["id"],
+            "branch_depth": depth,
+            "branch_path": branch_path,
+            "branch_condition": "Depends",
+            "source_type": "deterministic_branch",
+            "source_reference": parent.get("source_reference"),
+            "prompt": prompt,
+            "question_type": "yes_no" if depth == MAX_BRANCH_DEPTH else "yes_no_depends",
+            "answer_options": ["Yes", "No"]
+            if depth == MAX_BRANCH_DEPTH
+            else ["Yes", "Depends", "No"],
+            "why_this_matters": f"Narrows the {dimension.replace('_', ' ')} boundary.",
+            "dimension_being_narrowed": dimension,
+            "terminal_candidate": depth == MAX_BRANCH_DEPTH,
+            "proposed_boundary_rationale": (
+                f"This answer clarifies the physician's {dimension.replace('_', ' ')} boundary."
+            ),
+            "source_references": [parent.get("source_reference")]
+            if parent.get("source_reference")
+            else [],
+            "terminal": depth == MAX_BRANCH_DEPTH,
+            "synthetic": True,
+            "created_at": BASE_TIMESTAMP,
+        }
+    )
+
+
 def training_queue_summary(questions: list[dict], responses: list[dict]) -> dict:
     unanswered = [item for item in questions if item["status"] == "unanswered"]
+    persona_id = questions[0]["physician_persona"] if questions else None
+    catalog_total = QUESTION_BANK_AVAILABLE
+    if persona_id:
+        catalog_total += len(TRAINING_QUESTIONS[persona_id]) + len(
+            INITIALIZATION_QUESTIONS[persona_id]
+        )
+    answered_catalog_ids = {
+        item["question_id"] for item in responses if "-branch-" not in item["question_id"]
+    }
     today = datetime.now(UTC).date().isoformat()
     answered_today = sum(
         1 for item in responses if str(item.get("answered_at", "")).startswith(today)
@@ -645,7 +1023,7 @@ def training_queue_summary(questions: list[dict], responses: list[dict]) -> dict
     return {
         "recommended_today": min(TRAINING_DAILY_LIMIT, len(unanswered)),
         "unanswered_total": len(unanswered),
-        "available_total": QUESTION_BANK_AVAILABLE,
+        "available_total": max(0, catalog_total - len(answered_catalog_ids)),
         "answered_today": answered_today,
         "daily_limit": TRAINING_DAILY_LIMIT,
         "extended_limit": TRAINING_EXTENDED_LIMIT,
@@ -726,7 +1104,36 @@ def proposed_learning_statement(question_id: str, answer: str | list[str]) -> st
         return f"For {question['prompt']} The physician answered: {answer}."
     if "-bank-" in question_id:
         return f"The physician supplied this practice-calibration guidance: {answer}."
-    raise KeyError(question_id)
+    return f"The physician answered {answer} for practice-calibration question {question_id}."
+
+
+def synthesize_branch_learning(root_question_id: str, branch: list[tuple[dict, dict]]) -> str:
+    """Synthesize one reviewable boundary from a root and its answered descendants."""
+    answered = [(question, response) for question, response in branch if not response["skipped"]]
+    if not answered:
+        raise ValueError("A branch learning requires at least one answer")
+    if root_question_id == "iain-resistant-htn-normal-kidney":
+        answers = {question["id"]: response["answer"] for question, response in answered}
+        if answers.get("iain-branch-declining-egfr-normal-upcr") == "Yes":
+            return (
+                "Progressive renal dysfunction can make resistant-hypertension referrals "
+                "appropriate even without proteinuria."
+            )
+    leaf_question, leaf_response = max(
+        answered, key=lambda item: int(item[0].get("branch_depth", 0))
+    )
+    if len(answered) == 1:
+        return proposed_learning_statement(leaf_question["id"], leaf_response["answer"])
+    answer = leaf_response["answer"]
+    dimension = str(leaf_question.get("dimension_being_narrowed") or "practice fit").replace(
+        "_", " "
+    )
+    rationale = leaf_question.get("proposed_boundary_rationale")
+    if rationale:
+        return f"{rationale.rstrip('.')} Final boundary response: {answer}."
+    return (
+        f"The physician's {dimension} boundary resolves to {answer} at: {leaf_question['prompt']}"
+    )
 
 
 def base_practice_representation(persona_id: str) -> dict:
@@ -828,13 +1235,9 @@ def project_practice_representation(
     }
 
 
-def related_personas(
-    perspective: str, records: list[dict], members: list[dict]
-) -> set[str]:
+def related_personas(perspective: str, records: list[dict], members: list[dict]) -> set[str]:
     related = {
-        persona
-        for member in members
-        if (persona := PERSONA_BY_NPI.get(member["npi"])) is not None
+        persona for member in members if (persona := PERSONA_BY_NPI.get(member["npi"])) is not None
     }
     for record in records:
         result = record["result"]
@@ -864,4 +1267,3 @@ def profile_update_draft(item: dict) -> dict:
         ),
         "body": item.get("detail") or item["title"],
     }
-

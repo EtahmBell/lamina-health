@@ -152,6 +152,13 @@ class WorkflowStore:
                   status TEXT NOT NULL DEFAULT 'assigned', created_at TEXT NOT NULL,
                   PRIMARY KEY(workspace_id, session_id, question_id)
                 );
+                CREATE TABLE IF NOT EXISTS generated_training_questions (
+                  workspace_id TEXT NOT NULL, persona_id TEXT NOT NULL,
+                  session_id INTEGER NOT NULL, question_id TEXT NOT NULL,
+                  question_json TEXT NOT NULL, provider TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  PRIMARY KEY(workspace_id, persona_id, question_id)
+                );
                 CREATE TABLE IF NOT EXISTS profile_enrichment_jobs (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   workspace_id TEXT NOT NULL, persona_id TEXT NOT NULL,
@@ -226,6 +233,8 @@ class WorkflowStore:
                   ON physician_interests(workspace_id, persona_id);
                 CREATE INDEX IF NOT EXISTS training_questions_workspace
                   ON training_session_questions(workspace_id, persona_id, session_id);
+                CREATE INDEX IF NOT EXISTS generated_training_workspace
+                  ON generated_training_questions(workspace_id, persona_id, session_id);
                 CREATE INDEX IF NOT EXISTS enrichment_jobs_workspace
                   ON profile_enrichment_jobs(workspace_id, persona_id, id DESC);
                 CREATE INDEX IF NOT EXISTS candidate_facts_workspace
@@ -442,6 +451,7 @@ class WorkflowStore:
                     "training_responses",
                     "training_sessions",
                     "training_session_questions",
+                    "generated_training_questions",
                     "proposed_agent_learnings",
                     "practice_updates",
                     "physician_interests",
@@ -931,6 +941,72 @@ class WorkflowStore:
             }
             for row in rows
         ]
+
+    def save_generated_training_question(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        session_id: int,
+        question: dict,
+        provider: str,
+    ) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO generated_training_questions(
+                     workspace_id, persona_id, session_id, question_id,
+                     question_json, provider, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(workspace_id, persona_id, question_id) DO UPDATE SET
+                     question_json=excluded.question_json,
+                     provider=excluded.provider""",
+                (
+                    workspace_id,
+                    persona_id,
+                    session_id,
+                    question["id"],
+                    json.dumps(question),
+                    provider,
+                    now,
+                ),
+            )
+        return {**question, "generation_provider": provider}
+
+    def generated_training_question(
+        self, workspace_id: str, persona_id: str, question_id: str
+    ) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT question_json, provider
+                   FROM generated_training_questions
+                   WHERE workspace_id=? AND persona_id=? AND question_id=?""",
+                (workspace_id, persona_id, question_id),
+            ).fetchone()
+        if not row:
+            return None
+        return {**json.loads(row["question_json"]), "generation_provider": row["provider"]}
+
+    def reset_training(self, workspace_id: str, persona_id: str) -> dict[str, int]:
+        """Reset only workspace-local training-derived state for one demo persona."""
+        tables = (
+            ("training_responses", "responses"),
+            ("training_session_questions", "assignments"),
+            ("generated_training_questions", "generated_questions"),
+            ("training_sessions", "sessions"),
+        )
+        counts: dict[str, int] = {}
+        with self._connect() as db:
+            for table, key in tables:
+                counts[key] = db.execute(
+                    f"DELETE FROM {table} WHERE workspace_id=? AND persona_id=?",
+                    (workspace_id, persona_id),
+                ).rowcount
+            counts["training_learnings"] = db.execute(
+                """DELETE FROM proposed_agent_learnings
+                   WHERE workspace_id=? AND persona_id=? AND source_type='training_response'""",
+                (workspace_id, persona_id),
+            ).rowcount
+        return counts
 
     def save_training_response(
         self,

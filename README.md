@@ -154,4 +154,4 @@ Invoke-RestMethod -Method Post -ContentType application/json -Body '{"pcp_guidan
 - Production EHR authorization and live Epic/Cerner integration.
 - Persistent consultation storage and real referral submission.
 - Live payer eligibility, scheduling, and availability integrations.
-- LLM augmentation beyond the deterministic structured demonstration.
+- Production-grade LLM evaluation, authenticated physician enrichment, and real-PHI workflows.

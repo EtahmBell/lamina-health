@@ -219,13 +219,16 @@ export type PracticeRepresentation = {
 export type TrainingQuestionType = 'yes_no' | 'yes_no_depends' | 'single_choice' | 'multi_select' | 'short_text'
 export type TrainingQuestion = {
   id: string; physician_persona: DemoPhysicianPerspective
-  source_type: 'profile_confirmation' | 'existing_practice_rule' | 'canonical_case' | 'network_question' | 'explicit_synthetic_demo' | 'initialization' | 'unresolved_branch'
+  source_type: 'profile_confirmation' | 'existing_practice_rule' | 'canonical_case' | 'network_question' | 'explicit_synthetic_demo' | 'initialization' | 'unresolved_branch' | 'practice_gap' | 'bounded_practice_context' | 'deterministic_branch'
   source_reference: string | null; prompt: string; question_type: TrainingQuestionType
   answer_options: string[]; why_this_matters: string; status: 'unanswered' | 'answered' | 'skipped'
   asked_count: number | null; synthetic: true; created_at: string
   root_question_id: string; parent_question_id: string | null; branch_depth: number
   branch_path: string[]; branch_condition: string | null; terminal: boolean
   generated_from: string; priority: number
+  dimension_being_narrowed?: string; terminal_candidate?: boolean
+  source_references?: string[]; proposed_boundary_rationale?: string
+  generation_provider?: 'responses_api' | 'deterministic_fallback'
 }
 export type TrainingResponse = {
   session_id: number; question_id: string; answer: string | string[] | null
@@ -277,7 +280,7 @@ export type ProfileCandidateFact = {
 }
 export type ProfileEnrichmentJob = {
   id?: number; status: 'idle' | 'running' | 'complete' | 'failed'; provider: string | null
-  found_count: number; message?: string | null; candidates: ProfileCandidateFact[]
+  found_count: number; message?: string | null; candidates: ProfileCandidateFact[]; cached?: boolean
 }
 export type PostDraftRequest = {
   type: PostType; source_material: Record<string, unknown>
@@ -388,6 +391,7 @@ export const answerTrainingQuestion = (
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(response),
 })
 export const finishTrainingSession = (perspective: DemoPhysicianPerspective, sessionId: number) => request<TrainingSession>(physicianPerspectivePath(`/api/workspace/physician/training/sessions/${sessionId}/finish`, perspective), { method: 'POST' })
+export const resetTraining = (perspective: DemoPhysicianPerspective) => request<{ persona_id: DemoPhysicianPerspective; deleted: Record<string, number>; queue_summary: TrainingQueueSummary; questions: TrainingQuestion[]; proposed_learnings: ProposedLearning[] }>(physicianPerspectivePath('/api/workspace/physician/training/reset', perspective), { method: 'POST' })
 export const updateProposedLearning = (
   perspective: DemoPhysicianPerspective,
   learningId: number,

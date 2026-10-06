@@ -9,6 +9,12 @@ training assignments, draft public-profile enrichment, and a generalized
 professional-post contract. These remain representation systems, not referral
 ranking systems.
 
+Pass 6A makes routine calibration ternary (`Yes / Depends / No`). Initialization
+and the lazy question bank are structured; `short_text` remains only as an optional
+escape hatch after structured choices are exhausted. `Depends` selects a curated
+child when one exists, otherwise it may request one bounded structured Responses
+question and persists either that validated result or a deterministic fallback.
+
 ## State boundaries
 
 The public synthetic demo combines immutable synthetic base profiles with
@@ -54,6 +60,12 @@ duplicates/cycles. The queue advertises capacity from lazy grounded question-sou
 families (network demand, cases, gaps, rules, profile/interests), so 100+ future
 questions do not require loading or seeding meaningless rows.
 
+Completing a session creates one proposed learning per root branch rather than one
+per intermediate answer. The controlled-demo reset endpoint deletes only the
+selected workspace/persona's sessions, responses, generated questions, and
+training-derived learnings (including confirmed ones), restoring pristine training
+without changing manually configured practice state or other product records.
+
 Profile enrichment stores sourced candidate facts separately from confirmed profile
 items. Strong identity context (name, specialty, geography, institution/NPI when
 available) belongs at the enrichment boundary. An online result is never “verified”
@@ -70,11 +82,21 @@ explicit network membership or canonical agent participation in saved consultati
 Directory searches alone create no relationship. The feed is chronological and has
 no popularity or activity score.
 
-The optional Responses API boundary is backend-only, feature-gated, and has
-deterministic fallbacks. It may format supplied facts but may not invent claims or
-publish. Public-demo case posts accept only explicitly synthetic source material;
-real-patient publication requires a future separate privacy/de-identification
-workflow and is disabled here.
+The optional Responses API boundary is backend-only, feature-gated by
+`LAMINA_OPENAI_ENABLED`, `LAMINA_OPENAI_MODEL`, and `OPENAI_API_KEY`, and has
+deterministic fallbacks. The legacy `LAMINA_RESPONSES_ENABLED` flag remains an
+alias. Calls occur only on an explicit profile-enrichment action, an explicit
+professional-post draft action, or a `Depends` answer for which no curated child
+exists. There are no boot, page-load, feed-load, or ordinary Yes/No model calls.
+Successful Responses-backed enrichment is reused for 30 minutes within the same
+workspace/persona, and structured outputs are bounded to at most 12 candidate facts.
+Structured JSON Schema output is validated before persistence; profile enrichment
+uses the Responses `web_search` tool and retains public source metadata. Safe logs
+record use case, success/failure, model, latency, and fallback use, never keys,
+tokens, raw future PHI, or hidden reasoning. The service may format supplied facts
+but may not invent claims or publish. Public-demo case posts accept only explicitly
+synthetic source material; real-patient publication requires a future separate
+privacy/de-identification workflow and is disabled here.
 
 ## Patients and cases
 

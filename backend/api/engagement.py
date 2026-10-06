@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -16,18 +17,23 @@ from backend.engagement import (
     SYNTHETIC_FEED_FIXTURES,
     generated_training_questions,
     next_branch_question,
+    normalize_question,
     physician_interests,
     profile_update_draft,
     project_initialization,
     project_practice_representation,
     project_professional_profile,
     project_training_questions,
-    proposed_learning_statement,
     question_by_id,
     related_personas,
+    synthesize_branch_learning,
     training_queue_summary,
 )
-from backend.professional_services import post_draft_service, profile_enrichment_service
+from backend.professional_services import (
+    post_draft_service,
+    profile_enrichment_service,
+    training_branch_service,
+)
 from backend.workflow import workflow_store
 
 router = APIRouter(prefix="/api/workspace", tags=["physician-engagement"])
@@ -139,6 +145,12 @@ def _profile(workspace_id: str, persona_id: str) -> dict:
 def _questions(workspace_id: str, persona_id: str) -> list[dict]:
     return project_training_questions(
         persona_id, workflow_store.training_responses(workspace_id, persona_id)
+    )
+
+
+def _question(workspace_id: str, persona_id: str, question_id: str) -> dict | None:
+    return question_by_id(persona_id, question_id) or workflow_store.generated_training_question(
+        workspace_id, persona_id, question_id
     )
 
 
@@ -321,7 +333,7 @@ def start_training_session(
         )
     else:
         unanswered.sort(key=lambda item: (-item["priority"], item["id"]))
-    if update.mode == "extended" and len(unanswered) < question_limit:
+    if update.mode in {"daily", "extended"} and len(unanswered) < question_limit:
         known_ids = {
             item["question_id"]
             for item in workflow_store.training_responses(workspace_id, persona_id)
@@ -352,7 +364,7 @@ def resume_training_session(
     session["questions"] = [
         question
         for item in assigned
-        if (question := question_by_id(persona_id, item["question_id"])) is not None
+        if (question := _question(workspace_id, persona_id, item["question_id"])) is not None
     ]
     session["responses"] = workflow_store.training_responses(workspace_id, persona_id, session_id)
     return session
@@ -369,7 +381,7 @@ def answer_training_question(
     session = workflow_store.training_session(workspace_id, persona_id, session_id)
     if not session or session["status"] != "active":
         raise HTTPException(404, "Active training session not found")
-    question = question_by_id(persona_id, question_id)
+    question = _question(workspace_id, persona_id, question_id)
     if not question:
         raise HTTPException(404, "Training question not found")
     assigned = workflow_store.training_session_questions(workspace_id, persona_id, session_id)
@@ -398,6 +410,66 @@ def answer_training_question(
     next_question = None
     if not update.skipped and isinstance(answer, str):
         next_question = next_branch_question(persona_id, question_id, answer, assigned_ids)
+        if next_question is None and answer == "Depends":
+            source_reference = question.get("source_reference")
+            answered_prompts = [
+                item["prompt"]
+                for assignment in assigned
+                if (item := _question(workspace_id, persona_id, assignment["question_id"]))
+                is not None
+            ]
+            context = {
+                "persona_id": persona_id,
+                "physician": PERSONAS[persona_id],
+                "parent": question,
+                "parent_question": question["prompt"],
+                "physician_answer": "Depends",
+                "branch_depth": question.get("branch_depth", 0),
+                "branch_path": question.get("branch_path", []),
+                "dimension": question.get("dimension_being_narrowed", "diagnosis_phenotype"),
+                "question_objective": question.get(
+                    "question_objective", "Locate a bounded practice-fit boundary."
+                ),
+                "source_references": [source_reference] if source_reference else [],
+                "answered_questions": answered_prompts,
+                "confirmed_practice_representation": _representation(workspace_id, persona_id)[
+                    "sections"
+                ],
+                "data_boundary": "Synthetic professional/practice context only; no real PHI.",
+            }
+            generated, provider = training_branch_service.generate(context, assigned_ids)
+            if generated is not None:
+                if provider == "responses_api":
+                    depth = int(question.get("branch_depth", 0)) + 1
+                    generated = normalize_question(
+                        {
+                            "id": f"{persona_id}-branch-ai-{secrets.token_hex(8)}",
+                            "physician_persona": persona_id,
+                            "root_question_id": question.get("root_question_id", question["id"]),
+                            "parent_question_id": question["id"],
+                            "branch_depth": depth,
+                            "branch_path": [
+                                *question.get("branch_path", []),
+                                f"{question['id']}:Depends",
+                            ],
+                            "branch_condition": "Depends",
+                            "source_type": generated["source_type"],
+                            "source_reference": source_reference,
+                            "prompt": generated["question"],
+                            "question_type": generated["question_type"],
+                            "answer_options": generated["answer_options"],
+                            "why_this_matters": generated["why_this_matters"],
+                            "dimension_being_narrowed": generated["dimension_being_narrowed"],
+                            "terminal_candidate": generated["terminal_candidate"],
+                            "source_references": generated["source_references"],
+                            "proposed_boundary_rationale": generated["proposed_boundary_rationale"],
+                            "terminal": generated["terminal_candidate"],
+                            "synthetic": True,
+                        }
+                    )
+                next_question = workflow_store.save_generated_training_question(
+                    workspace_id, persona_id, session_id, generated, provider
+                )
         if next_question is not None:
             workflow_store.assign_training_question(
                 workspace_id,
@@ -419,19 +491,28 @@ def finish_training_session(
     if not session:
         raise HTTPException(404, "Training session not found")
     responses = workflow_store.training_responses(workspace_id, persona_id, session_id)
+    assigned = workflow_store.training_session_questions(workspace_id, persona_id, session_id)
+    assignment_by_id = {item["question_id"]: item for item in assigned}
+    branches: dict[str, list[tuple[dict, dict]]] = {}
     for response in responses:
         if response["skipped"] or response["answer"] is None:
             continue
+        question = _question(workspace_id, persona_id, response["question_id"])
+        if question is None:
+            continue
+        root_id = assignment_by_id.get(response["question_id"], {}).get(
+            "root_question_id", question.get("root_question_id", question["id"])
+        )
+        branches.setdefault(root_id, []).append((question, response))
+    for root_id, branch in branches.items():
         workflow_store.create_proposed_learning(
             workspace_id,
             persona_id,
             "training_response",
-            f"session:{session_id}:question:{response['question_id']}",
-            proposed_learning_statement(response["question_id"], response["answer"]),
+            f"session:{session_id}:root:{root_id}",
+            synthesize_branch_learning(root_id, branch),
         )
-    completed = workflow_store.complete_training_session(
-        workspace_id, persona_id, session_id
-    )
+    completed = workflow_store.complete_training_session(workspace_id, persona_id, session_id)
     return {
         **completed,
         "responses": responses,
@@ -440,6 +521,21 @@ def finish_training_session(
             for item in workflow_store.proposed_learnings(workspace_id, persona_id)
             if item["source_reference"].startswith(f"session:{session_id}:")
         ],
+    }
+
+
+@router.post("/physician/training/reset")
+def reset_training(workspace_id: MutableDemoWorkspace, persona_id: ControlledPersona) -> dict:
+    """Reset only training-derived state for repeat controlled-demo testing."""
+    deleted = workflow_store.reset_training(workspace_id, persona_id)
+    questions = _questions(workspace_id, persona_id)
+    responses = workflow_store.training_responses(workspace_id, persona_id)
+    return {
+        "persona_id": persona_id,
+        "deleted": deleted,
+        "queue_summary": training_queue_summary(questions, responses),
+        "questions": questions,
+        "proposed_learnings": workflow_store.proposed_learnings(workspace_id, persona_id),
     }
 
 
@@ -491,6 +587,14 @@ def update_training_learning(
 def enrich_physician_profile(
     workspace_id: MutableDemoWorkspace, persona_id: ControlledPersona
 ) -> dict:
+    latest = workflow_store.latest_enrichment(workspace_id, persona_id)
+    if (
+        latest["status"] == "complete"
+        and latest["provider"] == "responses_api"
+        and datetime.fromisoformat(latest["updated_at"])
+        >= datetime.now(UTC) - timedelta(minutes=30)
+    ):
+        return {**latest, "cached": True}
     provider, candidates, message = profile_enrichment_service.candidates(persona_id)
     job = workflow_store.create_enrichment_job(workspace_id, persona_id, provider)
     return workflow_store.complete_enrichment_job(
@@ -780,7 +884,9 @@ def network_feed(
                 {
                     **fixture,
                     "physician": PERSONAS[author],
-                    "relationship_basis": _relationship_bases(author, persona_id, records, members),
+                    "relationship_basis": _relationship_bases(
+                        author, persona_id, records, members
+                    ),
                 }
             )
     for update in workflow_store.practice_updates(workspace_id, status="published"):
@@ -794,9 +900,7 @@ def network_feed(
                     "id": f"workspace-{update['id']}",
                     "physician_persona": author,
                     "physician": PERSONAS[author],
-                    "relationship_basis": _relationship_bases(
-                        author, persona_id, records, members
-                    ),
+                    "relationship_basis": _relationship_bases(author, persona_id, records, members),
                     "synthetic": True,
                 }
             )
