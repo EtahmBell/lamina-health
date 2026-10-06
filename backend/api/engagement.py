@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -7,6 +8,14 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from backend.agent_experience import (
+    agent_test_cases,
+    deterministic_agent_chat,
+    deterministic_portrait,
+    focused_training_question,
+    persona_identity_summary,
+    test_case_by_id,
+)
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.engagement import (
     EDITABLE_PERSONAS,
@@ -30,10 +39,12 @@ from backend.engagement import (
     training_queue_summary,
 )
 from backend.professional_services import (
+    agent_chat_service,
     post_draft_service,
     profile_enrichment_service,
     training_branch_service,
 )
+from backend.specialist_projection import project_specialist_cases
 from backend.workflow import workflow_store
 
 router = APIRouter(prefix="/api/workspace", tags=["physician-engagement"])
@@ -97,6 +108,26 @@ class InterestInput(BaseModel):
 class TrainingSessionInput(BaseModel):
     mode: Literal["initialization", "daily", "extended"] = "daily"
     limit: int | None = Field(default=None, ge=1, le=25)
+
+
+class TrainingReviewCompleteInput(BaseModel):
+    defer_pending: bool = False
+
+
+class FocusedTrainingInput(BaseModel):
+    seed_id: str = Field(min_length=1, max_length=120)
+    answer_target: int = Field(default=10, ge=1, le=10)
+
+
+class AgentChatInput(BaseModel):
+    mode: Literal["practice_question", "synthetic_case"]
+    message: str = Field(min_length=1, max_length=1000)
+    controlled_test_case_id: str | None = Field(default=None, max_length=120)
+    origin: Literal["practice", "synthetic_demo", "real_patient"] = "practice"
+
+
+class AgentChatFeedbackInput(BaseModel):
+    feedback: Literal["reflects", "not_quite"]
 
 
 class CandidateReviewInput(BaseModel):
@@ -238,7 +269,21 @@ def update_physician_interest(
 def physician_initialization(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -> dict:
     profile = _profile(workspace_id, persona_id)
     questions = _questions(workspace_id, persona_id)
-    return project_initialization(profile, profile["interests"], questions)
+    sessions = workflow_store.training_sessions(workspace_id, persona_id)
+    first_training_completed = any(
+        item["mode"] == "initialization" and item["status"] == "completed"
+        for item in sessions
+    )
+    state = workflow_store.initialization_state(workspace_id, persona_id)
+    if state is None and first_training_completed and profile["interests"]:
+        state = workflow_store.mark_initialized(workspace_id, persona_id)
+    return project_initialization(
+        profile,
+        profile["interests"],
+        questions,
+        state,
+        first_training_completed,
+    )
 
 
 @router.put("/physician/profile/items/{item_id}")
@@ -294,6 +339,222 @@ def training_queue(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
     }
 
 
+def _training_projection(workspace_id: str, persona_id: str) -> dict:
+    responses = workflow_store.training_responses(workspace_id, persona_id)
+    sessions = workflow_store.training_sessions(workspace_id, persona_id)
+    history = workflow_store.training_history(workspace_id, persona_id)
+    active = next((item for item in sessions if item["status"] == "active"), None)
+    pending_review = [
+        item
+        for item in workflow_store.proposed_learnings(workspace_id, persona_id)
+        if item["source_type"] == "training_response"
+        and item.get("review_action") is None
+    ]
+    queue = training_queue_summary(_questions(workspace_id, persona_id), responses)
+    return {
+        "training_status": "active" if active else "ready",
+        "current_session": active,
+        "questions_answered_total": sum(not item["skipped"] for item in responses),
+        "sessions_completed": sum(item["status"] == "completed" for item in sessions),
+        "last_trained_at": max(
+            (item["answered_at"] for item in responses), default=None
+        ),
+        "more_training_available": queue["available_total"] > 0,
+        "available_total": queue["available_total"],
+        "recent_training_history": history[:10],
+        "deferred_branch_count": len(
+            workflow_store.deferred_training_questions(workspace_id, persona_id)
+        ),
+        "pending_training_review_count": len(pending_review),
+    }
+
+
+@router.get("/physician/training/history")
+def training_history(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -> dict:
+    return _training_projection(workspace_id, persona_id)
+
+
+@router.get("/physician/agent-overview")
+def agent_overview(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -> dict:
+    profile = _profile(workspace_id, persona_id)
+    representation = _representation(workspace_id, persona_id)
+    training = _training_projection(workspace_id, persona_id)
+    initialization = physician_initialization(workspace_id, persona_id)
+    confirmed = representation["sections"]["confirmed_learnings"]
+    portrait, portrait_facts = deterministic_portrait(persona_id, confirmed)
+    records = workflow_store.history(workspace_id, limit=200)
+    if persona_id == "iain":
+        network_cases_count = len(
+            project_specialist_cases(
+                records,
+                PERSONAS[persona_id]["npi"],
+                workflow_store.specialist_reviews(
+                    workspace_id, PERSONAS[persona_id]["npi"]
+                ),
+            )
+        )
+    else:
+        network_cases_count = len(records)
+    published_updates = workflow_store.practice_updates(
+        workspace_id, persona_id, "published"
+    )
+    network_physicians = workflow_store.network_members(workspace_id)
+    stats = {
+        "questions_answered_total": training["questions_answered_total"],
+        "training_sessions_completed": training["sessions_completed"],
+        "confirmed_practice_learnings": len(confirmed),
+        "case_interests_count": sum(
+            item["interest_type"] == "case_interest" and item["confirmed"]
+            for item in profile["interests"]
+        ),
+        "network_cases_count": network_cases_count,
+        "last_trained_at": training["last_trained_at"],
+        "published_updates_count": len(published_updates),
+        "network_physicians_count": len(network_physicians),
+    }
+    next_action = (
+        "complete_initialization"
+        if not initialization["initialized"]
+        else "resume_training"
+        if training["current_session"]
+        else "train"
+        if training["more_training_available"]
+        else "none"
+    )
+    return {
+        "physician": PERSONAS[persona_id],
+        "specialty": PERSONAS[persona_id]["specialty"],
+        "location": PERSONAS[persona_id]["location"],
+        "portrait": portrait,
+        "portrait_confirmed_facts": portrait_facts,
+        "stats": stats,
+        "initialization": initialization,
+        "last_trained_at": training["last_trained_at"],
+        "more_training_available": training["more_training_available"],
+        "next_action": next_action,
+        "ranking_effect": "none",
+    }
+
+
+@router.get("/physician/agent-test-cases")
+def get_agent_test_cases(
+    workspace_id: DemoWorkspace, persona_id: ControlledPersona
+) -> list[dict]:
+    del workspace_id
+    return agent_test_cases(persona_id)
+
+
+@router.post("/physician/agent-chat", status_code=201)
+def chat_with_agent(
+    update: AgentChatInput,
+    workspace_id: MutableDemoWorkspace,
+    persona_id: ControlledPersona,
+) -> dict:
+    if update.origin == "real_patient":
+        raise HTTPException(422, "Real-patient chat is disabled in the public synthetic demo")
+    if re.search(
+        r"\b(?:mrn|medical record number|ssn|date of birth|dob)\b",
+        update.message.casefold(),
+    ):
+        raise HTTPException(422, "Patient identifiers are not allowed in agent chat")
+    test_case = None
+    if update.mode == "synthetic_case":
+        if update.origin != "synthetic_demo" or not update.controlled_test_case_id:
+            raise HTTPException(422, "Synthetic-case chat requires a controlled test case")
+        test_case = test_case_by_id(persona_id, update.controlled_test_case_id)
+        if test_case is None:
+            raise HTTPException(404, "Controlled synthetic test case not found")
+    representation = _representation(workspace_id, persona_id)
+    fallback = deterministic_agent_chat(
+        persona_id,
+        update.mode,
+        update.message,
+        representation,
+        test_case,
+    )
+    allowed_references = {
+        "practice:explicit_rules",
+        "practice:preferred_workup",
+        "practice:clinical_focus",
+        "practice:explicit_rules:renal-routing",
+        "practice:explicit_rules:anaemia-routing",
+        *[
+            f"interest:{item['id']}"
+            for item in representation["sections"].get("interests", [])
+        ],
+        *[
+            f"learning:{item['id']}"
+            for item in representation["sections"].get("confirmed_learnings", [])
+        ],
+    }
+    if test_case:
+        allowed_references.add(f"test_case:{test_case['id']}")
+    payload = {
+        "physician": persona_identity_summary(persona_id),
+        "mode": update.mode,
+        "message": update.message,
+        "confirmed_representation": representation["sections"],
+        "controlled_synthetic_test_case": (
+            {key: value for key, value in test_case.items() if key != "correction_prompt"}
+            if test_case
+            else None
+        ),
+        "allowed_references": sorted(allowed_references),
+        "safety_boundary": "Practice representation and controlled synthetic scenarios only; no real PHI.",
+    }
+    result, provider = agent_chat_service.respond(payload, fallback)
+    response_id = f"chat-{secrets.token_hex(12)}"
+    saved = workflow_store.save_agent_chat_response(
+        workspace_id,
+        persona_id,
+        response_id,
+        update.mode,
+        test_case["id"] if test_case else None,
+        update.model_dump(),
+        result,
+        provider,
+    )
+    return {
+        **saved,
+        "mode": update.mode,
+        "controlled_test_case_id": test_case["id"] if test_case else None,
+        "synthetic_only": True,
+    }
+
+
+@router.post("/physician/agent-chat/{response_id}/feedback")
+def submit_agent_chat_feedback(
+    response_id: str,
+    update: AgentChatFeedbackInput,
+    workspace_id: MutableDemoWorkspace,
+    persona_id: ControlledPersona,
+) -> dict:
+    chat_response = workflow_store.agent_chat_response(
+        workspace_id, persona_id, response_id
+    )
+    if not chat_response:
+        raise HTTPException(404, "Agent chat response not found")
+    workflow_store.set_agent_chat_feedback(
+        workspace_id, persona_id, response_id, update.feedback
+    )
+    seed = None
+    if update.feedback == "not_quite":
+        question = focused_training_question(persona_id, chat_response)
+        seed_id = f"seed-{secrets.token_hex(10)}"
+        seed = workflow_store.create_focused_training_seed(
+            workspace_id,
+            persona_id,
+            seed_id,
+            response_id,
+            question,
+        )
+    return {
+        "response_id": response_id,
+        "feedback": update.feedback,
+        "focused_training_seed": seed,
+    }
+
+
 @router.post("/physician/training/sessions", status_code=201)
 def start_training_session(
     workspace_id: MutableDemoWorkspace,
@@ -301,17 +562,17 @@ def start_training_session(
     update: TrainingSessionInput | None = None,
 ) -> dict:
     update = update or TrainingSessionInput()
-    default_limit = 15 if update.mode == "initialization" else 5
-    if update.mode == "extended":
-        default_limit = 25
-    question_limit = min(update.limit or default_limit, 25)
+    question_limit = min(update.limit or 10, 25)
     session = workflow_store.start_training_session(
         workspace_id, persona_id, update.mode, question_limit
     )
+    deferred = workflow_store.deferred_training_questions(workspace_id, persona_id)
+    selected: list[dict] = deferred[:question_limit]
+    selected_ids = {item["id"] for item in selected}
     unanswered = [
         question
         for question in _questions(workspace_id, persona_id)
-        if question["status"] == "unanswered"
+        if question["status"] == "unanswered" and question["id"] not in selected_ids
     ]
     if update.mode == "initialization":
         answered_ids = {
@@ -333,7 +594,8 @@ def start_training_session(
         )
     else:
         unanswered.sort(key=lambda item: (-item["priority"], item["id"]))
-    if update.mode in {"daily", "extended"} and len(unanswered) < question_limit:
+    needed = question_limit - len(selected)
+    if update.mode in {"initialization", "daily", "extended"} and len(unanswered) < needed:
         known_ids = {
             item["question_id"]
             for item in workflow_store.training_responses(workspace_id, persona_id)
@@ -342,15 +604,56 @@ def start_training_session(
             if generated["id"] in known_ids:
                 continue
             unanswered.append(question_by_id(persona_id, generated["id"]))
-            if len(unanswered) >= question_limit:
+            if len(unanswered) >= needed:
                 break
-    session["questions"] = unanswered[:question_limit]
+    session["questions"] = [*selected, *unanswered[:needed]]
     for question in session["questions"]:
         workflow_store.assign_training_question(
             workspace_id, persona_id, session["id"], question, question["priority"]
         )
+        if question.get("deferred_id") is not None:
+            workflow_store.consume_deferred_training_question(
+                workspace_id,
+                persona_id,
+                question["deferred_id"],
+                session["id"],
+            )
     session["responses"] = []
     return session
+
+
+@router.post("/physician/training/focused", status_code=201)
+def start_focused_training(
+    update: FocusedTrainingInput,
+    workspace_id: MutableDemoWorkspace,
+    persona_id: ControlledPersona,
+) -> dict:
+    seed = workflow_store.focused_training_seed(
+        workspace_id, persona_id, update.seed_id
+    )
+    if not seed or seed["status"] != "pending":
+        raise HTTPException(404, "Pending focused training seed not found")
+    session = workflow_store.start_training_session(
+        workspace_id,
+        persona_id,
+        "focused",
+        update.answer_target,
+        focused_seed_id=update.seed_id,
+    )
+    question = workflow_store.save_generated_training_question(
+        workspace_id,
+        persona_id,
+        session["id"],
+        seed["question"],
+        "agent_chat_feedback",
+    )
+    workflow_store.assign_training_question(
+        workspace_id, persona_id, session["id"], question, 100
+    )
+    workflow_store.start_focused_training_seed(
+        workspace_id, persona_id, update.seed_id, session["id"]
+    )
+    return {**session, "questions": [question], "responses": []}
 
 
 @router.get("/physician/training/sessions/{session_id}")
@@ -368,6 +671,71 @@ def resume_training_session(
     ]
     session["responses"] = workflow_store.training_responses(workspace_id, persona_id, session_id)
     return session
+
+
+def _complete_training_questions(
+    workspace_id: str, persona_id: str, session_id: int
+) -> dict:
+    session = workflow_store.training_session(workspace_id, persona_id, session_id)
+    if not session:
+        raise HTTPException(404, "Training session not found")
+    responses = workflow_store.training_responses(workspace_id, persona_id, session_id)
+    assigned = workflow_store.training_session_questions(workspace_id, persona_id, session_id)
+    assignment_by_id = {item["question_id"]: item for item in assigned}
+    branches: dict[str, list[tuple[dict, dict]]] = {}
+    for response in responses:
+        if response["skipped"] or response["answer"] is None:
+            continue
+        question = _question(workspace_id, persona_id, response["question_id"])
+        if question is None:
+            continue
+        root_id = assignment_by_id.get(response["question_id"], {}).get(
+            "root_question_id", question.get("root_question_id", question["id"])
+        )
+        branches.setdefault(root_id, []).append((question, response))
+    for root_id, branch in branches.items():
+        workflow_store.create_proposed_learning(
+            workspace_id,
+            persona_id,
+            "training_response",
+            f"session:{session_id}:root:{root_id}",
+            synthesize_branch_learning(root_id, branch),
+        )
+    completed = workflow_store.complete_training_session(
+        workspace_id, persona_id, session_id
+    )
+    if session["mode"] == "initialization" and _profile(workspace_id, persona_id)[
+        "interests"
+    ]:
+        workflow_store.mark_initialized(workspace_id, persona_id)
+    proposed = [
+        item
+        for item in workflow_store.proposed_learnings(workspace_id, persona_id)
+        if item["source_reference"].startswith(f"session:{session_id}:")
+    ]
+    pending_deferred = workflow_store.deferred_training_questions(
+        workspace_id, persona_id
+    )
+    summary = {
+        "answered_count": sum(not item["skipped"] for item in responses),
+        "target_count": session["answer_target"],
+        "proposed_learning_count": len(proposed),
+        "unresolved_question_count": sum(
+            item["source_session_id"] == session_id for item in pending_deferred
+        ),
+        "pending_review_count": sum(item.get("review_action") is None for item in proposed),
+        "more_training_available": training_queue_summary(
+            _questions(workspace_id, persona_id),
+            workflow_store.training_responses(workspace_id, persona_id),
+        )["available_total"]
+        > 0,
+    }
+    return {
+        **completed,
+        "responses": responses,
+        "proposed_learnings": proposed,
+        "completion_summary": summary,
+    }
 
 
 @router.put("/physician/training/sessions/{session_id}/responses/{question_id}")
@@ -407,7 +775,16 @@ def answer_training_question(
     response = workflow_store.save_training_response(
         workspace_id, persona_id, session_id, question_id, answer, update.skipped
     )
+    response_count = len(
+        workflow_store.training_responses(workspace_id, persona_id, session_id)
+    )
+    target_reached = response_count >= session["answer_target"]
+    focused_resolved = bool(
+        session["mode"] == "focused"
+        and (update.skipped or answer != "Depends")
+    )
     next_question = None
+    deferred_question = None
     if not update.skipped and isinstance(answer, str):
         next_question = next_branch_question(persona_id, question_id, answer, assigned_ids)
         if next_question is None and answer == "Depends":
@@ -471,14 +848,39 @@ def answer_training_question(
                     workspace_id, persona_id, session_id, generated, provider
                 )
         if next_question is not None:
-            workflow_store.assign_training_question(
-                workspace_id,
-                persona_id,
-                session_id,
-                next_question,
-                next_question["priority"],
-            )
-    return {**response, "next_question": next_question}
+            if target_reached:
+                provider = next_question.get("generation_provider", "curated_branch")
+                deferred_question = workflow_store.defer_training_question(
+                    workspace_id,
+                    persona_id,
+                    session_id,
+                    next_question,
+                    provider,
+                )
+                next_question = None
+            else:
+                workflow_store.assign_training_question(
+                    workspace_id,
+                    persona_id,
+                    session_id,
+                    next_question,
+                    next_question["priority"],
+                )
+    questions_complete = target_reached or focused_resolved
+    completion = (
+        _complete_training_questions(workspace_id, persona_id, session_id)
+        if questions_complete
+        else None
+    )
+    return {
+        **response,
+        "next_question": next_question,
+        "answered_count": response_count,
+        "answer_target": session["answer_target"],
+        "questions_complete": questions_complete,
+        "deferred_branch": deferred_question,
+        "completion_summary": completion["completion_summary"] if completion else None,
+    }
 
 
 @router.post("/physician/training/sessions/{session_id}/finish")
@@ -487,41 +889,7 @@ def finish_training_session(
     workspace_id: MutableDemoWorkspace,
     persona_id: ControlledPersona,
 ) -> dict:
-    session = workflow_store.training_session(workspace_id, persona_id, session_id)
-    if not session:
-        raise HTTPException(404, "Training session not found")
-    responses = workflow_store.training_responses(workspace_id, persona_id, session_id)
-    assigned = workflow_store.training_session_questions(workspace_id, persona_id, session_id)
-    assignment_by_id = {item["question_id"]: item for item in assigned}
-    branches: dict[str, list[tuple[dict, dict]]] = {}
-    for response in responses:
-        if response["skipped"] or response["answer"] is None:
-            continue
-        question = _question(workspace_id, persona_id, response["question_id"])
-        if question is None:
-            continue
-        root_id = assignment_by_id.get(response["question_id"], {}).get(
-            "root_question_id", question.get("root_question_id", question["id"])
-        )
-        branches.setdefault(root_id, []).append((question, response))
-    for root_id, branch in branches.items():
-        workflow_store.create_proposed_learning(
-            workspace_id,
-            persona_id,
-            "training_response",
-            f"session:{session_id}:root:{root_id}",
-            synthesize_branch_learning(root_id, branch),
-        )
-    completed = workflow_store.complete_training_session(workspace_id, persona_id, session_id)
-    return {
-        **completed,
-        "responses": responses,
-        "proposed_learnings": [
-            item
-            for item in workflow_store.proposed_learnings(workspace_id, persona_id)
-            if item["source_reference"].startswith(f"session:{session_id}:")
-        ],
-    }
+    return _complete_training_questions(workspace_id, persona_id, session_id)
 
 
 @router.post("/physician/training/reset")
@@ -567,7 +935,7 @@ def update_training_learning(
         "reject": "rejected",
     }[update.action]
     learning = workflow_store.update_proposed_learning(
-        workspace_id, persona_id, learning_id, statement, status
+        workspace_id, persona_id, learning_id, statement, status, update.action
     )
     draft_update = None
     if status == "confirmed":
@@ -580,7 +948,46 @@ def update_training_learning(
             "agent_drafted_from_confirmed_learning",
             agent_drafted=True,
         )
-    return {"learning": learning, "draft_update": draft_update}
+    session = None
+    source_reference = current["source_reference"]
+    if source_reference.startswith("session:"):
+        session_id = int(source_reference.split(":", 2)[1])
+        session_learnings = [
+            item
+            for item in workflow_store.proposed_learnings(workspace_id, persona_id)
+            if item["source_reference"].startswith(f"session:{session_id}:")
+        ]
+        if session_learnings and all(
+            item.get("review_action") is not None for item in session_learnings
+        ):
+            session = workflow_store.complete_training_review(
+                workspace_id, persona_id, session_id
+            )
+    return {"learning": learning, "draft_update": draft_update, "session": session}
+
+
+@router.post("/physician/training/sessions/{session_id}/review/complete")
+def complete_training_review(
+    session_id: int,
+    update: TrainingReviewCompleteInput,
+    workspace_id: MutableDemoWorkspace,
+    persona_id: ControlledPersona,
+) -> dict:
+    session = workflow_store.training_session(workspace_id, persona_id, session_id)
+    if not session or session["status"] != "completed":
+        raise HTTPException(404, "Completed training session not found")
+    pending = [
+        item
+        for item in workflow_store.proposed_learnings(workspace_id, persona_id)
+        if item["source_reference"].startswith(f"session:{session_id}:")
+        and item.get("review_action") is None
+    ]
+    if pending and not update.defer_pending:
+        raise HTTPException(409, "Pending learnings must be reviewed or explicitly deferred")
+    completed = workflow_store.complete_training_review(
+        workspace_id, persona_id, session_id, deferred=bool(pending)
+    )
+    return {**completed, "pending_review_count": len(pending)}
 
 
 @router.post("/physician/profile/enrich", status_code=201)

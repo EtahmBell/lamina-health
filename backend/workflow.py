@@ -94,7 +94,15 @@ class WorkflowStore:
                   persona_id TEXT NOT NULL,
                   status TEXT NOT NULL CHECK(status IN ('active', 'completed')),
                   created_at TEXT NOT NULL,
-                  completed_at TEXT
+                  completed_at TEXT,
+                  mode TEXT NOT NULL DEFAULT 'daily',
+                  question_limit INTEGER NOT NULL DEFAULT 10,
+                  answer_target INTEGER,
+                  lifecycle_state TEXT NOT NULL DEFAULT 'active',
+                  questions_complete_at TEXT,
+                  review_completed_at TEXT,
+                  review_deferred INTEGER NOT NULL DEFAULT 0,
+                  focused_seed_id TEXT
                 );
                 CREATE TABLE IF NOT EXISTS training_responses (
                   workspace_id TEXT NOT NULL,
@@ -115,6 +123,7 @@ class WorkflowStore:
                   statement TEXT NOT NULL,
                   provenance TEXT NOT NULL,
                   status TEXT NOT NULL CHECK(status IN ('suggested', 'confirmed', 'rejected')),
+                  review_action TEXT,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
                   UNIQUE(workspace_id, persona_id, source_type, source_reference)
@@ -158,6 +167,34 @@ class WorkflowStore:
                   question_json TEXT NOT NULL, provider TEXT NOT NULL,
                   created_at TEXT NOT NULL,
                   PRIMARY KEY(workspace_id, persona_id, question_id)
+                );
+                CREATE TABLE IF NOT EXISTS deferred_training_questions (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  workspace_id TEXT NOT NULL, persona_id TEXT NOT NULL,
+                  source_session_id INTEGER NOT NULL, question_id TEXT NOT NULL,
+                  question_json TEXT NOT NULL, provider TEXT NOT NULL,
+                  status TEXT NOT NULL DEFAULT 'pending',
+                  consumed_session_id INTEGER, created_at TEXT NOT NULL,
+                  UNIQUE(workspace_id, persona_id, question_id, status)
+                );
+                CREATE TABLE IF NOT EXISTS physician_agent_initialization (
+                  workspace_id TEXT NOT NULL, persona_id TEXT NOT NULL,
+                  initialized_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                  PRIMARY KEY(workspace_id, persona_id)
+                );
+                CREATE TABLE IF NOT EXISTS agent_chat_responses (
+                  response_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+                  persona_id TEXT NOT NULL, mode TEXT NOT NULL,
+                  test_case_id TEXT, request_json TEXT NOT NULL,
+                  response_json TEXT NOT NULL, provider TEXT NOT NULL,
+                  feedback TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS focused_training_seeds (
+                  seed_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+                  persona_id TEXT NOT NULL, chat_response_id TEXT NOT NULL,
+                  question_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+                  started_session_id INTEGER, created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS profile_enrichment_jobs (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,6 +272,12 @@ class WorkflowStore:
                   ON training_session_questions(workspace_id, persona_id, session_id);
                 CREATE INDEX IF NOT EXISTS generated_training_workspace
                   ON generated_training_questions(workspace_id, persona_id, session_id);
+                CREATE INDEX IF NOT EXISTS deferred_training_workspace
+                  ON deferred_training_questions(workspace_id, persona_id, status, id);
+                CREATE INDEX IF NOT EXISTS agent_chat_workspace
+                  ON agent_chat_responses(workspace_id, persona_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS focused_seed_workspace
+                  ON focused_training_seeds(workspace_id, persona_id, status, created_at DESC);
                 CREATE INDEX IF NOT EXISTS enrichment_jobs_workspace
                   ON profile_enrichment_jobs(workspace_id, persona_id, id DESC);
                 CREATE INDEX IF NOT EXISTS candidate_facts_workspace
@@ -326,6 +369,15 @@ class WorkflowStore:
             "training_sessions": {
                 "mode": "TEXT NOT NULL DEFAULT 'daily'",
                 "question_limit": "INTEGER NOT NULL DEFAULT 5",
+                "answer_target": "INTEGER",
+                "lifecycle_state": "TEXT NOT NULL DEFAULT 'active'",
+                "questions_complete_at": "TEXT",
+                "review_completed_at": "TEXT",
+                "review_deferred": "INTEGER NOT NULL DEFAULT 0",
+                "focused_seed_id": "TEXT",
+            },
+            "proposed_agent_learnings": {
+                "review_action": "TEXT",
             },
             "practice_updates": {
                 "post_type": "TEXT",
@@ -349,6 +401,27 @@ class WorkflowStore:
                WHERE agent_drafted=1 AND drafted_by='physician'"""
         )
         db.execute("UPDATE practice_updates SET physician_approved=1 WHERE status='published'")
+        db.execute(
+            "UPDATE training_sessions SET answer_target=question_limit "
+            "WHERE answer_target IS NULL"
+        )
+        db.execute(
+            "UPDATE training_sessions SET lifecycle_state='questions_complete', "
+            "questions_complete_at=completed_at "
+            "WHERE status='completed' AND lifecycle_state='active'"
+        )
+        db.execute(
+            "UPDATE proposed_agent_learnings SET review_action='confirm' "
+            "WHERE review_action IS NULL AND status='confirmed'"
+        )
+        db.execute(
+            "UPDATE proposed_agent_learnings SET review_action='reject' "
+            "WHERE review_action IS NULL AND status='rejected'"
+        )
+        db.execute(
+            "UPDATE proposed_agent_learnings SET review_action='edit' "
+            "WHERE review_action IS NULL AND provenance='Physician-edited training draft'"
+        )
 
     @staticmethod
     def _now() -> str:
@@ -452,6 +525,10 @@ class WorkflowStore:
                     "training_sessions",
                     "training_session_questions",
                     "generated_training_questions",
+                    "deferred_training_questions",
+                    "physician_agent_initialization",
+                    "agent_chat_responses",
+                    "focused_training_seeds",
                     "proposed_agent_learnings",
                     "practice_updates",
                     "physician_interests",
@@ -842,15 +919,26 @@ class WorkflowStore:
         workspace_id: str,
         persona_id: str,
         mode: str = "daily",
-        question_limit: int = 5,
+        question_limit: int = 10,
+        *,
+        focused_seed_id: str | None = None,
     ) -> dict:
         now = self._now()
         with self._connect() as db:
             cursor = db.execute(
                 """INSERT INTO training_sessions(
-                     workspace_id, persona_id, status, created_at, mode, question_limit
-                   ) VALUES (?, ?, 'active', ?, ?, ?)""",
-                (workspace_id, persona_id, now, mode, question_limit),
+                     workspace_id, persona_id, status, created_at, mode, question_limit,
+                     answer_target, lifecycle_state, focused_seed_id
+                   ) VALUES (?, ?, 'active', ?, ?, ?, ?, 'active', ?)""",
+                (
+                    workspace_id,
+                    persona_id,
+                    now,
+                    mode,
+                    question_limit,
+                    question_limit,
+                    focused_seed_id,
+                ),
             )
             session_id = int(cursor.lastrowid)
         return {
@@ -861,29 +949,41 @@ class WorkflowStore:
             "completed_at": None,
             "mode": mode,
             "question_limit": question_limit,
+            "answer_target": question_limit,
+            "lifecycle_state": "active",
+            "questions_complete_at": None,
+            "review_completed_at": None,
+            "review_deferred": False,
+            "focused_seed_id": focused_seed_id,
         }
 
     def training_session(self, workspace_id: str, persona_id: str, session_id: int) -> dict | None:
         with self._connect() as db:
             row = db.execute(
                 """SELECT id, persona_id, status, created_at, completed_at,
-                          mode, question_limit
+                          mode, question_limit, answer_target, lifecycle_state,
+                          questions_complete_at, review_completed_at,
+                          review_deferred, focused_seed_id
                    FROM training_sessions
                    WHERE workspace_id=? AND persona_id=? AND id=?""",
                 (workspace_id, persona_id, session_id),
             ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        return {**dict(row), "review_deferred": bool(row["review_deferred"])}
 
     def training_sessions(self, workspace_id: str, persona_id: str) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
                 """SELECT id, persona_id, status, created_at, completed_at,
-                          mode, question_limit
+                          mode, question_limit, answer_target, lifecycle_state,
+                          questions_complete_at, review_completed_at,
+                          review_deferred, focused_seed_id
                    FROM training_sessions WHERE workspace_id=? AND persona_id=?
                    ORDER BY id DESC""",
                 (workspace_id, persona_id),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [{**dict(row), "review_deferred": bool(row["review_deferred"])} for row in rows]
 
     def assign_training_question(
         self,
@@ -986,12 +1086,104 @@ class WorkflowStore:
             return None
         return {**json.loads(row["question_json"]), "generation_provider": row["provider"]}
 
+    def defer_training_question(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        source_session_id: int,
+        question: dict,
+        provider: str,
+    ) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT OR IGNORE INTO deferred_training_questions(
+                     workspace_id, persona_id, source_session_id, question_id,
+                     question_json, provider, status, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                (
+                    workspace_id,
+                    persona_id,
+                    source_session_id,
+                    question["id"],
+                    json.dumps(question),
+                    provider,
+                    now,
+                ),
+            )
+        return {**question, "generation_provider": provider, "deferred": True}
+
+    def deferred_training_questions(
+        self, workspace_id: str, persona_id: str, *, pending_only: bool = True
+    ) -> list[dict]:
+        status_clause = " AND status='pending'" if pending_only else ""
+        with self._connect() as db:
+            rows = db.execute(
+                f"""SELECT id, source_session_id, question_id, question_json,
+                          provider, status, consumed_session_id, created_at
+                   FROM deferred_training_questions
+                   WHERE workspace_id=? AND persona_id=?{status_clause}
+                   ORDER BY id""",
+                (workspace_id, persona_id),
+            ).fetchall()
+        return [
+            {
+                **json.loads(row["question_json"]),
+                "deferred_id": row["id"],
+                "source_session_id": row["source_session_id"],
+                "generation_provider": row["provider"],
+                "deferred": True,
+            }
+            for row in rows
+        ]
+
+    def consume_deferred_training_question(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        deferred_id: int,
+        session_id: int,
+    ) -> None:
+        with self._connect() as db:
+            db.execute(
+                """UPDATE deferred_training_questions
+                   SET status='consumed', consumed_session_id=?
+                   WHERE workspace_id=? AND persona_id=? AND id=? AND status='pending'""",
+                (session_id, workspace_id, persona_id, deferred_id),
+            )
+
+    def initialization_state(self, workspace_id: str, persona_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT initialized_at, updated_at
+                   FROM physician_agent_initialization
+                   WHERE workspace_id=? AND persona_id=?""",
+                (workspace_id, persona_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def mark_initialized(self, workspace_id: str, persona_id: str) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO physician_agent_initialization(
+                     workspace_id, persona_id, initialized_at, updated_at
+                   ) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(workspace_id, persona_id) DO UPDATE SET
+                     updated_at=excluded.updated_at""",
+                (workspace_id, persona_id, now, now),
+            )
+        state = self.initialization_state(workspace_id, persona_id)
+        assert state is not None
+        return state
+
     def reset_training(self, workspace_id: str, persona_id: str) -> dict[str, int]:
         """Reset only workspace-local training-derived state for one demo persona."""
         tables = (
             ("training_responses", "responses"),
             ("training_session_questions", "assignments"),
             ("generated_training_questions", "generated_questions"),
+            ("deferred_training_questions", "deferred_questions"),
             ("training_sessions", "sessions"),
         )
         counts: dict[str, int] = {}
@@ -1006,7 +1198,139 @@ class WorkflowStore:
                    WHERE workspace_id=? AND persona_id=? AND source_type='training_response'""",
                 (workspace_id, persona_id),
             ).rowcount
+            counts["initialization"] = db.execute(
+                "DELETE FROM physician_agent_initialization "
+                "WHERE workspace_id=? AND persona_id=?",
+                (workspace_id, persona_id),
+            ).rowcount
+            counts["focused_seeds"] = db.execute(
+                "DELETE FROM focused_training_seeds "
+                "WHERE workspace_id=? AND persona_id=?",
+                (workspace_id, persona_id),
+            ).rowcount
         return counts
+
+    def save_agent_chat_response(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        response_id: str,
+        mode: str,
+        test_case_id: str | None,
+        request_payload: dict,
+        response_payload: dict,
+        provider: str,
+    ) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO agent_chat_responses(
+                     response_id, workspace_id, persona_id, mode, test_case_id,
+                     request_json, response_json, provider, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    response_id,
+                    workspace_id,
+                    persona_id,
+                    mode,
+                    test_case_id,
+                    json.dumps(request_payload),
+                    json.dumps(response_payload),
+                    provider,
+                    now,
+                    now,
+                ),
+            )
+        return {**response_payload, "response_id": response_id, "provider": provider}
+
+    def agent_chat_response(
+        self, workspace_id: str, persona_id: str, response_id: str
+    ) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT response_id, mode, test_case_id, request_json,
+                          response_json, provider, feedback, created_at
+                   FROM agent_chat_responses
+                   WHERE workspace_id=? AND persona_id=? AND response_id=?""",
+                (workspace_id, persona_id, response_id),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            **dict(row),
+            "request": json.loads(row["request_json"]),
+            "response": json.loads(row["response_json"]),
+        }
+
+    def set_agent_chat_feedback(
+        self, workspace_id: str, persona_id: str, response_id: str, feedback: str
+    ) -> None:
+        with self._connect() as db:
+            db.execute(
+                """UPDATE agent_chat_responses SET feedback=?, updated_at=?
+                   WHERE workspace_id=? AND persona_id=? AND response_id=?""",
+                (feedback, self._now(), workspace_id, persona_id, response_id),
+            )
+
+    def create_focused_training_seed(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        seed_id: str,
+        chat_response_id: str,
+        question: dict,
+    ) -> dict:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO focused_training_seeds(
+                     seed_id, workspace_id, persona_id, chat_response_id,
+                     question_json, status, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                (
+                    seed_id,
+                    workspace_id,
+                    persona_id,
+                    chat_response_id,
+                    json.dumps(question),
+                    now,
+                    now,
+                ),
+            )
+        return {
+            "seed_id": seed_id,
+            "chat_response_id": chat_response_id,
+            "status": "pending",
+            "question": question,
+            "created_at": now,
+        }
+
+    def focused_training_seed(
+        self, workspace_id: str, persona_id: str, seed_id: str
+    ) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT seed_id, chat_response_id, question_json, status,
+                          started_session_id, created_at
+                   FROM focused_training_seeds
+                   WHERE workspace_id=? AND persona_id=? AND seed_id=?""",
+                (workspace_id, persona_id, seed_id),
+            ).fetchone()
+        if not row:
+            return None
+        return {**dict(row), "question": json.loads(row["question_json"])}
+
+    def start_focused_training_seed(
+        self, workspace_id: str, persona_id: str, seed_id: str, session_id: int
+    ) -> None:
+        with self._connect() as db:
+            db.execute(
+                """UPDATE focused_training_seeds
+                   SET status='started', started_session_id=?, updated_at=?
+                   WHERE workspace_id=? AND persona_id=? AND seed_id=?
+                     AND status='pending'""",
+                (session_id, self._now(), workspace_id, persona_id, seed_id),
+            )
 
     def save_training_response(
         self,
@@ -1069,25 +1393,91 @@ class WorkflowStore:
             for row in rows
         ]
 
+    def training_history(self, workspace_id: str, persona_id: str) -> list[dict]:
+        sessions = self.training_sessions(workspace_id, persona_id)
+        responses = self.training_responses(workspace_id, persona_id)
+        learnings = self.proposed_learnings(workspace_id, persona_id)
+        deferred = self.deferred_training_questions(
+            workspace_id, persona_id, pending_only=False
+        )
+        entries: list[dict] = []
+        for session in sessions:
+            session_id = session["id"]
+            session_responses = [item for item in responses if item["session_id"] == session_id]
+            prefix = f"session:{session_id}:"
+            session_learnings = [
+                item for item in learnings if item["source_reference"].startswith(prefix)
+            ]
+            entries.append(
+                {
+                    "session_id": session_id,
+                    "mode": session["mode"],
+                    "lifecycle_state": session["lifecycle_state"],
+                    "started_at": session["created_at"],
+                    "completed_at": session["completed_at"],
+                    "answered_count": sum(not item["skipped"] for item in session_responses),
+                    "target_count": session["answer_target"],
+                    "proposed_count": len(session_learnings),
+                    "confirmed_count": sum(
+                        item.get("review_action") == "confirm" for item in session_learnings
+                    ),
+                    "edited_count": sum(
+                        item.get("review_action") == "edit" for item in session_learnings
+                    ),
+                    "rejected_count": sum(
+                        item.get("review_action") == "reject" for item in session_learnings
+                    ),
+                    "deferred_branch_count": sum(
+                        item["source_session_id"] == session_id for item in deferred
+                    ),
+                }
+            )
+        return entries
+
     def complete_training_session(
         self, workspace_id: str, persona_id: str, session_id: int
     ) -> dict | None:
         now = self._now()
         with self._connect() as db:
             updated = db.execute(
-                """UPDATE training_sessions SET status='completed', completed_at=?
-                   WHERE workspace_id=? AND persona_id=? AND id=? AND status='active'""",
-                (now, workspace_id, persona_id, session_id),
+                """UPDATE training_sessions
+                   SET status='completed', completed_at=COALESCE(completed_at, ?),
+                       questions_complete_at=COALESCE(questions_complete_at, ?),
+                       lifecycle_state=CASE
+                         WHEN lifecycle_state='active' THEN 'questions_complete'
+                         ELSE lifecycle_state END
+                   WHERE workspace_id=? AND persona_id=? AND id=?""",
+                (now, now, workspace_id, persona_id, session_id),
             ).rowcount
         if not updated:
             return self.training_session(workspace_id, persona_id, session_id)
+        return self.training_session(workspace_id, persona_id, session_id)
+
+    def complete_training_review(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        session_id: int,
+        *,
+        deferred: bool = False,
+    ) -> dict | None:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE training_sessions
+                   SET lifecycle_state='review_complete', review_completed_at=?,
+                       review_deferred=?
+                   WHERE workspace_id=? AND persona_id=? AND id=?
+                     AND status='completed'""",
+                (now, int(deferred), workspace_id, persona_id, session_id),
+            )
         return self.training_session(workspace_id, persona_id, session_id)
 
     def proposed_learnings(self, workspace_id: str, persona_id: str) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
                 """SELECT id, persona_id, source_type, source_reference, statement,
-                          provenance, status, created_at, updated_at
+                          provenance, status, review_action, created_at, updated_at
                    FROM proposed_agent_learnings
                    WHERE workspace_id=? AND persona_id=? ORDER BY id DESC""",
                 (workspace_id, persona_id),
@@ -1125,7 +1515,7 @@ class WorkflowStore:
             )
             row = db.execute(
                 """SELECT id, persona_id, source_type, source_reference, statement,
-                          provenance, status, created_at, updated_at
+                          provenance, status, review_action, created_at, updated_at
                    FROM proposed_agent_learnings
                    WHERE workspace_id=? AND persona_id=? AND source_type=?
                      AND source_reference=?""",
@@ -1140,6 +1530,7 @@ class WorkflowStore:
         learning_id: int,
         statement: str,
         status: str,
+        review_action: str | None = None,
     ) -> dict | None:
         provenance = (
             "Physician-confirmed training learning"
@@ -1152,12 +1543,13 @@ class WorkflowStore:
         with self._connect() as db:
             updated = db.execute(
                 """UPDATE proposed_agent_learnings
-                   SET statement=?, provenance=?, status=?, updated_at=?
+                   SET statement=?, provenance=?, status=?, review_action=?, updated_at=?
                    WHERE workspace_id=? AND persona_id=? AND id=?""",
                 (
                     statement,
                     provenance,
                     status,
+                    review_action,
                     now,
                     workspace_id,
                     persona_id,
@@ -1166,7 +1558,7 @@ class WorkflowStore:
             ).rowcount
             row = db.execute(
                 """SELECT id, persona_id, source_type, source_reference, statement,
-                          provenance, status, created_at, updated_at
+                          provenance, status, review_action, created_at, updated_at
                    FROM proposed_agent_learnings
                    WHERE workspace_id=? AND persona_id=? AND id=?""",
                 (workspace_id, persona_id, learning_id),

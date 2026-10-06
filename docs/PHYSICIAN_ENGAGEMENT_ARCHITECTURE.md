@@ -15,6 +15,13 @@ escape hatch after structured choices are exhausted. `Depends` selects a curated
 child when one exists, otherwise it may request one bounded structured Responses
 question and persists either that validated result or a deterministic fallback.
 
+Pass 6B simplifies the product model to **initialize once, train forever**. A normal
+session has an immutable, configurable answer target of 10. Assigned and generated
+questions may outnumber the remaining cards internally, but physician-facing progress
+is always `answered_count / answer_target`. A branch answer consumes the next card;
+a branch opened by the final answer is saved at high priority and becomes the first
+question of the next new session rather than extending the current one.
+
 ## State boundaries
 
 The public synthetic demo combines immutable synthetic base profiles with
@@ -48,9 +55,13 @@ clinical appropriateness and explicit constraints are satisfied. Interest count,
 training activity, profile completeness, publication count, and posting activity
 must never become paid, popularity, or engagement boosts.
 
-Initialization is progressive and non-blocking. Its six projections are professional
-identity, clinical focus, case interests, referral preferences, workup preferences,
-and access/practice context.
+Initialization is progressive and non-blocking before first completion, then durable.
+The required baseline is professional identity, basic specialty/practice context, at
+least one confirmed interest, and completion of the first 10-question initialization
+session. Controlled Lucy and Iain base data supplies the first three requirements.
+Completion persists `initialized_at`; optional profile changes cannot reverse it. The
+older six-section projection remains response-compatible for existing clients but is
+not the completion rule and should not be presented as six blocking chores.
 
 Training sessions persist assigned root and child questions with root/parent IDs,
 depth, path, trigger, and priority. Deterministic priorities favor actual network
@@ -60,11 +71,60 @@ duplicates/cycles. The queue advertises capacity from lazy grounded question-sou
 families (network demand, cases, gaps, rules, profile/interests), so 100+ future
 questions do not require loading or seeding meaningless rows.
 
-Completing a session creates one proposed learning per root branch rather than one
-per intermediate answer. The controlled-demo reset endpoint deletes only the
-selected workspace/persona's sessions, responses, generated questions, and
-training-derived learnings (including confirmed ones), restoring pristine training
-without changing manually configured practice state or other product records.
+Completing the question budget creates one proposed learning per root branch rather
+than one per intermediate answer and moves the session to `questions_complete`.
+Confirm, Edit, and Reject are part of that same Train experience. When all proposals
+are reviewed, or the physician explicitly leaves review for later, the session moves
+to `review_complete`; deferred review remains discoverable through Train/Practice.
+The canonical history projection supplies counts for answers, targets, proposed and
+reviewed learnings, and deferred branches without client-side reconstruction.
+
+The controlled-demo reset endpoint deletes only the selected workspace/persona's
+sessions, responses, assignments, generated/deferred questions, focused correction
+seeds, persisted initialization marker, and training-derived learnings (including
+confirmed ones). It preserves professional profile, interests, cases, posts, network
+state, enrichment, and synthetic/practice chat history. This intentionally returns a
+controlled persona to initial setup without creating a broad destructive "reset
+agent" operation.
+
+Existing rows are migrated additively. An existing session receives its previous
+question limit as its answer target, including targets greater than 10; only newly
+created ordinary sessions default to 10. Existing completed sessions are interpreted
+as question-complete. Calibration tables, specialist calibration endpoints, proposed
+learning records, and old deep links remain compatible. Calibration is now an
+internal persistence concept: Train owns suggestion review, Practice exposes the
+confirmed result, and chat/case corrections route back into Train.
+
+## Agent overview, test cases, and chat
+
+The Agent Overview is a canonical server projection of persona identity, specialty,
+location, a deterministic portrait, initialization, training/activity statistics,
+and one next action. Its statistics are descriptive only: answers, completed
+sessions, confirmed learnings, case interests, network cases, last training, posts,
+and network physicians. No quality, intelligence, visibility, referral, or ranking
+score is produced. Practice Representation remains the source of truth and includes
+only confirmed learnings, never pending or rejected suggestions.
+
+Agent chat is limited to questions about the physician's represented practice and a
+small persona-specific library of controlled synthetic test scenarios. Selecting a
+scenario is read-only and creates no patient, case, consultation, referral, network
+edge, or recommendation record. Requests explicitly marked `real_patient` are
+rejected, obvious identifier-shaped free text is rejected, and no patient chart is
+loaded. Supported chat is stored workspace/persona-locally only for this synthetic
+and practice context; this is not a durable general-purpose clinical-chat store.
+
+When enabled, the existing Responses API client receives a tightly bounded identity
+summary, confirmed representation, allowed reference IDs, the user's question, and
+optional controlled scenario facts. A structured response is accepted only when its
+evidence references are within that supplied set; otherwise a deterministic response
+is used. Responses distinguish represented facts from explicit uncertainty and do
+not expose hidden reasoning. Overview never depends on an OpenAI call.
+
+Synthetic-case feedback has two actions. `reflects` records feedback without learning.
+`not_quite` creates a grounded focused-training seed. Starting that seed creates a
+bounded session (maximum 10 answers) in the same question, branching, proposed-
+learning, and review engine used by normal training; it may end as soon as the focused
+boundary resolves. It does not create a parallel calibration mechanism.
 
 Profile enrichment stores sourced candidate facts separately from confirmed profile
 items. Strong identity context (name, specialty, geography, institution/NPI when

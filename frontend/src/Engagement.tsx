@@ -199,6 +199,7 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
   const [session, setSession] = useState<TrainingSession | null>(null)
   const [queue, setQueue] = useState<TrainingQuestion[]>([])
   const [index, setIndex] = useState(0)
+  const [answeredOffset, setAnsweredOffset] = useState(0)
   const [cardState, setCardState] = useState<'idle' | 'leaving'>('idle')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -224,6 +225,7 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     starter.then((started) => {
       if (cancelled) return
       const answeredIds = new Set((started.responses ?? []).map((item) => item.question_id))
+      setAnsweredOffset(answeredIds.size)
       const remaining = (started.questions ?? []).filter((item) => !answeredIds.has(item.id))
       setSession(started)
       setQueue(remaining)
@@ -275,7 +277,9 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     try {
       const response = await answerTrainingQuestion(personaId, session.id, current.id, skipped ? { skipped: true } : { answer: answer ?? undefined })
       const nextQuestion = response.next_question
-      if (nextQuestion) {
+      if (response.questions_complete) {
+        advance(session, response.deferred_branch ? 'Follow-up saved for your next session.' : null, true)
+      } else if (nextQuestion) {
         setQueue((prev) => { const copy = [...prev]; copy.splice(index + 1, 0, nextQuestion); return copy })
         advance(session, null, false)
       } else {
@@ -358,10 +362,12 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
   const source = questionSource(current)
   const hasDepends = current.question_type === 'yes_no_depends'
   const isFollowUp = current.branch_depth > 0
+  const answerTarget = session?.answer_target ?? queue.length
+  const progressNumber = Math.min(answerTarget, answeredOffset + index + 1)
   return <main className={`training-shell training-active ${cardState}`}>
     <div className="training-header">
       <p className="eyebrow">Train your agent</p>
-      <div className="training-progress-row"><span>Question {index + 1} of {queue.length}</span><div className="training-progress-bar" role="progressbar" aria-valuenow={index + 1} aria-valuemin={1} aria-valuemax={queue.length}><span style={{ width: `${Math.round((index / queue.length) * 100)}%` }} /></div></div>
+      <div className="training-progress-row"><span>Question {progressNumber} of {answerTarget}</span><div className="training-progress-bar" role="progressbar" aria-valuenow={progressNumber} aria-valuemin={1} aria-valuemax={answerTarget}><span style={{ width: `${Math.round(((progressNumber - 1) / answerTarget) * 100)}%` }} /></div></div>
       <button className="text-button training-exit" onClick={() => navigate(exitPath)}>Exit</button>
     </div>
     {branchNote && <p className="training-branch-note" role="status">{branchNote}</p>}

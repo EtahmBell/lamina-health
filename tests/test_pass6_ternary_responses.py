@@ -93,7 +93,7 @@ def test_yes_no_finish_directly_and_depends_materializes_a_child(
 def test_daily_then_multiple_extended_batches_need_no_reset(store: WorkflowStore) -> None:
     with TestClient(app) as client:
         daily = client.post(_url("/api/workspace/physician/training/sessions")).json()
-        assert len(daily["questions"]) == 5
+        assert len(daily["questions"]) == 10
         for question in daily["questions"]:
             client.put(
                 _url(

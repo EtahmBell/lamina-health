@@ -1031,24 +1031,58 @@ def training_queue_summary(questions: list[dict], responses: list[dict]) -> dict
     }
 
 
-def project_initialization(profile: dict, interests: list[dict], questions: list[dict]) -> dict:
-    completed = {"professional_identity", "clinical_focus"}
-    if any(item["interest_type"] == "case_interest" for item in interests):
+def project_initialization(
+    profile: dict,
+    interests: list[dict],
+    questions: list[dict],
+    persisted_state: dict | None = None,
+    first_training_completed: bool = False,
+) -> dict:
+    required_steps = [
+        {"id": "professional_identity", "label": "Professional identity"},
+        {"id": "practice_context", "label": "Basic specialty and practice context"},
+        {"id": "interests", "label": "At least one confirmed interest"},
+        {"id": "first_training", "label": "First 10-question setup session"},
+    ]
+    completed_step_ids = {"professional_identity", "practice_context"}
+    if any(item.get("confirmed", True) for item in interests):
+        completed_step_ids.add("interests")
+    if first_training_completed or persisted_state:
+        completed_step_ids.add("first_training")
+    initialized = persisted_state is not None
+    completed = set(INITIALIZATION_SECTIONS) if initialized else {
+        "professional_identity",
+        "clinical_focus",
+        "access_practice_context",
+    }
+    if not initialized and any(
+        item["interest_type"] == "case_interest" for item in interests
+    ):
         completed.add("case_interests")
-    if profile["sections"].get("locations"):
-        completed.add("access_practice_context")
-    answered = {item["id"] for item in questions if item["status"] == "answered"}
-    if answered:
+    if not initialized and any(item["status"] == "answered" for item in questions):
         completed.update({"referral_preferences", "workup_preferences"})
-    incomplete = [item for item in INITIALIZATION_SECTIONS if item not in completed]
+    incomplete = [] if initialized else [
+        item for item in INITIALIZATION_SECTIONS if item not in completed
+    ]
     return {
+        "status": "initialized" if initialized else "in_progress",
+        "initialized": initialized,
+        "initialized_at": persisted_state["initialized_at"] if persisted_state else None,
+        "required_steps": required_steps,
+        "completed_steps": [
+            item for item in required_steps if item["id"] in completed_step_ids
+        ],
         "initialized_sections": [item for item in INITIALIZATION_SECTIONS if item in completed],
         "incomplete_sections": incomplete,
         "high_value_questions_remaining": sum(
             1 for item in questions if item["status"] == "unanswered"
         ),
         "blocking": False,
-        "meaning": "Progressive representation setup; incomplete sections do not block Lamina use.",
+        "meaning": (
+            "Agent initialized; ongoing improvement happens through Profile and Train."
+            if initialized
+            else "Complete one setup training session to initialize your agent."
+        ),
     }
 
 

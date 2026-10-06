@@ -219,7 +219,7 @@ export type PracticeRepresentation = {
 export type TrainingQuestionType = 'yes_no' | 'yes_no_depends' | 'single_choice' | 'multi_select' | 'short_text'
 export type TrainingQuestion = {
   id: string; physician_persona: DemoPhysicianPerspective
-  source_type: 'profile_confirmation' | 'existing_practice_rule' | 'canonical_case' | 'network_question' | 'explicit_synthetic_demo' | 'initialization' | 'unresolved_branch' | 'practice_gap' | 'bounded_practice_context' | 'deterministic_branch'
+  source_type: 'profile_confirmation' | 'existing_practice_rule' | 'canonical_case' | 'network_question' | 'explicit_synthetic_demo' | 'initialization' | 'unresolved_branch' | 'practice_gap' | 'bounded_practice_context' | 'deterministic_branch' | 'agent_chat_correction'
   source_reference: string | null; prompt: string; question_type: TrainingQuestionType
   answer_options: string[]; why_this_matters: string; status: 'unanswered' | 'answered' | 'skipped'
   asked_count: number | null; synthetic: true; created_at: string
@@ -233,17 +233,41 @@ export type TrainingQuestion = {
 export type TrainingResponse = {
   session_id: number; question_id: string; answer: string | string[] | null
   skipped: boolean; answered_at: string; next_question?: TrainingQuestion | null
+  answered_count?: number; answer_target?: number; questions_complete?: boolean
+  deferred_branch?: TrainingQuestion | null; completion_summary?: TrainingCompletionSummary | null
 }
 export type ProposedLearning = {
   id: number; persona_id: DemoPhysicianPerspective; source_type: string; source_reference: string
   statement: string; provenance: string; status: 'suggested' | 'confirmed' | 'rejected'
-  created_at: string; updated_at: string
+  review_action?: 'confirm' | 'edit' | 'reject' | null; created_at: string; updated_at: string
 }
 export type TrainingSession = {
   id: number; persona_id: DemoPhysicianPerspective; status: 'active' | 'completed'
   created_at: string; completed_at: string | null; questions?: TrainingQuestion[]
   responses?: TrainingResponse[]; proposed_learnings?: ProposedLearning[]
-  mode?: 'initialization' | 'daily' | 'extended'; question_limit?: number
+  mode?: 'initialization' | 'daily' | 'extended' | 'focused'; question_limit?: number
+  answer_target?: number; lifecycle_state?: 'active' | 'questions_complete' | 'review_complete' | 'abandoned'
+  questions_complete_at?: string | null; review_completed_at?: string | null
+  review_deferred?: boolean; focused_seed_id?: string | null
+  completion_summary?: TrainingCompletionSummary
+}
+export type TrainingCompletionSummary = {
+  answered_count: number; target_count: number; proposed_learning_count: number
+  unresolved_question_count: number; pending_review_count: number; more_training_available: boolean
+}
+export type TrainingHistoryEntry = {
+  session_id: number; mode: 'initialization' | 'daily' | 'extended' | 'focused'
+  lifecycle_state: 'active' | 'questions_complete' | 'review_complete' | 'abandoned'
+  started_at: string; completed_at: string | null; answered_count: number; target_count: number
+  proposed_count: number; confirmed_count: number; edited_count: number; rejected_count: number
+  deferred_branch_count: number
+}
+export type TrainProjection = {
+  training_status: 'active' | 'ready'; current_session: TrainingSession | null
+  questions_answered_total: number; sessions_completed: number; last_trained_at: string | null
+  more_training_available: boolean; available_total: number
+  recent_training_history: TrainingHistoryEntry[]; deferred_branch_count: number
+  pending_training_review_count: number
 }
 export type TrainingQueueSummary = {
   recommended_today: number; unanswered_total: number; available_total: number
@@ -267,9 +291,52 @@ export type PracticeUpdate = {
   synthetic_case?: boolean; case_safety_label?: string | null
 }
 export type ProfessionalPost = Omit<PracticeUpdate, 'type'> & { type: PostType }
-export type AgentInitialization = {
+export type AgentInitializationStatus = {
+  status: 'setup_needed' | 'in_progress' | 'initialized'; initialized: boolean
+  initialized_at: string | null
+  required_steps: { id: string; label: string }[]
+  completed_steps: { id: string; label: string }[]
   initialized_sections: string[]; incomplete_sections: string[]
   high_value_questions_remaining: number; blocking: false; meaning: string
+}
+export type AgentInitialization = AgentInitializationStatus
+export type AgentOverviewStats = {
+  questions_answered_total: number; training_sessions_completed: number
+  confirmed_practice_learnings: number; case_interests_count: number
+  network_cases_count: number; last_trained_at: string | null
+  published_updates_count: number; network_physicians_count: number
+}
+export type AgentOverview = {
+  physician: ControlledPhysicianIdentity; specialty: string; location: string
+  portrait: string; portrait_confirmed_facts: string[]; stats: AgentOverviewStats
+  initialization: AgentInitializationStatus; last_trained_at: string | null
+  more_training_available: boolean
+  next_action: 'train' | 'resume_training' | 'complete_initialization' | 'none'
+  ranking_effect: 'none'
+}
+export type AgentTestCase = {
+  id: string; title: string; summary: string; facts: string[]
+  intended_domain: string; source: string
+}
+export type AgentChatRequest = {
+  mode: 'practice_question' | 'synthetic_case'; message: string
+  controlled_test_case_id?: string; origin?: 'practice' | 'synthetic_demo' | 'real_patient'
+}
+export type AgentChatResponse = {
+  response_id: string; mode: AgentChatRequest['mode']; answer: string
+  evidence_summary: string[]; based_on: string[]
+  coverage: 'represented' | 'confirmed_representation' | 'confirmed_training' | 'uncertain'
+  uncertainty: string | null; can_train_from_this: boolean
+  controlled_test_case_id: string | null; provider: 'responses_api' | 'deterministic_fallback'
+  synthetic_only: true
+}
+export type FocusedTrainingSeed = {
+  seed_id: string; chat_response_id: string; status: 'pending' | 'started'
+  question: TrainingQuestion; created_at: string
+}
+export type AgentChatFeedback = {
+  response_id: string; feedback: 'reflects' | 'not_quite'
+  focused_training_seed: FocusedTrainingSeed | null
 }
 export type ProfileCandidateFact = {
   candidate_id: string; category: ProfileCategory; proposed_title: string
@@ -380,6 +447,12 @@ export const updateProfessionalProfileItem = (
 })
 export const getPracticeRepresentation = (perspective: DemoPhysicianPerspective) => request<PracticeRepresentation>(physicianPerspectivePath('/api/workspace/physician/agent-representation', perspective))
 export const getPhysicianTraining = (perspective: DemoPhysicianPerspective) => request<TrainingWorkspace>(physicianPerspectivePath('/api/workspace/physician/training', perspective))
+export const getAgentOverview = (perspective: DemoPhysicianPerspective) => request<AgentOverview>(physicianPerspectivePath('/api/workspace/physician/agent-overview', perspective))
+export const getTrainingHistory = (perspective: DemoPhysicianPerspective) => request<TrainProjection>(physicianPerspectivePath('/api/workspace/physician/training/history', perspective))
+export const getAgentTestCases = (perspective: DemoPhysicianPerspective) => request<AgentTestCase[]>(physicianPerspectivePath('/api/workspace/physician/agent-test-cases', perspective))
+export const chatWithAgent = (perspective: DemoPhysicianPerspective, input: AgentChatRequest) => request<AgentChatResponse>(physicianPerspectivePath('/api/workspace/physician/agent-chat', perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const submitAgentChatFeedback = (perspective: DemoPhysicianPerspective, responseId: string, feedback: 'reflects' | 'not_quite') => request<AgentChatFeedback>(physicianPerspectivePath(`/api/workspace/physician/agent-chat/${encodeURIComponent(responseId)}/feedback`, perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }) })
+export const startFocusedTraining = (perspective: DemoPhysicianPerspective, seedId: string, answerTarget = 10) => request<TrainingSession>(physicianPerspectivePath('/api/workspace/physician/training/focused', perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seed_id: seedId, answer_target: answerTarget }) })
 export const startTrainingSession = (perspective: DemoPhysicianPerspective, options?: { mode?: 'initialization' | 'daily' | 'extended'; limit?: number }) => request<TrainingSession>(physicianPerspectivePath('/api/workspace/physician/training/sessions', perspective), { method: 'POST', headers: options ? { 'Content-Type': 'application/json' } : undefined, body: options ? JSON.stringify(options) : undefined })
 export const resumeTrainingSession = (perspective: DemoPhysicianPerspective, sessionId: number) => request<TrainingSession>(physicianPerspectivePath(`/api/workspace/physician/training/sessions/${sessionId}`, perspective))
 export const answerTrainingQuestion = (
@@ -391,6 +464,7 @@ export const answerTrainingQuestion = (
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(response),
 })
 export const finishTrainingSession = (perspective: DemoPhysicianPerspective, sessionId: number) => request<TrainingSession>(physicianPerspectivePath(`/api/workspace/physician/training/sessions/${sessionId}/finish`, perspective), { method: 'POST' })
+export const completeTrainingReview = (perspective: DemoPhysicianPerspective, sessionId: number, deferPending = false) => request<TrainingSession & { pending_review_count: number }>(physicianPerspectivePath(`/api/workspace/physician/training/sessions/${sessionId}/review/complete`, perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ defer_pending: deferPending }) })
 export const resetTraining = (perspective: DemoPhysicianPerspective) => request<{ persona_id: DemoPhysicianPerspective; deleted: Record<string, number>; queue_summary: TrainingQueueSummary; questions: TrainingQuestion[]; proposed_learnings: ProposedLearning[] }>(physicianPerspectivePath('/api/workspace/physician/training/reset', perspective), { method: 'POST' })
 export const updateProposedLearning = (
   perspective: DemoPhysicianPerspective,

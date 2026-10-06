@@ -441,6 +441,76 @@ class TrainingBranchService:
         return fallback, "deterministic_fallback"
 
 
+_CHAT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string"},
+        "evidence_summary": {"type": "array", "items": {"type": "string"}},
+        "based_on": {"type": "array", "items": {"type": "string"}},
+        "coverage": {
+            "type": "string",
+            "enum": ["represented", "confirmed_representation", "confirmed_training", "uncertain"],
+        },
+        "uncertainty": {"type": ["string", "null"]},
+        "can_train_from_this": {"type": "boolean"},
+    },
+    "required": [
+        "answer",
+        "evidence_summary",
+        "based_on",
+        "coverage",
+        "uncertainty",
+        "can_train_from_this",
+    ],
+    "additionalProperties": False,
+}
+
+
+class AgentChatService:
+    def __init__(self, client: ResponsesApiClient | None = None) -> None:
+        self.client = client or ResponsesApiClient()
+
+    @staticmethod
+    def valid(result: dict, allowed_references: set[str]) -> bool:
+        answer = str(result.get("answer", ""))
+        references = set(result.get("based_on", []))
+        contains_identifier = bool(
+            re.search(r"\b(?:mrn|medical record|ssn|date of birth|dob)\b", answer.casefold())
+            or re.search(r"\b\d{3}-\d{2}-\d{4}\b", answer)
+        )
+        return bool(
+            answer.strip()
+            and references.issubset(allowed_references)
+            and not contains_identifier
+            and result.get("coverage")
+            in {"represented", "confirmed_representation", "confirmed_training", "uncertain"}
+            and (result.get("coverage") != "uncertain" or result.get("uncertainty"))
+        )
+
+    def respond(self, payload: dict, fallback: dict) -> tuple[dict, str]:
+        if self.client.available:
+            try:
+                result = self.client.structured(
+                    """Represent only how this physician has configured and trained their
+                    Lamina agent. Answer concisely from supplied canonical facts and the
+                    optional controlled synthetic scenario. Explicitly state uncertainty
+                    when no confirmed representation answers the question. Do not invent
+                    preferences, diagnose, give individualized medical advice, promise how
+                    the physician would treat a real patient, or expose hidden reasoning.""",
+                    payload,
+                    _CHAT_SCHEMA,
+                    use_case="agent_chat",
+                    schema_name="lamina_agent_chat",
+                )
+                if self.valid(result, set(payload["allowed_references"])):
+                    return result, "responses_api"
+                _log_validation_fallback("agent_chat", self.client.model)
+            except RuntimeError:
+                pass
+        return fallback, "deterministic_fallback"
+
+
 profile_enrichment_service = ProfileEnrichmentService()
 post_draft_service = PostDraftService()
 training_branch_service = TrainingBranchService()
+agent_chat_service = AgentChatService()
