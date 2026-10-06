@@ -192,7 +192,7 @@ test('publishing is always an explicit physician action, never automatic', () =>
 /* ------------------------------------------------------------- network feed */
 
 test('the network feed renders chronologically and never computes its own popularity ordering', () => {
-  const section = slice(engagement, 'export function NetworkFeedSection', '/* ---------------------------------------------------- Practice representation */')
+  const section = slice(engagement, 'export function NetworkFeedSection', '/* --------------------------------------------------------------------- Train */')
   assert.doesNotMatch(section, /\.sort\(/, 'ordering comes from the backend (chronological_only), not a client-side re-sort')
 })
 
@@ -218,4 +218,109 @@ test('specialist review/calibration endpoints are untouched by the engagement ad
 test('the PCP referral flow and demo perspectives remain exactly as before this pass', () => {
   assert.match(app, /Consult network for referral/)
   assert.doesNotMatch(app, /id: 'specialist' as const, name: SPECIALIST_NAME.*path: '\/specialist\/cases'/)
+})
+
+/* -------------------------------------------------------- Pass 6D: Practice tab */
+
+const practiceTabFn = () => slice(engagement, 'export function PracticeTab', '/* ----------------------------------------------------------------- My Agent: Train */')
+
+test('ordinary Practice navigation never shows the legacy case-raised review block', () => {
+  assert.doesNotMatch(practiceTabFn(), /Case-raised preferences/, 'the legacy block moved out of PracticeTab itself')
+  assert.match(app, /tabParam === 'calibration' && pending > 0 && <section className="agent-panel learning-panel practice-legacy-review">/, 'legacy block only renders when explicitly deep-linked via the old ?tab=calibration URL')
+})
+
+test('legacy ?tab=calibration deep links still resolve to Practice and can show the legacy block', () => {
+  assert.match(app, /const LEGACY_AGENT_TAB_ALIASES: Record<string, AgentTab> = \{ knowledge: 'practice', calibration: 'practice' \}/)
+})
+
+test('the pending-training-review CTA is still wired to the real Train projection', () => {
+  assert.match(app, /findPendingReviewHistoryEntry\(trainProjection\.recent_training_history\)/)
+  assert.match(engagement, /reviewHref && <p className="practice-review-link">/)
+})
+
+test('Clinical focus and Case interests render as visual chip groups', () => {
+  const page = practiceTabFn()
+  assert.match(page, /<ChipGroup items=\{clinicalFocus\} prominent \/>/)
+  assert.match(page, /INTEREST_CATEGORY_HEADINGS\[group\.category\]/)
+  assert.match(engagement, /case_interest: "Areas you're especially interested in seeing"/)
+})
+
+test('only clinical_interest is suppressed against an identical Clinical Focus label; rules vs. learnings are still deduplicated', () => {
+  const fn = slice(engagement, 'export function categorizeInterests', 'export function PracticeTab')
+  assert.match(fn, /if \(category === 'clinical_interest' && focusLabels\.has\(label\)\) return false/, 'only the clinical_interest category is suppressed against Clinical Focus')
+  assert.doesNotMatch(fn, /category !== 'clinical_interest'.*focusLabels/, 'no other category should be gated on focusLabels')
+  const page = practiceTabFn()
+  assert.match(page, /!ruleLabels\.has\(normalizeLabel\(item\.statement\)\)/, 'confirmed learnings that duplicate an explicit rule sentence are still deduplicated')
+})
+
+test("Iain's Cardiorenal disease case interest survives alongside the identical Clinical Focus chip, while Lucy's duplicate clinical interest stays suppressed", () => {
+  // Mirrors the real categorizeInterests predicate (Engagement.tsx) against the exact
+  // backend-shaped fixtures confirmed live for Lucy/Iain, since this suite can't import
+  // .tsx modules directly. The source-pattern check above ties this back to the real code.
+  const normalizeLabel = (value) => value.trim().toLowerCase().replace(/\s+/g, ' ')
+  const categorizeInterests = (interests, clinicalFocus) => {
+    const focusLabels = new Set(clinicalFocus.map(normalizeLabel))
+    const order = ['case_interest', 'clinical_interest', 'research_interest', 'teaching_interest']
+    return order.map((category) => {
+      const seen = new Set()
+      const items = interests.filter((item) => {
+        if (item.interest_type !== category) return false
+        const label = normalizeLabel(item.title)
+        if (category === 'clinical_interest' && focusLabels.has(label)) return false
+        if (seen.has(label)) return false
+        seen.add(label)
+        return true
+      })
+      return { category, items }
+    }).filter((group) => group.items.length > 0)
+  }
+
+  const iainFocus = ['CKD stage 3–4', 'resistant hypertension', 'proteinuria', 'cardiorenal disease']
+  const iainInterests = [
+    { id: 'iain-case-interest-1', interest_type: 'case_interest', title: 'Resistant hypertension with renal dysfunction' },
+    { id: 'iain-case-interest-2', interest_type: 'case_interest', title: 'Proteinuric CKD' },
+    { id: 'iain-case-interest-3', interest_type: 'case_interest', title: 'Cardiorenal disease' },
+    { id: 'iain-case-interest-4', interest_type: 'case_interest', title: 'Difficult-to-control blood pressure in CKD' },
+  ]
+  const iainGrouped = categorizeInterests(iainInterests, iainFocus)
+  const iainCaseInterests = iainGrouped.find((group) => group.category === 'case_interest')?.items.map((item) => item.title) ?? []
+  assert.ok(iainCaseInterests.includes('Cardiorenal disease'), 'a case interest must survive even when it textually matches a Clinical Focus item')
+  assert.deepEqual(iainCaseInterests, ['Resistant hypertension with renal dysfunction', 'Proteinuric CKD', 'Cardiorenal disease', 'Difficult-to-control blood pressure in CKD'])
+
+  const lucyFocus = ['Primary care', 'Specialty-care coordination']
+  const lucyInterests = [
+    { id: 'lucy-care-coordination', interest_type: 'clinical_interest', title: 'Specialty-care coordination' },
+  ]
+  const lucyGrouped = categorizeInterests(lucyInterests, lucyFocus)
+  assert.deepEqual(lucyGrouped, [], "Lucy's duplicate clinical_interest must remain suppressed against Clinical Focus")
+})
+
+test('referral fit only renders when the backend provides meaningful good-fit/not-a-fit values, never raw signal codes', () => {
+  const page = practiceTabFn()
+  assert.match(page, /isRawSignalCode/)
+  assert.match(page, /\(goodFit\.length > 0 \|\| notFit\.length > 0\) && <section className="practice-section practice-section-fit">/)
+})
+
+test('workup/referral/access sections use canonical data and collapse an identical referral/workup duplicate into one group', () => {
+  const page = practiceTabFn()
+  assert.match(page, /workupSameAsReferral/)
+  assert.match(page, /sections\.access_facts\.join\(' · '\)/)
+})
+
+test('Practice Rules render as a quiet, scalable list', () => {
+  const page = practiceTabFn()
+  assert.match(page, /Practice rules/)
+  assert.match(page, /<ExpandableList items=\{sections\.explicit_rules/)
+  assert.match(engagement, /Show all \$\{items\.length\} rules/)
+})
+
+test('no disconnected completeness disclaimer remains on Practice since no completeness metric is shown', () => {
+  assert.doesNotMatch(practiceTabFn(), /completeness\.meaning/)
+  assert.doesNotMatch(practiceTabFn(), /Representation completeness only/)
+})
+
+test('the practice summary reuses the real Overview portrait sentence rather than composing new copy', () => {
+  const page = practiceTabFn()
+  assert.match(page, /const summary = practiceSummarySentence\(portrait\)/)
+  assert.match(engagement, /const practiceSummarySentence = \(portrait: string \| undefined \| null\)/)
 })

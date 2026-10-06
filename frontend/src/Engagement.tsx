@@ -861,29 +861,133 @@ export function AgentActivityList({ rows }: { rows: AgentActivityRow[] }) {
 
 /* -------------------------------------------------------------- My Agent: Practice */
 
-export function PracticeTab({ representation, reviewHref, navigate, extra }: {
-  representation: PracticeRepresentation; reviewHref?: string | null; navigate: Navigate; extra?: ReactNode
+const normalizeLabel = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ')
+/** Internal signal codes (e.g. "ckd_stage_3") are not physician-facing phrases; omit rather than show raw identifiers. */
+const isRawSignalCode = (value: string) => /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(value.trim())
+const practiceSummarySentence = (portrait: string | undefined | null) => {
+  if (!portrait) return null
+  const idx = portrait.indexOf('. ')
+  return idx === -1 ? portrait : portrait.slice(0, idx + 1)
+}
+
+function ChipGroup({ items, prominent }: { items: string[]; prominent?: boolean }) {
+  return <div className={`practice-chip-group ${prominent ? 'prominent' : ''}`}>{items.map((item) => <span className="practice-chip" key={item}>{item}</span>)}</div>
+}
+
+const INTEREST_CATEGORY_ORDER: PhysicianInterestType[] = ['case_interest', 'clinical_interest', 'research_interest', 'teaching_interest']
+const INTEREST_CATEGORY_HEADINGS: Record<PhysicianInterestType, string> = {
+  case_interest: "Areas you're especially interested in seeing",
+  clinical_interest: 'Clinical interests',
+  research_interest: 'Research interests',
+  teaching_interest: 'Teaching interests',
+}
+
+/**
+ * Groups confirmed interests by category for Practice display. Only clinical_interest is
+ * suppressed against an identical Clinical Focus label — it's the generic category most
+ * likely to just restate a focus area. Case/research/teaching interests keep their own
+ * meaning even when the phrase overlaps with a Clinical Focus chip (e.g. a case interest
+ * can legitimately repeat a focus area to say "this is the kind of case I want to see").
+ * Within-category exact duplicates are still collapsed either way.
+ */
+export function categorizeInterests(interests: PhysicianInterest[], clinicalFocus: string[]): Array<{ category: PhysicianInterestType; items: PhysicianInterest[] }> {
+  const focusLabels = new Set(clinicalFocus.map(normalizeLabel))
+  return INTEREST_CATEGORY_ORDER.map((category) => {
+    const seen = new Set<string>()
+    const items = interests.filter((item) => {
+      if (item.interest_type !== category) return false
+      const label = normalizeLabel(item.title)
+      if (category === 'clinical_interest' && focusLabels.has(label)) return false
+      if (seen.has(label)) return false
+      seen.add(label)
+      return true
+    })
+    return { category, items }
+  }).filter((group) => group.items.length > 0)
+}
+
+function ExpandableList({ items, initialCount = 5 }: { items: ReactNode[]; initialCount?: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded ? items : items.slice(0, initialCount)
+  return <>
+    <ul className="practice-rule-list">{visible}</ul>
+    {items.length > initialCount && <button className="text-button practice-rule-expand" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Show fewer' : `Show all ${items.length} rules`} <span>{expanded ? '↑' : '→'}</span></button>}
+  </>
+}
+
+export function PracticeTab({ representation, portrait, reviewHref, navigate, extra }: {
+  representation: PracticeRepresentation; portrait?: string | null; reviewHref?: string | null; navigate: Navigate; extra?: ReactNode
 }) {
   const sections = representation.sections
-  const group = (label: string, items: string[]) => items.length > 0 && <div className="practice-tab-group" key={label}><span className="section-label">{label}</span><ul className="clinical-list">{items.map((item) => <li key={item}>{item}</li>)}</ul></div>
-  const caseInterests = sections.interests.filter((item) => item.interest_type === 'case_interest')
-  const otherInterests = sections.interests.filter((item) => item.interest_type !== 'case_interest')
+  const summary = practiceSummarySentence(portrait)
+  const clinicalFocus = sections.clinical_focus
+
+  const interestsByCategory = categorizeInterests(sections.interests, clinicalFocus)
+
+  const goodFit = sections.good_fit.filter((item) => !isRawSignalCode(item))
+  const notFit = sections.not_a_fit.filter((item) => !isRawSignalCode(item))
+
+  const workupSameAsReferral = sections.referral_requirements.length > 0
+    && sections.preferred_workup.length > 0
+    && JSON.stringify(sections.referral_requirements) === JSON.stringify(sections.preferred_workup)
+  const workupGroups = workupSameAsReferral
+    ? [{ label: 'Preferred workup', items: sections.preferred_workup }]
+    : [
+      { label: 'Referral preferences', items: sections.referral_requirements },
+      { label: 'Preferred workup', items: sections.preferred_workup },
+    ].filter((group) => group.items.length > 0)
+
+  const ruleLabels = new Set(sections.explicit_rules.map(normalizeLabel))
+  const extraLearnings = sections.confirmed_learnings.filter((item) => !ruleLabels.has(normalizeLabel(item.statement)))
+
   return <div className="practice-tab">
     <p className="eyebrow">Practice representation</p>
     <h2>How your agent represents your practice</h2>
+    {summary && <p className="practice-summary">{summary}</p>}
     {reviewHref && <p className="practice-review-link"><button className="text-button" onClick={() => navigate(reviewHref)}>Review training results →</button></p>}
-    {group('Clinical focus', sections.clinical_focus)}
-    {caseInterests.length > 0 && <div className="practice-tab-group case-interests"><span className="section-label">Areas you're especially interested in seeing</span><ul className="clinical-list">{caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul>{sections.interest_safety && <small className="profile-interest-disclaimer">{sections.interest_safety}</small>}</div>}
-    {otherInterests.length > 0 && <div className="practice-tab-group"><span className="section-label">Other confirmed interests</span><ul className="clinical-list">{otherInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul></div>}
-    {group('Usually a good fit', sections.good_fit)}
-    {group('Usually not a fit', sections.not_a_fit)}
-    {group('Referral preferences', sections.referral_requirements)}
-    {group('Preferred workup', sections.preferred_workup)}
-    {group('Access / practice context', sections.access_facts)}
-    {group('Confirmed practice rules', sections.explicit_rules)}
-    {sections.confirmed_learnings.length > 0 && <div className="practice-tab-group" key="confirmed-learnings"><span className="section-label">Confirmed learnings</span><ul className="clinical-list">{sections.confirmed_learnings.map((item) => <li key={item.id}>{item.statement}</li>)}</ul></div>}
+
+    {clinicalFocus.length > 0 && <section className="practice-section practice-section-focus">
+      <h3 className="practice-section-heading">Clinical focus</h3>
+      <ChipGroup items={clinicalFocus} prominent />
+    </section>}
+
+    {interestsByCategory.length > 0 && <section className="practice-section practice-section-interests">
+      <h3 className="practice-section-heading">Interests</h3>
+      {interestsByCategory.map((group) => <div className="practice-interest-group" key={group.category}>
+        <p className="practice-subheading">{INTEREST_CATEGORY_HEADINGS[group.category]}</p>
+        <ChipGroup items={group.items.map((item) => item.title)} prominent={group.category === 'case_interest'} />
+        {group.category === 'case_interest' && sections.interest_safety && <small className="profile-interest-disclaimer">{sections.interest_safety}</small>}
+      </div>)}
+    </section>}
+
+    {(goodFit.length > 0 || notFit.length > 0) && <section className="practice-section practice-section-fit">
+      <h3 className="practice-section-heading">Referral fit</h3>
+      <div className="practice-fit-columns">
+        {goodFit.length > 0 && <div className="practice-fit-column good"><p className="practice-subheading">Usually a good fit</p><ul className="practice-fit-list">{goodFit.map((item) => <li key={item}><span aria-hidden="true">✓</span> {item}</li>)}</ul></div>}
+        {notFit.length > 0 && <div className="practice-fit-column not-fit"><p className="practice-subheading">Usually not a fit</p><ul className="practice-fit-list">{notFit.map((item) => <li key={item}><span aria-hidden="true">—</span> {item}</li>)}</ul></div>}
+      </div>
+    </section>}
+
+    {(workupGroups.length > 0 || sections.access_facts.length > 0) && <section className="practice-section practice-section-workup">
+      <h3 className="practice-section-heading">Before referral</h3>
+      <div className="practice-workup-columns">
+        {workupGroups.map((group) => <div className="practice-workup-block" key={group.label}><p className="practice-subheading">{group.label}</p><ChipGroup items={group.items} /></div>)}
+        {sections.access_facts.length > 0 && <div className="practice-workup-block"><p className="practice-subheading">Access</p><p className="practice-access-line">{sections.access_facts.join(' · ')}</p></div>}
+      </div>
+    </section>}
+
+    {sections.explicit_rules.length > 0 && <section className="practice-section practice-section-rules">
+      <h3 className="practice-section-heading">Practice rules</h3>
+      <p className="practice-subcopy">Confirmed guidance your agent uses when representing how you practice.</p>
+      <ExpandableList items={sections.explicit_rules.map((item) => <li key={item}>{item}</li>)} />
+    </section>}
+
+    {extraLearnings.length > 0 && <section className="practice-section practice-section-learnings">
+      <h3 className="practice-section-heading">Learned from training</h3>
+      <ExpandableList items={extraLearnings.map((item) => <li key={item.id}>{item.statement}</li>)} />
+    </section>}
+
     {extra}
-    <p className="practice-representation-note">{representation.completeness.meaning}</p>
   </div>
 }
 

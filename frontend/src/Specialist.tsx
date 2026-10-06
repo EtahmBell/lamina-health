@@ -378,7 +378,7 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
 
       {tab === 'overview' && <AgentOverviewPanel overview={overview} trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} onViewPractice={() => selectTab('practice')} />}
-      {tab === 'practice' && representation && <PracticeTab representation={representation} reviewHref={reviewHref} navigate={navigate} />}
+      {tab === 'practice' && representation && <PracticeTab representation={representation} portrait={overview?.portrait} reviewHref={reviewHref} navigate={navigate} />}
       {tab === 'train' && <TrainTab trainProjection={trainProjection} resumeAnsweredCount={resumeAnsweredCount} navigate={navigate} trainPath={trainingPath('iain')} />}
       {tab === 'chat' && <ChatTab personaId="iain" agentName={workspace.physician.agent_name} navigate={navigate} trainPath={trainingPath('iain')} />}
       {tab === 'activity' && <section className="agent-panel agent-activity"><div className="panel-header"><div><p className="eyebrow">Your agent's actions</p><h2>Recent activity</h2></div></div><AgentActivityList rows={activityRows} /></section>}
