@@ -3,7 +3,6 @@ import {
   ApiError,
   getAgentOverview,
   getNetworkFeed,
-  getPhysicianTraining,
   getPracticeRepresentation,
   getProfessionalPosts,
   getSpecialistCase,
@@ -11,7 +10,6 @@ import {
   getSpecialistWorkspace,
   getTrainingHistory,
   markSpecialistCaseReviewed,
-  resumeTrainingSession,
   updateSpecialistCalibration,
   type AgentOverview,
   type NetworkFeed,
@@ -22,7 +20,6 @@ import {
   type SpecialistCaseSummary,
   type SpecialistOutcome,
   type SpecialistWorkspace,
-  type TrainingQueueSummary,
   type TrainProjection,
 } from './api.ts'
 import { eventDomId } from './agentActivity.ts'
@@ -103,16 +100,12 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
   const [error, setError] = useState('')
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [queueSummary, setQueueSummary] = useState<TrainingQueueSummary | null>(null)
-  const [resumeSessionId, setResumeSessionId] = useState<number | null>(null)
+  const [training, setTraining] = useState<TrainProjection | null>(null)
   useEffect(() => {
     getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message))
     getPracticeRepresentation('iain').then(setRepresentation).catch(() => {})
     getNetworkFeed('iain').then(setFeed).catch(() => {})
-    getPhysicianTraining('iain').then((trainingWorkspace) => {
-      setQueueSummary(trainingWorkspace.queue_summary)
-      setResumeSessionId(trainingWorkspace.sessions.find((item) => item.status === 'active')?.id ?? null)
-    }).catch(() => {})
+    getTrainingHistory('iain').then(setTraining).catch(() => {})
   }, [])
   const needsReview = workspace?.recent_cases.filter((item) => !item.reviewed) ?? []
   const recent = workspace?.recent_cases ?? []
@@ -131,7 +124,7 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
         <div className="lam-list needs-attention">{needsReview.map((item) => <SpecialistCurrentWorkRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
       </section>}
     </>}
-    <ImproveAgentCard representation={representation} queueSummary={queueSummary} resumeSessionId={resumeSessionId} navigate={navigate} trainPath={trainingPath('iain')} />
+    <ImproveAgentCard representation={representation} training={training} navigate={navigate} trainPath={trainingPath('iain')} />
     <NetworkFeedSection feed={feed} navigate={navigate} perspective="iain" />
     {workspace && workspace.case_count > 0 && <section className="home-patients"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
       <div className="lam-list quiet">{recent.slice(0, 5).map((item) => <SpecialistActivityRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
@@ -326,7 +319,6 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [overview, setOverview] = useState<AgentOverview | null>(null)
   const [trainProjection, setTrainProjection] = useState<TrainProjection | null>(null)
-  const [resumeAnsweredCount, setResumeAnsweredCount] = useState<number | null>(null)
   const [tab, setTab] = useState<AgentTab>(() => ((AGENT_TABS as readonly string[]).includes(tabParam ?? '') ? (tabParam as AgentTab) : 'overview'))
   const [error, setError] = useState('')
   useEffect(() => {
@@ -338,11 +330,6 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
     getProfessionalPosts('iain').then(setPosts).catch(() => {})
   }, [])
   useEffect(() => { if ((AGENT_TABS as readonly string[]).includes(tabParam ?? '')) setTab(tabParam as AgentTab) }, [tabParam])
-  useEffect(() => {
-    const activeId = trainProjection?.current_session?.id
-    if (!activeId) { setResumeAnsweredCount(null); return }
-    resumeTrainingSession('iain', activeId).then((session) => setResumeAnsweredCount((session.responses ?? []).filter((item) => !item.skipped).length)).catch(() => {})
-  }, [trainProjection?.current_session?.id])
   const selectTab = (next: AgentTab) => { setTab(next); window.history.replaceState({}, '', `/specialist/agent?tab=${next}`) }
   const reviewHref = trainProjection ? (() => {
     const entry = findPendingReviewHistoryEntry(trainProjection.recent_training_history)
@@ -377,9 +364,9 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
 
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
 
-      {tab === 'overview' && <AgentOverviewPanel overview={overview} trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} onViewPractice={() => selectTab('practice')} />}
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} navigate={navigate} trainPath={trainingPath('iain')} onViewPractice={() => selectTab('practice')} />}
       {tab === 'practice' && representation && <PracticeTab representation={representation} portrait={overview?.portrait} reviewHref={reviewHref} navigate={navigate} />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} resumeAnsweredCount={resumeAnsweredCount} navigate={navigate} trainPath={trainingPath('iain')} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} />}
       {tab === 'chat' && <ChatTab personaId="iain" agentName={workspace.physician.agent_name} navigate={navigate} trainPath={trainingPath('iain')} />}
       {tab === 'activity' && <section className="agent-panel agent-activity"><div className="panel-header"><div><p className="eyebrow">Your agent's actions</p><h2>Recent activity</h2></div></div><AgentActivityList rows={activityRows} /></section>}
     </>}

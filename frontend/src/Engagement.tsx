@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   ApiError,
   answerTrainingQuestion,
@@ -59,7 +59,6 @@ import {
   type TrainingCompletionSummary,
   type TrainingHistoryEntry,
   type TrainingQuestion,
-  type TrainingQueueSummary,
   type TrainingResponse,
   type TrainingSession,
   type TrainProjection,
@@ -96,25 +95,30 @@ export const settingsPath = '/settings'
 
 /* ------------------------------------------------------------- Home: engagement */
 
-export function ImproveAgentCard({ representation, queueSummary, resumeSessionId, navigate, trainPath }: {
-  representation: PracticeRepresentation | null; queueSummary: TrainingQueueSummary | null
-  resumeSessionId: number | null; navigate: Navigate; trainPath: string
+export function ImproveAgentCard({ representation, training, navigate, trainPath }: {
+  representation: PracticeRepresentation | null; training: TrainProjection | null
+  navigate: Navigate; trainPath: string
 }) {
-  if (!representation) return null
-  const waiting = representation.completeness.questions_waiting
+  if (!representation || !training) return null
   const confirmedCount = representation.completeness.confirmed_practice_item_count
-  const recommendedToday = queueSummary?.recommended_today ?? waiting
-  return <section className={`improve-agent-card ${waiting === 0 && !resumeSessionId ? 'done' : ''}`}>
+  const activeId = training.active_session_id
+  const reviewId = training.review_session_id
+  const content = training.state === 'initialization_needed'
+    ? { title: 'Set up your agent.', label: 'Continue setup', href: `${trainPath}?mode=initialization` }
+    : training.state === 'active_unstarted' && activeId
+      ? { title: 'Train your agent.', label: 'Start training', href: `${trainPath}?resume=${activeId}` }
+      : training.state === 'active_in_progress' && activeId
+        ? { title: 'Continue training.', label: 'Resume training', href: `${trainPath}?resume=${activeId}` }
+        : training.state === 'review_pending' && reviewId
+          ? { title: 'Training complete.', label: 'Review what your agent learned', href: `${trainPath}?review=${reviewId}` }
+          : training.state === 'ready'
+            ? { title: 'A short training session is ready.', label: 'Start training', href: `${trainPath}?mode=daily` }
+            : null
+  return <section className={`improve-agent-card ${training.state === 'caught_up' ? 'done' : ''}`}>
     <p className="eyebrow">Improve your agent</p>
-    {resumeSessionId
-      ? <h2>You have an unfinished training session.</h2>
-      : waiting > 0
-        ? <h2>{recommendedToday} recommended question{recommendedToday === 1 ? '' : 's'} today could help your agent represent your practice more accurately.</h2>
-        : <h2>Your agent is up to date.</h2>}
-    <p className="improve-agent-stat">{confirmedCount} practice area{confirmedCount === 1 ? '' : 's'} confirmed{waiting > 0 ? ` · ${waiting} question${waiting === 1 ? '' : 's'} waiting` : ''}.</p>
-    {resumeSessionId
-      ? <button className="button-primary" onClick={() => navigate(`${trainPath}?resume=${resumeSessionId}`)}>Resume training <span>→</span></button>
-      : waiting > 0 && <button className="button-primary" onClick={() => navigate(`${trainPath}?mode=daily`)}>Start daily training <span>→</span></button>}
+    <h2>{content?.title ?? 'Your agent is caught up for now.'}</h2>
+    <p className="improve-agent-stat">{confirmedCount} practice area{confirmedCount === 1 ? '' : 's'} confirmed{training.state === 'active_in_progress' ? ` · ${training.answered_count} of ${training.answer_target ?? 10} answered` : ''}.</p>
+    {content && <button className="button-primary" onClick={() => navigate(content.href)}>{content.label} <span>→</span></button>}
   </section>
 }
 
@@ -221,38 +225,58 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
   const [editingLearningId, setEditingLearningId] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [branchNote, setBranchNote] = useState<string | null>(null)
-  const starterRef = useRef<{ key: string; promise: ReturnType<typeof startTrainingSession> } | null>(null)
-
   useEffect(() => {
     let cancelled = false
-    const key = `${personaId}:${modeParam}:${resumeParam ?? ''}:${reviewParam ?? ''}`
     setPhase('loading'); setIndex(0); setCardState('idle'); setBranchNote(null)
     setCompletionSummary(null); setLearnings([]); setMultiSelected([]); setTextAnswer(''); setError('')
-    if (reviewParam) {
-      Promise.all([resumeTrainingSession(personaId, Number(reviewParam)), getPhysicianTraining(personaId)]).then(([resumedSession, workspace]) => {
-        if (cancelled) return
-        const prefix = `session:${reviewParam}:`
-        setSession(resumedSession)
-        setLearnings(workspace.proposed_learnings.filter((item) => item.source_reference.startsWith(prefix)))
-        setPhase('reviewing')
-      }).catch((err: unknown) => { if (!cancelled) { setError(err instanceof Error ? err.message : 'Could not open this review'); setPhase('error') } })
-      return () => { cancelled = true }
+    const openReview = async (sessionId: number) => {
+      const [resumedSession, workspace] = await Promise.all([
+        resumeTrainingSession(personaId, sessionId),
+        getPhysicianTraining(personaId),
+      ])
+      if (cancelled) return
+      const prefix = `session:${sessionId}:`
+      setSession(resumedSession)
+      setLearnings(workspace.proposed_learnings.filter((item) => item.source_reference.startsWith(prefix)))
+      setPhase('reviewing')
     }
-    if (!starterRef.current || starterRef.current.key !== key) {
-      starterRef.current = { key, promise: resumeParam ? resumeTrainingSession(personaId, Number(resumeParam)) : startTrainingSession(personaId, { mode: modeParam }) }
-    }
-    const starter = starterRef.current.promise
-    starter.then((started) => {
+    const openTraining = async () => {
+      if (reviewParam) {
+        await openReview(Number(reviewParam))
+        return
+      }
+      const training = await getTrainingHistory(personaId)
+      if (cancelled) return
+      if (training.state === 'review_pending' && training.review_session_id) {
+        await openReview(training.review_session_id)
+        return
+      }
+      if (training.state === 'caught_up') {
+        setPhase('empty')
+        return
+      }
+      const activeId = resumeParam ? Number(resumeParam) : training.active_session_id
+      const started = activeId
+        ? await resumeTrainingSession(personaId, activeId)
+        : await startTrainingSession(personaId, {
+          mode: training.state === 'initialization_needed' ? 'initialization' : modeParam,
+        })
       if (cancelled) return
       const answeredIds = new Set((started.responses ?? []).map((item) => item.question_id))
-      const answeredSoFar = (started.responses ?? []).filter((item) => !item.skipped).length
+      const answeredSoFar = (started.responses ?? []).length
       const remaining = (started.questions ?? []).filter((item) => !answeredIds.has(item.id))
       setSession(started)
       setQueue(remaining)
       setAnsweredCount(answeredSoFar)
       setAnswerTarget(started.answer_target ?? 10)
       setPhase(remaining.length > 0 ? 'questions' : 'empty')
-    }).catch((err: unknown) => { if (!cancelled) { setError(err instanceof Error ? err.message : 'Could not start training'); setPhase('error') } })
+    }
+    void openTraining().catch((err: unknown) => {
+      if (!cancelled) {
+        setError(err instanceof Error ? err.message : 'Could not open training')
+        setPhase('error')
+      }
+    })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [personaId, modeParam, resumeParam, reviewParam])
@@ -317,7 +341,6 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     setBusy(true); setError('')
     try {
       const started = await startTrainingSession(personaId, { mode: 'daily' })
-      starterRef.current = { key: `${personaId}:daily::`, promise: Promise.resolve(started) }
       setSession(started)
       setQueue(started.questions ?? [])
       setAnsweredCount(0)
@@ -804,19 +827,23 @@ export function InitializationCard({ initialization, navigate, trainPath }: { in
 
 /* ------------------------------------------------------------- My Agent: Overview */
 
-export function AgentOverviewPanel({ overview, trainProjection, navigate, trainPath, onViewPractice }: {
-  overview: AgentOverview | null; trainProjection: TrainProjection | null
+export function AgentOverviewPanel({ overview, navigate, trainPath, onViewPractice }: {
+  overview: AgentOverview | null
   navigate: Navigate; trainPath: string; onViewPractice: () => void
 }) {
   if (!overview) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
   const firstName = overview.physician.name.replace(/^Dr\.\s*/, '').split(/\s+/)[0]
-  const resumeId = trainProjection?.current_session?.id ?? null
-  const primary = overview.next_action === 'complete_initialization'
+  const training = overview.training
+  const primary = training.action === 'continue_setup'
     ? { label: 'Continue setup', href: `${trainPath}?mode=initialization` }
-    : overview.next_action === 'resume_training' && resumeId
-      ? { label: 'Resume training', href: `${trainPath}?resume=${resumeId}` }
-      : overview.next_action === 'train'
+    : training.action === 'resume_training' && training.active_session_id
+      ? { label: 'Resume training', href: `${trainPath}?resume=${training.active_session_id}` }
+      : training.action === 'start_training' && training.active_session_id
+        ? { label: 'Start training', href: `${trainPath}?resume=${training.active_session_id}` }
+        : training.action === 'start_training'
         ? { label: 'Train my agent', href: `${trainPath}?mode=daily` }
+        : training.action === 'review_training' && training.review_session_id
+          ? { label: 'Review training', href: `${trainPath}?review=${training.review_session_id}` }
         : null
   return <div className="agent-overview-v2">
     <section className="agent-portrait-card">
@@ -1006,29 +1033,42 @@ export function findPendingReviewHistoryEntry(history: TrainingHistoryEntry[]): 
   return history.find((item) => item.proposed_count > item.confirmed_count + item.edited_count + item.rejected_count) ?? null
 }
 
-export function TrainTab({ trainProjection, resumeAnsweredCount, navigate, trainPath }: {
-  trainProjection: TrainProjection | null; resumeAnsweredCount: number | null
+export function TrainTab({ trainProjection, navigate, trainPath }: {
+  trainProjection: TrainProjection | null
   navigate: Navigate; trainPath: string
 }) {
   if (!trainProjection) return <div className="page-state embedded"><div className="loading-line" /><p>Opening training…</p></div>
-  const reviewEntry = findPendingReviewHistoryEntry(trainProjection.recent_training_history)
+  const activeId = trainProjection.active_session_id
+  const reviewId = trainProjection.review_session_id
   return <div className="train-tab-v2">
     <p className="eyebrow">Train your agent</p>
     <h2>Train your agent</h2>
     <p className="panel-intro">Answer a few quick questions about how you practice. Your answers help Lamina represent your preferences more accurately.</p>
-    {trainProjection.current_session
+    {trainProjection.state === 'initialization_needed'
       ? <div className="train-primary-card">
-        <p className="section-label">Training in progress</p>
-        <h3>{resumeAnsweredCount ?? 0} of {trainProjection.current_session.answer_target ?? 10} answered</h3>
-        <button className="button-primary" onClick={() => navigate(`${trainPath}?resume=${trainProjection.current_session!.id}`)}>Resume training <span>→</span></button>
+        <p className="section-label">Set up your agent</p>
+        <h3>Complete your first 10-question session</h3>
+        <button className="button-primary" onClick={() => navigate(activeId ? `${trainPath}?resume=${activeId}` : `${trainPath}?mode=initialization`)}>Continue setup <span>→</span></button>
       </div>
-      : reviewEntry
+      : trainProjection.state === 'active_unstarted' && activeId
+        ? <div className="train-primary-card">
+          <p className="section-label">Train your agent</p>
+          <h3>{trainProjection.answer_target ?? 10} questions</h3>
+          <button className="button-primary" onClick={() => navigate(`${trainPath}?resume=${activeId}`)}>Start training <span>→</span></button>
+        </div>
+        : trainProjection.state === 'active_in_progress' && activeId
+          ? <div className="train-primary-card">
+            <p className="section-label">Training in progress</p>
+            <h3>{trainProjection.answered_count} of {trainProjection.answer_target ?? 10} answered</h3>
+            <button className="button-primary" onClick={() => navigate(`${trainPath}?resume=${activeId}`)}>Resume training <span>→</span></button>
+          </div>
+      : trainProjection.state === 'review_pending' && reviewId
         ? <div className="train-primary-card">
           <p className="section-label">Training complete</p>
           <h3>Review what your agent learned</h3>
-          <button className="button-primary" onClick={() => navigate(`${trainPath}?review=${reviewEntry.session_id}`)}>Review learnings <span>→</span></button>
+          <button className="button-primary" onClick={() => navigate(`${trainPath}?review=${reviewId}`)}>Review learnings <span>→</span></button>
         </div>
-        : trainProjection.more_training_available
+        : trainProjection.state === 'ready'
           ? <div className="train-primary-card">
             <p className="section-label">Today's training</p>
             <h3>10 questions</h3>

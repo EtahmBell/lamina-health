@@ -925,6 +925,20 @@ class WorkflowStore:
     ) -> dict:
         now = self._now()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                """SELECT id FROM training_sessions
+                   WHERE workspace_id=? AND persona_id=? AND status='active'
+                     AND lifecycle_state='active'
+                   ORDER BY id DESC LIMIT 1""",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if existing:
+                session_id = int(existing["id"])
+                db.commit()
+                session = self.training_session(workspace_id, persona_id, session_id)
+                assert session is not None
+                return session
             cursor = db.execute(
                 """INSERT INTO training_sessions(
                      workspace_id, persona_id, status, created_at, mode, question_limit,
@@ -984,6 +998,45 @@ class WorkflowStore:
                 (workspace_id, persona_id),
             ).fetchall()
         return [{**dict(row), "review_deferred": bool(row["review_deferred"])} for row in rows]
+
+    def normalize_unstarted_training_session(
+        self,
+        workspace_id: str,
+        persona_id: str,
+        session_id: int,
+        answer_target: int = 10,
+    ) -> dict | None:
+        """Normalize a zero-response legacy session without discarding physician work."""
+        with self._connect() as db:
+            response_count = db.execute(
+                """SELECT COUNT(*) FROM training_responses
+                   WHERE workspace_id=? AND persona_id=? AND session_id=?""",
+                (workspace_id, persona_id, session_id),
+            ).fetchone()[0]
+            if response_count == 0:
+                db.execute(
+                    """UPDATE training_sessions
+                       SET question_limit=?, answer_target=?
+                       WHERE workspace_id=? AND persona_id=? AND id=?
+                         AND status='active' AND mode!='focused'""",
+                    (answer_target, answer_target, workspace_id, persona_id, session_id),
+                )
+        return self.training_session(workspace_id, persona_id, session_id)
+
+    def abandon_training_session(
+        self, workspace_id: str, persona_id: str, session_id: int
+    ) -> dict | None:
+        """Archive an unusable/duplicate active session while retaining its audit rows."""
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE training_sessions
+                   SET status='completed', lifecycle_state='abandoned',
+                       completed_at=COALESCE(completed_at, ?)
+                   WHERE workspace_id=? AND persona_id=? AND id=? AND status='active'""",
+                (now, workspace_id, persona_id, session_id),
+            )
+        return self.training_session(workspace_id, persona_id, session_id)
 
     def assign_training_question(
         self,
@@ -1402,6 +1455,8 @@ class WorkflowStore:
         )
         entries: list[dict] = []
         for session in sessions:
+            if session["lifecycle_state"] == "abandoned":
+                continue
             session_id = session["id"]
             session_responses = [item for item in responses if item["session_id"] == session_id]
             prefix = f"session:{session_id}:"

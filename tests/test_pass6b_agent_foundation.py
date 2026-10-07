@@ -118,7 +118,7 @@ def test_learning_review_lifecycle_and_practice_truth(store: WorkflowStore) -> N
     with TestClient(app) as client:
         session = client.post(
             _url("/api/workspace/physician/training/sessions"),
-            json={"mode": "daily", "limit": 2},
+            json={"mode": "daily"},
         ).json()
         final = _complete_questions(client, session)
         assert final["questions_complete"] is True
@@ -126,8 +126,8 @@ def test_learning_review_lifecycle_and_practice_truth(store: WorkflowStore) -> N
             _url(f"/api/workspace/physician/training/sessions/{session['id']}/finish")
         ).json()
         assert finished["lifecycle_state"] == "questions_complete"
-        assert finished["completion_summary"]["proposed_learning_count"] == 2
-        first, second = finished["proposed_learnings"]
+        assert finished["completion_summary"]["proposed_learning_count"] == 10
+        first, second, *remaining = finished["proposed_learnings"]
 
         confirmed = client.put(
             _url(f"/api/workspace/physician/training/learnings/{first['id']}"),
@@ -138,6 +138,11 @@ def test_learning_review_lifecycle_and_practice_truth(store: WorkflowStore) -> N
             _url(f"/api/workspace/physician/training/learnings/{second['id']}"),
             json={"action": "reject"},
         ).json()
+        for learning in remaining:
+            rejected = client.put(
+                _url(f"/api/workspace/physician/training/learnings/{learning['id']}"),
+                json={"action": "reject"},
+            ).json()
         assert rejected["session"]["lifecycle_state"] == "review_complete"
 
         practice = client.get(
@@ -153,7 +158,7 @@ def test_learning_review_lifecycle_and_practice_truth(store: WorkflowStore) -> N
             "recent_training_history"
         ][0]
         assert history["confirmed_count"] == 1
-        assert history["rejected_count"] == 1
+        assert history["rejected_count"] == 9
 
 
 def test_initialization_is_persisted_once_and_reset_deliberately_clears_it(

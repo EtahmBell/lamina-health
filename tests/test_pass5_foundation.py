@@ -75,8 +75,8 @@ def test_initialization_and_lazy_large_queue(store: WorkflowStore) -> None:
     assert queue["queue_summary"]["availability_model"] == "lazy_grounded_sources"
     assert len(session["questions"]) == 10
     assert all(item["source_type"] == "initialization" for item in session["questions"])
-    assert len(extended["questions"]) == 25
-    assert any(item["source_type"] == "practice_gap" for item in extended["questions"])
+    assert extended["id"] == session["id"]
+    assert len(extended["questions"]) == 10
 
 
 def test_depends_branch_persists_path_resumes_and_stops_at_boundary(

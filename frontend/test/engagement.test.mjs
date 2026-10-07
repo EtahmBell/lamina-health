@@ -59,9 +59,13 @@ test('specialist network page is derived from the feed, never Lucy\'s private ro
 
 /* ---------------------------------------------------------------- training */
 
-test('training never auto-answers: it starts a real session (with mode) and reads unanswered questions from it', () => {
+test('training route consumes canonical state before it resumes or starts a session', () => {
   const page = trainingPageFn()
-  assert.match(page, /startTrainingSession\(personaId, \{ mode: modeParam \}\)/)
+  assert.match(page, /const training = await getTrainingHistory\(personaId\)/)
+  assert.match(page, /training\.state === 'caught_up'/)
+  assert.match(page, /training\.active_session_id/)
+  assert.match(page, /training\.state === 'review_pending'/)
+  assert.match(page, /mode: training\.state === 'initialization_needed' \? 'initialization' : modeParam/)
   assert.match(page, /const remaining = \(started\.questions \?\? \[\]\)\.filter\(\(item\) => !answeredIds\.has\(item\.id\)\)/)
 })
 
@@ -127,13 +131,16 @@ test('Improve your agent never shows a referral score, ranking, or quality metri
   const card = slice(engagement, 'export function ImproveAgentCard', 'const FEED_TYPE_LABELS')
   assert.doesNotMatch(card, /score|ranking|quality/i)
   assert.match(card, /practice area/)
-  assert.match(card, /question/)
+  assert.match(card, /training\.answered_count/)
+  assert.doesNotMatch(card, /unfinished training/i)
 })
 
-test('Home (both personas) surfaces Improve your agent, including resume-session awareness', () => {
-  assert.match(homePageFn(), /<ImproveAgentCard representation=\{representation\} queueSummary=\{queueSummary\} resumeSessionId=\{resumeSessionId\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} \/>/)
+test('Home (both personas) passes the canonical training projection to Improve your agent', () => {
+  assert.match(homePageFn(), /getTrainingHistory\('lucy'\)\.then\(setTraining\)/)
+  assert.match(homePageFn(), /<ImproveAgentCard representation=\{representation\} training=\{training\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} \/>/)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------------- Cases */')
-  assert.match(specialistHome, /<ImproveAgentCard representation=\{representation\} queueSummary=\{queueSummary\} resumeSessionId=\{resumeSessionId\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} \/>/)
+  assert.match(specialistHome, /getTrainingHistory\('iain'\)\.then\(setTraining\)/)
+  assert.match(specialistHome, /<ImproveAgentCard representation=\{representation\} training=\{training\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} \/>/)
 })
 
 /* -------------------------------------------------------------- My Agent */

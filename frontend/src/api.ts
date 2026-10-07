@@ -262,7 +262,13 @@ export type TrainingHistoryEntry = {
   proposed_count: number; confirmed_count: number; edited_count: number; rejected_count: number
   deferred_branch_count: number
 }
+export type TrainingState = 'initialization_needed' | 'ready' | 'active_unstarted' | 'active_in_progress' | 'review_pending' | 'caught_up'
+export type TrainingAction = 'continue_setup' | 'start_training' | 'resume_training' | 'review_training' | 'none'
 export type TrainProjection = {
+  state: TrainingState; action: TrainingAction
+  active_session_id: number | null; review_session_id: number | null
+  answered_count: number; answer_target: number | null; review_pending: boolean
+  initialization_required: boolean; initialized: boolean
   training_status: 'active' | 'ready'; current_session: TrainingSession | null
   questions_answered_total: number; sessions_completed: number; last_trained_at: string | null
   more_training_available: boolean; available_total: number
@@ -309,9 +315,9 @@ export type AgentOverviewStats = {
 export type AgentOverview = {
   physician: ControlledPhysicianIdentity; specialty: string; location: string
   portrait: string; portrait_confirmed_facts: string[]; stats: AgentOverviewStats
-  initialization: AgentInitializationStatus; last_trained_at: string | null
+  initialization: AgentInitializationStatus; training: TrainProjection; last_trained_at: string | null
   more_training_available: boolean
-  next_action: 'train' | 'resume_training' | 'complete_initialization' | 'none'
+  next_action: TrainingAction
   ranking_effect: 'none'
 }
 export type AgentTestCase = {

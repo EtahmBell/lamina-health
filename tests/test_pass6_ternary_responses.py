@@ -116,7 +116,7 @@ def test_daily_then_multiple_extended_batches_need_no_reset(store: WorkflowStore
                 _url("/api/workspace/physician/training/sessions"),
                 json={"mode": "extended", "limit": 12},
             ).json()
-            assert len(session["questions"]) == 12
+            assert len(session["questions"]) == 10
             ids = {item["id"] for item in session["questions"]}
             assert not ids.intersection(seen)
             seen.update(ids)
@@ -129,7 +129,7 @@ def test_daily_then_multiple_extended_batches_need_no_reset(store: WorkflowStore
                     json={"answer": _answer_for(question)},
                 )
             client.post(_url(f"/api/workspace/physician/training/sessions/{session['id']}/finish"))
-        assert len(seen) == 36
+        assert len(seen) == 30
 
 
 def test_training_reset_is_persona_and_workspace_scoped(store: WorkflowStore) -> None:

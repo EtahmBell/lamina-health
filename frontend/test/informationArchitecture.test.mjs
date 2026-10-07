@@ -81,8 +81,8 @@ test('the Home activity header links to all agent activity, not to consultations
 test('the Your Agent summary carries existing factual state only', () => {
   const card = home().slice(home().indexOf('home-agent-card'), home().indexOf('</aside>'))
   assert.match(card, /Last activity/)
-  assert.match(card, /Proposed learnings/)
-  assert.match(card, /awaiting your confirmation/)
+  assert.match(card, /Practice rules confirmed/)
+  assert.match(card, /confirmed_practice_learnings/)
   assert.match(card, /navigate\('\/agent\?tab=overview'\)/)
   assert.doesNotMatch(card, /Math\.|%|average|score|trend/i, 'no invented metrics')
 })
@@ -103,9 +103,10 @@ test('Home activity carries timestamps and differentiates interactions from mile
   assert.match(home(), /agentActivity\(ordered\)\.slice\(0, 3\)/)
 })
 
-test('the Home learning row opens Calibration, not the agent overview', () => {
-  assert.match(home(), /agent learning\{pending\.length === 1/)
-  assert.match(home(), /navigate\(calibrationPath\(\)\)/)
+test('legacy case-raised learning records no longer drive ordinary Home current work', () => {
+  assert.doesNotMatch(home(), /agent learning\{pending\.length === 1/)
+  assert.doesNotMatch(home(), /navigate\(calibrationPath\(\)\)/)
+  assert.match(home(), /const currentWork = latestByPatient\.slice\(0, 3\)/)
 })
 
 /* ---------------------------------------------------------- patient detail */

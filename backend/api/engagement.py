@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -48,6 +49,8 @@ from backend.specialist_projection import project_specialist_cases
 from backend.workflow import workflow_store
 
 router = APIRouter(prefix="/api/workspace", tags=["physician-engagement"])
+logger = logging.getLogger(__name__)
+NORMAL_TRAINING_TARGET = 10
 
 UPDATE_TYPES = {
     "practice_focus",
@@ -271,7 +274,9 @@ def physician_initialization(workspace_id: DemoWorkspace, persona_id: Controlled
     questions = _questions(workspace_id, persona_id)
     sessions = workflow_store.training_sessions(workspace_id, persona_id)
     first_training_completed = any(
-        item["mode"] == "initialization" and item["status"] == "completed"
+        item["mode"] == "initialization"
+        and item["status"] == "completed"
+        and item["lifecycle_state"] != "abandoned"
         for item in sessions
     )
     state = workflow_store.initialization_state(workspace_id, persona_id)
@@ -339,23 +344,245 @@ def training_queue(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
     }
 
 
+def _materialize_training_session(
+    workspace_id: str, persona_id: str, session: dict
+) -> dict:
+    session_responses = workflow_store.training_responses(
+        workspace_id, persona_id, session["id"]
+    )
+    answered_ids = {item["question_id"] for item in session_responses}
+    assigned = workflow_store.training_session_questions(
+        workspace_id, persona_id, session["id"]
+    )
+    assigned_ids = {item["question_id"] for item in assigned}
+    remaining_budget = max(0, session["answer_target"] - len(session_responses))
+    selected = [
+        question
+        for item in assigned
+        if item["question_id"] not in answered_ids
+        and (question := _question(workspace_id, persona_id, item["question_id"])) is not None
+    ][:remaining_budget]
+    selected_ids = {item["id"] for item in selected}
+
+    deferred = [
+        item
+        for item in workflow_store.deferred_training_questions(workspace_id, persona_id)
+        if item["id"] not in selected_ids and item["id"] not in answered_ids
+    ]
+    for question in deferred:
+        if len(selected) >= remaining_budget:
+            break
+        selected.append(question)
+        selected_ids.add(question["id"])
+
+    responses = workflow_store.training_responses(workspace_id, persona_id)
+    unanswered = [
+        question
+        for question in _questions(workspace_id, persona_id)
+        if question["status"] == "unanswered"
+        and question["id"] not in selected_ids
+        and question["id"] not in assigned_ids
+    ]
+    if session["mode"] == "initialization":
+        globally_answered_ids = {item["question_id"] for item in responses}
+        initialization = [
+            question_by_id(persona_id, item["id"])
+            for item in INITIALIZATION_QUESTIONS[persona_id]
+            if item["id"] not in globally_answered_ids
+            and item["id"] not in assigned_ids
+            and item["id"] not in selected_ids
+        ]
+        unanswered = [item for item in initialization if item is not None] + unanswered
+        unanswered.sort(
+            key=lambda item: (
+                item.get("source_type") != "initialization",
+                -item["priority"],
+                item["id"],
+            )
+        )
+    else:
+        unanswered.sort(key=lambda item: (-item["priority"], item["id"]))
+
+    needed = remaining_budget - len(selected)
+    if session["mode"] in {"initialization", "daily", "extended"} and len(unanswered) < needed:
+        known_ids = answered_ids | assigned_ids | selected_ids | {
+            item["question_id"] for item in responses
+        } | {item["id"] for item in unanswered}
+        for generated in generated_training_questions(persona_id):
+            if generated["id"] in known_ids:
+                continue
+            question = question_by_id(persona_id, generated["id"])
+            if question is not None:
+                unanswered.append(question)
+                known_ids.add(question["id"])
+            if len(unanswered) >= needed:
+                break
+    selected.extend(unanswered[: max(0, remaining_budget - len(selected))])
+
+    for question in selected:
+        if question["id"] not in assigned_ids:
+            workflow_store.assign_training_question(
+                workspace_id,
+                persona_id,
+                session["id"],
+                question,
+                1000 if question.get("deferred_id") is not None else question["priority"],
+            )
+        if question.get("deferred_id") is not None:
+            workflow_store.consume_deferred_training_question(
+                workspace_id,
+                persona_id,
+                question["deferred_id"],
+                session["id"],
+            )
+    materialized = [
+        question
+        for item in workflow_store.training_session_questions(
+            workspace_id, persona_id, session["id"]
+        )
+        if (question := _question(workspace_id, persona_id, item["question_id"])) is not None
+    ]
+    return {**session, "questions": materialized, "responses": session_responses}
+
+
+def _recover_active_training_session(
+    workspace_id: str, persona_id: str
+) -> dict | None:
+    sessions = workflow_store.training_sessions(workspace_id, persona_id)
+    active = [
+        item
+        for item in sessions
+        if item["status"] == "active" and item["lifecycle_state"] == "active"
+    ]
+    if not active:
+        return None
+    response_counts = {
+        item["id"]: len(
+            workflow_store.training_responses(workspace_id, persona_id, item["id"])
+        )
+        for item in active
+    }
+    progressed = [item for item in active if response_counts[item["id"]] > 0]
+    canonical = (progressed or active)[0]
+    for duplicate in active:
+        if duplicate["id"] == canonical["id"]:
+            continue
+        workflow_store.abandon_training_session(workspace_id, persona_id, duplicate["id"])
+        logger.info(
+            "training_session_recovered persona=%s session=%s reason=duplicate_active answers_preserved=%s",
+            persona_id,
+            duplicate["id"],
+            response_counts[duplicate["id"]],
+        )
+    if (
+        response_counts[canonical["id"]] == 0
+        and canonical["mode"] != "focused"
+        and canonical["answer_target"] != NORMAL_TRAINING_TARGET
+    ):
+        canonical = workflow_store.normalize_unstarted_training_session(
+            workspace_id,
+            persona_id,
+            canonical["id"],
+            NORMAL_TRAINING_TARGET,
+        ) or canonical
+        logger.info(
+            "training_session_recovered persona=%s session=%s reason=legacy_unstarted target=%s",
+            persona_id,
+            canonical["id"],
+            NORMAL_TRAINING_TARGET,
+        )
+    if response_counts[canonical["id"]] >= canonical["answer_target"]:
+        _complete_training_questions(workspace_id, persona_id, canonical["id"])
+        logger.info(
+            "training_session_recovered persona=%s session=%s reason=target_already_reached",
+            persona_id,
+            canonical["id"],
+        )
+        return None
+    materialized = _materialize_training_session(workspace_id, persona_id, canonical)
+    if response_counts[canonical["id"]] == 0 and not materialized["questions"]:
+        workflow_store.abandon_training_session(workspace_id, persona_id, canonical["id"])
+        logger.info(
+            "training_session_recovered persona=%s session=%s reason=empty_unstarted",
+            persona_id,
+            canonical["id"],
+        )
+        return None
+    response_ids = {item["question_id"] for item in materialized["responses"]}
+    if response_ids and not any(
+        item["id"] not in response_ids for item in materialized["questions"]
+    ):
+        _complete_training_questions(workspace_id, persona_id, canonical["id"])
+        logger.info(
+            "training_session_recovered persona=%s session=%s reason=no_remaining_questions",
+            persona_id,
+            canonical["id"],
+        )
+        return None
+    return materialized
+
+
 def _training_projection(workspace_id: str, persona_id: str) -> dict:
     responses = workflow_store.training_responses(workspace_id, persona_id)
+    active = _recover_active_training_session(workspace_id, persona_id)
     sessions = workflow_store.training_sessions(workspace_id, persona_id)
     history = workflow_store.training_history(workspace_id, persona_id)
-    active = next((item for item in sessions if item["status"] == "active"), None)
-    pending_review = [
+    pending_learnings = [
         item
         for item in workflow_store.proposed_learnings(workspace_id, persona_id)
         if item["source_type"] == "training_response"
         and item.get("review_action") is None
     ]
+    pending_by_session: dict[int, list[dict]] = {}
+    for item in pending_learnings:
+        if not item["source_reference"].startswith("session:"):
+            continue
+        pending_by_session.setdefault(int(item["source_reference"].split(":", 2)[1]), []).append(
+            item
+        )
+    review_session = next(
+        (
+            item
+            for item in sessions
+            if item["lifecycle_state"] == "questions_complete"
+            and item["id"] in pending_by_session
+        ),
+        None,
+    )
     queue = training_queue_summary(_questions(workspace_id, persona_id), responses)
+    initialization = physician_initialization(workspace_id, persona_id)
+    answered_count = len(active.get("responses", [])) if active else 0
+    if not initialization["initialized"]:
+        state, action = "initialization_needed", "continue_setup"
+    elif active:
+        state, action = (
+            ("active_unstarted", "start_training")
+            if answered_count == 0
+            else ("active_in_progress", "resume_training")
+        )
+    elif review_session:
+        state, action = "review_pending", "review_training"
+    elif queue["available_total"] > 0:
+        state, action = "ready", "start_training"
+    else:
+        state, action = "caught_up", "none"
     return {
+        "state": state,
+        "action": action,
+        "active_session_id": active["id"] if active else None,
+        "review_session_id": review_session["id"] if review_session else None,
+        "answered_count": answered_count,
+        "answer_target": active["answer_target"] if active else None,
+        "review_pending": bool(pending_learnings),
+        "initialization_required": not initialization["initialized"],
+        "initialized": initialization["initialized"],
         "training_status": "active" if active else "ready",
         "current_session": active,
         "questions_answered_total": sum(not item["skipped"] for item in responses),
-        "sessions_completed": sum(item["status"] == "completed" for item in sessions),
+        "sessions_completed": sum(
+            item["status"] == "completed" and item["lifecycle_state"] != "abandoned"
+            for item in sessions
+        ),
         "last_trained_at": max(
             (item["answered_at"] for item in responses), default=None
         ),
@@ -365,7 +592,7 @@ def _training_projection(workspace_id: str, persona_id: str) -> dict:
         "deferred_branch_count": len(
             workflow_store.deferred_training_questions(workspace_id, persona_id)
         ),
-        "pending_training_review_count": len(pending_review),
+        "pending_training_review_count": len(pending_learnings),
     }
 
 
@@ -412,15 +639,6 @@ def agent_overview(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
         "published_updates_count": len(published_updates),
         "network_physicians_count": len(network_physicians),
     }
-    next_action = (
-        "complete_initialization"
-        if not initialization["initialized"]
-        else "resume_training"
-        if training["current_session"]
-        else "train"
-        if training["more_training_available"]
-        else "none"
-    )
     return {
         "physician": PERSONAS[persona_id],
         "specialty": PERSONAS[persona_id]["specialty"],
@@ -429,9 +647,10 @@ def agent_overview(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
         "portrait_confirmed_facts": portrait_facts,
         "stats": stats,
         "initialization": initialization,
+        "training": training,
         "last_trained_at": training["last_trained_at"],
         "more_training_available": training["more_training_available"],
-        "next_action": next_action,
+        "next_action": training["action"],
         "ranking_effect": "none",
     }
 
@@ -562,64 +781,20 @@ def start_training_session(
     update: TrainingSessionInput | None = None,
 ) -> dict:
     update = update or TrainingSessionInput()
-    question_limit = min(update.limit or 10, 25)
+    existing = _recover_active_training_session(workspace_id, persona_id)
+    if existing is not None:
+        return existing
+    question_limit = NORMAL_TRAINING_TARGET
     session = workflow_store.start_training_session(
         workspace_id, persona_id, update.mode, question_limit
     )
-    deferred = workflow_store.deferred_training_questions(workspace_id, persona_id)
-    selected: list[dict] = deferred[:question_limit]
-    selected_ids = {item["id"] for item in selected}
-    unanswered = [
-        question
-        for question in _questions(workspace_id, persona_id)
-        if question["status"] == "unanswered" and question["id"] not in selected_ids
-    ]
-    if update.mode == "initialization":
-        answered_ids = {
-            item["question_id"]
-            for item in workflow_store.training_responses(workspace_id, persona_id)
-        }
-        unanswered = [
-            question_by_id(persona_id, item["id"])
-            for item in INITIALIZATION_QUESTIONS[persona_id]
-            if item["id"] not in answered_ids
-        ] + unanswered
-        unanswered = [item for item in unanswered if item is not None]
-        unanswered.sort(
-            key=lambda item: (
-                item.get("source_type") != "initialization",
-                -item["priority"],
-                item["id"],
-            )
+    materialized = _materialize_training_session(workspace_id, persona_id, session)
+    if not materialized["questions"]:
+        abandoned = workflow_store.abandon_training_session(
+            workspace_id, persona_id, session["id"]
         )
-    else:
-        unanswered.sort(key=lambda item: (-item["priority"], item["id"]))
-    needed = question_limit - len(selected)
-    if update.mode in {"initialization", "daily", "extended"} and len(unanswered) < needed:
-        known_ids = {
-            item["question_id"]
-            for item in workflow_store.training_responses(workspace_id, persona_id)
-        } | {item["id"] for item in unanswered}
-        for generated in generated_training_questions(persona_id):
-            if generated["id"] in known_ids:
-                continue
-            unanswered.append(question_by_id(persona_id, generated["id"]))
-            if len(unanswered) >= needed:
-                break
-    session["questions"] = [*selected, *unanswered[:needed]]
-    for question in session["questions"]:
-        workflow_store.assign_training_question(
-            workspace_id, persona_id, session["id"], question, question["priority"]
-        )
-        if question.get("deferred_id") is not None:
-            workflow_store.consume_deferred_training_question(
-                workspace_id,
-                persona_id,
-                question["deferred_id"],
-                session["id"],
-            )
-    session["responses"] = []
-    return session
+        return {**(abandoned or session), "questions": [], "responses": []}
+    return materialized
 
 
 @router.post("/physician/training/focused", status_code=201)
@@ -628,6 +803,8 @@ def start_focused_training(
     workspace_id: MutableDemoWorkspace,
     persona_id: ControlledPersona,
 ) -> dict:
+    if _recover_active_training_session(workspace_id, persona_id) is not None:
+        raise HTTPException(409, "Complete the current training session before starting focused training")
     seed = workflow_store.focused_training_seed(
         workspace_id, persona_id, update.seed_id
     )
@@ -640,6 +817,8 @@ def start_focused_training(
         update.answer_target,
         focused_seed_id=update.seed_id,
     )
+    if session.get("focused_seed_id") != update.seed_id:
+        raise HTTPException(409, "Another training session is already active")
     question = workflow_store.save_generated_training_question(
         workspace_id,
         persona_id,
@@ -663,6 +842,11 @@ def resume_training_session(
     session = workflow_store.training_session(workspace_id, persona_id, session_id)
     if not session:
         raise HTTPException(404, "Training session not found")
+    if session["status"] == "active":
+        recovered = _recover_active_training_session(workspace_id, persona_id)
+        if recovered is None or recovered["id"] != session_id:
+            raise HTTPException(409, "This training session is no longer active")
+        return recovered
     assigned = workflow_store.training_session_questions(workspace_id, persona_id, session_id)
     session["questions"] = [
         question

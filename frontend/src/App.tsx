@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, getAgentNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPhysicianTraining, getPracticeRepresentation, getProfessionalPosts, getTrainingHistory, resetJordanDemo, resumeTrainingSession, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type ProfessionalPost, type TrainingQueueSummary, type TrainProjection } from './api.ts'
+import { consultNetwork, getAgentNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getProfessionalPosts, getTrainingHistory, resetJordanDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type ProfessionalPost, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient } from './agentActivity.ts'
@@ -164,29 +164,25 @@ function NetworkFeedRoute({ personaId, navigate }: { personaId: 'lucy' | 'iain';
 
 function HomePage({ navigate }: { navigate: Navigate }) {
   const [records, setRecords] = useState<ConsultationRecord[]>([])
-  const [agent, setAgent] = useState<MyAgent | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [queueSummary, setQueueSummary] = useState<TrainingQueueSummary | null>(null)
-  const [resumeSessionId, setResumeSessionId] = useState<number | null>(null)
+  const [training, setTraining] = useState<TrainProjection | null>(null)
+  const [overview, setOverview] = useState<AgentOverview | null>(null)
   useEffect(() => {
-    Promise.all([getConsultationHistory(), getMyAgent()])
-      .then(([consultations, currentAgent]) => { setRecords(consultations); setAgent(currentAgent) })
+    getConsultationHistory()
+      .then(setRecords)
       .catch(() => setError(true)).finally(() => setLoading(false))
     getPracticeRepresentation('lucy').then(setRepresentation).catch(() => {})
     getNetworkFeed('lucy').then(setFeed).catch(() => {})
-    getPhysicianTraining('lucy').then((workspace) => {
-      setQueueSummary(workspace.queue_summary)
-      setResumeSessionId(workspace.sessions.find((item) => item.status === 'active')?.id ?? null)
-    }).catch(() => {})
+    getTrainingHistory('lucy').then(setTraining).catch(() => {})
+    getAgentOverview('lucy').then(setOverview).catch(() => {})
   }, [])
   const ordered = [...records].sort((a, b) => b.completed_at.localeCompare(a.completed_at))
   const latestByPatient = ordered.filter((record, index) => ordered.findIndex((item) => item.patient_id === record.patient_id) === index)
-  const pending = agent?.learnings.filter((item) => item.status === 'suggested') || []
-  const currentWork = latestByPatient.slice(0, pending.length ? 2 : 3)
-  const workCount = currentWork.length + (pending.length ? 1 : 0)
+  const currentWork = latestByPatient.slice(0, 3)
+  const workCount = currentWork.length
   const activity = agentActivity(ordered).slice(0, 3)
   const lastRecord = ordered[0]
   return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page">
@@ -194,11 +190,11 @@ function HomePage({ navigate }: { navigate: Navigate }) {
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
-      {workCount > 0 && <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{workCount}</span></div><div className="lam-list needs-attention">{currentWork.map((record) => <button className="lam-row" key={record.id} onClick={() => navigate(consultationPath(record.id))}><span className="lam-row-mark patient-row-avatar">{DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials}</span><span className="lam-row-main"><strong>{patientName(record.patient_id)}</strong><span>{record.result.recommended_physician.specialty} recommended{record.patient_id === MARIA_ID ? ' first' : ''}</span><small>{cleanName(record.result.recommended_physician.physician_name)} · Workup identified</small></span><span className="lam-row-action">Review consultation <b>→</b></span></button>)}{pending.length > 0 && <button className="lam-row" onClick={() => navigate(calibrationPath())}><NetworkMark /><span className="lam-row-main"><strong>{pending.length} agent learning{pending.length === 1 ? '' : 's'}</strong><span>Ready for your confirmation</span><small>Proposed learnings are not used as physician-confirmed rules.</small></span><span className="lam-row-action">Review preferences <b>→</b></span></button>}</div></section>}
-      <ImproveAgentCard representation={representation} queueSummary={queueSummary} resumeSessionId={resumeSessionId} navigate={navigate} trainPath={trainingPath('lucy')} />
+      {workCount > 0 && <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{workCount}</span></div><div className="lam-list needs-attention">{currentWork.map((record) => <button className="lam-row" key={record.id} onClick={() => navigate(consultationPath(record.id))}><span className="lam-row-mark patient-row-avatar">{DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials}</span><span className="lam-row-main"><strong>{patientName(record.patient_id)}</strong><span>{record.result.recommended_physician.specialty} recommended{record.patient_id === MARIA_ID ? ' first' : ''}</span><small>{cleanName(record.result.recommended_physician.physician_name)} · Workup identified</small></span><span className="lam-row-action">Review consultation <b>→</b></span></button>)}</div></section>}
+      <ImproveAgentCard representation={representation} training={training} navigate={navigate} trainPath={trainingPath('lucy')} />
       <NetworkFeedSection feed={feed} navigate={navigate} perspective="lucy" />
       <section className="home-main-grid"><div className="home-activity"><div className="home-section-heading"><div><h2>Recent agent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=activity')}>View all activity →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span><em className="activity-kind">{item.kind === 'interaction' ? 'Agent interaction' : 'Consultation milestone'}</em><strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</div>
-        <aside className="home-agent-card"><div className="home-agent-title"><NetworkMark active /><div><p className="eyebrow">Your Agent</p><h2>{PCP_AGENT_NAME}</h2><span><i /> Active</span></div></div><dl><div><dt>Last activity</dt><dd>{lastRecord ? `Consulted ${lastRecord.result.consultation.length} physician agents for ${patientName(lastRecord.patient_id)}` : 'No consultations yet'}{lastRecord && <small>{eventTimestamp(lastRecord.completed_at)}</small>}</dd></div><div><dt>Proposed learnings</dt><dd>{pending.length ? `${pending.length} awaiting your confirmation` : 'None awaiting review'}</dd></div></dl><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View My Agent →</button></aside>
+        <aside className="home-agent-card"><div className="home-agent-title"><NetworkMark active /><div><p className="eyebrow">Your Agent</p><h2>{PCP_AGENT_NAME}</h2><span><i /> Active</span></div></div><dl><div><dt>Last activity</dt><dd>{lastRecord ? `Consulted ${lastRecord.result.consultation.length} physician agents for ${patientName(lastRecord.patient_id)}` : 'No consultations yet'}{lastRecord && <small>{eventTimestamp(lastRecord.completed_at)}</small>}</dd></div><div><dt>Practice rules confirmed</dt><dd>{overview?.stats.confirmed_practice_learnings ?? 0}</dd></div></dl><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View My Agent →</button></aside>
       </section>
     </>}
   </main></ProductShell>
@@ -286,7 +282,6 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [overview, setOverview] = useState<AgentOverview | null>(null)
   const [trainProjection, setTrainProjection] = useState<TrainProjection | null>(null)
-  const [resumeAnsweredCount, setResumeAnsweredCount] = useState<number | null>(null)
   const refresh = () => getMyAgent().then(setAgent).catch((err: Error) => setError(err.message))
   const refreshRepresentation = () => getPracticeRepresentation('lucy').then(setRepresentation).catch(() => {})
   const refreshOverview = () => getAgentOverview('lucy').then(setOverview).catch(() => {})
@@ -304,11 +299,6 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
     const frame = window.requestAnimationFrame(() => document.getElementById(`learning-${focusedLearning}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
     return () => window.cancelAnimationFrame(frame)
   }, [focusedLearning, agent, tab])
-  useEffect(() => {
-    const activeId = trainProjection?.current_session?.id
-    if (!activeId) { setResumeAnsweredCount(null); return }
-    resumeTrainingSession('lucy', activeId).then((session) => setResumeAnsweredCount((session.responses ?? []).filter((item) => !item.skipped).length)).catch(() => {})
-  }, [trainProjection?.current_session?.id])
   const act = async (learning: AgentLearning, action: 'confirm' | 'edit' | 'reject', statement?: string) => {
     try { await updateAgentLearning(learning.key, action, statement); setEditing(null); setError(''); await refresh() } catch (err) { setError(err instanceof Error ? err.message : 'Could not save preference') }
   }
@@ -336,13 +326,13 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
     {error && <div className="error-banner" role="alert">{error}</div>}{!agent && !error && <p className="muted-note">Opening your agent…</p>}
     {agent && <><section className="agent-hero"><div className="agent-hero-mark"><NetworkMark active /></div><div><p className="eyebrow">Your physician agent</p><h1>{PCP_AGENT_NAME}</h1><p>Primary Care · Represents how you practise across the Lamina network.</p><span className="agent-state"><i /> ACTIVE</span></div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-      {tab === 'overview' && <AgentOverviewPanel overview={overview} trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('lucy')} onViewPractice={() => selectTab('practice')} />}
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} onViewPractice={() => selectTab('practice')} />}
       {tab === 'practice' && representation && <PracticeTab representation={representation} portrait={overview?.portrait} reviewHref={reviewHref} navigate={navigate} extra={<>
         {tabParam === 'calibration' && pending > 0 && <section className="agent-panel learning-panel practice-legacy-review"><div className="panel-header"><div><p className="eyebrow">Needs your review</p><h2>Case-raised preferences</h2><p className="panel-intro">Suggestions raised from a completed consultation are not silently treated as your preferences. A proposal stays proposed until you confirm or edit it.</p></div></div>
           <div className="learning-grid">{(agent?.learnings ?? []).filter((learning) => learning.status === 'suggested').map((learning) => <article className={`learning-card ${focusedLearning === learning.key ? 'focused' : ''}`} id={`learning-${learning.key}`} key={learning.key}><span className={`learning-status ${learning.status}`}>Proposed · needs confirmation</span><p>{learning.statement}</p><small>Source: {learning.provenance}</small>{focusedLearning === learning.key && caseParam && <p className="learning-case-source">Raised from the {patientName(caseParam)} consultation.{recordParam && <button className="text-button" onClick={() => navigate(consultationPath(Number(recordParam)))}>View consultation →</button>}</p>}{editing === learning.key ? <div className="learning-edit"><label htmlFor={`edit-${learning.key}`}>Correct this preference</label><textarea id={`edit-${learning.key}`} maxLength={240} value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="button-primary" disabled={!draft.trim()} onClick={() => act(learning, 'edit', draft)}>Save draft</button><button className="text-button" onClick={() => setEditing(null)}>Cancel</button></div></div> : <div className="learning-actions"><button onClick={() => act(learning, 'confirm')}>Confirm</button><button onClick={() => { setEditing(learning.key); setDraft(learning.statement) }}>Edit</button><button onClick={() => act(learning, 'reject')}>Reject</button></div>}</article>)}</div>
         </section>}
       </>} />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} resumeAnsweredCount={resumeAnsweredCount} navigate={navigate} trainPath={trainingPath('lucy')} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('lucy')} />}
       {tab === 'chat' && <ChatTab personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} trainPath={trainingPath('lucy')} />}
       {tab === 'activity' && <section className="agent-panel agent-activity"><div className="panel-header"><div><p className="eyebrow">Your agent's actions</p><h2>Recent activity</h2></div></div><AgentActivityList rows={activityRows} /></section>}
     </>}

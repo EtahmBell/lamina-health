@@ -22,6 +22,41 @@ is always `answered_count / answer_target`. A branch answer consumes the next ca
 a branch opened by the final answer is saved at high priority and becomes the first
 question of the next new session rather than extending the current one.
 
+Pass 7A makes training status a single backend-owned state machine consumed by Home,
+My Agent → Train, Agent Overview, and the immersive training route. The canonical
+projection returns `state`, `action`, active/review session IDs, current answer count
+and target, review/init flags, grounded availability, and last training time. Its
+controlled mapping is:
+
+- `initialization_needed` → `continue_setup`
+- `ready` → `start_training`
+- `active_unstarted` → `start_training`
+- `active_in_progress` → `resume_training`
+- `review_pending` → `review_training`
+- `caught_up` → `none`
+
+An active zero-answer session is ready to start, never “unfinished.” `caught_up` is
+valid only when there is no usable active session, no undeferred question-complete
+review, and the lazy grounded planner reports no available questions. The absence of
+a currently materialized queue is not evidence that the lazy bank is exhausted.
+
+Starting ordinary or initialization training is idempotent and always targets 10.
+A valid active session is reused. A zero-answer pre-6B ordinary/init session with a
+different target is normalized to 10 and replenished from the same lazy planner. A
+partially answered legacy session retains its original target so physician work is
+not reinterpreted or discarded. Duplicate/stale active rows are archived with
+`lifecycle_state=abandoned`; response and assignment audit rows remain intact, and
+abandoned recovery artifacts do not appear in user-facing completion history. If a
+legacy active session has already reached its target, or has responses but no further
+grounded question that can be materialized, it is completed into the normal learning-
+review lifecycle rather than mislabeled as caught up.
+
+Home current work now represents consultations and specialist case work. Legacy
+case-raised `AgentLearning` preferences remain stored and deep-link compatible, but
+they no longer create an ordinary Home work item. The Home agent card uses canonical
+training state and confirmed Practice Representation facts; it does not use legacy
+calibration counts as primary work.
+
 ## State boundaries
 
 The public synthetic demo combines immutable synthetic base profiles with
