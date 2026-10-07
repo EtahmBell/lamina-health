@@ -242,6 +242,28 @@ class WorkflowStore:
                   disabled_at TEXT,
                   updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS physician_owner_scopes (
+                  id TEXT PRIMARY KEY,
+                  provider_claim_id INTEGER NOT NULL UNIQUE,
+                  auth_user_id TEXT NOT NULL,
+                  npi TEXT NOT NULL,
+                  storage_scope_id TEXT NOT NULL UNIQUE,
+                  physician_id TEXT NOT NULL UNIQUE,
+                  provider_identity_json TEXT NOT NULL,
+                  publication_status TEXT NOT NULL DEFAULT 'private'
+                    CHECK(publication_status IN ('private', 'published', 'unpublished')),
+                  clinical_access INTEGER NOT NULL DEFAULT 0,
+                  selected INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  FOREIGN KEY(provider_claim_id) REFERENCES provider_claims(id)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS physician_owner_scopes_selected_user
+                  ON physician_owner_scopes(auth_user_id) WHERE selected=1;
+                CREATE INDEX IF NOT EXISTS physician_owner_scopes_user
+                  ON physician_owner_scopes(auth_user_id, updated_at);
+                CREATE INDEX IF NOT EXISTS physician_owner_scopes_npi
+                  ON physician_owner_scopes(npi);
                 """
             )
             self._migrate_demo_tables(db)
@@ -1759,6 +1781,7 @@ class WorkflowStore:
         source_input: dict | None = None,
         synthetic_case: bool = False,
         case_safety_label: str | None = None,
+        visibility: str = "network",
     ) -> dict:
         now = self._now()
         with self._connect() as db:
@@ -1769,7 +1792,7 @@ class WorkflowStore:
                      authored_by, drafted_by, physician_approved, visibility,
                      source_input_json, synthetic_case, case_safety_label
                    ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, 'physician',
-                     ?, 0, 'network', ?, ?, ?)""",
+                     ?, 0, ?, ?, ?, ?)""",
                 (
                     workspace_id,
                     persona_id,
@@ -1782,6 +1805,7 @@ class WorkflowStore:
                     now,
                     update_type,
                     "lamina_agent" if agent_drafted else "physician",
+                    visibility,
                     json.dumps(source_input) if source_input is not None else None,
                     int(synthetic_case),
                     case_safety_label,
@@ -1970,6 +1994,109 @@ class WorkflowStore:
                 (auth_user_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def _owner_scope_dict(row: sqlite3.Row | None) -> dict | None:
+        if not row:
+            return None
+        result = dict(row)
+        result["provider_identity"] = json.loads(result.pop("provider_identity_json"))
+        result["clinical_access"] = bool(result["clinical_access"])
+        result["selected"] = bool(result["selected"])
+        return result
+
+    def ensure_physician_owner_scope(self, claim: dict, provider_identity: dict) -> dict:
+        """Idempotently bind an active claim to an opaque private engagement scope."""
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE provider_claim_id=?",
+                (claim["id"],),
+            ).fetchone()
+            if existing:
+                return self._owner_scope_dict(existing)  # type: ignore[return-value]
+            selected = not bool(
+                db.execute(
+                    "SELECT 1 FROM physician_owner_scopes WHERE auth_user_id=? AND selected=1",
+                    (claim["auth_user_id"],),
+                ).fetchone()
+            )
+            scope_id = f"pos-{secrets.token_hex(16)}"
+            storage_scope_id = f"physician-owner-{secrets.token_hex(16)}"
+            physician_id = f"claimed-physician-{secrets.token_hex(16)}"
+            db.execute(
+                """INSERT INTO physician_owner_scopes(
+                     id, provider_claim_id, auth_user_id, npi, storage_scope_id,
+                     physician_id, provider_identity_json, selected, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    scope_id,
+                    claim["id"],
+                    claim["auth_user_id"],
+                    claim["npi"],
+                    storage_scope_id,
+                    physician_id,
+                    json.dumps(provider_identity, separators=(",", ":"), sort_keys=True),
+                    int(selected),
+                    now,
+                    now,
+                ),
+            )
+            row = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE id=?", (scope_id,)
+            ).fetchone()
+        return self._owner_scope_dict(row)  # type: ignore[return-value]
+
+    def physician_owner_scopes(self, auth_user_id: str) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT * FROM physician_owner_scopes WHERE auth_user_id=?
+                   ORDER BY selected DESC, created_at, id""",
+                (auth_user_id,),
+            ).fetchall()
+        return [self._owner_scope_dict(row) for row in rows]  # type: ignore[misc]
+
+    def physician_owner_scope_for_claim(self, claim_id: int) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE provider_claim_id=?",
+                (claim_id,),
+            ).fetchone()
+        return self._owner_scope_dict(row)
+
+    def selected_physician_owner_scope(self, auth_user_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT * FROM physician_owner_scopes WHERE auth_user_id=?
+                   ORDER BY selected DESC, created_at, id LIMIT 1""",
+                (auth_user_id,),
+            ).fetchone()
+        return self._owner_scope_dict(row)
+
+    def select_physician_owner_scope(self, auth_user_id: str, claim_id: int) -> dict | None:
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            owned = db.execute(
+                """SELECT id FROM physician_owner_scopes
+                   WHERE auth_user_id=? AND provider_claim_id=?""",
+                (auth_user_id, claim_id),
+            ).fetchone()
+            if not owned:
+                return None
+            db.execute(
+                "UPDATE physician_owner_scopes SET selected=0, updated_at=? WHERE auth_user_id=?",
+                (now, auth_user_id),
+            )
+            db.execute(
+                "UPDATE physician_owner_scopes SET selected=1, updated_at=? WHERE id=?",
+                (now, owned["id"]),
+            )
+            row = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE id=?", (owned["id"],)
+            ).fetchone()
+        return self._owner_scope_dict(row)
 
     def claim_provider(self, auth_user_id: str, npi: str) -> tuple[dict, bool]:
         """Create one active claim per NPI, returning (claim, conflict)."""

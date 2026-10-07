@@ -85,6 +85,28 @@ export type ProviderSearchResponse = {
   directory_status: 'available' | 'unavailable' | 'invalid_query' | 'no_results'
   directory_backend: 'local_snapshot' | 'live_api' | 'unavailable'; directory_message: string | null
 }
+export type PhysicianSandboxCapabilities = {
+  can_edit_profile: boolean; can_enrich_profile: boolean; can_train_agent: boolean
+  can_test_agent: boolean; can_draft_posts: boolean; can_publish_profile: boolean
+  can_publish_posts: boolean; can_join_network: boolean; can_access_patients: boolean
+  can_access_clinical_cases: boolean
+}
+export type PhysicianSandboxStatus = {
+  has_claim: boolean; claim_status: ClaimStatus | null
+  verification_status: 'unverified' | 'verified'
+  publication_status: 'private' | 'published' | 'unpublished'
+  clinical_access_status: 'unavailable' | 'enabled'
+  provider_identity: (Pick<PhysicianNetworkProfile, 'npi' | 'display_name' | 'specialty' | 'taxonomy_code' | 'organization' | 'city' | 'state' | 'phone' | 'source' | 'directory_disclaimer'>) | null
+  profile_ready: boolean; initialization_required: boolean; initialized: boolean
+  agent_ready: boolean; capabilities: PhysicianSandboxCapabilities
+}
+export type OwnedPhysicianIdentity = NonNullable<PhysicianSandboxStatus['provider_identity']> & {
+  id: string; synthetic: false
+}
+export type OwnedProfessionalProfile = Omit<ProfessionalProfile, 'physician' | 'synthetic'> & {
+  physician: OwnedPhysicianIdentity; base_identity: NonNullable<PhysicianSandboxStatus['provider_identity']>
+  synthetic: false
+}
 export type AgentRelationship = {
   source_agent: string; target_agent: string; relationship_type: 'recommended' | 'redirected' | 'consulted'
   consultation_count: number; recommended_count: number; redirect_count: number
@@ -293,7 +315,7 @@ export type PracticeUpdate = {
   status: 'draft' | 'published' | 'archived'; agent_drafted?: boolean
   created_at: string; updated_at?: string; published_at: string | null; synthetic?: true
   authored_by?: 'physician'; drafted_by?: 'physician' | 'lamina_agent'
-  physician_approved?: boolean; visibility?: 'network'; source_input?: Record<string, unknown> | null
+  physician_approved?: boolean; visibility?: 'network' | 'private'; source_input?: Record<string, unknown> | null
   synthetic_case?: boolean; case_safety_label?: string | null
 }
 export type ProfessionalPost = Omit<PracticeUpdate, 'type'> & { type: PostType }
@@ -320,6 +342,21 @@ export type AgentOverview = {
   next_action: TrainingAction
   ranking_effect: 'none'
 }
+export type OwnedTrainingQuestion = Omit<TrainingQuestion, 'physician_persona'> & { physician_persona: string }
+export type OwnedTrainingSession = Omit<TrainingSession, 'persona_id' | 'questions'> & {
+  persona_id: string; questions?: OwnedTrainingQuestion[]
+}
+export type OwnedTrainProjection = Omit<TrainProjection, 'current_session'> & {
+  current_session: OwnedTrainingSession | null
+}
+export type OwnedPracticeRepresentation = Omit<PracticeRepresentation, 'physician' | 'gaps'> & {
+  physician: OwnedPhysicianIdentity
+  gaps: Omit<PracticeRepresentation['gaps'], 'unanswered_questions'> & { unanswered_questions: OwnedTrainingQuestion[] }
+}
+export type OwnedAgentOverview = Omit<AgentOverview, 'physician' | 'training'> & {
+  physician: OwnedPhysicianIdentity; training: OwnedTrainProjection
+}
+export type OwnedProfessionalPost = Omit<ProfessionalPost, 'persona_id'> & { persona_id?: string }
 export type AgentTestCase = {
   id: string; title: string; summary: string; facts: string[]
   intended_domain: string; source: string
@@ -517,6 +554,60 @@ export const searchProviders = (filters: { q?: string; specialty?: string; locat
 export const getProvider = (npi: string) => request<PhysicianNetworkProfile>(`/api/providers/${encodeURIComponent(npi)}`)
 export const getProviderClaimState = (npi: string) => request<ProviderClaimState>(`/api/providers/${encodeURIComponent(npi)}/claim-state`)
 export const getMyProviderClaims = () => request<ProviderClaim[]>('/api/me/provider-claims')
+export const getPhysicianSandboxStatus = () => request<PhysicianSandboxStatus>('/api/me/physician/status')
+export const selectPhysicianSandbox = (claimId: number) => request<PhysicianSandboxStatus>(`/api/me/physician/selection/${claimId}`, { method: 'PUT' })
+export const getOwnedPhysicianProfile = () => request<OwnedProfessionalProfile>('/api/me/physician/profile')
+export const updateOwnedProfileItem = (itemId: string, item: { category: ProfileCategory; title: string; detail?: string; shareable?: boolean }) => request<{ profile_item: ProfileItem }>(`/api/me/physician/profile/items/${encodeURIComponent(itemId)}`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item),
+})
+export const getOwnedPhysicianInterests = () => request<PhysicianInterest[]>('/api/me/physician/interests')
+export const saveOwnedPhysicianInterest = (interest: Omit<PhysicianInterest, 'id' | 'provenance' | 'created_at' | 'updated_at'>, interestId?: string) => request<PhysicianInterest>(interestId ? `/api/me/physician/interests/${encodeURIComponent(interestId)}` : '/api/me/physician/interests', {
+  method: interestId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(interest),
+})
+export const getOwnedAgentInitialization = () => request<AgentInitialization>('/api/me/physician/initialization')
+export const getOwnedAgentOverview = () => request<OwnedAgentOverview>('/api/me/physician/agent-overview')
+export const getOwnedPracticeRepresentation = () => request<OwnedPracticeRepresentation>('/api/me/physician/practice-representation')
+export const getOwnedTrainProjection = () => request<OwnedTrainProjection>('/api/me/physician/training')
+export const startOwnedTraining = (mode: 'initialization' | 'daily' | 'extended' = 'daily') => request<OwnedTrainingSession>('/api/me/physician/training/sessions', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }),
+})
+export const resumeOwnedTraining = (sessionId: number) => request<OwnedTrainingSession>(`/api/me/physician/training/sessions/${sessionId}`)
+export const answerOwnedTraining = (sessionId: number, questionId: string, response: { answer?: string | string[]; skipped?: boolean }) => request<TrainingResponse>(`/api/me/physician/training/sessions/${sessionId}/responses/${encodeURIComponent(questionId)}`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(response),
+})
+export const finishOwnedTraining = (sessionId: number) => request<OwnedTrainingSession>(`/api/me/physician/training/sessions/${sessionId}/finish`, { method: 'POST' })
+export const completeOwnedTrainingReview = (sessionId: number, deferPending = false) => request<OwnedTrainingSession & { pending_review_count: number }>(`/api/me/physician/training/sessions/${sessionId}/review/complete`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ defer_pending: deferPending }),
+})
+export const reviewOwnedLearning = (learningId: number, action: 'confirm' | 'edit' | 'reject', statement?: string) => request<{ learning: ProposedLearning }>(`/api/me/physician/training/learnings/${learningId}`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, statement }),
+})
+export const runOwnedProfileEnrichment = () => request<ProfileEnrichmentJob>('/api/me/physician/profile/enrich', { method: 'POST' })
+export const getOwnedProfileEnrichment = () => request<ProfileEnrichmentJob>('/api/me/physician/profile/enrichment')
+export const reviewOwnedProfileCandidate = (candidateId: string, input: { action: 'confirm' | 'edit_confirm' | 'reject'; title?: string; detail?: string; shareable?: boolean }) => request<{ candidate: ProfileCandidateFact; profile_item: ProfileItem | null }>(`/api/me/physician/profile/enrichment/candidates/${encodeURIComponent(candidateId)}`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+})
+export const getOwnedAgentTestCases = () => request<AgentTestCase[]>('/api/me/physician/agent-test-cases')
+export const chatWithOwnedAgent = (input: AgentChatRequest) => request<AgentChatResponse>('/api/me/physician/agent-chat', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+})
+export const submitOwnedChatFeedback = (responseId: string, feedback: 'reflects' | 'not_quite') => request<AgentChatFeedback>(`/api/me/physician/agent-chat/${encodeURIComponent(responseId)}/feedback`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }),
+})
+export const startOwnedFocusedTraining = (seedId: string, answerTarget = 10) => request<OwnedTrainingSession>('/api/me/physician/training/focused', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seed_id: seedId, answer_target: answerTarget }),
+})
+export const getOwnedProfessionalPosts = () => request<OwnedProfessionalPost[]>('/api/me/physician/posts')
+export const createOwnedProfessionalPost = (post: { type: PostType; title: string; body: string; case_origin?: 'synthetic_demo' }) => request<OwnedProfessionalPost>('/api/me/physician/posts', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(post),
+})
+export const draftOwnedProfessionalPost = (input: PostDraftRequest) => request<OwnedProfessionalPost>('/api/me/physician/posts/draft', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+})
+export const editOwnedProfessionalPost = (postId: number, post: { type: PostType; title: string; body: string; case_origin?: 'synthetic_demo' }) => request<OwnedProfessionalPost>(`/api/me/physician/posts/${postId}`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(post),
+})
+export const dismissOwnedProfessionalPost = (postId: number) => request<OwnedProfessionalPost>(`/api/me/physician/posts/${postId}/dismiss`, { method: 'POST' })
 export const createProviderClaim = (npi: string) => request<ProviderClaim>(`/api/providers/${encodeURIComponent(npi)}/claim`, { method: 'POST' })
 export const submitProviderVerification = (claimId: number) => request<ProviderClaim>(`/api/provider-claims/${claimId}/submit-verification`, { method: 'POST' })
 export const verifySyntheticDemoClaim = (claimId: number) => request<ProviderClaim>(`/api/provider-claims/${claimId}/verify-demo`, { method: 'POST' })

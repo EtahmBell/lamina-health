@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.consult import router as consult_router
 from backend.api.engagement import router as engagement_router
+from backend.api.physician_sandbox import router as physician_sandbox_router
 from backend.api.specialist import router as specialist_router
 from backend.api.workspace import router as workspace_router
 from backend.demo_workspace import configured_cors_origins
@@ -27,6 +28,7 @@ app.include_router(workspace_router)
 app.include_router(specialist_router)
 app.include_router(engagement_router)
 app.include_router(provider_network_router)
+app.include_router(physician_sandbox_router)
 
 
 @app.get("/health")

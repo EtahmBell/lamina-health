@@ -64,11 +64,18 @@ workspace-local overlays. Profile edits, interests, training responses and branc
 paths, enrichment candidates, proposed learnings, and posts never write to the shared synthetic directory,
 `provider_claims`, or `provider_agent_state`.
 
-A future authenticated implementation can retain the same profile, representation,
-training, learning, update, and feed contracts while replacing the workspace/persona
-owner key with a verified active provider-claim owner key. That binding must be
-resolved server-side from authentication and a verified claim; an NPI supplied by a
-browser is not authorization.
+The authenticated private physician sandbox now retains the same repository and
+projection contracts through a `PhysicianOwnerScope`. Its opaque storage/physician
+keys occupy the legacy-named `workspace_id`/`persona_id` columns, while the binding
+to account plus owned provider claim is resolved server-side. It does not require
+verification for private professional setup, never treats an NPI supplied by a
+browser as authorization, and never joins demo workspace state.
+
+Demo scope remains anonymous workspace plus controlled Lucy/Iain persona. Owner
+scope remains authenticated account plus selected owned provider claim. Demo base
+fixtures stay persona-specific; owner projections instead use the stored NPPES base
+identity, physician-confirmed overlays/interests/learnings, and generic controlled
+synthetic scenarios. Neither scope can read the other's state.
 
 ## Professional identity and practice representation
 

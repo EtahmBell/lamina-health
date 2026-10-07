@@ -175,10 +175,25 @@ class ProviderNetwork:
         )
 
     def claim(self, npi: str, auth_user_id: str) -> ProviderClaim:
-        self._resolve(npi)
+        profile = self._resolve(npi)
         claim, conflict = self.store.claim_provider(auth_user_id, npi)
         if conflict:
             raise ClaimConflictError("Provider identity already has an active claim")
+        self.store.ensure_physician_owner_scope(
+            claim,
+            {
+                "npi": profile.npi,
+                "display_name": profile.display_name,
+                "specialty": profile.specialty,
+                "taxonomy_code": profile.taxonomy_code,
+                "organization": profile.organization,
+                "city": profile.city,
+                "state": profile.state,
+                "phone": profile.phone,
+                "source": profile.source.value,
+                "directory_disclaimer": profile.directory_disclaimer,
+            },
+        )
         return self._public_claim(claim)
 
     def claims_for_user(self, auth_user_id: str) -> list[ProviderClaim]:
@@ -237,6 +252,14 @@ class ProviderNetwork:
         if claim["status"] != ClaimStatus.VERIFIED:
             raise AgentTransitionError("A verified claim is required before activation")
         profile = self._resolve(claim["npi"])
+        owner_scope = self.store.physician_owner_scope_for_claim(claim_id)
+        if (
+            profile.source != ProviderSource.SYNTHETIC
+            and (not owner_scope or owner_scope["publication_status"] != "published")
+        ):
+            raise AgentTransitionError(
+                "Private physician sandboxes cannot be activated or published in this phase"
+            )
         self.store.activate_provider_agent(profile.npi)
         return self._with_state(profile, auth_user_id)
 
@@ -259,6 +282,10 @@ class ProviderNetwork:
     ) -> PhysicianNetworkProfile:
         claim = self.store.active_provider_claim(profile.npi)
         agent_state = self.store.provider_agent_state(profile.npi)
+        if claim and profile.source != ProviderSource.SYNTHETIC:
+            owner_scope = self.store.physician_owner_scope_for_claim(claim["id"])
+            if not owner_scope or owner_scope["publication_status"] != "published":
+                agent_state = None
         lifecycle = project_lifecycle(claim, agent_state)
         owned = bool(claim and auth_user_id and claim["auth_user_id"] == auth_user_id)
         preferences = (

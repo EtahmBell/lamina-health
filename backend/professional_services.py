@@ -274,6 +274,11 @@ class PostDraftService:
         self.client = client or ResponsesApiClient()
 
     def draft(self, persona_id: str, post_type: str, source: dict[str, Any]) -> dict:
+        return self.draft_for_identity(PERSONAS[persona_id], post_type, source)
+
+    def draft_for_identity(
+        self, physician: dict[str, Any], post_type: str, source: dict[str, Any]
+    ) -> dict:
         if self.client.available:
             try:
                 result = self.client.structured(
@@ -281,7 +286,7 @@ class PostDraftService:
                     invent credentials, outcomes, study conclusions, referral rules, or
                     rankings. For a paper, distinguish the supplied citation from the
                     physician's own note. The physician remains the author.""",
-                    {"physician": PERSONAS[persona_id], "post_type": post_type, "source": source},
+                    {"physician": physician, "post_type": post_type, "source": source},
                     {
                         "type": "object",
                         "properties": {

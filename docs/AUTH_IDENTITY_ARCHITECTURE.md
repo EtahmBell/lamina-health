@@ -24,6 +24,19 @@ demo. Claiming another provider does not rebind that workspace.
 Preferences stay separate from claim ownership, and activation stays separate
 from verification.
 
+`physician_owner_scopes` binds one active provider claim to an opaque private
+engagement scope. It stores the claim/user/NPI relationship, a safe NPPES
+identity snapshot, independent storage and physician keys, explicit
+`publication_status`, and a separate `clinical_access` bit. The NPI is identity
+metadata, not an authorization key. A partial unique index permits one selected
+scope per account; accounts with multiple owned claims explicitly select among
+their own claim IDs.
+
+Scope creation is additive and idempotent. A claim creates one scope; a legacy
+active claim is lazily backfilled when its owner first opens the sandbox. The
+first scope is selected by default. No demo workspace row or cookie participates
+in this resolution.
+
 ## Canonical lifecycle
 
 `backend/provider_network/lifecycle.py` is the only claim/activation projection:
@@ -50,6 +63,12 @@ credential verification integration exists. The demo verifier requires
 `LAMINA_DEMO_VERIFICATION_ENABLED=true`, accepts only controlled synthetic NPIs,
 and records `verification_method=synthetic_demo`.
 
+Claim, verification, publication, and clinical access are independent. A real
+claim is private by default. Verification does not publish it, and publication
+would not grant clinical access. Pass 8A exposes no publication mutation and
+keeps clinical access unavailable. The legacy activation endpoint rejects real
+private scopes; synthetic demo verification/activation remains unchanged.
+
 ## API surface
 
 Public or optionally authenticated:
@@ -67,6 +86,33 @@ Authenticated owner operations:
 - `PUT /api/providers/{npi}/preferences`
 - `POST /api/provider-claims/{claim_id}/activate-agent`
 - `POST /api/provider-claims/{claim_id}/disable-agent`
+- `GET /api/me/physician/status`
+- `PUT /api/me/physician/selection/{owned_claim_id}`
+- `/api/me/physician/profile`, `/interests`, `/profile/enrichment`
+- `/api/me/physician/training`, `/practice-representation`, `/agent-overview`
+- `/api/me/physician/agent-test-cases`, `/agent-chat`
+- `/api/me/physician/posts` (private drafts only)
+
+Every `/api/me/physician` route derives the account from the verified bearer
+token and then resolves an owned selected claim. It never accepts a user ID,
+NPI, anonymous workspace ID, or Lucy/Iain persona as authority. Missing auth is
+401, no active selection is a safe 409 (except the status projection), and an
+unowned selector/resource is a non-disclosing 404.
+
+## Data boundary
+
+The physician sandbox contains professional profile overlays, confirmed
+interests, review-first public enrichment candidates, initialization/training,
+confirmed practice representation, private agent chat against generic synthetic
+scenarios, and private post drafts. Shared engagement repository methods are
+addressed with the opaque owner keys, preserving the established session and
+review state machines without copying their tables.
+
+It has no patient list, patient cases, EHR connector, consultation context,
+referral execution, network roster mutation, routing-pool eligibility, or PHI.
+Its capability projection keeps all of those permissions false. Owner-scope
+rows and engagement rows persist across logout, browser refresh, and a new
+signed-in browser session; logout merely removes the bearer credential.
 
 Public responses expose lifecycle, claimability, synthetic provenance, and
 active state. Owner-only fields are populated only when the validated token owns
