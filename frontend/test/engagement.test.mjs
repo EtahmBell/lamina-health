@@ -215,7 +215,7 @@ test('Profile has no visible tab navigation; it is one continuous page', () => {
 test('legacy ?tab= deep links degrade to a scroll target or a redirect, never a visible tab switch', () => {
   const page = profilePageFn()
   assert.match(page, /params\?\.get\('tab'\)/)
-  assert.match(page, /if \(tabParam === 'updates'\) \{ navigate\(networkUpdatesPath\(personaId\)\); return \}/)
+  assert.match(page, /if \(tabParam === 'updates'\) \{ if \(personaId !== 'owner'\) navigate\(networkUpdatesPath\(personaId\)\); return \}/)
   assert.match(page, /LEGACY_PROFILE_TAB_SECTION\[tabParam\]/)
   assert.match(page, /scrollIntoView/)
   const map = slice(engagement, 'const LEGACY_PROFILE_TAB_SECTION', 'export function ProfessionalProfilePage')

@@ -241,6 +241,13 @@ _ONGOING_PROMPTS = [
     ),
 ]
 
+_REQUIRED_INITIALIZATION_STEPS = [
+    {"id": "professional_identity", "label": "Professional identity"},
+    {"id": "practice_context", "label": "Basic specialty and practice context"},
+    {"id": "interests", "label": "At least one confirmed interest"},
+    {"id": "first_training", "label": "First 10-question setup session"},
+]
+
 _SYNTHETIC_QUALIFIERS = [
     "the presentation is stable",
     "the referral question is narrowly defined",
@@ -497,23 +504,34 @@ class PhysicianSandboxService:
         confirmed_interest = any(item["confirmed"] for item in self.interests(scope))
         if state is None and completed and confirmed_interest:
             state = self.store.mark_initialized(workspace_id, physician_id)
+        completed_ids = {
+            "professional_identity",
+            "practice_context",
+            *(["interests"] if confirmed_interest else []),
+            *(["first_training"] if completed else []),
+        }
+        unanswered = sum(1 for q in self.questions(scope) if q["status"] == "unanswered")
         return {
             "status": "initialized" if state else "in_progress",
             "initialized": bool(state),
             "initialized_at": state["initialized_at"] if state else None,
-            "required_steps": [
-                "professional_identity",
-                "practice_context",
-                "interests",
-                "first_training",
-            ],
+            "required_steps": _REQUIRED_INITIALIZATION_STEPS,
             "completed_steps": [
-                "professional_identity",
-                "practice_context",
-                *(["interests"] if confirmed_interest else []),
-                *(["first_training"] if completed else []),
+                step for step in _REQUIRED_INITIALIZATION_STEPS if step["id"] in completed_ids
             ],
+            "initialized_sections": sorted(completed_ids),
+            "incomplete_sections": [
+                step["id"]
+                for step in _REQUIRED_INITIALIZATION_STEPS
+                if step["id"] not in completed_ids
+            ],
+            "high_value_questions_remaining": unanswered,
             "blocking": False,
+            "meaning": (
+                "Agent initialized; ongoing improvement happens through Profile and Train."
+                if state
+                else "Complete one setup training session to initialize your agent."
+            ),
         }
 
     def _active_session(self, scope: PhysicianOwnerScope) -> dict | None:
@@ -557,7 +575,17 @@ class PhysicianSandboxService:
             )
             questions.append(question)
             needed -= 1
-        return {**session, "questions": questions, "responses": responses}
+        proposed = [
+            learning
+            for learning in self.store.proposed_learnings(workspace_id, physician_id)
+            if learning["source_reference"].startswith(f"session:{session['id']}:")
+        ]
+        return {
+            **session,
+            "questions": questions,
+            "responses": responses,
+            "proposed_learnings": proposed,
+        }
 
     def start_training(self, scope: PhysicianOwnerScope, mode: str = "daily") -> dict:
         existing = self._active_session(scope)

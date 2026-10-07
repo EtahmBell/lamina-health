@@ -3,6 +3,7 @@ import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
 import { consultNetwork, getAgentNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getProfessionalPosts, getTrainingHistory, resetJordanDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type ProfessionalPost, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
+import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
@@ -718,6 +719,10 @@ export default function App() {
   const path = current.pathname
   const params = current.searchParams
   if (path === '/') return <LandingPage navigate={navigate} />
+  if (path === '/me' || path === '/me/home') return <OwnerHomePage navigate={navigate} />
+  if (path === '/me/profile') return <OwnerProfilePage navigate={navigate} params={params} />
+  if (path === '/me/agent') return <OwnerAgentPage navigate={navigate} params={params} />
+  if (path === '/me/agent/train') return <OwnerTrainingPage navigate={navigate} params={params} />
   if (path === '/home') return <HomePage navigate={navigate} />
   if (path === '/patients') return <PatientSelector navigate={navigate} />
   if (path === '/consultations') return <ConsultationsPage navigate={navigate} />

@@ -43,6 +43,7 @@ import {
   type FocusedTrainingSeed,
   type NetworkFeed,
   type NetworkFeedItem,
+  type PhysicianIdentity,
   type PhysicianInterest,
   type PhysicianInterestType,
   type PostType,
@@ -87,7 +88,7 @@ function relativeDayLabel(value: string) {
 
 /* -------------------------------------------------------------------- paths */
 
-export const trainingPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/agent/train' : '/agent/train')
+export const trainingPath = (perspective: PhysicianIdentity) => (perspective === 'iain' ? '/specialist/agent/train' : perspective === 'owner' ? '/me/agent/train' : '/agent/train')
 export const professionalProfilePath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/profile' : '/profile')
 export const networkProfilePath = (perspective: DemoPhysicianPerspective, controlledId: string) => (perspective === 'iain' ? `/specialist/network/profile/${controlledId}` : `/network/profile/${controlledId}`)
 export const networkUpdatesPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network?tab=feed' : '/network?tab=feed')
@@ -244,7 +245,7 @@ function TrainingLearningCard({ learning, editing, draft, onEdit, onCancelEdit, 
 type TrainingPhase = 'loading' | 'empty' | 'questions' | 'completed' | 'reviewing' | 'review_complete' | 'error'
 type TrainingMode = 'initialization' | 'daily'
 
-export function TrainingPage({ personaId, agentName, navigate, exitPath, params }: { personaId: DemoPhysicianPerspective; agentName: string; navigate: Navigate; exitPath: string; params?: URLSearchParams }) {
+export function TrainingPage({ personaId, agentName, navigate, exitPath, params }: { personaId: PhysicianIdentity; agentName: string; navigate: Navigate; exitPath: string; params?: URLSearchParams }) {
   const modeParam = (params?.get('mode') as TrainingMode | null) ?? 'daily'
   const resumeParam = params?.get('resume')
   const reviewParam = params?.get('review')
@@ -269,14 +270,17 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     setPhase('loading'); setIndex(0); setCardState('idle'); setBranchNote(null)
     setCompletionSummary(null); setLearnings([]); setMultiSelected([]); setTextAnswer(''); setError('')
     const openReview = async (sessionId: number) => {
-      const [resumedSession, workspace] = await Promise.all([
-        resumeTrainingSession(personaId, sessionId),
-        getPhysicianTraining(personaId),
-      ])
+      const resumedSession = await resumeTrainingSession(personaId, sessionId)
       if (cancelled) return
       const prefix = `session:${sessionId}:`
       setSession(resumedSession)
-      setLearnings(workspace.proposed_learnings.filter((item) => item.source_reference.startsWith(prefix)))
+      if (personaId === 'owner') {
+        setLearnings((resumedSession.proposed_learnings ?? []).filter((item) => item.source_reference.startsWith(prefix)))
+      } else {
+        const workspace = await getPhysicianTraining(personaId)
+        if (cancelled) return
+        setLearnings(workspace.proposed_learnings.filter((item) => item.source_reference.startsWith(prefix)))
+      }
       setPhase('reviewing')
     }
     const openTraining = async () => {
@@ -575,7 +579,7 @@ function ProfileItemForm({ category, initial, onSave, onCancel, busy }: {
 }
 
 function ProfileSection({ category, items, personaId, onSaved, itemActions, heading, id, quiet, readOnly }: {
-  category: ProfileCategory; items: ProfileItem[]; personaId?: DemoPhysicianPerspective
+  category: ProfileCategory; items: ProfileItem[]; personaId?: PhysicianIdentity
   onSaved?: () => void; itemActions?: (item: ProfileItem) => ReactNode; heading?: string; id?: string; quiet?: boolean; readOnly?: boolean
 }) {
   const [adding, setAdding] = useState(false)
@@ -606,7 +610,7 @@ function ProfileSection({ category, items, personaId, onSaved, itemActions, head
 
 /** Own-profile-only editable chip section (Skills & procedures, Languages). Each chip is a real button because clicking one enters edit mode — never a decorative fake control. */
 function ProfileChipSection({ category, items, personaId, onSaved, heading, readOnly }: {
-  category: ProfileCategory; items: ProfileItem[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void; heading?: string; readOnly?: boolean
+  category: ProfileCategory; items: ProfileItem[]; personaId?: PhysicianIdentity; onSaved?: () => void; heading?: string; readOnly?: boolean
 }) {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -632,7 +636,7 @@ function ProfileChipSection({ category, items, personaId, onSaved, heading, read
 
 /** Vertical professional timeline for one Background subcategory (Training / Experience / Affiliations). */
 function ProfileTimelineGroup({ category, items, personaId, onSaved, readOnly }: {
-  category: ProfileCategory; items: ProfileItem[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void; readOnly?: boolean
+  category: ProfileCategory; items: ProfileItem[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean
 }) {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -662,7 +666,7 @@ function ProfileTimelineGroup({ category, items, personaId, onSaved, readOnly }:
 }
 
 /** About reads as a biography paragraph, not a metadata row — but reuses the same canonical save path as every other profile item. */
-function AboutSection({ items, personaId, onSaved, readOnly }: { items: ProfileItem[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void; readOnly?: boolean }) {
+function AboutSection({ items, personaId, onSaved, readOnly }: { items: ProfileItem[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean }) {
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const existing = items[0] ?? null
@@ -844,7 +848,7 @@ function InterestForm({ initial, onSave, onCancel, busy }: { initial?: Physician
   </div>
 }
 
-export function InterestGroup({ interestType, items, personaId, onSaved, readOnly }: { interestType: PhysicianInterestType; items: PhysicianInterest[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void; readOnly?: boolean }) {
+export function InterestGroup({ interestType, items, personaId, onSaved, readOnly }: { interestType: PhysicianInterestType; items: PhysicianInterest[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean }) {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -872,7 +876,7 @@ export function InterestGroup({ interestType, items, personaId, onSaved, readOnl
 }
 
 export function InterestsPanel({ interests, personaId, onSaved, navigate, trainPath, types = INTEREST_TYPES, id, explainer, readOnly }: {
-  interests: PhysicianInterest[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void
+  interests: PhysicianInterest[]; personaId?: PhysicianIdentity; onSaved?: () => void
   navigate?: Navigate; trainPath?: string; types?: PhysicianInterestType[]; id?: string; explainer?: string; readOnly?: boolean
 }) {
   return <section id={id} className="profile-section-v2 interests-panel">
@@ -884,7 +888,7 @@ export function InterestsPanel({ interests, personaId, onSaved, navigate, trainP
 
 /* ----------------------------------------------------------------- Enrichment */
 
-function EnrichmentCandidateCard({ candidate, personaId, onReviewed }: { candidate: ProfileCandidateFact; personaId: DemoPhysicianPerspective; onReviewed: (candidate: ProfileCandidateFact) => void }) {
+function EnrichmentCandidateCard({ candidate, personaId, onReviewed }: { candidate: ProfileCandidateFact; personaId: PhysicianIdentity; onReviewed: (candidate: ProfileCandidateFact) => void }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(candidate.proposed_title)
   const [busy, setBusy] = useState(false)
@@ -909,7 +913,7 @@ function EnrichmentCandidateCard({ candidate, personaId, onReviewed }: { candida
 }
 
 function ProfileSuggestionsModal({ personaId, candidates, onClose, onReviewed, triggerRef }: {
-  personaId: DemoPhysicianPerspective; candidates: ProfileCandidateFact[]
+  personaId: PhysicianIdentity; candidates: ProfileCandidateFact[]
   onClose: () => void; onReviewed: (candidate: ProfileCandidateFact) => void
   triggerRef: { current: HTMLButtonElement | null }
 }) {
@@ -933,7 +937,7 @@ function ProfileSuggestionsModal({ personaId, candidates, onClose, onReviewed, t
 }
 
 /** Replaces the old inline "Suggested additions" block: a small, dismissible entry point, never the dominant Profile content. */
-export function ProfileSuggestionsEntry({ personaId, onConfirmed }: { personaId: DemoPhysicianPerspective; onConfirmed: () => void }) {
+export function ProfileSuggestionsEntry({ personaId, onConfirmed }: { personaId: PhysicianIdentity; onConfirmed: () => void }) {
   const [job, setJob] = useState<ProfileEnrichmentJob | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -1108,6 +1112,7 @@ export function PracticeTab({ representation, portrait, reviewHref, navigate, ex
   representation: PracticeRepresentation; portrait?: string | null; reviewHref?: string | null; navigate: Navigate; extra?: ReactNode
 }) {
   const sections = representation.sections
+  const gaps = representation.gaps
   const summary = practiceSummarySentence(portrait)
   const clinicalFocus = sections.clinical_focus
 
@@ -1174,6 +1179,12 @@ export function PracticeTab({ representation, portrait, reviewHref, navigate, ex
     {extraLearnings.length > 0 && <section className="practice-section practice-section-learnings">
       <h3 className="practice-section-heading">Learned from training</h3>
       <ExpandableList items={extraLearnings.map((item) => <li key={item.id}>{item.statement}</li>)} />
+    </section>}
+
+    {gaps.practice_areas_needing_input.length > 0 && <section className="practice-section practice-section-gaps">
+      <h3 className="practice-section-heading">Still building this representation</h3>
+      <p className="practice-subcopy">Your agent does not yet have a confirmed answer for these practice areas. Training fills these in.</p>
+      <ExpandableList items={gaps.practice_areas_needing_input.map((item) => <li key={item}>{item}</li>)} initialCount={3} />
     </section>}
 
     {extra}
@@ -1293,7 +1304,7 @@ function ChatMessageBubble({ message, agentName, onFeedback, onStartFocused, bus
 }
 
 export function ChatTab({ personaId, agentName, navigate, trainPath }: {
-  personaId: DemoPhysicianPerspective; agentName: string; navigate: Navigate; trainPath: string
+  personaId: PhysicianIdentity; agentName: string; navigate: Navigate; trainPath: string
 }) {
   const [cases, setCases] = useState<AgentTestCase[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -1363,13 +1374,13 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
 }
 
 const BACKGROUND_CATEGORIES: ProfileCategory[] = ['training', 'experience', 'affiliations']
-const agentPracticePath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/agent' : '/agent?tab=knowledge')
+const agentPracticePath = (perspective: PhysicianIdentity) => (perspective === 'iain' ? '/specialist/agent' : perspective === 'owner' ? '/me/agent?tab=practice' : '/agent?tab=knowledge')
 /** Legacy ?tab= deep links degrade to a scroll target on the one continuous page, or a redirect for the retired Updates tab. */
 const LEGACY_PROFILE_TAB_SECTION: Record<string, string | null> = {
   overview: null, background: 'profile-section-training', research: 'profile-section-research', interests: 'profile-section-interests',
 }
 
-export function ProfessionalProfilePage({ personaId, navigate, params }: { personaId: DemoPhysicianPerspective; navigate: Navigate; params?: URLSearchParams }) {
+export function ProfessionalProfilePage({ personaId, navigate, params }: { personaId: PhysicianIdentity; navigate: Navigate; params?: URLSearchParams }) {
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
   const [initialization, setInitialization] = useState<AgentInitialization | null>(null)
   const [error, setError] = useState('')
@@ -1381,7 +1392,7 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
   useEffect(load, [personaId]) // eslint-disable-line react-hooks/exhaustive-deps
   const tabParam = params?.get('tab') ?? null
   useEffect(() => {
-    if (tabParam === 'updates') { navigate(networkUpdatesPath(personaId)); return }
+    if (tabParam === 'updates') { if (personaId !== 'owner') navigate(networkUpdatesPath(personaId)); return }
     const sectionId = tabParam ? LEGACY_PROFILE_TAB_SECTION[tabParam] : null
     if (!sectionId || !profile) return
     const frame = window.requestAnimationFrame(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
@@ -1417,7 +1428,7 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
     </header>
     <div className="profile-header-actions">
       <button className="button-secondary" onClick={scrollToAbout}>Edit profile</button>
-      <button className="text-button" onClick={() => navigate(networkProfilePath(personaId, profile.physician.id))}>View as others see it →</button>
+      {personaId !== 'owner' && <button className="text-button" onClick={() => navigate(networkProfilePath(personaId, profile.physician.id))}>View as others see it →</button>}
       <button className="text-button" onClick={() => navigate(agentPracticePath(personaId))}>View how my agent represents me →</button>
     </div>
     {savedNote && <p className="profile-save-note" role="status">{savedNote}</p>}
@@ -1447,7 +1458,7 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
       {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} personaId={personaId} onSaved={onItemSaved} />}
       <ProfileSection category="research" items={profile.sections.research} personaId={personaId} onSaved={onItemSaved} quiet />
       <ProfileSection category="publications" items={profile.sections.publications} personaId={personaId} onSaved={onItemSaved} quiet
-        itemActions={(item) => <PostButton personaId={personaId} paperTitle={item.title} triggerLabel="Share this paper" compact />} />
+        itemActions={personaId === 'owner' ? undefined : (item) => <PostButton personaId={personaId} paperTitle={item.title} triggerLabel="Share this paper" compact />} />
     </section>}
 
     {hasTeachingSection && <section id="profile-section-teaching" className="profile-block">

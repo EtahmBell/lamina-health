@@ -11,6 +11,7 @@ import {
   getMyProviderClaims,
   getProvider,
   searchProviders,
+  selectPhysicianSandbox,
   submitProviderVerification,
   verifySyntheticDemoClaim,
   type AgentStatus,
@@ -27,6 +28,7 @@ import {
 } from './claimLifecycle.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { physicianDisplayName } from './networkRoster.ts'
+import { ownerHomePath } from './ownerPaths.ts'
 
 type Navigate = (path: string) => void
 
@@ -40,9 +42,9 @@ type Navigate = (path: string) => void
 /** Title-cased NPPES names, with the demo-only "(synthetic)" suffix stripped
  * from headings, confirmations and success copy — it belongs in the eyebrow
  * label, not repeated through every piece of identity text. */
-const displayName = (value: string) => cleanName(physicianDisplayName(value))
-const initials = (name: string) => name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')
-const location = (profile: PhysicianNetworkProfile) => `${profile.city || 'Location not listed'}${profile.state ? `, ${profile.state}` : ''}`
+export const displayName = (value: string) => cleanName(physicianDisplayName(value))
+export const initials = (name: string) => name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')
+export const location = (profile: PhysicianNetworkProfile) => `${profile.city || 'Location not listed'}${profile.state ? `, ${profile.state}` : ''}`
 export const providerPath = (npi: string) => `/claim/provider/${encodeURIComponent(npi)}`
 export const signInPath = (returnTo: string) => `/claim/sign-in?return=${encodeURIComponent(returnTo)}`
 export const signUpPath = (returnTo: string) => `/claim/sign-up?return=${encodeURIComponent(returnTo)}`
@@ -153,6 +155,26 @@ export function PhysicianIdentitySearchPage({ navigate }: { navigate: Navigate }
 
 /* ----------------------------------------------------------- identity page */
 
+/** The one entry point from an owned claim into the private, authenticated Lamina
+ * workspace (Pass 8B). Selecting the claim is explicit and server-recorded — it never
+ * implies verification is complete, that the physician is public, or that their agent
+ * is network-visible. Those are independent capabilities, tracked separately. */
+function OpenPrivateWorkspaceAction({ claimId, navigate }: { claimId: number; navigate: Navigate }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const open = async () => {
+    setBusy(true); setError('')
+    try { await selectPhysicianSandbox(claimId); navigate(ownerHomePath) }
+    catch (err) { setError(err instanceof Error ? err.message : 'Could not open your private workspace') }
+    finally { setBusy(false) }
+  }
+  return <div className="open-workspace-action">
+    <button className="button-primary" disabled={busy} onClick={() => void open()}>{busy ? 'Opening…' : 'Open private workspace'} <span>→</span></button>
+    <p className="muted-note">Build your professional profile and train your private Lamina agent. This does not make you public or complete verification.</p>
+    {error && <p className="error-banner" role="alert">{error}</p>}
+  </div>
+}
+
 export function ProviderIdentityPage({ npi, navigate, params }: { npi: string; navigate: Navigate; params: URLSearchParams }) {
   const { configured, loading: authLoading, user } = useAuth()
   const [profile, setProfile] = useState<PhysicianNetworkProfile | null>(null)
@@ -214,6 +236,7 @@ export function ProviderIdentityPage({ npi, navigate, params }: { npi: string; n
       <header><div><p className="eyebrow">Lamina identity</p><h2>{copy.label}</h2><p>{copy.detail}</p></div><LifecycleChip status={status} claimedByMe={profile.claimed_by_me} /></header>
       <LifecycleStepper status={status} />
       <SessionNotice />
+      {profile.claimed_by_me && profile.my_claim_id !== null && <OpenPrivateWorkspaceAction claimId={profile.my_claim_id} navigate={navigate} />}
 
       {status === 'reserved' && profile.claimable && (
         user
