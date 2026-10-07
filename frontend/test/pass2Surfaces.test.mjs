@@ -7,13 +7,13 @@ const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const network = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to))
-const directory = () => slice(network, 'export function PhysicianDirectoryPage', 'const splitList')
+const directory = () => slice(network, 'export function MyNetworkTab', 'export function PhysicianProfilePage')
 const profile = () => slice(app, 'function SettingsPage', 'function UnfinishedPatient')
 
 /* ---------------------------------------------------------- network hero */
 
-test('the network page leads with relationships, then building, then the graph', () => {
-  const order = ['Your network', 'Add your network', 'Network visualization']
+test('the network page leads with the visualization, then relationships, then building', () => {
+  const order = ['Network visualization', 'Your network', 'Add your network']
   const positions = order.map((token) => directory().indexOf(token))
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b))
@@ -87,7 +87,7 @@ test('the graph still draws edges only from recorded consultations', () => {
 
 test('added physicians outside the consult roster are disclosed, not faked into the graph', () => {
   assert.match(directory(), /The visualization shows physician agents involved in Lamina consultations\./)
-  assert.match(directory(), /Added relationships without a consultation appear in Your network above\./)
+  assert.match(directory(), /Added relationships without a consultation appear in Your network below\./)
   assert.doesNotMatch(directory(), /offGraphMembers/, 'one quiet line replaces the conditional note')
 })
 

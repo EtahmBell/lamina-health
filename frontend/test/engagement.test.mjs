@@ -23,7 +23,7 @@ test('unified navigation: Lucy nav now reads Cases instead of Consultations', ()
 
 test('specialist nav now matches the unified physician app, including Profile as a 6th item (Pass 5B)', () => {
   const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'function ProfileControl')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'", "title: 'Profile'"])
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Network'", "title: 'Profile'"])
 })
 
 /* --------------------------------------------------------------- routing */
@@ -52,7 +52,7 @@ test('specialist patients page is an honest empty state, not a fabricated panel'
 test('specialist network page is derived from the feed, never Lucy\'s private roster endpoint', () => {
   const dispatch = routing()
   assert.match(dispatch, /path === '\/specialist\/network'/)
-  const networkPage = slice(specialist, 'export function SpecialistNetworkPage', specialist.length)
+  const networkPage = slice(specialist, 'function dedupePhysicians', specialist.length)
   assert.match(networkPage, /getNetworkFeed\('iain'\)/)
   assert.doesNotMatch(networkPage, /getAgentNetwork/)
 })
@@ -367,4 +367,72 @@ test('Lucy and Iain Home share the same dashboard architecture: Your Agent card 
   assert.match(specialistHome, /<HomeAgentCard overview=\{overview\}/)
   assert.match(specialistHome, /<NetworkHighlights feed=\{feed\}/)
   assert.doesNotMatch(specialistHome, /agent learning|Review preferences/i, 'legacy case-raised learnings never drive Iain\'s ordinary Home either')
+})
+
+/* ----------------------------------------------------------------- Pass 7C: Network */
+
+test('sidebar says Network, not Physician Network, for both personas', () => {
+  assert.match(app, /id: 'network', title: 'Network', icon: '⌁', path: '\/network'/)
+  assert.match(app, /id: 'specialist-network', title: 'Network', icon: '⌁', path: '\/specialist\/network'/)
+  assert.doesNotMatch(app, /title: 'Physician Network'/)
+})
+
+test('Network defaults to My Network and routes ?tab=feed to Feed, for both personas', () => {
+  const lucyShell = slice(app, 'function LucyNetworkPage', 'function HomePage')
+  assert.match(lucyShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
+  assert.match(lucyShell, /tab === 'my-network' \? <MyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="lucy" navigate=\{navigate\} \/>/)
+  const specialistShell = slice(specialist, 'export function SpecialistNetworkPage', specialist.length)
+  assert.match(specialistShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
+  assert.match(specialistShell, /tab === 'my-network' \? <SpecialistMyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="iain" navigate=\{navigate\} \/>/)
+})
+
+test('legacy /network/updates and /specialist/network/updates alias to the Feed tab, never a separate feed page', () => {
+  const dispatch = routing()
+  assert.match(dispatch, /path === '\/network\/updates'[\s\S]{0,160}LucyNetworkPage navigate=\{navigate\} params=\{new URLSearchParams\('tab=feed'\)\}/)
+  assert.match(dispatch, /path === '\/specialist\/network\/updates'[\s\S]{0,160}SpecialistNetworkPage navigate=\{navigate\} params=\{new URLSearchParams\('tab=feed'\)\}/)
+  assert.doesNotMatch(engagement, /export function FullNetworkFeedPage/, 'the old standalone full-feed page implementation is gone')
+})
+
+test('Home "View network" lands on Network -> Feed, not a standalone feed route', () => {
+  assert.match(engagement, /export const networkUpdatesPath = \(perspective: DemoPhysicianPerspective\) => \(perspective === 'iain' \? '\/specialist\/network\?tab=feed' : '\/network\?tab=feed'\)/)
+})
+
+test('My Network retains the existing graph/search/add behavior unchanged', () => {
+  assert.match(network, /export function MyNetworkTab/)
+  assert.match(network, /getAgentNetwork\(\)\.then\(setNetwork\)/)
+  assert.match(network, /searchProviders\(filters\)/)
+  assert.match(network, /addNetworkMember\(profile\.npi\)/)
+  assert.match(network, /<NetworkGraph network=\{network\}/)
+})
+
+test('Network Feed uses canonical getNetworkFeed and never renders drafts', () => {
+  const feedTab = slice(engagement, 'export function NetworkFeedTab', '/* --------------------------------------------------------------------- Train */')
+  assert.match(feedTab, /getNetworkFeed\(personaId\)\.then\(setFeed\)/)
+  assert.doesNotMatch(feedTab, /status === 'draft'/, 'the public feed never shows draft/suggested posts')
+})
+
+test('Post intents map to backend-supported PostType values with friendly labels', () => {
+  const intents = slice(engagement, 'const POST_INTENTS', 'type PostFlowStage')
+  for (const type of ['practice_update', 'referral_guidance', 'share_paper', 'research_update', 'teaching_update', 'interesting_case', 'availability', 'professional_update', 'other']) {
+    assert.match(intents, new RegExp(`type: '${type}'`))
+  }
+  assert.doesNotMatch(intents, /type: 'profile_update'/, 'profile_update stays system-generated only, never a user-facing intent')
+})
+
+test('agent-drafted posts stay unpublished until explicit physician approval, never auto-published', () => {
+  const postButton = slice(engagement, 'export function PostButton', '/* ------------------------------------------------------------------ Interests */')
+  assert.match(postButton, /setDraftPost\(result\.post\)/)
+  assert.match(postButton, /setStage\('preview'\)/)
+  assert.doesNotMatch(postButton, /publishProfessionalPost[\s\S]{0,60}draftWithAgent/, 'drafting never implies publishing')
+  assert.match(postButton, /await publishProfessionalPost\(personaId, Number\(draftPost\.id\)\)/)
+})
+
+test('the synthetic-case post safety boundary is preserved', () => {
+  assert.match(engagement, /Demo mode supports synthetic case reflections only\./)
+  assert.match(engagement, /case_origin: intent === 'interesting_case' \? 'synthetic_demo' : undefined/)
+})
+
+test('no likes, comments, follower, or engagement mechanics were added to the feed', () => {
+  const feedArea = slice(engagement, 'function FeedCard', 'export function NetworkFeedTab')
+  assert.doesNotMatch(feedArea, /like|comment|follower|repost|trending|engagement score/i)
 })

@@ -77,7 +77,7 @@ test('PCP shell navigation and Lucy sidebar card are unchanged aside from the he
 
 test('specialist shell now matches the unified physician-app navigation, including Profile (Pass 5B)', () => {
   const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'function ProfileControl')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Physician Network'", "title: 'Profile'"])
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Network'", "title: 'Profile'"])
 })
 
 test('the specialist sidebar card never claims Active status for a reserved provider', () => {

@@ -59,7 +59,7 @@ test('a manually added relationship needs no graph edge, and the graph says so',
   assert.match(graph, /return edge && <line/, 'a line exists only where the projection has an edge')
   assert.doesNotMatch(graph, /in_network/, 'membership must never draw or style an edge')
   assert.match(network, /The visualization shows physician agents involved in Lamina consultations\./)
-  assert.match(network, /Added relationships without a consultation appear in Your network above\./)
+  assert.match(network, /Added relationships without a consultation appear in Your network below\./)
 })
 
 test('the graph has room above and below the outer agents', () => {

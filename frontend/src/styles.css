@@ -1376,3 +1376,27 @@ button.lam-row:hover { background: #fff9f1; }
   .home-agent-card-v2 { padding: 20px; }
   .home-agent-card-v2 .button-primary { display: block; width: 100%; margin: 0 0 12px; }
 }
+
+/* --------------------------------------------------------------- Pass 7C: Network */
+.network-tabs { display: flex; gap: 5px; margin: 20px 0 6px; border-bottom: 1px solid var(--border); }
+.network-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 12px 17px; color: var(--text-secondary); cursor: pointer; font-size: .72rem; font-weight: 700; }
+.network-tabs button.active { border-color: var(--accent); color: var(--accent-hover); }
+.network-tabs button:hover:not(.active) { color: var(--clinical); }
+.my-network-tab { margin-top: 26px; }
+.network-intro { max-width: 680px; margin: 0 0 4px; color: var(--text-secondary); font-size: .74rem; line-height: 1.6; }
+.network-boundary-notice.quiet { margin-top: 12px; }
+
+.network-feed-tab { margin-top: 26px; }
+.network-feed-tab-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+.network-feed-tab-header h2 { margin: 3px 0 6px; font-size: 1.5rem; }
+.network-feed-tab-header .page-intro { max-width: 520px; margin: 0; }
+.network-feed-tab-header .post-trigger { flex: 0 0 auto; white-space: nowrap; }
+
+.feed-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.feed-card-footer i { color: var(--text-secondary); font-size: .58rem; font-style: normal; }
+.feed-card-footer .text-button { white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .network-feed-tab-header { flex-direction: column; align-items: stretch; }
+  .network-feed-tab-header .post-trigger { align-self: flex-start; }
+}

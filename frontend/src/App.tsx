@@ -11,9 +11,9 @@ import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, cleanName, patientName } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients.ts'
-import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, FullNetworkFeedPage, HomeAgentCard, NetworkHighlights, NetworkPhysicianProfilePage, PracticeTab, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, type AgentActivityRow } from './Engagement.tsx'
+import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkPhysicianProfilePage, NetworkTabs, PracticeTab, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, type AgentActivityRow, type NetworkTab } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
-import { PhysicianDirectoryPage, PhysicianProfilePage } from './PhysicianNetwork.tsx'
+import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
 
@@ -36,7 +36,7 @@ const navItems = [
   { id: 'patients', title: 'Patients', icon: '✦', path: '/patients' },
   { id: 'consultations', title: 'Cases', icon: '◫', path: '/consultations' },
   { id: 'agent', title: 'My Agent', icon: '◇', path: '/agent' },
-  { id: 'network', title: 'Physician Network', icon: '⌁', path: '/network' },
+  { id: 'network', title: 'Network', icon: '⌁', path: '/network' },
   { id: 'profile', title: 'Profile', icon: '◐', path: '/profile' },
 ] as const
 
@@ -45,7 +45,7 @@ const SPECIALIST_NAV_ITEMS = [
   { id: 'specialist-patients', title: 'Patients', icon: '✦', path: '/specialist/patients' },
   { id: 'specialist-cases', title: 'Cases', icon: '◫', path: '/specialist/cases' },
   { id: 'specialist-agent', title: 'My Agent', icon: '◇', path: '/specialist/agent' },
-  { id: 'specialist-network', title: 'Physician Network', icon: '⌁', path: '/specialist/network' },
+  { id: 'specialist-network', title: 'Network', icon: '⌁', path: '/specialist/network' },
   { id: 'specialist-profile', title: 'Profile', icon: '◐', path: '/specialist/profile' },
 ] as const
 
@@ -155,11 +155,16 @@ function eventTimestamp(value: string) {
   return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(', ', ' · ')
 }
 
-function NetworkFeedRoute({ personaId, navigate }: { personaId: 'lucy' | 'iain'; navigate: Navigate }) {
-  const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [error, setError] = useState('')
-  useEffect(() => { getNetworkFeed(personaId).then(setFeed).catch((err: Error) => setError(err.message)) }, [personaId])
-  return <FullNetworkFeedPage feed={feed} navigate={navigate} perspective={personaId} error={error} />
+function LucyNetworkPage({ navigate, params }: { navigate: Navigate; params: URLSearchParams }) {
+  const tabParam = params.get('tab')
+  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
+  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
+  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/network?tab=feed' : '/network') }
+  return <main className="page-shell physician-directory-page">
+    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
+    <NetworkTabs tab={tab} onSelect={selectTab} />
+    {tab === 'my-network' ? <MyNetworkTab navigate={navigate} /> : <NetworkFeedTab personaId="lucy" navigate={navigate} />}
+  </main>
 }
 
 function HomePage({ navigate }: { navigate: Navigate }) {
@@ -720,7 +725,7 @@ export default function App() {
   if (path === '/agent/train') return <ProductShell navigate={navigate} section="agent"><TrainingPage personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} exitPath="/agent?tab=train" params={params} /></ProductShell>
   if (path === '/profile' || path === '/profile/professional') return <ProductShell navigate={navigate} section="profile"><ProfessionalProfilePage personaId="lucy" navigate={navigate} /></ProductShell>
   if (path === '/settings') return <SettingsPage navigate={navigate} />
-  if (path === networkUpdatesPath('lucy')) return <ProductShell navigate={navigate} section="network"><NetworkFeedRoute personaId="lucy" navigate={navigate} /></ProductShell>
+  if (path === '/network/updates') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
   const networkProfileControlledId = path.match(/^\/network\/profile\/([^/]+)$/)?.[1]
   if (networkProfileControlledId) return <ProductShell navigate={navigate} section="network"><NetworkPhysicianProfilePage controlledId={networkProfileControlledId} navigate={navigate} backPath="/home" /></ProductShell>
   const historyPatientId = path.match(/^\/consultations\/patient\/([^/]+)$/)?.[1]
@@ -741,11 +746,11 @@ export default function App() {
   if (path === '/specialist/agent/train') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><TrainingPage personaId="iain" agentName={SPECIALIST_AGENT_NAME} navigate={navigate} exitPath="/specialist/agent?tab=train" params={params} /></ProductShell>
   if (path === '/specialist/profile') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><ProfessionalProfilePage personaId="iain" navigate={navigate} /></ProductShell>
   if (path === '/specialist/patients') return <ProductShell navigate={navigate} section="specialist-patients" perspective="specialist"><SpecialistPatientsPage navigate={navigate} /></ProductShell>
-  if (path === '/specialist/network') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} /></ProductShell>
-  if (path === '/specialist/network/updates') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkFeedRoute personaId="iain" navigate={navigate} /></ProductShell>
+  if (path === '/specialist/network') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={params} /></ProductShell>
+  if (path === '/specialist/network/updates') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
   const specialistNetworkProfileId = path.match(/^\/specialist\/network\/profile\/([^/]+)$/)?.[1]
   if (specialistNetworkProfileId) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkPhysicianProfilePage controlledId={specialistNetworkProfileId} navigate={navigate} backPath="/specialist/home" /></ProductShell>
-  if (path === '/network') return <ProductShell navigate={navigate} section="network"><PhysicianDirectoryPage navigate={navigate} /></ProductShell>
+  if (path === '/network') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={params} /></ProductShell>
   const networkNpi = path.match(/^\/network\/([^/]+)$/)?.[1]
   if (networkNpi) return <ProductShell navigate={navigate} section="network"><PhysicianProfilePage npi={networkNpi} navigate={navigate} /></ProductShell>
   const patientId = path.match(/^\/patients\/([^/]+)$/)?.[1]

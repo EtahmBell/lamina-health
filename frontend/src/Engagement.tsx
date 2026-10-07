@@ -90,7 +90,8 @@ function relativeDayLabel(value: string) {
 export const trainingPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/agent/train' : '/agent/train')
 export const professionalProfilePath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/profile' : '/profile')
 export const networkProfilePath = (perspective: DemoPhysicianPerspective, controlledId: string) => (perspective === 'iain' ? `/specialist/network/profile/${controlledId}` : `/network/profile/${controlledId}`)
-export const networkUpdatesPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network/updates' : '/network/updates')
+export const networkUpdatesPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network?tab=feed' : '/network?tab=feed')
+export const networkPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network' : '/network')
 export const settingsPath = '/settings'
 
 /* ------------------------------------------------------------- Home: engagement */
@@ -144,12 +145,13 @@ const FEED_TYPE_LABELS: Record<string, string> = {
 }
 
 function FeedCard({ item, navigate, perspective }: { item: NetworkFeedItem; navigate: Navigate; perspective: DemoPhysicianPerspective }) {
+  const when = item.published_at ?? item.created_at
   return <article className="feed-card">
     <div className="feed-card-physician"><strong>{item.physician.name}</strong><small>{item.physician.specialty}</small></div>
     <span className="feed-card-tag">{FEED_TYPE_LABELS[item.type] ?? 'Update'}</span>
     <p className="feed-card-title">{item.title}</p>
     <p className="feed-card-body">{item.body}</p>
-    <button className="text-button" onClick={() => navigate(networkProfilePath(perspective, item.physician.id))}>View profile <b>→</b></button>
+    <div className="feed-card-footer"><i>{relativeDayLabel(when)}</i><button className="text-button" onClick={() => navigate(networkProfilePath(perspective, item.physician.id))}>View profile <b>→</b></button></div>
   </article>
 }
 
@@ -168,16 +170,34 @@ export function NetworkHighlights({ feed, navigate, perspective }: { feed: Netwo
   </section>
 }
 
-export function FullNetworkFeedPage({ feed, navigate, perspective, error }: { feed: NetworkFeed | null; navigate: Navigate; perspective: DemoPhysicianPerspective; error: string }) {
-  return <main className="page-shell history-page">
-    <p className="eyebrow">Network pulse</p>
-    <h1>Network updates</h1>
-    <p className="page-intro">The chronological, relationship-derived feed for physicians and practices your network actually interacts with.</p>
+export const NETWORK_TABS = ['my-network', 'feed'] as const
+export type NetworkTab = typeof NETWORK_TABS[number]
+const NETWORK_TAB_LABELS: Record<NetworkTab, string> = { 'my-network': 'My Network', feed: 'Feed' }
+
+export function NetworkTabs({ tab, onSelect }: { tab: NetworkTab; onSelect: (next: NetworkTab) => void }) {
+  return <nav className="network-tabs" aria-label="Network sections">{NETWORK_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => onSelect(item)}>{NETWORK_TAB_LABELS[item]}</button>)}</nav>
+}
+
+/** Network → Feed: the canonical professional-update destination. Published items only, chronological, backend-decided eligibility. */
+export function NetworkFeedTab({ personaId, navigate, onPublished }: { personaId: DemoPhysicianPerspective; navigate: Navigate; onPublished?: (post: ProfessionalPost) => void }) {
+  const [feed, setFeed] = useState<NetworkFeed | null>(null)
+  const [error, setError] = useState('')
+  const load = () => { getNetworkFeed(personaId).then(setFeed).catch((err: Error) => setError(err.message)) }
+  useEffect(load, [personaId]) // eslint-disable-line react-hooks/exhaustive-deps
+  return <div className="network-feed-tab">
+    <div className="network-feed-tab-header">
+      <div><h2>Feed</h2><p className="page-intro">Professional updates from physicians and practices your network interacts with.</p></div>
+      <PostButton personaId={personaId} triggerLabel="Post" compact={false} onPublished={(post) => { onPublished?.(post); load() }} />
+    </div>
     {error && <div className="error-banner" role="alert">{error}</div>}
-    {!feed && !error && <p className="muted-note">Loading network updates…</p>}
-    {feed && feed.items.length === 0 && <p className="home-empty">No network updates yet. Updates will appear as physicians and agents in your network share changes.</p>}
-    {feed && feed.items.length > 0 && <div className="feed-grid full-feed-grid">{feed.items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={perspective} />)}</div>}
-  </main>
+    {!feed && !error && <p className="muted-note">Loading your network feed…</p>}
+    {feed && feed.items.length === 0 && <div className="empty-state history-empty">
+      <NetworkMark />
+      <h2>No updates from your network yet.</h2>
+      <p>Updates will appear as physicians and agents in your network share professional changes.</p>
+    </div>}
+    {feed && feed.items.length > 0 && <div className="feed-grid full-feed-grid">{feed.items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} />)}</div>}
+  </div>
 }
 
 /* --------------------------------------------------------------------- Train */
@@ -614,13 +634,13 @@ function PostCard({ post, personaId, onChanged }: { post: ProfessionalPost; pers
 /* --------------------------------------------------------------------- Post */
 
 const POST_INTENTS: Array<{ type: PostType; label: string; prompt: string }> = [
-  { type: 'practice_update', label: 'Update my practice', prompt: 'What changed in your practice?' },
-  { type: 'referral_guidance', label: 'Share referral guidance', prompt: 'What would you like referring physicians to know?' },
+  { type: 'practice_update', label: 'Practice update', prompt: 'What changed in your practice?' },
+  { type: 'referral_guidance', label: 'Referral guidance', prompt: 'What should referring physicians know?' },
   { type: 'share_paper', label: 'Share a paper', prompt: 'What should your network know about it?' },
-  { type: 'research_update', label: 'Share research', prompt: 'What would you like to share?' },
-  { type: 'teaching_update', label: 'Share teaching', prompt: 'What would you like to share?' },
-  { type: 'interesting_case', label: 'Share an interesting case', prompt: 'Describe the synthetic/demo case reflection.' },
-  { type: 'availability', label: 'Share availability', prompt: 'What should your network know about your availability?' },
+  { type: 'research_update', label: 'Research', prompt: 'What would you like to share?' },
+  { type: 'teaching_update', label: 'Teaching', prompt: 'What are you teaching or presenting?' },
+  { type: 'interesting_case', label: 'Interesting case', prompt: 'Describe the synthetic/demo case reflection.' },
+  { type: 'availability', label: 'Availability', prompt: 'What should your network know about your availability?' },
   { type: 'professional_update', label: 'Professional update', prompt: 'What would you like to share?' },
   { type: 'other', label: 'Other', prompt: 'What would you like to share?' },
 ]
@@ -698,8 +718,8 @@ export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 
         {stage === 'compose' && selected && <>
           <p className="eyebrow">{selected.label}</p>
           {selected.type === 'interesting_case' && <p className="post-synthetic-notice">Demo mode supports synthetic case reflections only.</p>}
-          <label htmlFor="post-title">Title <em>Optional</em></label>
-          <input id="post-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={240} />
+          <label htmlFor="post-title">{selected.type === 'share_paper' ? <>Paper title or citation <em>Optional</em></> : <>Title <em>Optional</em></>}</label>
+          <input id="post-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={240} placeholder={selected.type === 'share_paper' ? 'Title, citation, or DOI/URL' : undefined} />
           <label htmlFor="post-note">{selected.prompt}</label>
           <textarea id="post-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} />
           {error && <p className="demo-reset-error" role="alert">{error}</p>}
