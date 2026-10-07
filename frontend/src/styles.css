@@ -1114,9 +1114,8 @@ button.lam-row:hover { background: #fff9f1; }
 
 /* ------------------------------------------------------ Professional profile */
 .professional-profile-page .profile-hero { margin-bottom: 10px; }
-.profile-benefit-note { max-width: 640px; margin: 4px 0 22px; color: var(--text-secondary); font-size: .7rem; line-height: 1.55; }
-.profile-completeness { margin-bottom: 14px; border: 1px solid var(--border); border-radius: 12px; background: #f8f3eb; padding: 15px 18px; }
-.profile-completeness h2 { margin: 3px 0 0; font-size: .96rem; }
+.profile-location { margin: 2px 0 0; color: var(--text-secondary); font-size: .76rem; }
+.profile-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 4px 0 20px; }
 .profile-save-note { margin: 0 0 16px; border-left: 3px solid var(--success); background: #edf3ee; padding: 9px 13px; color: var(--clinical); font-size: .68rem; border-radius: 0 8px 8px 0; }
 .profile-section-v2 { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 18px; }
 .profile-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
@@ -1135,6 +1134,39 @@ button.lam-row:hover { background: #fff9f1; }
 .profile-item-form textarea { min-height: 70px; }
 .profile-shareable-toggle { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: .64rem; font-weight: 400; }
 .profile-item-form > div:last-child { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+
+/* -------------------------------------------------- Pass 7D: one-page profile */
+.profile-block { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 22px; }
+.profile-block:first-of-type { margin-top: 20px; }
+.profile-block-heading { margin: 0 0 4px; font-size: 1.05rem; }
+.profile-about-text { max-width: 640px; margin: 10px 0 0; color: var(--clinical); font-family: var(--font-display); font-size: .92rem; line-height: 1.6; }
+.profile-about .text-button { margin-top: 10px; }
+
+.profile-chip-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.profile-chip { display: inline-block; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 7px 14px; color: var(--clinical); cursor: pointer; font-size: .7rem; }
+.profile-chip:hover { border-color: var(--accent); }
+.profile-chip.static { cursor: default; }
+.profile-chip.static:hover { border-color: var(--border); }
+
+.profile-timeline-group { margin-top: 20px; }
+.profile-timeline-group:first-of-type { margin-top: 0; }
+.profile-timeline-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.profile-timeline-heading h3 { margin: 0; color: var(--text-secondary); font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.profile-timeline { position: relative; margin-top: 12px; padding-left: 16px; border-left: 1px solid var(--border); }
+.profile-timeline-item { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 0 0 18px; }
+.profile-timeline-item:last-child { padding-bottom: 2px; }
+.profile-timeline-dot { position: absolute; left: -20px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.profile-timeline-item strong { display: block; color: var(--clinical); font-size: .8rem; }
+.profile-timeline-item p { margin: 4px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.profile-timeline-item small { display: block; margin-top: 4px; color: #a39c8c; font-size: .56rem; text-transform: uppercase; letter-spacing: .03em; }
+
+.profile-suggestions-row { margin: 4px 0 20px; }
+.profile-suggestions-indicator { display: block; width: 100%; max-width: 480px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; background: #fdf3e8; padding: 13px 16px; cursor: pointer; text-align: left; }
+.profile-suggestions-indicator strong { display: block; color: var(--clinical); font-size: .8rem; }
+.profile-suggestions-indicator span { display: block; margin: 4px 0; color: var(--text-secondary); font-size: .66rem; line-height: 1.5; }
+.profile-suggestions-indicator b { color: var(--accent-hover); font-size: .66rem; font-weight: 700; }
+.suggestions-dialog .learning-grid { margin-top: 18px; }
+.enrichment-provenance { color: var(--text-secondary); font-size: .62rem; }
 
 /* ----------------------------------------------------------- Practice updates */
 .practice-updates-section .text-button { margin-bottom: 4px; }
@@ -1159,13 +1191,7 @@ button.lam-row:hover { background: #fff9f1; }
 .professional-profile-link-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; background: #f8f3eb; padding: 16px 18px; }
 .profile-interest-disclaimer { display: block; margin-top: 6px; color: var(--text-secondary); font-size: .6rem; line-height: 1.5; }
 
-/* ---------------------------------------------- Pass 5B: profile tabs & sections */
-.profile-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
-.profile-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 9px 4px; color: var(--text-secondary); cursor: pointer; font-family: var(--font-ui); font-size: .76rem; font-weight: 600; margin-right: 18px; }
-.profile-tabs button.active { border-bottom-color: var(--accent); color: var(--clinical); }
-.profile-overview-tab, .profile-background-tab, .profile-research-tab, .profile-updates-tab { margin-top: 4px; }
-.profile-overview-fact { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 18px; }
-.profile-overview-fact p { margin: 6px 0 0; color: var(--text-secondary); font-size: .74rem; }
+/* ---------------------------------------------- Pass 5B: profile sections */
 .profile-item-extra-actions { margin-top: 8px; }
 .profile-section-explainer { max-width: 620px; margin: 0 0 12px; color: var(--text-secondary); font-size: .68rem; line-height: 1.55; }
 
@@ -1182,7 +1208,6 @@ button.lam-row:hover { background: #fff9f1; }
 .interest-training-hint { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
 
 /* --------------------------------------------------------- Pass 5B: enrichment */
-.enrichment-panel .button-secondary { margin-top: 4px; }
 .enrichment-candidate .enrichment-category { display: block; margin-top: 8px; color: var(--accent-hover); font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
 .enrichment-candidate p { margin: 8px 0; }
 .enrichment-candidate .enrichment-detail { color: var(--text-secondary); font-size: .72rem; }

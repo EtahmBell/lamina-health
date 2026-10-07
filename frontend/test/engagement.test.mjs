@@ -154,7 +154,7 @@ test('the full Network Pulse feed section is gone from Home; only the compact 2-
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.doesNotMatch(specialistHome, /NetworkFeedSection/)
   assert.match(specialistHome, /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="iain" \/>/)
-  const highlights = slice(engagement, 'export function NetworkHighlights', 'export function FullNetworkFeedPage')
+  const highlights = slice(engagement, 'export function NetworkHighlights', 'export const NETWORK_TABS')
   assert.match(highlights, /feed\.items\.slice\(0, 2\)/)
   assert.doesNotMatch(highlights, /No network updates yet/, 'Home never shows a giant empty feed state')
 })
@@ -185,12 +185,15 @@ test('profile items are saved through the canonical upsert endpoint with a clien
 })
 
 test('profile distinguishes itself from My Agent referral preferences', () => {
-  assert.match(engagement, /Your professional profile helps Lamina understand your background and expertise\. Explicit referral preferences are managed separately in My Agent\./)
+  const page = profilePageFn()
+  assert.match(page, /View how my agent represents me/)
+  assert.match(engagement, /they do not guarantee referral eligibility or override clinical fit/)
 })
 
-test('profile completeness is framed as representation only, never a ranking score', () => {
+test('profile never shows a completeness score, percentage, or ranking', () => {
   const page = profilePageFn()
-  assert.match(page, /sections completed/)
+  assert.doesNotMatch(page, /sections completed/)
+  assert.doesNotMatch(page, /completeness/i)
   assert.doesNotMatch(page, /score|rank|top \d+%/i)
 })
 
@@ -198,6 +201,79 @@ test('provenance is honest: never claims Verified for a synthetic demo item', ()
   assert.doesNotMatch(engagement, /'Verified'/)
   assert.match(engagement, /'Added by you'/)
   assert.match(engagement, /'Synthetic demo profile'/)
+})
+
+/* --------------------------------------------------- Pass 7D: one-page profile */
+
+test('Profile has no visible tab navigation; it is one continuous page', () => {
+  const page = profilePageFn()
+  assert.doesNotMatch(page, /PROFILE_TABS/)
+  assert.doesNotMatch(page, /className="profile-tabs"/)
+  assert.doesNotMatch(page, /setTab\(/)
+})
+
+test('legacy ?tab= deep links degrade to a scroll target or a redirect, never a visible tab switch', () => {
+  const page = profilePageFn()
+  assert.match(page, /params\?\.get\('tab'\)/)
+  assert.match(page, /if \(tabParam === 'updates'\) \{ navigate\(networkUpdatesPath\(personaId\)\); return \}/)
+  assert.match(page, /LEGACY_PROFILE_TAB_SECTION\[tabParam\]/)
+  assert.match(page, /scrollIntoView/)
+  const map = slice(engagement, 'const LEGACY_PROFILE_TAB_SECTION', 'export function ProfessionalProfilePage')
+  assert.match(map, /background: 'profile-section-training'/)
+  assert.match(map, /research: 'profile-section-research'/)
+  assert.match(map, /interests: 'profile-section-interests'/)
+})
+
+test('Updates is retired from Profile IA entirely: no drafts/published-posts list rendering remains on the profile page (Share-this-paper reuse of PostButton is unrelated and still allowed)', () => {
+  const page = profilePageFn()
+  assert.doesNotMatch(page, /<PostCard/)
+  assert.doesNotMatch(page, /suggestedDrafts|yourDrafts|getProfessionalPosts/)
+})
+
+test('enrichment suggestions render as a compact dismissible indicator, never a dominant inline block, and are omitted entirely when there are zero pending suggestions', () => {
+  const entry = slice(engagement, 'export function ProfileSuggestionsEntry', 'export function NetworkPhysicianProfilePage')
+  assert.match(entry, /pending\.length > 0/)
+  assert.match(entry, /className="profile-suggestions-indicator"/)
+  assert.match(entry, /\{pending\.length\} profile suggestion/)
+  assert.match(entry, /Find public information/)
+})
+
+test('suggestion review reuses the existing backend review-state semantics, never a parallel frontend approval state', () => {
+  assert.match(engagement, /await reviewProfileCandidate\(personaId, candidate\.candidate_id, action === 'edit_confirm' \? \{ action, title: title\.trim\(\) \} : \{ action \}\)/)
+  const candidateCard = slice(engagement, 'function EnrichmentCandidateCard', 'function ProfileSuggestionsModal')
+  assert.match(candidateCard, />Add to profile</)
+  assert.match(candidateCard, />Edit &amp; add</)
+  assert.match(candidateCard, />Dismiss</)
+  assert.match(candidateCard, /candidate\.source_url && <>.*View source/)
+})
+
+test('"Find public information" never auto-runs on page open; it is a user-triggered action with the documented loading/empty/failure copy', () => {
+  const entry = slice(engagement, 'export function ProfileSuggestionsEntry', 'export function NetworkPhysicianProfilePage')
+  assert.doesNotMatch(entry, /useEffect\(\(\) => \{ runEnrichment/)
+  assert.match(entry, /Looking for public professional information…/)
+  assert.match(entry, /No new profile information found\./)
+  assert.match(entry, /Public profile enrichment is temporarily unavailable\./)
+})
+
+test('own-profile editing controls (Edit, +Add, suggestions, Find public information) never render on another physician\'s public profile', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.doesNotMatch(publicPage, /ProfileSuggestionsEntry/)
+  assert.doesNotMatch(publicPage, /Edit profile/)
+  assert.doesNotMatch(publicPage, /Find public information/)
+  assert.match(publicPage, /readOnly/)
+})
+
+test('public and private profile reuse the same section-rendering components (timeline, chips, interests) for presentational consistency', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /<ProfileTimelineGroup category="training"/)
+  assert.match(publicPage, /<ProfileChipSection category="skills_or_procedures"/)
+  assert.match(publicPage, /<InterestsPanel interests=\{data\.professional_profile\.interests\}/)
+})
+
+test('Profile structural parity: Lucy and Iain render the same ProfessionalProfilePage shell', () => {
+  const dispatch = routing()
+  assert.match(dispatch, /ProfessionalProfilePage personaId="lucy" navigate=\{navigate\} params=\{params\}/)
+  assert.match(dispatch, /ProfessionalProfilePage personaId="iain" navigate=\{navigate\} params=\{params\}/)
 })
 
 /* --------------------------------------------------------- posts & updates */

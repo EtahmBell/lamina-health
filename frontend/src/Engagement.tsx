@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ApiError,
   answerTrainingQuestion,
@@ -540,7 +540,6 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
 
 /* ------------------------------------------------------------- Profile: shared */
 
-const PROFILE_CATEGORIES: ProfileCategory[] = ['about', 'training', 'experience', 'affiliations', 'clinical_interests', 'skills_or_procedures', 'research', 'publications', 'teaching', 'languages', 'locations', 'professional_links']
 const CATEGORY_LABELS: Record<ProfileCategory, string> = {
   about: 'About', training: 'Training', experience: 'Experience', affiliations: 'Affiliations',
   clinical_interests: 'Clinical interests', skills_or_procedures: 'Skills / procedures',
@@ -575,32 +574,114 @@ function ProfileItemForm({ category, initial, onSave, onCancel, busy }: {
   </div>
 }
 
-function ProfileSection({ category, items, personaId, onSaved, itemActions }: {
-  category: ProfileCategory; items: ProfileItem[]; personaId: DemoPhysicianPerspective
-  onSaved: () => void; itemActions?: (item: ProfileItem) => ReactNode
+function ProfileSection({ category, items, personaId, onSaved, itemActions, heading, id, quiet, readOnly }: {
+  category: ProfileCategory; items: ProfileItem[]; personaId?: DemoPhysicianPerspective
+  onSaved?: () => void; itemActions?: (item: ProfileItem) => ReactNode; heading?: string; id?: string; quiet?: boolean; readOnly?: boolean
 }) {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const save = async (itemId: string, fields: { title: string; detail: string; shareable: boolean }) => {
+    if (!personaId) return
     setBusy(true)
     try {
       await updateProfessionalProfileItem(personaId, itemId, { category, title: fields.title, detail: fields.detail || undefined, shareable: fields.shareable })
-      onSaved()
+      onSaved?.()
       setAdding(false); setEditingId(null)
     } finally { setBusy(false) }
   }
-  return <section className="profile-section-v2">
-    <div className="profile-section-heading"><h2>{CATEGORY_LABELS[category]}</h2><button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button></div>
+  return <section id={id} className={`profile-section-v2 ${quiet ? 'quiet' : ''}`}>
+    <div className="profile-section-heading"><h2>{heading ?? CATEGORY_LABELS[category]}</h2>{!readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>}</div>
     {items.length === 0 && !adding && <p className="profile-section-empty">Nothing added yet.</p>}
     <div className="profile-item-list">{items.map((item) => (editingId === item.id
       ? <ProfileItemForm key={item.id} category={category} initial={item} busy={busy} onCancel={() => setEditingId(null)} onSave={(fields) => save(item.id, fields)} />
       : <div className="profile-item-row" key={item.id}>
-        <div><strong>{item.title}</strong>{item.detail && <p>{item.detail}</p>}<small>{provenanceLabel(item)}</small>{itemActions && <div className="profile-item-extra-actions">{itemActions(item)}</div>}</div>
-        <button className="text-button" onClick={() => { setEditingId(item.id); setAdding(false) }}>Edit</button>
+        <div><strong>{item.title}</strong>{item.detail && <p>{item.detail}</p>}{!readOnly && <small>{provenanceLabel(item)}</small>}{itemActions && <div className="profile-item-extra-actions">{itemActions(item)}</div>}</div>
+        {!readOnly && <button className="text-button" onClick={() => { setEditingId(item.id); setAdding(false) }}>Edit</button>}
       </div>))}
     </div>
     {adding && <ProfileItemForm category={category} busy={busy} onCancel={() => setAdding(false)} onSave={(fields) => save(`item-${crypto.randomUUID()}`, fields)} />}
+  </section>
+}
+
+/** Own-profile-only editable chip section (Skills & procedures, Languages). Each chip is a real button because clicking one enters edit mode — never a decorative fake control. */
+function ProfileChipSection({ category, items, personaId, onSaved, heading, readOnly }: {
+  category: ProfileCategory; items: ProfileItem[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void; heading?: string; readOnly?: boolean
+}) {
+  const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const save = async (itemId: string, fields: { title: string; detail: string; shareable: boolean }) => {
+    if (!personaId) return
+    setBusy(true)
+    try {
+      await updateProfessionalProfileItem(personaId, itemId, { category, title: fields.title, detail: fields.detail || undefined, shareable: fields.shareable })
+      onSaved?.(); setAdding(false); setEditingId(null)
+    } finally { setBusy(false) }
+  }
+  return <section id={`profile-section-${category}`} className="profile-section-v2">
+    <div className="profile-section-heading"><h2>{heading ?? CATEGORY_LABELS[category]}</h2>{!readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>}</div>
+    {items.length === 0 && !adding && <p className="profile-section-empty">Nothing added yet.</p>}
+    <div className="profile-chip-group">{items.filter((item) => editingId !== item.id).map((item) => (readOnly
+      ? <span key={item.id} className="profile-chip static">{item.title}</span>
+      : <button key={item.id} className="profile-chip" onClick={() => { setEditingId(item.id); setAdding(false) }}>{item.title}</button>))}</div>
+    {!readOnly && items.filter((item) => editingId === item.id).map((item) => <ProfileItemForm key={item.id} category={category} initial={item} busy={busy} onCancel={() => setEditingId(null)} onSave={(fields) => save(item.id, fields)} />)}
+    {adding && <ProfileItemForm category={category} busy={busy} onCancel={() => setAdding(false)} onSave={(fields) => save(`item-${crypto.randomUUID()}`, fields)} />}
+  </section>
+}
+
+/** Vertical professional timeline for one Background subcategory (Training / Experience / Affiliations). */
+function ProfileTimelineGroup({ category, items, personaId, onSaved, readOnly }: {
+  category: ProfileCategory; items: ProfileItem[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void; readOnly?: boolean
+}) {
+  const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const save = async (itemId: string, fields: { title: string; detail: string; shareable: boolean }) => {
+    if (!personaId) return
+    setBusy(true)
+    try {
+      await updateProfessionalProfileItem(personaId, itemId, { category, title: fields.title, detail: fields.detail || undefined, shareable: fields.shareable })
+      onSaved?.(); setAdding(false); setEditingId(null)
+    } finally { setBusy(false) }
+  }
+  if (readOnly && items.length === 0) return null
+  return <div className="profile-timeline-group">
+    <div className="profile-timeline-heading"><h3>{CATEGORY_LABELS[category]}</h3>{!readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>}</div>
+    {items.length === 0 && !adding && <p className="profile-section-empty">Nothing added yet.</p>}
+    <div className="profile-timeline">{items.map((item) => (editingId === item.id
+      ? <ProfileItemForm key={item.id} category={category} initial={item} busy={busy} onCancel={() => setEditingId(null)} onSave={(fields) => save(item.id, fields)} />
+      : <div className="profile-timeline-item" key={item.id}>
+        <span className="profile-timeline-dot" aria-hidden="true" />
+        <div><strong>{item.title}</strong>{item.detail && <p>{item.detail}</p>}{!readOnly && <small>{provenanceLabel(item)}</small>}</div>
+        {!readOnly && <button className="text-button" onClick={() => { setEditingId(item.id); setAdding(false) }}>Edit</button>}
+      </div>))}
+    </div>
+    {adding && <ProfileItemForm category={category} busy={busy} onCancel={() => setAdding(false)} onSave={(fields) => save(`item-${crypto.randomUUID()}`, fields)} />}
+  </div>
+}
+
+/** About reads as a biography paragraph, not a metadata row — but reuses the same canonical save path as every other profile item. */
+function AboutSection({ items, personaId, onSaved, readOnly }: { items: ProfileItem[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void; readOnly?: boolean }) {
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const existing = items[0] ?? null
+  const save = async (fields: { title: string; detail: string; shareable: boolean }) => {
+    if (!personaId) return
+    setBusy(true)
+    try {
+      await updateProfessionalProfileItem(personaId, existing?.id ?? `item-${crypto.randomUUID()}`, { category: 'about', title: fields.title, detail: fields.detail || undefined, shareable: fields.shareable })
+      onSaved?.(); setEditing(false)
+    } finally { setBusy(false) }
+  }
+  if (readOnly && !existing) return null
+  return <section id="profile-section-about" className="profile-block profile-about">
+    <h2 className="profile-block-heading">About</h2>
+    {editing
+      ? <ProfileItemForm category="about" initial={existing ?? undefined} busy={busy} onCancel={() => setEditing(false)} onSave={save} />
+      : existing
+        ? <><p className="profile-about-text">{existing.title}</p>{existing.detail && <p className="profile-about-text">{existing.detail}</p>}{!readOnly && <button className="text-button" onClick={() => setEditing(true)}>Edit</button>}</>
+        : <button className="text-button" onClick={() => setEditing(true)}>+ Add an introduction about your practice →</button>}
   </section>
 }
 
@@ -763,35 +844,40 @@ function InterestForm({ initial, onSave, onCancel, busy }: { initial?: Physician
   </div>
 }
 
-function InterestGroup({ interestType, items, personaId, onSaved }: { interestType: PhysicianInterestType; items: PhysicianInterest[]; personaId: DemoPhysicianPerspective; onSaved: () => void }) {
+export function InterestGroup({ interestType, items, personaId, onSaved, readOnly }: { interestType: PhysicianInterestType; items: PhysicianInterest[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void; readOnly?: boolean }) {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const save = async (interestId: string | undefined, fields: { title: string; detail: string }) => {
+    if (!personaId) return
     setBusy(true)
     try {
       await savePhysicianInterest(personaId, { interest_type: interestType, title: fields.title, detail: fields.detail || null, confirmed: true, shareable: true }, interestId)
-      onSaved(); setAdding(false); setEditingId(null)
+      onSaved?.(); setAdding(false); setEditingId(null)
     } finally { setBusy(false) }
   }
+  if (readOnly && items.length === 0) return null
   return <div className={`interest-group ${interestType === 'case_interest' ? 'primary' : ''}`}>
-    <div className="profile-section-heading"><h3>{INTEREST_TYPE_LABELS[interestType]}</h3><button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button></div>
+    <div className="profile-section-heading"><h3>{INTEREST_TYPE_LABELS[interestType]}</h3>{!readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>}</div>
     {items.length === 0 && !adding && <p className="profile-section-empty">Nothing added yet.</p>}
     <div className="interest-item-list">{items.map((item) => (editingId === item.id
       ? <InterestForm key={item.id} initial={item} busy={busy} onCancel={() => setEditingId(null)} onSave={(fields) => save(item.id, fields)} />
       : <div className="profile-item-row interest-row" key={item.id}>
         <div><strong>{item.title}</strong>{item.detail && <p>{item.detail}</p>}</div>
-        <button className="text-button" onClick={() => { setEditingId(item.id); setAdding(false) }}>Edit</button>
+        {!readOnly && <button className="text-button" onClick={() => { setEditingId(item.id); setAdding(false) }}>Edit</button>}
       </div>))}
     </div>
     {adding && <InterestForm busy={busy} onCancel={() => setAdding(false)} onSave={(fields) => save(undefined, fields)} />}
   </div>
 }
 
-export function InterestsPanel({ interests, personaId, onSaved, navigate, trainPath }: { interests: PhysicianInterest[]; personaId: DemoPhysicianPerspective; onSaved: () => void; navigate?: Navigate; trainPath?: string }) {
-  return <section className="profile-section-v2 interests-panel">
-    <p className="profile-section-explainer">Tell Lamina what areas of medicine and kinds of cases you are particularly interested in. Interests help your agent understand the work you are especially interested in — they do not guarantee referral eligibility or override clinical fit.</p>
-    {INTEREST_TYPES.map((type) => <InterestGroup key={type} interestType={type} items={interests.filter((item) => item.interest_type === type)} personaId={personaId} onSaved={onSaved} />)}
+export function InterestsPanel({ interests, personaId, onSaved, navigate, trainPath, types = INTEREST_TYPES, id, explainer, readOnly }: {
+  interests: PhysicianInterest[]; personaId?: DemoPhysicianPerspective; onSaved?: () => void
+  navigate?: Navigate; trainPath?: string; types?: PhysicianInterestType[]; id?: string; explainer?: string; readOnly?: boolean
+}) {
+  return <section id={id} className="profile-section-v2 interests-panel">
+    {!readOnly && <p className="profile-section-explainer">{explainer ?? 'Tell Lamina what areas of medicine and kinds of cases you are particularly interested in. Interests help your agent understand the work you are especially interested in — they do not guarantee referral eligibility or override clinical fit.'}</p>}
+    {types.map((type) => <InterestGroup key={type} interestType={type} items={interests.filter((item) => item.interest_type === type)} personaId={personaId} onSaved={onSaved} readOnly={readOnly} />)}
     {navigate && trainPath && interests.length > 0 && <p className="profile-section-explainer interest-training-hint">Lamina can ask follow-up questions based on these interests. <button className="text-button" onClick={() => navigate(trainPath)}>Continue training →</button></p>}
   </section>
 }
@@ -811,44 +897,81 @@ function EnrichmentCandidateCard({ candidate, personaId, onReviewed }: { candida
     } finally { setBusy(false) }
   }
   return <article className="learning-card enrichment-candidate">
-    <span className="learning-status suggested">Suggested</span>
+    <span className="learning-status suggested">Suggested for</span>
     <strong className="enrichment-category">{CATEGORY_LABELS[candidate.category]}</strong>
     {editing ? <input className="enrichment-edit-input" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={240} /> : <p>{candidate.proposed_title}</p>}
     {candidate.proposed_detail && !editing && <p className="enrichment-detail">{candidate.proposed_detail}</p>}
-    <small>Source: {candidate.source_title}</small>
+    <p className="enrichment-provenance">Source: {candidate.source_title}{candidate.source_url && <> · <a href={candidate.source_url} target="_blank" rel="noreferrer">View source →</a></>}</p>
     {editing
-      ? <div className="learning-edit"><div><button className="button-primary" disabled={!title.trim() || busy} onClick={() => act('edit_confirm')}>Save &amp; confirm</button><button className="text-button" onClick={() => setEditing(false)}>Cancel</button></div></div>
-      : <div className="learning-actions"><button disabled={busy} onClick={() => act('confirm')}>Confirm</button><button disabled={busy} onClick={() => setEditing(true)}>Edit</button><button disabled={busy} onClick={() => act('reject')}>Reject</button></div>}
+      ? <div className="learning-edit"><div><button className="button-primary" disabled={!title.trim() || busy} onClick={() => act('edit_confirm')}>Add to profile</button><button className="text-button" onClick={() => setEditing(false)}>Cancel</button></div></div>
+      : <div className="learning-actions"><button disabled={busy} onClick={() => act('confirm')}>Add to profile</button><button disabled={busy} onClick={() => setEditing(true)}>Edit &amp; add</button><button disabled={busy} onClick={() => act('reject')}>Dismiss</button></div>}
   </article>
 }
 
-export function EnrichmentPanel({ personaId, onConfirmed }: { personaId: DemoPhysicianPerspective; onConfirmed: () => void }) {
+function ProfileSuggestionsModal({ personaId, candidates, onClose, onReviewed, triggerRef }: {
+  personaId: DemoPhysicianPerspective; candidates: ProfileCandidateFact[]
+  onClose: () => void; onReviewed: (candidate: ProfileCandidateFact) => void
+  triggerRef: { current: HTMLButtonElement | null }
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('keydown', onKey); triggerRef.current?.focus() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="post-flow-dialog suggestions-dialog" role="dialog" aria-modal="true" aria-label="Profile suggestions">
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
+      <p className="eyebrow">Profile suggestions</p>
+      <h2>Lamina found these from public professional sources.</h2>
+      <p className="profile-section-explainer">Nothing is added until you approve it.</p>
+      {candidates.length === 0
+        ? <p className="profile-section-empty">All caught up — no suggestions waiting for review.</p>
+        : <div className="learning-grid">{candidates.map((candidate) => <EnrichmentCandidateCard key={candidate.candidate_id} candidate={candidate} personaId={personaId} onReviewed={onReviewed} />)}</div>}
+    </div>
+  </div>
+}
+
+/** Replaces the old inline "Suggested additions" block: a small, dismissible entry point, never the dominant Profile content. */
+export function ProfileSuggestionsEntry({ personaId, onConfirmed }: { personaId: DemoPhysicianPerspective; onConfirmed: () => void }) {
   const [job, setJob] = useState<ProfileEnrichmentJob | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => { getProfileEnrichment(personaId).then(setJob).catch(() => {}) }, [personaId])
-  const start = async () => {
-    setLoading(true); setError('')
-    try { const result = await enrichPhysicianProfile(personaId); setJob(result) } catch (err) { setError(err instanceof Error ? err.message : 'Could not search for professional information') } finally { setLoading(false) }
+  useEffect(() => { if (!message) return; const timer = window.setTimeout(() => setMessage(''), 4000); return () => window.clearTimeout(timer) }, [message])
+
+  const runEnrichment = async () => {
+    setLoading(true); setError(''); setMessage('')
+    try {
+      const result = await enrichPhysicianProfile(personaId)
+      setJob(result)
+      const found = result.candidates.filter((item) => item.review_status === 'suggested').length
+      if (found === 0) setMessage('No new profile information found.')
+    } catch {
+      setError('Public profile enrichment is temporarily unavailable.')
+    } finally { setLoading(false) }
   }
   const onReviewed = (candidate: ProfileCandidateFact) => {
     setJob((prev) => (prev ? { ...prev, candidates: prev.candidates.map((item) => (item.candidate_id === candidate.candidate_id ? candidate : item)) } : prev))
     if (candidate.review_status === 'confirmed' || candidate.review_status === 'edited') onConfirmed()
   }
   const pending = job?.candidates.filter((item) => item.review_status === 'suggested') ?? []
-  if (!job || job.status === 'idle') return <section className="profile-section-v2 enrichment-panel">
-    <div className="profile-section-heading"><h2>Help fill my profile</h2></div>
-    <p className="profile-section-explainer">Lamina can suggest professional background for you to review and confirm.</p>
+
+  return <div className="profile-suggestions-row">
+    {pending.length > 0
+      ? <button ref={triggerRef} className="profile-suggestions-indicator" onClick={() => setOpen(true)}>
+        <strong>{pending.length} profile suggestion{pending.length === 1 ? '' : 's'}</strong>
+        <span>Lamina found public information that may help complete your profile.</span>
+        <b>Review suggestions →</b>
+      </button>
+      : <button ref={triggerRef} className="text-button" disabled={loading} onClick={runEnrichment}>{loading ? 'Looking for public professional information…' : 'Find public information →'}</button>}
+    {message && <p className="muted-note" role="status">{message}</p>}
     {error && <p className="demo-reset-error" role="alert">{error}</p>}
-    <button className="button-secondary" disabled={loading} onClick={start}>{loading ? 'Searching…' : 'Help fill my profile →'}</button>
-  </section>
-  return <section className="profile-section-v2 enrichment-panel">
-    <div className="profile-section-heading"><h2>Suggested additions</h2></div>
-    {pending.length === 0
-      ? <p className="profile-section-empty">No new profile suggestions.</p>
-      : <><p className="profile-section-explainer">{job.found_count} suggested addition{job.found_count === 1 ? '' : 's'} found. Review each before it joins your profile.</p>
-        <div className="learning-grid">{pending.map((candidate) => <EnrichmentCandidateCard key={candidate.candidate_id} candidate={candidate} personaId={personaId} onReviewed={onReviewed} />)}</div></>}
-  </section>
+    {open && <ProfileSuggestionsModal personaId={personaId} candidates={pending} onClose={() => setOpen(false)} onReviewed={onReviewed} triggerRef={triggerRef} />}
+  </div>
 }
 
 /* -------------------------------------------------------------- Initialization */
@@ -1239,81 +1362,104 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
   </div>
 }
 
-const PROFILE_TABS = ['overview', 'background', 'research', 'interests', 'updates'] as const
-type ProfileTab = typeof PROFILE_TABS[number]
-const PROFILE_TAB_LABELS: Record<ProfileTab, string> = { overview: 'Overview', background: 'Background', research: 'Research & Teaching', interests: 'Interests', updates: 'Updates' }
-const BACKGROUND_CATEGORIES: ProfileCategory[] = ['training', 'experience', 'affiliations', 'skills_or_procedures', 'languages', 'locations', 'professional_links', 'clinical_interests']
-const RESEARCH_CATEGORIES: ProfileCategory[] = ['research', 'publications', 'teaching']
+const BACKGROUND_CATEGORIES: ProfileCategory[] = ['training', 'experience', 'affiliations']
 const agentPracticePath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/agent' : '/agent?tab=knowledge')
+/** Legacy ?tab= deep links degrade to a scroll target on the one continuous page, or a redirect for the retired Updates tab. */
+const LEGACY_PROFILE_TAB_SECTION: Record<string, string | null> = {
+  overview: null, background: 'profile-section-training', research: 'profile-section-research', interests: 'profile-section-interests',
+}
 
-export function ProfessionalProfilePage({ personaId, navigate }: { personaId: DemoPhysicianPerspective; navigate: Navigate }) {
-  const [tab, setTab] = useState<ProfileTab>('overview')
+export function ProfessionalProfilePage({ personaId, navigate, params }: { personaId: DemoPhysicianPerspective; navigate: Navigate; params?: URLSearchParams }) {
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
-  const [posts, setPosts] = useState<ProfessionalPost[] | null>(null)
   const [initialization, setInitialization] = useState<AgentInitialization | null>(null)
   const [error, setError] = useState('')
   const [savedNote, setSavedNote] = useState('')
   const load = () => {
     getProfessionalProfile(personaId).then(setProfile).catch((err: Error) => setError(err.message))
-    getProfessionalPosts(personaId).then(setPosts).catch(() => setPosts([]))
     getAgentInitialization(personaId).then(setInitialization).catch(() => {})
   }
   useEffect(load, [personaId]) // eslint-disable-line react-hooks/exhaustive-deps
-  const onItemSaved = () => { load(); setSavedNote('Saved. A suggested update was drafted in Updates for your review.') }
-  const onPostChanged = (updated: ProfessionalPost) => setPosts((prev) => (prev ?? []).map((item) => (item.id === updated.id ? updated : item)))
-  const onPostPublished = (published: ProfessionalPost) => setPosts((prev) => [published, ...(prev ?? []).filter((item) => item.id !== published.id)])
+  const tabParam = params?.get('tab') ?? null
+  useEffect(() => {
+    if (tabParam === 'updates') { navigate(networkUpdatesPath(personaId)); return }
+    const sectionId = tabParam ? LEGACY_PROFILE_TAB_SECTION[tabParam] : null
+    if (!sectionId || !profile) return
+    const frame = window.requestAnimationFrame(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    return () => window.cancelAnimationFrame(frame)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabParam, profile])
+  useEffect(() => { if (!savedNote) return; const timer = window.setTimeout(() => setSavedNote(''), 2600); return () => window.clearTimeout(timer) }, [savedNote])
+  const onItemSaved = () => { load(); setSavedNote('Saved.') }
+
   if (error) return <main className="page-shell profile-page"><div className="error-banner" role="alert">{error}</div></main>
   if (!profile) return <main className="page-shell profile-page"><p className="muted-note">Opening professional profile…</p></main>
-  const suggestedDrafts = (posts ?? []).filter((item) => item.status === 'draft' && item.provenance?.startsWith('agent_drafted_from_'))
-  const yourDrafts = (posts ?? []).filter((item) => item.status === 'draft' && !item.provenance?.startsWith('agent_drafted_from_'))
-  const published = (posts ?? []).filter((item) => item.status === 'published')
+
   const initials = profile.physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
-  const aboutItems = profile.sections.about
-  const locationItems = profile.sections.locations
-  const recentPublished = published.slice(0, 3)
+  const scrollToAbout = () => document.getElementById('profile-section-about')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  const researchInterests = profile.interests.filter((item) => item.interest_type === 'research_interest')
+  const teachingInterests = profile.interests.filter((item) => item.interest_type === 'teaching_interest')
+  const hasResearchSection = profile.sections.research.length > 0 || profile.sections.publications.length > 0 || researchInterests.length > 0
+  const hasTeachingSection = profile.sections.teaching.length > 0 || teachingInterests.length > 0
+  const hasSkills = profile.sections.skills_or_procedures.length > 0
+  const hasLanguages = profile.sections.languages.length > 0
+  const hasLocations = profile.sections.locations.length > 0
+  const hasLinks = profile.sections.professional_links.length > 0
+
   return <main className="page-shell profile-page professional-profile-page">
     <header className="profile-hero">
       <span className="clinician-avatar large">{initials}</span>
-      <div><p className="eyebrow">Professional profile</p><h1>{profile.physician.name}</h1><p className="profile-role">{profile.physician.specialty} · {profile.physician.location}</p></div>
+      <div>
+        <h1>{profile.physician.name}</h1>
+        <p className="profile-role">{profile.physician.specialty}</p>
+        <p className="profile-location">{profile.physician.location}</p>
+      </div>
     </header>
-    <p className="profile-benefit-note">Your professional profile helps Lamina understand your background and expertise. Explicit referral preferences are managed separately in My Agent.</p>
-    <nav className="profile-tabs" aria-label="Professional profile sections">{PROFILE_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)}>{PROFILE_TAB_LABELS[item]}</button>)}</nav>
-    {savedNote && <p className="profile-save-note" role="status">{savedNote}</p>}
-
-    {tab === 'overview' && <div className="profile-overview-tab">
-      <section className="profile-completeness"><p className="eyebrow">Practice representation</p><h2>{profile.completeness.completed_section_count} of {profile.completeness.total_section_count} sections completed</h2></section>
-      <InitializationCard initialization={initialization} navigate={navigate} trainPath={trainingPath(personaId)} />
-      <EnrichmentPanel personaId={personaId} onConfirmed={load} />
-      <ProfileSection category="about" items={aboutItems} personaId={personaId} onSaved={onItemSaved} />
-      {locationItems.length > 0 && <div className="profile-overview-fact"><span className="section-label">Locations</span><p>{locationItems.map((item) => item.title).join(' · ')}</p></div>}
-      {recentPublished.length > 0 && <div className="profile-section-v2"><div className="profile-section-heading"><h2>Recent professional updates</h2></div>{recentPublished.map((post) => <article className="practice-update-card" key={post.id}><p className="practice-update-title">{post.title}</p><p className="practice-update-body">{post.body}</p></article>)}</div>}
+    <div className="profile-header-actions">
+      <button className="button-secondary" onClick={scrollToAbout}>Edit profile</button>
+      <button className="text-button" onClick={() => navigate(networkProfilePath(personaId, profile.physician.id))}>View as others see it →</button>
       <button className="text-button" onClick={() => navigate(agentPracticePath(personaId))}>View how my agent represents me →</button>
-    </div>}
+    </div>
+    {savedNote && <p className="profile-save-note" role="status">{savedNote}</p>}
+    <InitializationCard initialization={initialization} navigate={navigate} trainPath={trainingPath(personaId)} />
+    <ProfileSuggestionsEntry personaId={personaId} onConfirmed={load} />
 
-    {tab === 'background' && <div className="profile-background-tab">
-      {BACKGROUND_CATEGORIES.map((category) => <ProfileSection key={category} category={category} items={profile.sections[category]} personaId={personaId} onSaved={onItemSaved} />)}
-    </div>}
+    <AboutSection items={profile.sections.about} personaId={personaId} onSaved={onItemSaved} />
 
-    {tab === 'research' && <div className="profile-research-tab">
-      {RESEARCH_CATEGORIES.map((category) => <ProfileSection
-        key={category}
-        category={category}
-        items={profile.sections[category]}
-        personaId={personaId}
-        onSaved={onItemSaved}
-        itemActions={category === 'publications' ? (item) => <PostButton personaId={personaId} onPublished={onPostPublished} paperTitle={item.title} triggerLabel="Share this paper" compact /> : undefined}
-      />)}
-    </div>}
+    <section id="profile-section-training" className="profile-block">
+      <h2 className="profile-block-heading">Background</h2>
+      {BACKGROUND_CATEGORIES.map((category) => <ProfileTimelineGroup key={category} category={category} items={profile.sections[category]} personaId={personaId} onSaved={onItemSaved} />)}
+    </section>
 
-    {tab === 'interests' && <InterestsPanel interests={profile.interests} personaId={personaId} onSaved={load} navigate={navigate} trainPath={trainingPath(personaId)} />}
+    <InterestsPanel
+      id="profile-section-interests"
+      interests={profile.interests}
+      personaId={personaId}
+      onSaved={onItemSaved}
+      navigate={navigate}
+      trainPath={trainingPath(personaId)}
+      types={['case_interest', 'clinical_interest']}
+      explainer="Case interests describe areas of professional interest. Clinical appropriateness still determines referral fit."
+    />
 
-    {tab === 'updates' && <div className="profile-updates-tab">
-      <PostButton personaId={personaId} onPublished={onPostPublished} />
-      {suggestedDrafts.length > 0 && <div className="practice-update-group"><p className="section-label">Suggested drafts</p>{suggestedDrafts.map((post) => <PostCard key={post.id} post={post} personaId={personaId} onChanged={onPostChanged} />)}</div>}
-      {yourDrafts.length > 0 && <div className="practice-update-group"><p className="section-label">Your drafts</p>{yourDrafts.map((post) => <PostCard key={post.id} post={post} personaId={personaId} onChanged={onPostChanged} />)}</div>}
-      {published.length > 0 && <div className="practice-update-group"><p className="section-label">Published</p>{published.map((post) => <PostCard key={post.id} post={post} personaId={personaId} onChanged={onPostChanged} />)}</div>}
-      {suggestedDrafts.length === 0 && yourDrafts.length === 0 && published.length === 0 && <p className="profile-section-empty">No published updates yet. Share something when there's something useful for your network to know.</p>}
-    </div>}
+    {hasResearchSection && <section id="profile-section-research" className="profile-block">
+      <h2 className="profile-block-heading">Research &amp; publications</h2>
+      {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} personaId={personaId} onSaved={onItemSaved} />}
+      <ProfileSection category="research" items={profile.sections.research} personaId={personaId} onSaved={onItemSaved} quiet />
+      <ProfileSection category="publications" items={profile.sections.publications} personaId={personaId} onSaved={onItemSaved} quiet
+        itemActions={(item) => <PostButton personaId={personaId} paperTitle={item.title} triggerLabel="Share this paper" compact />} />
+    </section>}
+
+    {hasTeachingSection && <section id="profile-section-teaching" className="profile-block">
+      <h2 className="profile-block-heading">Teaching</h2>
+      {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} personaId={personaId} onSaved={onItemSaved} />}
+      <ProfileSection category="teaching" items={profile.sections.teaching} personaId={personaId} onSaved={onItemSaved} quiet />
+    </section>}
+
+    {hasSkills && <ProfileChipSection category="skills_or_procedures" items={profile.sections.skills_or_procedures} personaId={personaId} onSaved={onItemSaved} heading="Skills &amp; procedures" />}
+    {hasLanguages && <ProfileChipSection category="languages" items={profile.sections.languages} personaId={personaId} onSaved={onItemSaved} />}
+    {hasLocations && <ProfileSection category="locations" items={profile.sections.locations} personaId={personaId} onSaved={onItemSaved} heading="Practice &amp; locations" />}
+    {hasLinks && <ProfileSection category="professional_links" items={profile.sections.professional_links} personaId={personaId} onSaved={onItemSaved} heading="Professional links" />}
   </main>
 }
 
@@ -1327,9 +1473,14 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }
   const caseInterests = rep.interests.filter((item) => item.interest_type === 'case_interest')
   const otherInterests = rep.interests.filter((item) => item.interest_type !== 'case_interest')
   const initials = data.physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
+  const sections = data.professional_profile.sections
+  const researchInterests = data.professional_profile.interests.filter((item) => item.interest_type === 'research_interest')
+  const teachingInterests = data.professional_profile.interests.filter((item) => item.interest_type === 'teaching_interest')
+  const hasResearchSection = sections.research.length > 0 || sections.publications.length > 0 || researchInterests.length > 0
+  const hasTeachingSection = sections.teaching.length > 0 || teachingInterests.length > 0
   return <main className="page-shell profile-page">
     <button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button>
-    <header className="profile-hero"><span className="clinician-avatar large">{initials}</span><div><p className="eyebrow">Professional profile</p><h1>{data.physician.name}</h1><p className="profile-role">{data.physician.specialty} · {data.physician.location}</p></div></header>
+    <header className="profile-hero"><span className="clinician-avatar large">{initials}</span><div><h1>{data.physician.name}</h1><p className="profile-role">{data.physician.specialty}</p><p className="profile-location">{data.physician.location}</p></div></header>
     <section className="practice-representation-panel"><p className="eyebrow">How the network sees this practice</p>
       {rep.clinical_focus.length > 0 && <div><span className="section-label">Clinical focus</span><ul className="clinical-list">{rep.clinical_focus.map((item) => <li key={item}>{item}</li>)}</ul></div>}
       {rep.good_fit.length > 0 && <div><span className="section-label">Good-fit cases</span><ul className="clinical-list">{rep.good_fit.map((item) => <li key={item}>{item}</li>)}</ul></div>}
@@ -1337,7 +1488,37 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }
       {caseInterests.length > 0 && <div><span className="section-label">Areas {data.physician.name} is especially interested in seeing</span><ul className="clinical-list">{caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul><small className="profile-interest-disclaimer">Interests reflect what {data.physician.name} wants referring physicians to know. They do not guarantee referral eligibility or override clinical fit.</small></div>}
       {otherInterests.length > 0 && <div><span className="section-label">Research &amp; teaching interests</span><ul className="clinical-list">{otherInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul></div>}
     </section>
-    {PROFILE_CATEGORIES.map((category) => data.professional_profile.sections[category].length > 0 && <section className="profile-section-v2" key={category}><div className="profile-section-heading"><h2>{CATEGORY_LABELS[category]}</h2></div><div className="profile-item-list">{data.professional_profile.sections[category].map((item) => <div className="profile-item-row" key={item.id}><div><strong>{item.title}</strong>{item.detail && <p>{item.detail}</p>}</div></div>)}</div></section>)}
+
+    <AboutSection items={sections.about} readOnly />
+
+    {(sections.training.length > 0 || sections.experience.length > 0 || sections.affiliations.length > 0) && <section className="profile-block">
+      <h2 className="profile-block-heading">Background</h2>
+      <ProfileTimelineGroup category="training" items={sections.training} readOnly />
+      <ProfileTimelineGroup category="experience" items={sections.experience} readOnly />
+      <ProfileTimelineGroup category="affiliations" items={sections.affiliations} readOnly />
+    </section>}
+
+    {(sections.clinical_interests.length > 0 || data.professional_profile.interests.some((item) => item.interest_type === 'case_interest' || item.interest_type === 'clinical_interest')) &&
+      <InterestsPanel interests={data.professional_profile.interests} types={['case_interest', 'clinical_interest']} readOnly />}
+
+    {hasResearchSection && <section className="profile-block">
+      <h2 className="profile-block-heading">Research &amp; publications</h2>
+      {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} readOnly />}
+      <ProfileSection category="research" items={sections.research} quiet readOnly />
+      <ProfileSection category="publications" items={sections.publications} quiet readOnly />
+    </section>}
+
+    {hasTeachingSection && <section className="profile-block">
+      <h2 className="profile-block-heading">Teaching</h2>
+      {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} readOnly />}
+      <ProfileSection category="teaching" items={sections.teaching} quiet readOnly />
+    </section>}
+
+    {sections.skills_or_procedures.length > 0 && <ProfileChipSection category="skills_or_procedures" items={sections.skills_or_procedures} readOnly heading="Skills &amp; procedures" />}
+    {sections.languages.length > 0 && <ProfileChipSection category="languages" items={sections.languages} readOnly />}
+    {sections.locations.length > 0 && <ProfileSection category="locations" items={sections.locations} readOnly heading="Practice &amp; locations" />}
+    {sections.professional_links.length > 0 && <ProfileSection category="professional_links" items={sections.professional_links} readOnly heading="Professional links" />}
+
     {data.published_updates.length > 0 && <section className="profile-section-v2"><div className="profile-section-heading"><h2>Practice updates</h2></div>{data.published_updates.map((update) => <article className="practice-update-card" key={update.id}><p className="practice-update-title">{update.title}</p><p className="practice-update-body">{update.body}</p></article>)}</section>}
     <p className="disclaimer">{data.disclaimer}</p>
   </main>

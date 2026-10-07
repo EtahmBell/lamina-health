@@ -723,7 +723,7 @@ export default function App() {
   if (path === '/consultations') return <ConsultationsPage navigate={navigate} />
   if (path === '/agent') return <MyAgentPage navigate={navigate} params={params} />
   if (path === '/agent/train') return <ProductShell navigate={navigate} section="agent"><TrainingPage personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} exitPath="/agent?tab=train" params={params} /></ProductShell>
-  if (path === '/profile' || path === '/profile/professional') return <ProductShell navigate={navigate} section="profile"><ProfessionalProfilePage personaId="lucy" navigate={navigate} /></ProductShell>
+  if (path === '/profile' || path === '/profile/professional') return <ProductShell navigate={navigate} section="profile"><ProfessionalProfilePage personaId="lucy" navigate={navigate} params={params} /></ProductShell>
   if (path === '/settings') return <SettingsPage navigate={navigate} />
   if (path === '/network/updates') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
   const networkProfileControlledId = path.match(/^\/network\/profile\/([^/]+)$/)?.[1]
@@ -744,7 +744,7 @@ export default function App() {
   if (specialistRecordId) return <ProductShell navigate={navigate} section="specialist-cases" perspective="specialist"><SpecialistCaseDetailPage recordId={Number(specialistRecordId)} navigate={navigate} /></ProductShell>
   if (path === '/specialist/agent') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><SpecialistAgentPage navigate={navigate} params={params} /></ProductShell>
   if (path === '/specialist/agent/train') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><TrainingPage personaId="iain" agentName={SPECIALIST_AGENT_NAME} navigate={navigate} exitPath="/specialist/agent?tab=train" params={params} /></ProductShell>
-  if (path === '/specialist/profile') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><ProfessionalProfilePage personaId="iain" navigate={navigate} /></ProductShell>
+  if (path === '/specialist/profile') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><ProfessionalProfilePage personaId="iain" navigate={navigate} params={params} /></ProductShell>
   if (path === '/specialist/patients') return <ProductShell navigate={navigate} section="specialist-patients" perspective="specialist"><SpecialistPatientsPage navigate={navigate} /></ProductShell>
   if (path === '/specialist/network') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={params} /></ProductShell>
   if (path === '/specialist/network/updates') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
