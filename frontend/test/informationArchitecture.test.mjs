@@ -78,13 +78,9 @@ test('the Home activity header links to all agent activity, not to consultations
   assert.match(home(), /'View interaction' : 'View consultation'/)
 })
 
-test('the Your Agent summary carries existing factual state only', () => {
-  const card = home().slice(home().indexOf('home-agent-card'), home().indexOf('</aside>'))
-  assert.match(card, /Last activity/)
-  assert.match(card, /Practice rules confirmed/)
-  assert.match(card, /confirmed_practice_learnings/)
-  assert.match(card, /navigate\('\/agent\?tab=overview'\)/)
-  assert.doesNotMatch(card, /Math\.|%|average|score|trend/i, 'no invented metrics')
+test('Home renders the Your Agent card from canonical AgentOverview state only', () => {
+  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" \/>/)
+  assert.doesNotMatch(home(), /Math\.|%|average|score|trend/i, 'no invented metrics on Home')
 })
 
 test('Patients uses canonical consultation state rather than inferring from legacy activity', () => {

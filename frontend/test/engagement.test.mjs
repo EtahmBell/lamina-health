@@ -125,22 +125,38 @@ test('question source labeling matches the four documented categories', () => {
   assert.match(engagement, /tag: 'Referral guidance'/)
 })
 
-/* -------------------------------------------------------- improve-agent card */
+/* ------------------------------------------------------------ home agent card */
 
-test('Improve your agent never shows a referral score, ranking, or quality metric', () => {
-  const card = slice(engagement, 'export function ImproveAgentCard', 'const FEED_TYPE_LABELS')
+test('Your Agent card never shows a referral score, ranking, or quality metric, and maps its CTA from canonical state/action only', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', '/* --------------------------------------------------------------------- Train */')
   assert.doesNotMatch(card, /score|ranking|quality/i)
-  assert.match(card, /practice area/)
-  assert.match(card, /training\.answered_count/)
+  assert.match(card, /question\{overview\.stats\.questions_answered_total === 1 \? '' : 's'\} answered/)
+  assert.match(card, /training\.state === 'active_in_progress'/)
   assert.doesNotMatch(card, /unfinished training/i)
+  const mapping = slice(engagement, 'function homeTrainingCta', 'export function HomeAgentCard')
+  assert.match(mapping, /training\.action === 'continue_setup'/)
+  assert.match(mapping, /training\.action === 'resume_training' && activeId/)
+  assert.match(mapping, /training\.action === 'start_training' && activeId/)
+  assert.match(mapping, /training\.action === 'review_training' && reviewId/)
 })
 
-test('Home (both personas) passes the canonical training projection to Improve your agent', () => {
-  assert.match(homePageFn(), /getTrainingHistory\('lucy'\)\.then\(setTraining\)/)
-  assert.match(homePageFn(), /<ImproveAgentCard representation=\{representation\} training=\{training\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} \/>/)
-  const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------------- Cases */')
-  assert.match(specialistHome, /getTrainingHistory\('iain'\)\.then\(setTraining\)/)
-  assert.match(specialistHome, /<ImproveAgentCard representation=\{representation\} training=\{training\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} \/>/)
+test('Home (both personas) renders the Your Agent card from AgentOverview, with a quiet link to My Agent', () => {
+  assert.match(homePageFn(), /getAgentOverview\('lucy'\)\.then\(setOverview\)/)
+  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" \/>/)
+  const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
+  assert.match(specialistHome, /getAgentOverview\('iain'\)\.then\(setOverview\)/)
+  assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" \/>/)
+})
+
+test('the full Network Pulse feed section is gone from Home; only the compact 2-item highlight preview remains', () => {
+  assert.doesNotMatch(homePageFn(), /NetworkFeedSection/)
+  assert.match(homePageFn(), /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="lucy" \/>/)
+  const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
+  assert.doesNotMatch(specialistHome, /NetworkFeedSection/)
+  assert.match(specialistHome, /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="iain" \/>/)
+  const highlights = slice(engagement, 'export function NetworkHighlights', 'export function FullNetworkFeedPage')
+  assert.match(highlights, /feed\.items\.slice\(0, 2\)/)
+  assert.doesNotMatch(highlights, /No network updates yet/, 'Home never shows a giant empty feed state')
 })
 
 /* -------------------------------------------------------------- My Agent */
@@ -204,7 +220,7 @@ test('the network feed renders chronologically and never computes its own popula
 })
 
 test('feed cards offer professional actions only — no likes, comments, or follower counts', () => {
-  const card = slice(engagement, 'function FeedCard', 'export function NetworkFeedSection')
+  const card = slice(engagement, 'function FeedCard', 'export function NetworkHighlights')
   assert.match(card, /View profile/)
   assert.doesNotMatch(card, /like|heart|comment|follower|repost/i)
 })
@@ -330,4 +346,25 @@ test('the practice summary reuses the real Overview portrait sentence rather tha
   const page = practiceTabFn()
   assert.match(page, /const summary = practiceSummarySentence\(portrait\)/)
   assert.match(engagement, /const practiceSummarySentence = \(portrait: string \| undefined \| null\)/)
+})
+
+/* ----------------------------------------------------------------- Pass 7B: Home */
+
+test('Current Work has a calm, compact empty state on both Home pages instead of a blank gap', () => {
+  assert.match(homePageFn(), /No current cases need your attention\./)
+  const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
+  assert.match(specialistHome, /Cases involving your agent will appear here\./)
+})
+
+test('caught_up renders no CTA button at all — just quiet up-to-date text', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', '/* --------------------------------------------------------------------- Train */')
+  assert.match(card, /training\.state === 'caught_up' && <p className="home-agent-caught-up">Training is up to date\.<\/p>/)
+  assert.match(card, /\{cta && <button/, 'the CTA button only renders when homeTrainingCta returns a mapped action')
+})
+
+test('Lucy and Iain Home share the same dashboard architecture: Your Agent card + compact activity + optional network highlights, no separate specialist design', () => {
+  const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
+  assert.match(specialistHome, /<HomeAgentCard overview=\{overview\}/)
+  assert.match(specialistHome, /<NetworkHighlights feed=\{feed\}/)
+  assert.doesNotMatch(specialistHome, /agent learning|Review preferences/i, 'legacy case-raised learnings never drive Iain\'s ordinary Home either')
 })

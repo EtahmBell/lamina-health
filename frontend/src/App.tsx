@@ -11,7 +11,7 @@ import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, cleanName, patientName } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients.ts'
-import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, FullNetworkFeedPage, ImproveAgentCard, NetworkFeedSection, NetworkPhysicianProfilePage, PracticeTab, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, type AgentActivityRow } from './Engagement.tsx'
+import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, FullNetworkFeedPage, HomeAgentCard, NetworkHighlights, NetworkPhysicianProfilePage, PracticeTab, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, type AgentActivityRow } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { PhysicianDirectoryPage, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
@@ -166,17 +166,13 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const [records, setRecords] = useState<ConsultationRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [training, setTraining] = useState<TrainProjection | null>(null)
   const [overview, setOverview] = useState<AgentOverview | null>(null)
   useEffect(() => {
     getConsultationHistory()
       .then(setRecords)
       .catch(() => setError(true)).finally(() => setLoading(false))
-    getPracticeRepresentation('lucy').then(setRepresentation).catch(() => {})
     getNetworkFeed('lucy').then(setFeed).catch(() => {})
-    getTrainingHistory('lucy').then(setTraining).catch(() => {})
     getAgentOverview('lucy').then(setOverview).catch(() => {})
   }, [])
   const ordered = [...records].sort((a, b) => b.completed_at.localeCompare(a.completed_at))
@@ -184,18 +180,17 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const currentWork = latestByPatient.slice(0, 3)
   const workCount = currentWork.length
   const activity = agentActivity(ordered).slice(0, 3)
-  const lastRecord = ordered[0]
   return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page">
     <header className="home-header"><div><h1>Home</h1><p>Current work and recent agent activity.</p></div><button className="button-primary home-start" onClick={() => navigate('/patients')}>Start consultation <span>→</span></button></header>
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
-      {workCount > 0 && <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{workCount}</span></div><div className="lam-list needs-attention">{currentWork.map((record) => <button className="lam-row" key={record.id} onClick={() => navigate(consultationPath(record.id))}><span className="lam-row-mark patient-row-avatar">{DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials}</span><span className="lam-row-main"><strong>{patientName(record.patient_id)}</strong><span>{record.result.recommended_physician.specialty} recommended{record.patient_id === MARIA_ID ? ' first' : ''}</span><small>{cleanName(record.result.recommended_physician.physician_name)} · Workup identified</small></span><span className="lam-row-action">Review consultation <b>→</b></span></button>)}</div></section>}
-      <ImproveAgentCard representation={representation} training={training} navigate={navigate} trainPath={trainingPath('lucy')} />
-      <NetworkFeedSection feed={feed} navigate={navigate} perspective="lucy" />
-      <section className="home-main-grid"><div className="home-activity"><div className="home-section-heading"><div><h2>Recent agent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=activity')}>View all activity →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span><em className="activity-kind">{item.kind === 'interaction' ? 'Agent interaction' : 'Consultation milestone'}</em><strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</div>
-        <aside className="home-agent-card"><div className="home-agent-title"><NetworkMark active /><div><p className="eyebrow">Your Agent</p><h2>{PCP_AGENT_NAME}</h2><span><i /> Active</span></div></div><dl><div><dt>Last activity</dt><dd>{lastRecord ? `Consulted ${lastRecord.result.consultation.length} physician agents for ${patientName(lastRecord.patient_id)}` : 'No consultations yet'}{lastRecord && <small>{eventTimestamp(lastRecord.completed_at)}</small>}</dd></div><div><dt>Practice rules confirmed</dt><dd>{overview?.stats.confirmed_practice_learnings ?? 0}</dd></div></dl><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View My Agent →</button></aside>
-      </section>
+      {workCount > 0
+        ? <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{workCount}</span></div><div className="lam-list needs-attention">{currentWork.map((record) => <button className="lam-row" key={record.id} onClick={() => navigate(consultationPath(record.id))}><span className="lam-row-mark patient-row-avatar">{DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials}</span><span className="lam-row-main"><strong>{patientName(record.patient_id)}</strong><span>{record.result.recommended_physician.specialty} recommended{record.patient_id === MARIA_ID ? ' first' : ''}</span><small>{cleanName(record.result.recommended_physician.physician_name)} · Workup identified</small></span><span className="lam-row-action">Review consultation <b>→</b></span></button>)}</div></section>
+        : <p className="home-current-work-empty">No current cases need your attention.</p>}
+      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" />
+      <section className="home-activity"><div className="home-section-heading"><div><h2>Recent agent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=activity')}>View all activity →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span><em className="activity-kind">{item.kind === 'interaction' ? 'Agent interaction' : 'Consultation milestone'}</em><strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
+      <NetworkHighlights feed={feed} navigate={navigate} perspective="lucy" />
     </>}
   </main></ProductShell>
 }

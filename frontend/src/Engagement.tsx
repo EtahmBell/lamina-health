@@ -95,30 +95,44 @@ export const settingsPath = '/settings'
 
 /* ------------------------------------------------------------- Home: engagement */
 
-export function ImproveAgentCard({ representation, training, navigate, trainPath }: {
-  representation: PracticeRepresentation | null; training: TrainProjection | null
-  navigate: Navigate; trainPath: string
-}) {
-  if (!representation || !training) return null
-  const confirmedCount = representation.completeness.confirmed_practice_item_count
+/**
+ * Maps the canonical TrainProjection directly to a Home CTA. Only `.state`/`.action`/
+ * `.active_session_id`/`.review_session_id`/`.answered_count`/`.answer_target` are read —
+ * never independently inferred (e.g. never "unfinished", never guessing resume vs start
+ * from answered_count alone).
+ */
+function homeTrainingCta(training: TrainProjection, trainPath: string): { label: string; href: string } | null {
   const activeId = training.active_session_id
   const reviewId = training.review_session_id
-  const content = training.state === 'initialization_needed'
-    ? { title: 'Set up your agent.', label: 'Continue setup', href: `${trainPath}?mode=initialization` }
-    : training.state === 'active_unstarted' && activeId
-      ? { title: 'Train your agent.', label: 'Start training', href: `${trainPath}?resume=${activeId}` }
-      : training.state === 'active_in_progress' && activeId
-        ? { title: 'Continue training.', label: 'Resume training', href: `${trainPath}?resume=${activeId}` }
-        : training.state === 'review_pending' && reviewId
-          ? { title: 'Training complete.', label: 'Review what your agent learned', href: `${trainPath}?review=${reviewId}` }
-          : training.state === 'ready'
-            ? { title: 'A short training session is ready.', label: 'Start training', href: `${trainPath}?mode=daily` }
-            : null
-  return <section className={`improve-agent-card ${training.state === 'caught_up' ? 'done' : ''}`}>
-    <p className="eyebrow">Improve your agent</p>
-    <h2>{content?.title ?? 'Your agent is caught up for now.'}</h2>
-    <p className="improve-agent-stat">{confirmedCount} practice area{confirmedCount === 1 ? '' : 's'} confirmed{training.state === 'active_in_progress' ? ` · ${training.answered_count} of ${training.answer_target ?? 10} answered` : ''}.</p>
-    {content && <button className="button-primary" onClick={() => navigate(content.href)}>{content.label} <span>→</span></button>}
+  if (training.action === 'continue_setup') return { label: 'Continue setup', href: `${trainPath}?mode=initialization` }
+  if (training.action === 'resume_training' && activeId) return { label: 'Resume training', href: `${trainPath}?resume=${activeId}` }
+  if (training.action === 'start_training' && activeId) return { label: 'Start training', href: `${trainPath}?resume=${activeId}` }
+  if (training.action === 'start_training') return { label: 'Start training', href: `${trainPath}?mode=daily` }
+  if (training.action === 'review_training' && reviewId) return { label: 'Review what your agent learned', href: `${trainPath}?review=${reviewId}` }
+  return null
+}
+
+export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath }: {
+  overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string
+}) {
+  if (!overview) return null
+  const training = overview.training
+  const cta = homeTrainingCta(training, trainPath)
+  const summary = practiceSummarySentence(overview.portrait)
+  return <section className="home-agent-card-v2">
+    <p className="eyebrow">Your agent</p>
+    <h2>{overview.physician.agent_name}</h2>
+    {summary && <p className="home-agent-portrait">{summary}</p>}
+    <div className="home-agent-stats">
+      <span>{overview.stats.questions_answered_total} question{overview.stats.questions_answered_total === 1 ? '' : 's'} answered</span>
+      <span>{overview.stats.confirmed_practice_learnings} practice rule{overview.stats.confirmed_practice_learnings === 1 ? '' : 's'}</span>
+      {training.state === 'active_in_progress'
+        ? <span>{training.answered_count} of {training.answer_target ?? 10} answered</span>
+        : overview.last_trained_at && <span>Last trained {relativeDayLabel(overview.last_trained_at)}</span>}
+    </div>
+    {training.state === 'caught_up' && <p className="home-agent-caught-up">Training is up to date.</p>}
+    {cta && <button className="button-primary" onClick={() => navigate(cta.href)}>{cta.label} <span>→</span></button>}
+    <button className="text-button home-agent-view-link" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
   </section>
 }
 
@@ -139,13 +153,18 @@ function FeedCard({ item, navigate, perspective }: { item: NetworkFeedItem; navi
   </article>
 }
 
-export function NetworkFeedSection({ feed, navigate, perspective, limit = 4 }: { feed: NetworkFeed | null; navigate: Navigate; perspective: DemoPhysicianPerspective; limit?: number }) {
-  if (!feed) return null
-  return <section className="network-feed-section">
-    <div className="home-section-heading"><div><h2>Network pulse</h2><p className="network-pulse-subtitle">What changed among the physicians and practices your network actually interacts with.</p></div>{feed.items.length > 0 && <button className="text-button" onClick={() => navigate(networkUpdatesPath(perspective))}>View all →</button>}</div>
-    {feed.items.length === 0
-      ? <p className="home-empty">No network updates yet. Updates will appear as physicians and agents in your network share changes.</p>
-      : <div className="feed-grid">{feed.items.slice(0, limit).map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={perspective} />)}</div>}
+/** Home's tiny network preview — at most 2 compact rows, omitted entirely when there is nothing to show. Never a feed, never an empty state on Home. */
+export function NetworkHighlights({ feed, navigate, perspective }: { feed: NetworkFeed | null; navigate: Navigate; perspective: DemoPhysicianPerspective }) {
+  if (!feed || feed.items.length === 0) return null
+  const items = feed.items.slice(0, 2)
+  return <section className="home-network-highlights">
+    <div className="home-section-heading"><h2>From your network</h2></div>
+    <div className="home-network-highlight-rows">{items.map((item) => <button key={item.id} className="home-network-highlight-row" onClick={() => navigate(networkProfilePath(perspective, item.physician.id))}>
+      <span className="home-network-highlight-physician">{item.physician.name} · {item.physician.specialty}</span>
+      <span className="home-network-highlight-title">{item.title}</span>
+      <b>View →</b>
+    </button>)}</div>
+    <button className="text-button" onClick={() => navigate(networkUpdatesPath(perspective))}>View network →</button>
   </section>
 }
 

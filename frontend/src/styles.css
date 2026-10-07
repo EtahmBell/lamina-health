@@ -244,12 +244,10 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 /* Workflow home: current work first, supporting state second. */
 .home-page { max-width: 1180px; animation: workspace-enter .22s ease-out both; }.home-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 25px; padding: 8px 0 27px; border-bottom: 1px solid var(--border); }.home-hero h1 { margin: 5px 0 8px; font-size: clamp(2.5rem, 5vw, 4rem); }.home-hero p:last-child { margin: 0; color: var(--text-secondary); font-size: .75rem; }.home-start { min-width: 165px; justify-content: space-between; }.home-loading { padding: 42px 0; color: var(--text-secondary); font-size: .7rem; }.home-loading .loading-line { max-width: 260px; }
 .home-attention { margin-top: 31px; }.home-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 15px; margin-bottom: 12px; }.home-section-heading h2 { margin: 4px 0 0; font-size: 1.45rem; }.home-section-heading .eyebrow { margin: 0; }.home-section-heading > span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #f3e7db; color: var(--accent-hover); font-size: .65rem; font-weight: 800; }
-.home-main-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .55fr); gap: 21px; margin-top: 34px; }.home-activity { min-width: 0; }.activity-stream { border-top: 1px solid var(--border); }.activity-stream > button { width: 100%; display: grid; grid-template-columns: 13px 1fr auto; gap: 13px; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 15px 5px; color: var(--clinical); cursor: pointer; text-align: left; }.activity-stream > button:hover { background: rgb(255 252 247 / 50%); }.activity-marker { width: 9px; height: 9px; margin-top: 4px; border: 2px solid var(--accent); border-radius: 50%; background: var(--background); }.activity-stream strong, .activity-stream small, .activity-stream em { display: block; }.activity-stream strong { font-family: var(--font-display); font-size: .78rem; }.activity-stream small { margin-top: 3px; color: var(--text-secondary); font-size: .58rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.activity-stream em { margin-top: 5px; color: #817d75; font-size: .52rem; font-style: normal; }.activity-stream > button > b { align-self: center; color: var(--accent); }.home-empty { border-top: 1px solid var(--border); padding: 24px 2px; color: var(--text-secondary); font-size: .66rem; }
-.home-agent-card { align-self: start; border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 13px; background: var(--surface); padding: 21px; box-shadow: var(--shadow-soft); }.home-agent-title { display: flex; align-items: center; gap: 12px; }.home-agent-title .network-motif { width: 47px; height: 47px; flex-basis: 47px; }.home-agent-title .network-motif .motif-logo { transform: scale(.75); }.home-agent-title h2 { margin: 3px 0; font-size: .96rem; }.home-agent-title span { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: .52rem; font-weight: 700; text-transform: uppercase; }.home-agent-title span i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }.home-agent-card dl { margin: 18px 0; }.home-agent-card dl > div { border-top: 1px solid var(--border); padding: 12px 0; }.home-agent-card dt { color: var(--text-secondary); font-size: .52rem; font-weight: 700; text-transform: uppercase; }.home-agent-card dd { margin: 5px 0 0; color: var(--clinical); font-size: .62rem; line-height: 1.5; }.home-agent-card > div:last-child { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }.home-agent-card .button-secondary { padding: 9px 11px; }
+.home-activity { margin-top: 34px; }.activity-stream { border-top: 1px solid var(--border); }.activity-stream > button { width: 100%; display: grid; grid-template-columns: 13px 1fr auto; gap: 13px; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 15px 5px; color: var(--clinical); cursor: pointer; text-align: left; }.activity-stream > button:hover { background: rgb(255 252 247 / 50%); }.activity-marker { width: 9px; height: 9px; margin-top: 4px; border: 2px solid var(--accent); border-radius: 50%; background: var(--background); }.activity-stream strong, .activity-stream small, .activity-stream em { display: block; }.activity-stream strong { font-family: var(--font-display); font-size: .78rem; }.activity-stream small { margin-top: 3px; color: var(--text-secondary); font-size: .58rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.activity-stream em { margin-top: 5px; color: #817d75; font-size: .52rem; font-style: normal; }.activity-stream > button > b { align-self: center; color: var(--accent); }.home-empty { border-top: 1px solid var(--border); padding: 24px 2px; color: var(--text-secondary); font-size: .66rem; }
 .home-patients { margin-top: 38px; }
 @keyframes workspace-enter { from { opacity: 0; transform: translateY(4px) scale(.997); } }
-@media (max-width: 850px) { .home-main-grid { grid-template-columns: 1fr; }.home-agent-card { order: -1; }}
-@media (max-width: 600px) { .home-hero { align-items: flex-start; flex-direction: column; }.home-start { width: 100%; }.activity-stream small { white-space: normal; }.home-agent-card > div:last-child { align-items: flex-start; flex-direction: column; }}
+@media (max-width: 600px) { .home-hero { align-items: flex-start; flex-direction: column; }.home-start { width: 100%; }.activity-stream small { white-space: normal; }}
 @media (prefers-reduced-motion: reduce) { .home-page { animation: none; }}
 /* ==========================================================================
    Final polish pass. One shared list-row grammar, one meaning for the rust
@@ -292,10 +290,6 @@ button.lam-row:hover { background: #fff9f1; }
 .consult-peer > .network-motif .motif-logo { transform: scale(.45); }
 
 /* Home: vertical hierarchy, supporting state kept light rather than boxed. */
-.home-main-grid { grid-template-columns: minmax(0, 1.5fr) minmax(250px, .5fr); gap: 36px; margin-top: 38px; }
-.home-agent-card { border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; padding: 18px 0 0; box-shadow: none; }
-.home-agent-card dl { margin: 16px 0 14px; }
-.home-agent-card dl > div { border-top: 0; padding: 0; }
 .home-patients { margin-top: 42px; }
 .home-section-heading .text-button { white-space: nowrap; }
 
@@ -379,11 +373,9 @@ button.lam-row:hover { background: #fff9f1; }
 .home-attention { margin-top: var(--section-space); }
 .home-attention .home-section-heading h2 { font-size: clamp(1.65rem, 2.2vw, 2rem); }
 .home-attention .home-section-heading > span { width: 31px; height: 31px; font-size: .74rem; }
-.home-main-grid, .home-patients { margin-top: var(--section-space); }
+.home-activity, .home-patients { margin-top: var(--section-space); }
 .home-activity .home-section-heading h2, .home-patients .home-section-heading h2 { font-size: 1.55rem; }
-.home-agent-card { padding-top: 19px; }
-.home-agent-card dd, .activity-stream small, .activity-stream em { font-size: var(--type-meta); }
-.home-agent-card dt { font-size: .61rem; }
+.activity-stream small, .activity-stream em { font-size: var(--type-meta); }
 .activity-stream strong { font-size: .86rem; }
 .activity-stream > button { padding-block: 17px; }
 
@@ -480,7 +472,7 @@ button.lam-row:hover { background: #fff9f1; }
 .home-header h1 { margin: 0; font-size: 1.85rem; }
 .home-header p { margin: 6px 0 0; color: var(--text-secondary); font-size: var(--type-body); }
 .home-page .home-attention { margin-top: 24px; }
-.home-page .home-main-grid { margin-top: 30px; }
+.home-page .home-activity { margin-top: 30px; }
 
 /* Agent interactions and consultation milestones stay legibly distinct. */
 .activity-stream > button { align-items: start; }
@@ -490,13 +482,6 @@ button.lam-row:hover { background: #fff9f1; }
 .activity-stream > button > b { align-self: center; font-size: .64rem; font-weight: 700; white-space: nowrap; }
 .agent-activity-row .activity-kind { margin: 0 0 4px; color: var(--text-secondary); font-size: .53rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
 .agent-activity-row i { display: block; margin-top: 5px; color: #817d75; font-size: var(--type-meta); font-style: normal; }
-
-/* The agent summary is a real panel so it balances the activity list. */
-.home-agent-card { border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 13px; background: var(--surface); padding: 22px; box-shadow: var(--shadow-soft); }
-.home-agent-card dl { margin: 19px 0 4px; }
-.home-agent-card dl > div { border-top: 1px solid var(--border); padding: 13px 0; }
-.home-agent-card dd small { display: block; margin-top: 5px; color: var(--text-secondary); font-size: var(--type-meta); }
-.home-agent-card > div:last-child { border-top: 1px solid var(--border); padding-top: 15px; }
 
 .page-breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; color: var(--text-secondary); font-size: var(--type-meta); }
 .page-breadcrumb .text-button { font-size: var(--type-meta); }
@@ -1057,7 +1042,6 @@ button.lam-row:hover { background: #fff9f1; }
 .improve-agent-card .button-primary { display: inline-flex; }
 
 /* Network updates feed: professional utility, no vanity mechanics. */
-.network-feed-section { margin-top: 28px; }
 .feed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .feed-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 17px; box-shadow: var(--shadow-soft); }
 .feed-card-physician strong { display: block; font-family: var(--font-display); font-size: .86rem; }
@@ -1226,7 +1210,6 @@ button.lam-row:hover { background: #fff9f1; }
 .post-preview-card { margin-top: 0; }
 
 /* --------------------------------------------------- Pass 5B: network pulse */
-.network-pulse-subtitle { margin: 2px 0 0; color: var(--text-secondary); font-size: .68rem; }
 .full-feed-grid { margin-top: 18px; }
 
 /* ------------------------------------------------------- Pass 5B: training */
@@ -1367,3 +1350,29 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-activity-row.static { cursor: default; }
 .agent-activity-row.static:hover { background: transparent; }
 .agent-activity-row.training .activity-kind, .agent-activity-row.update .activity-kind { color: var(--accent-hover); }
+
+/* ----------------------------------------------------- Pass 7B: Home dashboard */
+.home-current-work-empty { margin: 31px 0 0; color: var(--text-secondary); font-size: .7rem; }
+
+.home-agent-card-v2 { margin-top: 34px; border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 13px; background: var(--surface); padding: 24px 26px; box-shadow: var(--shadow-soft); max-width: 620px; }
+.home-agent-card-v2 h2 { margin: 3px 0 10px; font-size: 1.05rem; }
+.home-agent-portrait { margin: 0 0 16px; color: var(--clinical); font-family: var(--font-display); font-size: .84rem; line-height: 1.55; }
+.home-agent-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 18px; color: var(--text-secondary); font-size: .66rem; }
+.home-agent-caught-up { margin: 0 0 16px; color: var(--text-secondary); font-size: .7rem; }
+.home-agent-card-v2 .button-primary { margin-right: 14px; }
+.home-agent-view-link { margin-top: 4px; }
+.home-agent-card-v2:has(.button-primary) .home-agent-view-link { display: inline-block; margin-top: 14px; }
+
+.home-network-highlights { margin-top: 34px; }
+.home-network-highlight-rows { display: flex; flex-direction: column; }
+.home-network-highlight-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 10px; border: 0; border-top: 1px solid var(--border); background: transparent; padding: 13px 2px; color: var(--clinical); cursor: pointer; text-align: left; }
+.home-network-highlight-row:first-child { border-top: 0; }
+.home-network-highlight-row:hover { background: rgb(255 252 247 / 50%); }
+.home-network-highlight-physician { grid-column: 1 / -1; color: var(--text-secondary); font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.home-network-highlight-title { font-size: .76rem; }
+.home-network-highlight-row b { color: var(--accent); font-size: .62rem; font-weight: 700; white-space: nowrap; }
+
+@media (max-width: 600px) {
+  .home-agent-card-v2 { padding: 20px; }
+  .home-agent-card-v2 .button-primary { display: block; width: 100%; margin: 0 0 12px; }
+}

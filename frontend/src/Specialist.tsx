@@ -23,7 +23,7 @@ import {
   type TrainProjection,
 } from './api.ts'
 import { eventDomId } from './agentActivity.ts'
-import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, ImproveAgentCard, NetworkFeedSection, PracticeTab, TrainTab, networkProfilePath, trainingPath, type AgentActivityRow } from './Engagement.tsx'
+import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, HomeAgentCard, NetworkHighlights, PracticeTab, TrainTab, networkProfilePath, trainingPath, type AgentActivityRow } from './Engagement.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 
 type Navigate = (path: string) => void
@@ -98,14 +98,12 @@ function SpecialistActivityRow({ item, navigate }: { item: SpecialistCaseSummary
 export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
   const [workspace, setWorkspace] = useState<SpecialistWorkspace | null>(null)
   const [error, setError] = useState('')
-  const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [training, setTraining] = useState<TrainProjection | null>(null)
+  const [overview, setOverview] = useState<AgentOverview | null>(null)
   useEffect(() => {
     getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message))
-    getPracticeRepresentation('iain').then(setRepresentation).catch(() => {})
     getNetworkFeed('iain').then(setFeed).catch(() => {})
-    getTrainingHistory('iain').then(setTraining).catch(() => {})
+    getAgentOverview('iain').then(setOverview).catch(() => {})
   }, [])
   const needsReview = workspace?.recent_cases.filter((item) => !item.reviewed) ?? []
   const recent = workspace?.recent_cases ?? []
@@ -113,22 +111,25 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
     <header className="home-header"><div><h1>Home</h1><p>Cases involving your agent and recent network activity.</p></div></header>
     {error && <div className="error-banner" role="alert">Specialist workspace activity is temporarily unavailable.</div>}
     {!workspace && !error && <div className="home-loading"><div className="loading-line" /><p>Opening specialist workspace…</p></div>}
-    {workspace && workspace.case_count === 0 && <div className="empty-state specialist-empty">
-      <NetworkMark />
-      <h2>No cases involving your agent yet</h2>
-      <p>Cases will appear here when your agent participates in a network consultation.</p>
-      <SwitchToLucyHelper navigate={navigate} copy="Run a network consultation from the referring-physician perspective to see the specialist side." />
-    </div>}
-    {workspace && workspace.case_count > 0 && <>
-      {needsReview.length > 0 && <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{needsReview.length}</span></div>
-        <div className="lam-list needs-attention">{needsReview.map((item) => <SpecialistCurrentWorkRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
-      </section>}
+    {workspace && <>
+      {needsReview.length > 0
+        ? <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{needsReview.length}</span></div>
+          <div className="lam-list needs-attention">{needsReview.map((item) => <SpecialistCurrentWorkRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
+        </section>
+        : <p className="home-current-work-empty">Cases involving your agent will appear here.</p>}
+      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('iain')} viewAgentPath="/specialist/agent?tab=overview" />
+      {workspace.case_count > 0
+        ? <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
+          <div className="lam-list quiet">{recent.slice(0, 5).map((item) => <SpecialistActivityRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
+        </section>
+        : <div className="empty-state specialist-empty">
+          <NetworkMark />
+          <h2>No cases involving your agent yet</h2>
+          <p>Cases will appear here when your agent participates in a network consultation.</p>
+          <SwitchToLucyHelper navigate={navigate} copy="Run a network consultation from the referring-physician perspective to see the specialist side." />
+        </div>}
+      <NetworkHighlights feed={feed} navigate={navigate} perspective="iain" />
     </>}
-    <ImproveAgentCard representation={representation} training={training} navigate={navigate} trainPath={trainingPath('iain')} />
-    <NetworkFeedSection feed={feed} navigate={navigate} perspective="iain" />
-    {workspace && workspace.case_count > 0 && <section className="home-patients"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
-      <div className="lam-list quiet">{recent.slice(0, 5).map((item) => <SpecialistActivityRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
-    </section>}
   </main>
 }
 
