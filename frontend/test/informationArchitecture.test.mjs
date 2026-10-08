@@ -60,17 +60,17 @@ test('the sidebar physician-agent block is one clickable control into My Agent, 
 
 /* -------------------------------------------------------------------- home */
 
-test('the Dashboard (post-8B rename of Home) greets the physician and leads with Needs you, then the agent banner, then activity', () => {
+test('the Dashboard (post-8B rename of Home) greets the physician and leads with the agent banner, then stats, then the patient watchlist, then activity (mineral-system pass: the standalone Needs You hero is gone — urgency now lives in the watchlist row)', () => {
   assert.match(home(), /<p className="eyebrow">Dashboard<\/p><h1>\{timeAwareGreeting\(greetingName\)\}<\/h1>/)
   assert.doesNotMatch(source, /physician workspace/i)
   assert.doesNotMatch(home(), /Recent patients|home-patients|getPatientActivity/)
-  assert.match(home(), /Needs you/)
-  assert.match(source, /Nothing needs you right now\./)
+  assert.doesNotMatch(home(), /dashboard-needs-you/, 'the large standalone Needs You section is gone from the Dashboard')
+  assert.match(home(), /<PatientWatchTable rows=\{watchRows\}/)
   assert.match(home(), /Recent activity/)
-  const order = ['dashboard-needs-you', '<HomeAgentCard', 'className="home-activity"']
+  const order = ['<HomeAgentCard', 'dashboard-stats', 'PatientWatchTable', 'className="home-activity"']
   const positions = order.map((token) => home().indexOf(token))
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
-  assert.deepEqual(positions, [...positions].sort((a, b) => a - b), 'Needs you precedes the agent banner, which precedes recent activity')
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b), 'the agent banner precedes the stat cards, which precede the patient watchlist, which precedes recent activity')
 })
 
 test('the Dashboard activity header links to the agent, not to consultations', () => {
@@ -80,7 +80,7 @@ test('the Dashboard activity header links to the agent, not to consultations', (
 })
 
 test('Home renders the Your Agent card from canonical AgentOverview state only', () => {
-  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" \/>/)
+  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} \/>/)
   assert.doesNotMatch(home(), /Math\.|%|average|score|trend/i, 'no invented metrics on Home')
 })
 

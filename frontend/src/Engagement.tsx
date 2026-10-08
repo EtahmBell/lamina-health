@@ -132,18 +132,22 @@ function agentBannerPlan(training: TrainProjection, trainPath: string): { label:
  * Muted sage surface — "your agent" is a distinct semantic color from physician-action
  * copper. Never an artificial quality score, XP, consecutive-day mechanic, or finite
  * completion percentage for the open-ended representation. */
-export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath }: {
-  overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string
+export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, matchesReady = 0 }: {
+  overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string; matchesReady?: number
 }) {
   if (!overview) return null
   const training = overview.training
   const plan = agentBannerPlan(training, trainPath)
   return <section className="agent-banner">
     <div className="agent-banner-main">
-      <div className="agent-banner-glyph" aria-hidden="true"><span className="agent-banner-ring one" /><span className="agent-banner-ring two" /><LaminaMark active /></div>
+      <div className="agent-banner-glyph" aria-hidden="true">
+        <span className="agent-banner-ring r1" /><span className="agent-banner-ring r2" /><span className="agent-banner-ring r3" /><span className="agent-banner-ring r4" /><span className="agent-banner-ring r5" /><span className="agent-banner-ring r6" />
+        <span className="agent-banner-sparkle">✧</span>
+      </div>
       <p className="eyebrow">Your agent is active</p>
       <h2>A little more you. A lot more helpful.</h2>
       <p className="agent-banner-support">{plan?.support ?? 'Training is up to date.'}</p>
+      {matchesReady > 0 && <p className="agent-banner-foot">✧ {matchesReady} specialist match{matchesReady === 1 ? '' : 'es'} ready for you to review</p>}
       <button className="text-button agent-banner-view" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
     </div>
     <div className="agent-banner-action">
@@ -178,7 +182,7 @@ export function NetworkHighlights({ feed, navigate, perspective }: { feed: Netwo
   if (!feed || feed.items.length === 0) return null
   const items = feed.items.slice(0, 2)
   return <section className="home-network-highlights">
-    <div className="home-section-heading"><h2>From your network</h2></div>
+    <div className="home-section-heading"><h2>Recent network</h2></div>
     <div className="home-network-highlight-rows">{items.map((item) => <button key={item.id} className="home-network-highlight-row" onClick={() => navigate(networkProfilePath(perspective, item.physician.id))}>
       <span className="home-network-highlight-physician">{item.physician.name} · {item.physician.specialty}</span>
       <span className="home-network-highlight-title">{item.title}</span>

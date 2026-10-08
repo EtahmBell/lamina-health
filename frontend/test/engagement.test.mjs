@@ -143,7 +143,7 @@ test('the agent banner (post-8B rename of the Your Agent card) never shows a ref
 
 test('Home (both personas) renders the Your Agent card from AgentOverview, with a quiet link to My Agent', () => {
   assert.match(homePageFn(), /getAgentOverview\('lucy'\)\.then\(setOverview\)/)
-  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" \/>/)
+  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} \/>/)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.match(specialistHome, /getAgentOverview\('iain'\)\.then\(setOverview\)/)
   assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" \/>/)
@@ -427,8 +427,7 @@ test('the practice summary reuses the real Overview portrait sentence rather tha
 
 /* ----------------------------------------------------------------- Pass 7B: Home */
 
-test('Needs you (post-8B rename of Current Work) has a calm, compact empty state on both Dashboards instead of a blank gap', () => {
-  assert.match(app, /Nothing needs you right now\./)
+test('Needs you (post-8B rename of Current Work) has a calm, compact empty state on the Specialist Dashboard instead of a blank gap (mineral-system pass: the PCP Dashboard replaced its standalone Needs You section with the patient watchlist, so this empty-state copy is now Specialist-only)', () => {
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.match(specialistHome, /Nothing needs you right now\./)
 })

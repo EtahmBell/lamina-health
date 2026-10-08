@@ -172,15 +172,39 @@ function LucyNetworkPage({ navigate, params }: { navigate: Navigate; params: URL
   </main>
 }
 
-type NeedsYouItem = { id: string; title: string; detail: string; href: string; avatar: string; kind: 'patient' | 'agent' }
+function DashboardMetricCard({ icon, value, label }: { icon: string; value: number; label: string }) {
+  return <div className="dashboard-stat-card"><span className="dashboard-stat-icon" aria-hidden="true">{icon}</span><div><span className="dashboard-stat-value">{value}</span><p className="dashboard-stat-label">{label}</p></div></div>
+}
 
-function NeedsYouList({ items, navigate }: { items: NeedsYouItem[]; navigate: Navigate }) {
-  if (items.length === 0) return <p className="dashboard-empty-note">Nothing needs you right now.</p>
-  return <div className="lam-list needs-attention">{items.map((item) => <button className="lam-row" key={item.id} onClick={() => navigate(item.href)}>
-    <span className={`lam-row-mark ${item.kind === 'agent' ? 'agent-row-avatar' : 'patient-row-avatar'}`}>{item.avatar}</span>
-    <span className="lam-row-main"><strong>{item.title}</strong><small>{item.detail}</small></span>
-    <span className="lam-row-status your-move">Your move</span>
-  </button>)}</div>
+/** Dashboard-scoped patient row. Deliberately built from `records` (already fetched
+ * for currentWork), never `getPatientActivity` — Home stays on canonical consultation
+ * state, matching the rest of the page, and never introduces a second data source. */
+type PatientWatchRow = { patient: DemoPatientSummary; status: WorklistStatus; detail: string; nextStep: string; action: string }
+
+function buildWatchRows(records: ConsultationRecord[]): PatientWatchRow[] {
+  return DEMO_PATIENTS.map((patient): PatientWatchRow => {
+    const record = records.find((item) => item.patient_id === patient.id)
+    const status: WorklistStatus = record ? 'Ready for your review' : patient.implemented ? 'Not yet consulted' : 'No action needed'
+    const detail = record ? `${record.result.recommended_physician.specialty} · ${cleanName(record.result.recommended_physician.physician_name)}` : patient.reason
+    return {
+      patient, status, detail,
+      nextStep: status === 'Ready for your review' ? 'Review referral options' : WORKLIST_NEXT_STEP[status],
+      action: status === 'Ready for your review' ? 'Review' : 'View patient info',
+    }
+  }).sort((a, b) => WORKLIST_STATUS_PRIORITY[a.status] - WORKLIST_STATUS_PRIORITY[b.status])
+}
+
+function PatientWatchTable({ rows, navigate }: { rows: PatientWatchRow[]; navigate: Navigate }) {
+  return <section className="dashboard-watchlist">
+    <div className="home-section-heading"><div><h2>Patients to keep an eye on</h2><p className="dashboard-watchlist-sub">Recent activity and the next step in their care.</p></div><button className="text-button" onClick={() => navigate('/patients')}>View all patients →</button></div>
+    <div className="lam-list patient-worklist">{rows.map(({ patient, status, detail, nextStep, action }) => <button key={patient.id} className="lam-row worklist-row" onClick={() => navigate(`/patients/${patient.id}`)}>
+      <span className="lam-row-mark patient-row-avatar">{patient.initials}</span>
+      <span className="lam-row-main"><strong>{patient.name}</strong><small>{patient.age} years · {detail}</small></span>
+      <span className={`worklist-status ${WORKLIST_STATUS_TONE[status]}`}>{status}{status === 'Ready for your review' && <span className="watch-row-flag">Your move</span>}</span>
+      <span className="worklist-next-step">{nextStep}</span>
+      <span className="lam-row-action">{action} <b>→</b></span>
+    </button>)}</div>
+  </section>
 }
 
 function HomePage({ navigate }: { navigate: Navigate }) {
@@ -200,20 +224,8 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const latestByPatient = ordered.filter((record, index) => ordered.findIndex((item) => item.patient_id === record.patient_id) === index)
   const currentWork = latestByPatient.slice(0, 3)
   const activity = agentActivity(ordered).slice(0, 3)
-  const training = overview?.training ?? null
-  const needsYou: NeedsYouItem[] = [
-    ...currentWork.map((record): NeedsYouItem => ({
-      id: `consult-${record.id}`, kind: 'patient',
-      title: `Review referral options for ${patientName(record.patient_id)}`,
-      detail: `${record.result.recommended_physician.specialty} recommended · ${cleanName(record.result.recommended_physician.physician_name)}`,
-      href: consultationPath(record.id), avatar: DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials ?? '··',
-    })),
-    ...(training?.state === 'review_pending' && training.review_session_id ? [{
-      id: 'agent-review', kind: 'agent' as const, title: 'Confirm proposed learning',
-      detail: 'Your agent finished a training session and has a proposed learning ready for review.',
-      href: `${trainingPath('lucy')}?review=${training.review_session_id}`, avatar: '◇',
-    }] : []),
-  ]
+  const watchRows = buildWatchRows(latestByPatient)
+  const needsNextStep = watchRows.filter((row) => row.status === 'Not yet consulted').length
   const greetingName = `Dr. ${PCP_NAME.split(' ').at(-1)}`
   const situationSummary = currentWork.length > 0 ? `${currentWork.length} referral${currentWork.length === 1 ? '' : 's'} ${currentWork.length === 1 ? 'is' : 'are'} ready for your review.` : null
   return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page dashboard-page">
@@ -221,10 +233,13 @@ function HomePage({ navigate }: { navigate: Navigate }) {
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
-      <section className="dashboard-needs-you"><div className="home-section-heading"><div><h2>Needs you</h2></div>{needsYou.length > 0 && <span>{needsYou.length}</span>}</div><NeedsYouList items={needsYou} navigate={navigate} /></section>
-      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" />
-      <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View your agent →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span>{item.kind === 'interaction' && <em className="activity-kind agent-event-label">Agent</em>}<strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
-      <NetworkHighlights feed={feed} navigate={navigate} perspective="lucy" />
+      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" matchesReady={currentWork.length} />
+      <div className="dashboard-stats"><DashboardMetricCard icon="✦" value={DEMO_PATIENTS.length} label="Patients in your care" /><DashboardMetricCard icon="↗" value={currentWork.length} label="Specialist matches ready" /><DashboardMetricCard icon="◷" value={needsNextStep} label="Patients with a next step" /></div>
+      <PatientWatchTable rows={watchRows} navigate={navigate} />
+      <div className="dashboard-bottom-row">
+        <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View your agent →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span>{item.kind === 'interaction' && <em className="activity-kind agent-event-label">Agent</em>}<strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
+        <NetworkHighlights feed={feed} navigate={navigate} perspective="lucy" />
+      </div>
     </>}
   </main></ProductShell>
 }
