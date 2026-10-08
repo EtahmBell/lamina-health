@@ -17,13 +17,14 @@ const myAgentPageFn = () => slice(app, 'function MyAgentPage', 'function DemoRes
 
 /* ------------------------------------------------------------------- nav */
 
-test('unified navigation: Lucy nav now reads Cases instead of Consultations', () => {
-  assert.match(app, /id: 'consultations', title: 'Cases', icon: '◫', path: '\/consultations'/)
+test('post-8B consolidated navigation: Cases is no longer a top-level destination for either persona', () => {
+  assert.doesNotMatch(slice(app, 'const navItems', 'const SPECIALIST_NAV_ITEMS'), /title: 'Cases'/)
+  assert.match(app, /if \(path === '\/consultations'\) return <ConsultationsPage navigate=\{navigate\} \/>/, 'the route stays reachable for compatibility')
 })
 
-test('specialist nav now matches the unified physician app, including Profile as a 6th item (Pass 5B)', () => {
-  const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'function ProfileControl')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Network'", "title: 'Profile'"])
+test('specialist nav matches the consolidated Dashboard/Patients/Network set (post-8B), with My Agent as the persistent sidebar object and Profile in the avatar menu', () => {
+  const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
 })
 
 /* --------------------------------------------------------------- routing */
@@ -127,17 +128,17 @@ test('question source labeling matches the four documented categories', () => {
 
 /* ------------------------------------------------------------ home agent card */
 
-test('Your Agent card never shows a referral score, ranking, or quality metric, and maps its CTA from canonical state/action only', () => {
-  const card = slice(engagement, 'export function HomeAgentCard', '/* --------------------------------------------------------------------- Train */')
+test('the agent banner (post-8B rename of the Your Agent card) never shows a referral score, ranking, or quality metric, and maps its CTA from canonical state/action only', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
   assert.doesNotMatch(card, /score|ranking|quality/i)
-  assert.match(card, /question\{overview\.stats\.questions_answered_total === 1 \? '' : 's'\} answered/)
-  assert.match(card, /training\.state === 'active_in_progress'/)
+  assert.match(card, /Make your agent more like you\./)
   assert.doesNotMatch(card, /unfinished training/i)
-  const mapping = slice(engagement, 'function homeTrainingCta', 'export function HomeAgentCard')
+  const mapping = slice(engagement, 'function agentBannerPlan', 'export function HomeAgentCard')
   assert.match(mapping, /training\.action === 'continue_setup'/)
   assert.match(mapping, /training\.action === 'resume_training' && activeId/)
   assert.match(mapping, /training\.action === 'start_training' && activeId/)
   assert.match(mapping, /training\.action === 'review_training' && reviewId/)
+  assert.doesNotMatch(mapping, /\d+ of \d+/, 'never a finite "x of y" completion count for the open-ended representation')
 })
 
 test('Home (both personas) renders the Your Agent card from AgentOverview, with a quiet link to My Agent', () => {
@@ -161,16 +162,16 @@ test('the full Network Pulse feed section is gone from Home; only the compact 2-
 
 /* -------------------------------------------------------------- My Agent */
 
-test('My Agent uses the simplified Pass 6C tabs, with legacy Knowledge/Calibration deep links preserved via alias', () => {
-  assert.match(app, /const AGENT_TABS = \['overview', 'practice', 'train', 'chat', 'activity'\] as const/)
-  assert.match(app, /const LEGACY_AGENT_TAB_ALIASES: Record<string, AgentTab> = \{ knowledge: 'practice', calibration: 'practice' \}/)
+test('My Agent uses the consolidated post-8B tabs (Overview/Train/Test), with legacy Knowledge/Calibration/Practice/Chat/Activity deep links preserved via alias', () => {
+  assert.match(app, /const AGENT_TABS = \['overview', 'train', 'test'\] as const/)
+  assert.match(app, /const LEGACY_AGENT_TAB_ALIASES: Record<string, AgentTab> = \{ knowledge: 'overview', calibration: 'overview', practice: 'overview', chat: 'test', activity: 'overview' \}/)
   assert.match(myAgentPageFn(), /learningParam = params\.get\('learning'\)/)
   assert.match(myAgentPageFn(), /recordParam = params\.get\('record'\)/)
 })
 
-test('Practice tab shows confirmed truth and links pending training review into Train, not a recreated Calibration UI', () => {
+test('Overview (which absorbed the old separate Practice tab) shows confirmed truth and links pending training review into Train, not a recreated Calibration UI', () => {
   const page = myAgentPageFn()
-  assert.match(page, /tab === 'practice' && representation && <PracticeTab/)
+  assert.match(page, /tab === 'overview' && <AgentOverviewPanel overview=\{overview\} representation=\{representation\}/)
   assert.doesNotMatch(engagement, /export function PracticeRepresentationPanel/, 'the old flat representation panel was replaced by the tabbed PracticeTab')
   assert.match(engagement, /reviewHref && <p className="practice-review-link">/)
 })
@@ -328,12 +329,12 @@ test('ordinary Practice navigation never shows the legacy case-raised review blo
   assert.match(app, /tabParam === 'calibration' && pending > 0 && <section className="agent-panel learning-panel practice-legacy-review">/, 'legacy block only renders when explicitly deep-linked via the old ?tab=calibration URL')
 })
 
-test('legacy ?tab=calibration deep links still resolve to Practice and can show the legacy block', () => {
-  assert.match(app, /const LEGACY_AGENT_TAB_ALIASES: Record<string, AgentTab> = \{ knowledge: 'practice', calibration: 'practice' \}/)
+test('legacy ?tab=calibration deep links still resolve to Overview and can show the legacy block', () => {
+  assert.match(app, /const LEGACY_AGENT_TAB_ALIASES: Record<string, AgentTab> = \{ knowledge: 'overview', calibration: 'overview', practice: 'overview', chat: 'test', activity: 'overview' \}/)
 })
 
-test('the pending-training-review CTA is still wired to the real Train projection', () => {
-  assert.match(app, /findPendingReviewHistoryEntry\(trainProjection\.recent_training_history\)/)
+test('the pending-training-review CTA is still wired to the real Train projection (now computed inside AgentOverviewPanel itself)', () => {
+  assert.match(engagement, /const reviewHref = training\.state === 'review_pending' && training\.review_session_id \? `\$\{trainPath\}\?review=\$\{training\.review_session_id\}` : null/)
   assert.match(engagement, /reviewHref && <p className="practice-review-link">/)
 })
 
@@ -426,16 +427,16 @@ test('the practice summary reuses the real Overview portrait sentence rather tha
 
 /* ----------------------------------------------------------------- Pass 7B: Home */
 
-test('Current Work has a calm, compact empty state on both Home pages instead of a blank gap', () => {
-  assert.match(homePageFn(), /No current cases need your attention\./)
+test('Needs you (post-8B rename of Current Work) has a calm, compact empty state on both Dashboards instead of a blank gap', () => {
+  assert.match(app, /Nothing needs you right now\./)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
-  assert.match(specialistHome, /Cases involving your agent will appear here\./)
+  assert.match(specialistHome, /Nothing needs you right now\./)
 })
 
-test('caught_up renders no CTA button at all — just quiet up-to-date text', () => {
-  const card = slice(engagement, 'export function HomeAgentCard', '/* --------------------------------------------------------------------- Train */')
-  assert.match(card, /training\.state === 'caught_up' && <p className="home-agent-caught-up">Training is up to date\.<\/p>/)
-  assert.match(card, /\{cta && <button/, 'the CTA button only renders when homeTrainingCta returns a mapped action')
+test('caught_up renders no CTA button at all — just quiet up-to-date support text', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
+  assert.match(card, /\{plan\?\.support \?\? 'Training is up to date\.'\}/)
+  assert.match(card, /\{plan && <button/, 'the CTA button only renders when agentBannerPlan returns a mapped action')
 })
 
 test('Lucy and Iain Home share the same dashboard architecture: Your Agent card + compact activity + optional network highlights, no separate specialist design', () => {
@@ -453,12 +454,12 @@ test('sidebar says Network, not Physician Network, for both personas', () => {
   assert.doesNotMatch(app, /title: 'Physician Network'/)
 })
 
-test('Network defaults to My Network and routes ?tab=feed to Feed, for both personas', () => {
+test('Network defaults to Feed and routes ?tab=my-network to Colleagues, for both personas (post-8B: Feed is primary, not graph/directory-first)', () => {
   const lucyShell = slice(app, 'function LucyNetworkPage', 'function HomePage')
-  assert.match(lucyShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
+  assert.match(lucyShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'my-network' \? 'my-network' : 'feed'\)/)
   assert.match(lucyShell, /tab === 'my-network' \? <MyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="lucy" navigate=\{navigate\} \/>/)
   const specialistShell = slice(specialist, 'export function SpecialistNetworkPage', specialist.length)
-  assert.match(specialistShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
+  assert.match(specialistShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'my-network' \? 'my-network' : 'feed'\)/)
   assert.match(specialistShell, /tab === 'my-network' \? <SpecialistMyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="iain" navigate=\{navigate\} \/>/)
 })
 

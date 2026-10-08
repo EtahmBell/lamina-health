@@ -34,7 +34,7 @@ test('direct case-id routes use the consultation_record_id, not the canonical co
 
 test('the perspective switch is the existing clinician pill, now a menu — not a new giant toggle', () => {
   const control = perspectiveSwitch()
-  assert.match(control, /className="profile-control"/)
+  assert.match(control, /className="profile-control avatar-control"/)
   assert.match(control, /aria-haspopup="menu"/)
   assert.match(control, /role="menu"/)
   assert.match(control, /Demo perspective/)
@@ -75,9 +75,9 @@ test('PCP shell navigation and Lucy sidebar card are unchanged aside from the he
   assert.match(shell(), /Active · Primary Care/)
 })
 
-test('specialist shell now matches the unified physician-app navigation, including Profile (Pass 5B)', () => {
-  const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'function ProfileControl')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'Patients'", "title: 'Cases'", "title: 'My Agent'", "title: 'Network'", "title: 'Profile'"])
+test('specialist shell uses the consolidated three-item navigation (post-8B): Dashboard/Patients/Network, with My Agent as the persistent sidebar object and Profile in the avatar menu', () => {
+  const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
 })
 
 test('the specialist sidebar card never claims Active status for a reserved provider', () => {
@@ -227,10 +227,15 @@ test('specialist My Agent invents no unsupported practice facts', () => {
   assert.doesNotMatch(page, /insurance|privileges|affiliation|availability/i)
 })
 
-test('specialist My Agent shows recent case activity from real case data, not a global calibration dashboard', () => {
-  const page = agentPage()
-  assert.match(page, /getSpecialistCases\(\)\.then\(setCases\)/)
+test('the specialist Dashboard (post-8B: Activity moved out of My Agent) shows recent case activity from real workspace data, not a global calibration dashboard', () => {
+  const page = home()
+  assert.match(page, /recent\.slice\(0, 5\)\.map/)
   assert.doesNotMatch(page, /calibration/i)
+})
+
+test('specialist My Agent no longer carries its own case-activity fetch — that moved to the Dashboard', () => {
+  const page = agentPage()
+  assert.doesNotMatch(page, /getSpecialistCases\(\)/)
 })
 
 /* --------------------------------------------------------------- styles */

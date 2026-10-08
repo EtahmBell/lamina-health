@@ -23,7 +23,8 @@ import {
   type TrainProjection,
 } from './api.ts'
 import { eventDomId } from './agentActivity.ts'
-import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkTabs, PracticeTab, TrainTab, networkProfilePath, trainingPath, type AgentActivityRow, type NetworkTab } from './Engagement.tsx'
+import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkTabs, TrainTab, networkProfilePath, trainingPath, type AgentActivityRow, type NetworkTab } from './Engagement.tsx'
+import { timeAwareGreeting } from './greeting.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 
 type Navigate = (path: string) => void
@@ -107,16 +108,23 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
   }, [])
   const needsReview = workspace?.recent_cases.filter((item) => !item.reviewed) ?? []
   const recent = workspace?.recent_cases ?? []
-  return <main className="page-shell home-page">
-    <header className="home-header"><div><h1>Home</h1><p>Cases involving your agent and recent network activity.</p></div></header>
+  const training = overview?.training ?? null
+  const trainReviewHref = training?.state === 'review_pending' && training.review_session_id ? `${trainingPath('iain')}?review=${training.review_session_id}` : null
+  const greetingName = `Dr. ${workspace?.physician.physician.split(' ').at(-1) ?? 'Jung'}`
+  const situationSummary = needsReview.length > 0 ? `${needsReview.length} case${needsReview.length === 1 ? '' : 's'} ${needsReview.length === 1 ? 'needs' : 'need'} your review.` : null
+  return <main className="page-shell home-page dashboard-page">
+    <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1>{situationSummary && <p className="dashboard-situation">{situationSummary}</p>}</header>
     {error && <div className="error-banner" role="alert">Specialist workspace activity is temporarily unavailable.</div>}
     {!workspace && !error && <div className="home-loading"><div className="loading-line" /><p>Opening specialist workspace…</p></div>}
     {workspace && <>
-      {needsReview.length > 0
-        ? <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{needsReview.length}</span></div>
-          <div className="lam-list needs-attention">{needsReview.map((item) => <SpecialistCurrentWorkRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
-        </section>
-        : <p className="home-current-work-empty">Cases involving your agent will appear here.</p>}
+      <section className="dashboard-needs-you"><div className="home-section-heading"><div><h2>Needs you</h2></div>{(needsReview.length > 0 || trainReviewHref) && <span>{needsReview.length + (trainReviewHref ? 1 : 0)}</span>}</div>
+        {needsReview.length > 0 || trainReviewHref
+          ? <div className="lam-list needs-attention">
+            {needsReview.map((item) => <SpecialistCurrentWorkRow key={item.consultation_record_id} item={item} navigate={navigate} />)}
+            {trainReviewHref && <button className="lam-row" onClick={() => navigate(trainReviewHref)}><span className="lam-row-mark agent-row-avatar">◇</span><span className="lam-row-main"><strong>Confirm proposed learning</strong><small>Your agent finished a training session and has a proposed learning ready for review.</small></span><span className="lam-row-status your-move">Your move</span></button>}
+          </div>
+          : <p className="dashboard-empty-note">Nothing needs you right now.</p>}
+      </section>
       <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('iain')} viewAgentPath="/specialist/agent?tab=overview" />
       {workspace.case_count > 0
         ? <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
@@ -309,49 +317,33 @@ export function SpecialistCaseDetailPage({ recordId, navigate }: { recordId: num
 
 /* ------------------------------------------------------------- My Agent */
 
-const AGENT_TABS = ['overview', 'practice', 'train', 'chat', 'activity'] as const
+/** Overview absorbed the old separate Practice tab (post-8B consolidation); Activity
+ * moved to the Dashboard. */
+const AGENT_TABS = ['overview', 'train', 'test'] as const
 type AgentTab = typeof AGENT_TABS[number]
+const LEGACY_SPECIALIST_AGENT_TAB_ALIASES: Record<string, AgentTab> = { practice: 'overview', chat: 'test', activity: 'overview' }
+const resolveSpecialistAgentTab = (value: string | null): AgentTab => {
+  if (value && (AGENT_TABS as readonly string[]).includes(value)) return value as AgentTab
+  if (value && value in LEGACY_SPECIALIST_AGENT_TAB_ALIASES) return LEGACY_SPECIALIST_AGENT_TAB_ALIASES[value]
+  return 'overview'
+}
 
 export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
   const tabParam = params?.get('tab') ?? null
   const [workspace, setWorkspace] = useState<SpecialistWorkspace | null>(null)
-  const [cases, setCases] = useState<SpecialistCaseSummary[] | null>(null)
-  const [posts, setPosts] = useState<ProfessionalPost[]>([])
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [overview, setOverview] = useState<AgentOverview | null>(null)
   const [trainProjection, setTrainProjection] = useState<TrainProjection | null>(null)
-  const [tab, setTab] = useState<AgentTab>(() => ((AGENT_TABS as readonly string[]).includes(tabParam ?? '') ? (tabParam as AgentTab) : 'overview'))
+  const [tab, setTab] = useState<AgentTab>(() => resolveSpecialistAgentTab(tabParam))
   const [error, setError] = useState('')
   useEffect(() => {
     getSpecialistWorkspace().then(setWorkspace).catch((err: Error) => setError(err.message))
-    getSpecialistCases().then(setCases).catch(() => setCases([]))
     getPracticeRepresentation('iain').then(setRepresentation).catch(() => {})
     getAgentOverview('iain').then(setOverview).catch(() => {})
     getTrainingHistory('iain').then(setTrainProjection).catch(() => {})
-    getProfessionalPosts('iain').then(setPosts).catch(() => {})
   }, [])
-  useEffect(() => { if ((AGENT_TABS as readonly string[]).includes(tabParam ?? '')) setTab(tabParam as AgentTab) }, [tabParam])
+  useEffect(() => { setTab(resolveSpecialistAgentTab(tabParam)) }, [tabParam])
   const selectTab = (next: AgentTab) => { setTab(next); window.history.replaceState({}, '', `/specialist/agent?tab=${next}`) }
-  const reviewHref = trainProjection ? (() => {
-    const entry = findPendingReviewHistoryEntry(trainProjection.recent_training_history)
-    return entry ? `${trainingPath('iain')}?review=${entry.session_id}` : null
-  })() : null
-  const activityRows: AgentActivityRow[] = [
-    ...(cases ?? []).slice(0, 12).map((item) => ({
-      id: `case-${item.consultation_record_id}`, kind: 'interaction' as const,
-      title: `Responded to ${item.patient_name}'s network consultation`,
-      detail: item.was_recommended ? 'You were recommended as the referral destination' : `${SPECIALIST_OUTCOME_LABELS[item.specialist_outcome]} · ${item.recommendation_physician} recommended`,
-      time: item.consulted_at, onClick: () => navigate(specialistCasePath(item.consultation_record_id)),
-    })),
-    ...(trainProjection?.recent_training_history ?? []).filter((entry) => entry.lifecycle_state !== 'active').map((entry) => ({
-      id: `training-${entry.session_id}`, kind: 'training' as const,
-      title: 'Completed agent training', detail: `${entry.target_count} question${entry.target_count === 1 ? '' : 's'}`,
-      time: entry.completed_at ?? entry.started_at,
-    })),
-    ...posts.filter((item) => item.status === 'published').map((item) => ({
-      id: `post-${item.id}`, kind: 'update' as const, title: 'Published practice update', detail: item.title, time: item.published_at ?? item.created_at,
-    })),
-  ].sort((a, b) => b.time.localeCompare(a.time))
   return <main className="page-shell agent-page">
     {error && <div className="error-banner" role="alert">{error}</div>}
     {!workspace && !error && <p className="muted-note">Opening your agent…</p>}
@@ -365,11 +357,9 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
 
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
 
-      {tab === 'overview' && <AgentOverviewPanel overview={overview} navigate={navigate} trainPath={trainingPath('iain')} onViewPractice={() => selectTab('practice')} />}
-      {tab === 'practice' && representation && <PracticeTab representation={representation} portrait={overview?.portrait} reviewHref={reviewHref} navigate={navigate} />}
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('iain')} />}
       {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} />}
-      {tab === 'chat' && <ChatTab personaId="iain" agentName={workspace.physician.agent_name} navigate={navigate} trainPath={trainingPath('iain')} />}
-      {tab === 'activity' && <section className="agent-panel agent-activity"><div className="panel-header"><div><p className="eyebrow">Your agent's actions</p><h2>Recent activity</h2></div></div><AgentActivityList rows={activityRows} /></section>}
+      {tab === 'test' && <ChatTab personaId="iain" agentName={workspace.physician.agent_name} navigate={navigate} trainPath={trainingPath('iain')} />}
     </>}
   </main>
 }
@@ -420,11 +410,12 @@ function SpecialistMyNetworkTab({ navigate }: { navigate: Navigate }) {
   </div>
 }
 
+/** Feed is the default/primary tab — a colleague directory is secondary. */
 export function SpecialistNetworkPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
   const tabParam = params?.get('tab') ?? null
-  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
-  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
-  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/specialist/network?tab=feed' : '/specialist/network') }
+  const [tab, setTab] = useState<NetworkTab>(tabParam === 'my-network' ? 'my-network' : 'feed')
+  useEffect(() => { setTab(tabParam === 'my-network' ? 'my-network' : 'feed') }, [tabParam])
+  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'my-network' ? '/specialist/network?tab=my-network' : '/specialist/network') }
   return <main className="page-shell physician-directory-page">
     <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
     <NetworkTabs tab={tab} onSelect={selectTab} />

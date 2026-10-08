@@ -3,6 +3,13 @@
   --background: #f7f3ec; --surface: #fffcf7; --text-primary: #1e1e1c; --text-secondary: #625f59; --border: #ded8ce;
   --accent: #b85c32; --accent-hover: #934729; --clinical: #243447; --success: #3f6b55; --warning: #a76b28; --danger: #9b3a35;
   --shadow-soft: 0 14px 30px rgb(36 52 71 / 5%); --type-meta: .68rem; --type-body: .76rem; --section-space: 36px;
+  /* Semantic roles (post-8B consolidation): copper = "you act here" (physician-action
+   * states, primary buttons); sage = "your agent" (agent surfaces/events/glyph —
+   * never a generic success color); slate = passive/waiting states. --danger stays a
+   * distinct crimson so it is never confused with copper. */
+  --copper: var(--accent); --copper-hover: var(--accent-hover);
+  --sage: #4f7a63; --sage-ink: #2f5342; --sage-surface: #eef3ec; --sage-surface-strong: #e3ecE0;
+  --slate: #6b7686; --slate-surface: #eef0f3;
   font-family: var(--font-ui); color: var(--text-primary); background: var(--background); font-synthesis: none;
 }
 * { box-sizing: border-box; }
@@ -40,7 +47,7 @@ h1, h2, h3 { font-family: var(--font-display); } h1 { margin: 0; font-size: clam
 .network-action { display: flex; align-items: center; justify-content: space-between; gap: 26px; margin: 20px 0; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 14px; background: var(--surface); padding: 22px 23px; box-shadow: var(--shadow-soft); }
 .network-copy { display: flex; align-items: center; gap: 17px; }.network-copy .eyebrow { margin-bottom: 4px; }.network-copy h2 { margin: 0; font-size: 1.35rem; font-weight: 600; }.network-copy p:last-child { margin: 6px 0 0; color: var(--text-secondary); font-size: .76rem; line-height: 1.45; }
 .network-mark { position: relative; width: 47px; height: 47px; flex: 0 0 47px; border-radius: 50%; background: #f3e7db; }.network-mark span { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }.network-mark span:nth-child(1) { top: 7px; left: 20px; }.network-mark span:nth-child(2) { top: 20px; right: 7px; }.network-mark span:nth-child(3) { bottom: 7px; left: 20px; background: var(--clinical); }.network-mark span:nth-child(4) { top: 20px; left: 7px; background: #73849a; }.network-mark::after { position: absolute; inset: 14px; border: 2px solid var(--clinical); border-radius: 7px; transform: rotate(45deg); content: ""; }
-.consult-button, .button-primary { border: 1px solid var(--accent); border-radius: 9px; background: var(--accent); color: #fffaf4; cursor: pointer; font-weight: 600; box-shadow: 0 8px 20px rgb(184 92 50 / 16%); transition: background 150ms, border-color 150ms, transform 150ms; }.consult-button { min-width: 208px; display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 14px 16px; font-size: .88rem; }.consult-button svg { width: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; }.consult-button:hover:not(:disabled), .button-primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); transform: translateY(-1px); }.consult-button:disabled { cursor: wait; opacity: .68; }
+.consult-button, .button-primary { border: 1px solid var(--accent); border-radius: 9px; background: var(--accent); color: #fffaf4; cursor: pointer; font-weight: 600; transition: background 150ms, border-color 150ms; }.consult-button { min-width: 208px; display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 14px 16px; font-size: .88rem; }.consult-button svg { width: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; }.consult-button:hover:not(:disabled), .button-primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); }.consult-button:disabled { cursor: wait; opacity: .68; }
 
 .clinical-grid { display: grid; grid-template-columns: .82fr .82fr 1.65fr; gap: 14px; }.clinical-card { min-width: 0; border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 14px; background: var(--surface); padding: 18px; box-shadow: var(--shadow-soft); }
 .card-title { min-height: 38px; display: flex; align-items: center; gap: 10px; }.card-title > div { flex: 1; }.card-title p, .card-title h2 { margin: 0; }.card-title p { color: var(--text-secondary); font-size: .57rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }.card-title h2 { margin-top: 2px; font-size: .96rem; }.card-title > b { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; background: #edf0f2; color: var(--clinical); font-size: .68rem; }
@@ -618,15 +625,6 @@ button.lam-row:hover { background: #fff9f1; }
 .network-specialty-heading span { order: 3; color: var(--text-secondary); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
 .network-roster-note { margin: 14px 2px 0; color: var(--text-secondary); font-size: var(--type-meta); }
 
-/* Build your network: purposeful, rust-accented, but not the page's main action. */
-.network-build-section { margin-top: var(--section-space); }
-.network-build-banner { display: flex; align-items: flex-start; gap: 17px; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 14px; background: var(--surface); padding: 20px 22px; box-shadow: var(--shadow-soft); }
-.network-build-banner .directory-network-glyph { width: 46px; height: 46px; flex: 0 0 46px; }
-.network-build-banner .eyebrow { margin: 0 0 5px; }
-.network-build-banner h2 { margin: 0; font-size: 1.15rem; font-weight: 600; }
-.network-build-banner p:last-child { margin: 7px 0 0; max-width: 62ch; color: var(--text-secondary); font-size: var(--type-body); line-height: 1.5; }
-.network-build-section .directory-search-panel { margin-top: 16px; }
-
 .directory-result { flex-wrap: wrap; }
 .directory-result-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 14px; }
 .directory-result-actions .button-secondary { padding: 9px 13px; font-size: .68rem; white-space: nowrap; }
@@ -678,7 +676,6 @@ button.lam-row:hover { background: #fff9f1; }
 
 @media (max-width: 760px) {
   .directory-result-actions { width: 100%; justify-content: flex-start; }
-  .network-build-banner { flex-direction: column; gap: 13px; }
   .profile-hero { align-items: flex-start; }
   .profile-agent-card { align-items: flex-start; flex-direction: column; }
   .profile-section dl > div { grid-template-columns: 1fr; gap: 4px; }
@@ -703,24 +700,10 @@ button.lam-row:hover { background: #fff9f1; }
 
 .network-roster-note { max-width: 78ch; }
 
-/* Previously consulted patients get a resolved navy state, not a rust CTA. */
-.prior-consult { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 20px 0 0; border: 1px solid var(--border); border-left: 4px solid var(--clinical); border-radius: 14px; background: var(--surface); padding: 20px 22px; box-shadow: var(--shadow-soft); }
-.prior-consult-copy { display: flex; align-items: center; gap: 17px; min-width: 0; }
-.prior-consult-copy > .network-motif { width: 50px; height: 50px; flex: 0 0 50px; }
-.prior-consult-copy > .network-motif svg { inset: 5px; width: 40px; height: 40px; }
-.prior-consult .eyebrow { margin: 0 0 4px; }
-.prior-consult h2 { margin: 0; font-size: 1.2rem; font-weight: 600; }
-.prior-consult-outcome { display: block; margin-top: 8px; color: var(--clinical); font-size: var(--type-body); }
-.prior-consult-outcome b { font-weight: 600; }
-.prior-consult-outcome small { display: block; margin-top: 3px; color: var(--text-secondary); font-size: var(--type-meta); }
-.prior-consult-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 16px; }
-.prior-consult-actions .button-primary { background: var(--clinical); border-color: var(--clinical); white-space: nowrap; }
-.prior-consult-actions .button-primary:hover { background: #1b2735; }
-.reconsult-prompt { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 13px; margin: 17px 0 2px; padding: 2px; color: var(--text-secondary); font-size: .9rem; line-height: 1.5; }
-.reconsult-prompt .text-button { border-radius: 5px; padding: 4px 2px; color: var(--accent-hover); font-size: .9rem; font-weight: 600; }
-.reconsult-prompt .text-button:hover { color: var(--clinical); }
-.reconsult-panel { margin: 13px 0 18px; border-left: 3px solid var(--accent); padding: 4px 0 4px 17px; }
-.reconsult-panel .network-controls { width: min(100%, 560px); }
+/* Previously consulted patients get a resolved navy state, not a rust CTA (now
+ * inside the idle-prior Next step card rather than a standalone prior-consult banner). */
+.next-step-card.idle .button-primary { background: var(--clinical); border-color: var(--clinical); }
+.next-step-card.idle .button-primary:hover { background: #1b2735; }
 
 /* Profile demo environment: deliberate, reversible, never alarming. */
 .demo-reset { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
@@ -752,8 +735,6 @@ button.lam-row:hover { background: #fff9f1; }
   .agent-network-canvas { height: auto; }
 }
 @media (max-width: 760px) {
-  .prior-consult { align-items: stretch; flex-direction: column; gap: 16px; }
-  .prior-consult-actions { flex-wrap: wrap; }
   .demo-reset { flex-direction: column; }
   .demo-reset .button-secondary { width: 100%; }
   .demo-reset-confirm div { flex-wrap: wrap; }
@@ -910,17 +891,10 @@ button.lam-row:hover { background: #fff9f1; }
    referral CTA as the clear hero and a genuinely optional guidance layer.
    ========================================================================== */
 
-/* The hero row (agent identity + primary CTA) sits above the optional
-   guidance layer instead of being vertically centered against it. */
-.network-action.brief-action { flex-direction: column; align-items: stretch; gap: 20px; padding: 24px 26px 22px; }
-.network-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
-.brief-action .network-copy { align-items: flex-start; }
-.brief-action .network-copy h2 { font-size: 1.3rem; }
-/* A single inline text flow (not flex space-between) so the arrow stays
-   glued to "referral" and the only breakable space is after "network". */
-.consult-button-hero { display: block; flex-shrink: 0; width: auto; min-width: 0; max-width: 100%; padding: 15px 26px; font-size: 1.0625rem; line-height: 1.35; text-align: center; white-space: normal; box-shadow: 0 10px 26px rgb(184 92 50 / 20%); }
-.consult-button-tail { white-space: nowrap; }
-.consult-button-arrow { display: inline-block; margin-left: 16px; }
+/* post-8B: the agent identity hero + primary CTA + optional guidance all now live
+   together inside one Next step card (see .next-step-card) rather than a standalone
+   network-action banner. */
+.consult-button-hero { width: 100%; padding: 15px 26px; font-size: .95rem; text-align: center; }
 
 /* Optional guidance reads as a secondary, clearly-labeled enhancement layer
    below the hero, not a second setup step the clinician must pass through. */
@@ -932,11 +906,6 @@ button.lam-row:hover { background: #fff9f1; }
 .network-optional .network-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgb(184 92 50 / 10%); }
 .network-optional .context-suggestions { margin-top: 14px; }
 
-/* The re-consult panel gets the same optional-guidance treatment, secondary
-   to the previous-consultation card above it. */
-.reconsult-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; margin: 13px 0 18px; border-left: 3px solid var(--accent); padding: 15px 0 15px 17px; }
-.reconsult-panel .network-optional { width: 100%; border-top: 0; padding-top: 0; }
-
 /* A subtle, non-color-only selected state for suggestion chips already
    folded into the context field. */
 .context-chip.added { border-color: var(--success); background: #edf3ee; color: var(--success); font-weight: 700; }
@@ -945,11 +914,6 @@ button.lam-row:hover { background: #fff9f1; }
 /* The Consultations empty-state CTA shares the centered content's axis
    instead of defaulting to a left-aligned flex box. */
 .empty-state .button-primary { margin: 6px auto 0; }
-
-@media (max-width: 700px) {
-  .network-hero { flex-direction: column; align-items: stretch; gap: 16px; }
-  .consult-button-hero { width: 100%; }
-}
 
 /* ==========================================================================
    Pass 3B — Specialist mode: the other side of the same Lamina network.
@@ -1458,3 +1422,73 @@ button.lam-row:hover { background: #fff9f1; }
 .owner-capability-note .muted-note { max-width: 620px; }
 
 @media (max-width: 760px) { .owner-stats-row { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------------------------------------------- Post-8B: avatar / agent object */
+.avatar-control { font-weight: 600; }
+.sidebar-clinician.active { border-top-color: rgb(184 92 50 / 35%); background: linear-gradient(180deg, transparent, #f3e7db 140%); }
+.sidebar-clinician.active strong { color: var(--accent-hover); }
+
+/* ---------------------------------------------------------- Post-8B: Dashboard */
+.dashboard-greeting h1 { font-size: clamp(1.9rem, 3.6vw, 2.5rem); }
+.dashboard-situation { margin: 8px 0 0; color: var(--text-secondary); font-size: .88rem; font-family: var(--font-display); }
+.dashboard-needs-you { margin-top: 34px; }
+.dashboard-empty-note { margin: 4px 0 0; color: var(--text-secondary); font-size: .74rem; }
+.lam-row-status.your-move { border: 1px solid rgb(184 92 50 / 24%); background: #fdf3e8; color: var(--copper-hover); font-weight: 700; }
+.lam-row-mark.agent-row-avatar { display: grid; place-items: center; background: var(--sage-surface); color: var(--sage-ink); font-size: 1rem; }
+.activity-kind.agent-event-label { display: inline-block; margin: 0 7px 0 0; border-radius: 999px; background: var(--sage-surface); padding: 2px 8px; color: var(--sage-ink); font-weight: 700; }
+
+/* The persistent agent object woven through the workspace — muted sage, never the
+ * generic copper/success treatment used for physician-action states. */
+.agent-banner { display: flex; align-items: flex-start; gap: 18px; margin-top: 28px; border: 1px solid rgb(79 122 99 / 20%); border-radius: 16px; background: var(--sage-surface); padding: 26px 28px; }
+.agent-banner-glyph { flex: 0 0 auto; margin-top: 2px; }
+.agent-banner-body { flex: 1; min-width: 0; }
+.agent-banner-body .eyebrow { color: var(--sage-ink); }
+.agent-banner-body h2 { margin: 2px 0 0; font-size: 1.3rem; }
+.agent-banner-support { margin: 8px 0 16px; max-width: 48ch; color: var(--text-secondary); font-size: .8rem; line-height: 1.5; }
+.agent-banner-view { align-self: center; white-space: nowrap; }
+@media (max-width: 700px) { .agent-banner { flex-direction: column; } .agent-banner-view { align-self: flex-start; } }
+
+/* -------------------------------------------------------------- Post-8B: Patients worklist */
+.worklist-row { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 14px; }
+.worklist-status { flex: 0 0 auto; border-radius: 999px; padding: 6px 10px; font-size: .62rem; font-weight: 600; white-space: nowrap; }
+.worklist-status.copper { border: 1px solid rgb(184 92 50 / 24%); background: #fdf3e8; color: var(--copper-hover); }
+.worklist-status.slate { border: 1px solid rgb(107 118 134 / 20%); background: var(--slate-surface); color: var(--slate); }
+.worklist-status.quiet { background: #f2f0eb; color: var(--text-secondary); }
+.worklist-next-step { color: var(--clinical); font-size: .72rem; font-weight: 600; white-space: nowrap; }
+.worklist-updated { color: var(--text-secondary); font-size: .62rem; white-space: nowrap; }
+@media (max-width: 760px) { .worklist-row { grid-template-columns: auto 1fr; grid-template-areas: "avatar main" "status status" "step updated"; row-gap: 6px; } .worklist-row .lam-row-mark { grid-area: avatar; } .worklist-row .lam-row-main { grid-area: main; } .worklist-row .worklist-status { grid-area: status; justify-self: start; } .worklist-row .worklist-next-step { grid-area: step; } .worklist-row .worklist-updated { grid-area: updated; justify-self: end; } }
+
+/* ----------------------------------------------------------- Post-8B: Patient detail */
+.patient-id { color: var(--text-secondary); font-size: .68rem; }
+.patient-current-issue { max-width: 68ch; margin: 14px 0 0; color: var(--clinical); font-family: var(--font-display); font-size: 1.02rem; line-height: 1.5; }
+.patient-current-issue .section-label { display: block; margin-bottom: 4px; }
+.patient-detail-grid { display: grid; grid-template-columns: 1fr 300px; gap: 32px; margin-top: 28px; align-items: start; }
+.patient-next-step { grid-column: 2; grid-row: 1; position: sticky; top: 76px; }
+.patient-clinical-main { grid-column: 1; grid-row: 1; min-width: 0; }
+.next-step-card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 20px 22px; }
+.next-step-card h2 { margin: 10px 0 0; font-size: 1.05rem; }
+.next-step-card p { margin: 8px 0 0; color: var(--text-secondary); font-size: .76rem; line-height: 1.5; }
+.next-step-card small { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .62rem; }
+.next-step-card .button-primary, .next-step-card .consult-button { width: 100%; margin-top: 16px; justify-content: center; }
+.next-step-card .text-button { margin-top: 14px; }
+.next-step-card.consulting { border-color: rgb(79 122 99 / 25%); background: var(--sage-surface); }
+.next-step-card.ready { border-color: rgb(184 92 50 / 22%); background: #fdf3e8; }
+.next-step-card details.network-optional { margin-top: 16px; }
+details.network-optional summary { min-height: 0; padding: 0; border: 0; background: none; margin: 14px 0 9px; color: var(--text-secondary); font-size: .58rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+details.network-optional { border: 0; background: none; margin-top: 0; padding: 0; }
+@media (max-width: 900px) {
+  .patient-detail-grid { grid-template-columns: 1fr; }
+  .patient-next-step { grid-column: 1; grid-row: 1; position: static; }
+  .patient-clinical-main { grid-column: 1; grid-row: 2; }
+}
+
+/* --------------------------------------------------------------- Post-8B: Network */
+.my-network-tab-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.add-colleague-trigger { flex: 0 0 auto; white-space: nowrap; }
+details.network-visual-section { margin-top: var(--section-space); }
+details.network-visual-section summary { display: flex; align-items: center; justify-content: space-between; min-height: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 14px 18px; }
+details.network-visual-section summary h2 { margin: 0; font-size: 1.1rem; }
+details.network-visual-section summary em { color: var(--text-secondary); font-size: .64rem; font-style: normal; font-weight: 600; }
+details.network-visual-section[open] summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.network-visual-intro { margin: 14px 2px 0; color: var(--text-secondary); font-size: .69rem; line-height: 1.5; }
+@media (max-width: 760px) { .my-network-tab-header { flex-direction: column; align-items: stretch; } }

@@ -20,13 +20,13 @@ const someRule = (selector, pattern) => rulesFor(selector).some((body) => patter
 
 /* ------------------------------------------------------------- network */
 
-test('the directory section is "Add your network"', () => {
-  assert.match(network, /<p className="eyebrow">Add your network<\/p>/)
+test('the add-colleague flow is a focused modal, not a dominant inline banner (post-8B)', () => {
+  assert.match(network, /<p className="eyebrow">Add a colleague<\/p>/)
   assert.doesNotMatch(network, /Build your network/)
   assert.match(network, /Add physicians and practices you already work with\./)
-  assert.match(network, /Lamina can preserve those relationships alongside the broader network\./)
+  assert.match(network, /Lamina preserves this relationship alongside your broader network\./)
   assert.match(network, /searchProviders/, 'the NPPES search is preserved')
-  assert.match(network, /addNetworkMember\(profile\.npi\)/, 'Add to my network is preserved')
+  assert.match(network, /addNetworkMember\(profile\.npi\)/, 'Add colleague is preserved')
 })
 
 test('the legend lists only the three real edge types', () => {
@@ -59,7 +59,7 @@ test('a manually added relationship needs no graph edge, and the graph says so',
   assert.match(graph, /return edge && <line/, 'a line exists only where the projection has an edge')
   assert.doesNotMatch(graph, /in_network/, 'membership must never draw or style an edge')
   assert.match(network, /The visualization shows physician agents involved in Lamina consultations\./)
-  assert.match(network, /Added relationships without a consultation appear in Your network below\./)
+  assert.match(network, /Added relationships without a consultation appear in Your network above\./)
 })
 
 test('the graph has room above and below the outer agents', () => {
@@ -79,44 +79,44 @@ test('the patient page reads canonical consultation state, not activity counters
   assert.doesNotMatch(patientPage(), /consultation_count/, 'no counter inference')
 })
 
-test('a never-consulted patient keeps the first-time consult banner', () => {
-  assert.match(patientPage(), /priorConsultation \? 'Ready for another network consultation\.' : 'Ready for network consultation\.'/)
+/** Post-8B: the consult trigger/prior-consult/re-consult states all now live inside
+ * the sticky Next step card (.next-step-card), keyed by nextStepState, rather than a
+ * standalone network-action banner. */
+test('a never-consulted patient keeps the first-time consult prompt', () => {
+  assert.match(patientPage(), /nextStepState === 'idle' && <div className="next-step-card idle">/)
+  assert.match(patientPage(), /Ask agent for referral options/)
   assert.match(patientPage(), /Add context only if you want to guide the network consultation\./)
   assert.match(patientPage(), /onClick=\{runConsult\}/)
 })
 
 test('a previously consulted patient surfaces the latest consultation instead', () => {
-  const prior = slice(app, 'showPriorConsult', 'className="agent-task"')
+  const prior = slice(app, "nextStepState === 'idle-prior'", 'className="patient-clinical-main"')
   assert.match(prior, /Previous network consultation available\./)
   assert.match(prior, /cleanName\(activity\?\.latest_recommended_physician \|\| ''\)/)
   assert.match(prior, /activity\.latest_recommended_specialty/)
   assert.match(prior, /formatTime\(activity\.latest_consulted_at\)/)
   assert.match(prior, /navigate\(consultationPath\(activity\?\.latest_consultation_id as number\)\)/)
-  assert.match(prior, /showPriorConsult = priorConsultation && !consulting && !consultation/)
+  assert.match(patientPage(), /consultation \? 'ready' : priorConsultation \? 'idle-prior' : 'idle'/)
 })
 
 test('re-consulting is available but secondary, and reveals optional context', () => {
-  const prior = slice(app, 'showPriorConsult', 'className="agent-task"')
-  assert.match(prior, /New information or want another network review\?/)
+  const prior = slice(app, "nextStepState === 'idle-prior'", 'className="patient-clinical-main"')
   assert.match(prior, /setReconsulting\(true\)\}>Re-consult the network/)
-  assert.match(prior, /reconsulting[\s\S]*reconsult-panel[\s\S]*Add what changed, if anything, since the last consultation\./)
+  assert.match(prior, /reconsulting[\s\S]*optionalGuidance\('Add what changed, if anything, since the last consultation\.'\)/)
   assert.match(prior, /onClick=\{runConsult\}/, 'the existing append-only consultation flow is reused')
-  const promptIndex = prior.indexOf('reconsult-prompt')
-  const actionIndex = prior.indexOf('prior-consult-actions')
-  assert.ok(actionIndex < promptIndex, 'View consultation leads; re-consult follows')
-  assert.ok(someRule('.reconsult-prompt', /font-size: \.9rem/))
-  assert.ok(someRule('.reconsult-prompt .text-button', /font-weight: 600/))
+  const actionIndex = prior.indexOf('View consultation')
+  const reconsultIndex = prior.indexOf('Re-consult the network')
+  assert.ok(actionIndex < reconsultIndex, 'View consultation leads; re-consult follows')
 })
 
 test('the previous-consultation state reads as resolved, not as an alert', () => {
-  assert.ok(someRule('.prior-consult', /border-left: 4px solid var\(--clinical\)/), 'navy resolved emphasis, not rust')
-  assert.ok(!rulesFor('.prior-consult').some((body) => /var\(--danger\)|var\(--warning\)/.test(body)))
-  assert.ok(someRule('.prior-consult-actions .button-primary', /background: var\(--clinical\)/))
+  assert.ok(someRule('.next-step-card.idle .button-primary', /background: var\(--clinical\)/), 'navy resolved emphasis, not rust')
+  assert.ok(!rulesFor('.next-step-card.idle').some((body) => /var\(--danger\)|var\(--warning\)/.test(body)))
 })
 
-test('the patient list uses canonical fields for its status and latest line', () => {
-  assert.match(patientsList(), /record\?\.has_consultation \? 'Consulted' : patient\.status/)
-  assert.match(patientsList(), /Latest: \$\{record\.latest_recommended_specialty \|\| 'consultation'\} · \$\{shortDate\(record\.latest_consulted_at\)\}/)
+test('the patient worklist derives status from canonical consultation/implementation data, not an inferred counter', () => {
+  assert.match(patientsList(), /record\?\.has_consultation \? 'Ready for your review' : patient\.implemented \? 'Not yet consulted' : 'No action needed'/)
+  assert.match(patientsList(), /record\?\.has_consultation && record\.latest_consulted_at \? shortDate\(record\.latest_consulted_at\)/)
   assert.doesNotMatch(patientsList(), /record\?\.last_consultation/)
 })
 

@@ -12,11 +12,12 @@ const profile = () => slice(app, 'function SettingsPage', 'function UnfinishedPa
 
 /* ---------------------------------------------------------- network hero */
 
-test('the network page leads with the visualization, then relationships, then building', () => {
-  const order = ['Network visualization', 'Your network', 'Add your network']
+test('the network page leads with relationships, then a demoted/collapsed visualization (post-8B: Colleagues, not graph-first)', () => {
+  const order = ['Your network', 'Network visualization']
   const positions = order.map((token) => directory().indexOf(token))
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b))
+  assert.match(directory(), /<details className="network-visual-section quiet">/, 'the graph is collapsed by default, not the page hero')
   assert.match(directory(), /networkRoster\(network\)/)
   assert.match(directory(), /network-specialty-group/)
 })
@@ -48,8 +49,8 @@ test('one reserved-identity notice covers the page and states what adding does n
 
 test('a directory result can be added to, and removed from, the network', () => {
   const result = slice(network, 'function DirectoryResult', 'function NetworkRelationshipRow')
-  assert.match(result, /Add to my network/)
-  assert.match(result, /inNetwork[\s\S]*In your network[\s\S]*quiet-remove/)
+  assert.match(result, /Add colleague/)
+  assert.match(result, /inNetwork[\s\S]*Remove colleague/)
   assert.match(directory(), /addNetworkMember\(profile\.npi\)/)
   assert.match(directory(), /removeNetworkMember\(profile\.npi\)/)
   assert.match(directory(), /await action\(\); await loadNetwork\(\)/, 'membership reloads canonical state')
@@ -87,20 +88,20 @@ test('the graph still draws edges only from recorded consultations', () => {
 
 test('added physicians outside the consult roster are disclosed, not faked into the graph', () => {
   assert.match(directory(), /The visualization shows physician agents involved in Lamina consultations\./)
-  assert.match(directory(), /Added relationships without a consultation appear in Your network below\./)
+  assert.match(directory(), /Added relationships without a consultation appear in Your network above\./)
   assert.doesNotMatch(directory(), /offGraphMembers/, 'one quiet line replaces the conditional note')
 })
 
 /* -------------------------------------------------------------- my agent */
 
-test('My Agent uses the simplified Pass 6C tab set, with no separate visualization dashboard', () => {
-  assert.match(app, /const AGENT_TABS = \['overview', 'practice', 'train', 'chat', 'activity'\] as const/)
+test('My Agent uses the consolidated post-8B tab set (Overview/Train/Test), with no separate visualization dashboard', () => {
+  assert.match(app, /const AGENT_TABS = \['overview', 'train', 'test'\] as const/)
   assert.doesNotMatch(app, /function ConsultationFootprint/, 'the specialties-consulted chart was removed as part of the My Agent simplification')
 })
 
-test('case-raised preferences still confirm/edit/reject without a separate Calibration tab', () => {
+test('case-raised preferences still confirm/edit/reject without a separate Calibration tab; activity now links via the one deep-link helper on the Dashboard', () => {
   assert.match(app, /Proposed · needs confirmation/)
-  assert.match(app, /navigate\(activityPath\(event\)\)/)
+  assert.match(app, /navigate\(activityPath\(item\)\)/)
 })
 
 test('specialty counts come from the recommended specialty of each record', () => {

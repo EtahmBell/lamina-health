@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, getAgentNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getProfessionalPosts, getTrainingHistory, resetJordanDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type ProfessionalPost, type TrainProjection } from './api.ts'
+import { consultNetwork, getAgentNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, resetJordanDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -12,7 +12,7 @@ import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, cleanName, patientName } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients.ts'
-import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkPhysicianProfilePage, NetworkTabs, PracticeTab, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, type AgentActivityRow, type NetworkTab } from './Engagement.tsx'
+import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkPhysicianProfilePage, NetworkTabs, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, type NetworkTab } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
@@ -32,22 +32,19 @@ function SyntheticStatus() {
   return <div className="synthetic-status"><span />Synthetic demo · no PHI</div>
 }
 
+/** Three top-level destinations. My Agent is deliberately not here — it lives as a
+ * persistent object at the bottom of the sidebar (see .sidebar-clinician below).
+ * Profile/account access moved to the avatar menu in the top-right workspace bar. */
 const navItems = [
-  { id: 'home', title: 'Home', icon: '⌂', path: '/home' },
+  { id: 'home', title: 'Dashboard', icon: '⌂', path: '/home' },
   { id: 'patients', title: 'Patients', icon: '✦', path: '/patients' },
-  { id: 'consultations', title: 'Cases', icon: '◫', path: '/consultations' },
-  { id: 'agent', title: 'My Agent', icon: '◇', path: '/agent' },
   { id: 'network', title: 'Network', icon: '⌁', path: '/network' },
-  { id: 'profile', title: 'Profile', icon: '◐', path: '/profile' },
 ] as const
 
 const SPECIALIST_NAV_ITEMS = [
-  { id: 'specialist-home', title: 'Home', icon: '⌂', path: '/specialist/home' },
+  { id: 'specialist-home', title: 'Dashboard', icon: '⌂', path: '/specialist/home' },
   { id: 'specialist-patients', title: 'Patients', icon: '✦', path: '/specialist/patients' },
-  { id: 'specialist-cases', title: 'Cases', icon: '◫', path: '/specialist/cases' },
-  { id: 'specialist-agent', title: 'My Agent', icon: '◇', path: '/specialist/agent' },
   { id: 'specialist-network', title: 'Network', icon: '⌁', path: '/specialist/network' },
-  { id: 'specialist-profile', title: 'Profile', icon: '◐', path: '/specialist/profile' },
 ] as const
 
 function ProfileControl({ navigate }: { navigate: Navigate }) {
@@ -55,12 +52,12 @@ function ProfileControl({ navigate }: { navigate: Navigate }) {
 }
 
 const DEMO_PERSPECTIVES = [
-  { id: 'pcp' as const, name: PCP_NAME, role: 'Referring physician', initials: 'LS', path: '/home' },
-  { id: 'specialist' as const, name: SPECIALIST_NAME, role: 'Specialist', initials: 'IJ', path: '/specialist/home' },
+  { id: 'pcp' as const, name: PCP_NAME, role: 'Referring physician', initials: 'LS', path: '/home', profilePath: '/profile' },
+  { id: 'specialist' as const, name: SPECIALIST_NAME, role: 'Specialist', initials: 'IJ', path: '/specialist/home', profilePath: '/specialist/profile' },
 ]
 
-/** The same top-right identity control, now also a restrained switch between
- * the two controlled demo perspectives — never a real account/session change. */
+/** The top-right avatar/account control. Combines the demo perspective switch with
+ * profile and settings access, now that Profile is no longer a primary-nav item. */
 function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; perspective: 'pcp' | 'specialist' }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -75,16 +72,17 @@ function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; pers
   const current = DEMO_PERSPECTIVES.find((item) => item.id === perspective) ?? DEMO_PERSPECTIVES[0]
   const switchTo = (path: string) => { setOpen(false); navigate(path) }
   return <div className="perspective-switch" ref={containerRef}>
-    <button className="profile-control" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label="Switch demo perspective">
+    <button className="profile-control avatar-control" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label="Account menu">
       <span>{current.initials}</span><strong>{current.name}</strong>
     </button>
-    {open && <div className="perspective-menu" role="menu" aria-label="Demo perspective">
-      <p className="perspective-menu-label">Demo perspective</p>
+    {open && <div className="perspective-menu" role="menu" aria-label="Account menu">
+      <button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate(current.profilePath) }}>Profile</button>
+      <div className="perspective-menu-divider" role="separator" /><button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate(settingsPath) }}>Settings &amp; demo</button>
+      <div className="perspective-menu-divider" role="separator" /><p className="perspective-menu-label">Demo perspective</p>
       {DEMO_PERSPECTIVES.map((item) => <button key={item.id} role="menuitemradio" aria-checked={item.id === perspective} className={`perspective-option ${item.id === perspective ? 'active' : ''}`} onClick={() => switchTo(item.path)}>
         <span className="perspective-option-check" aria-hidden="true">{item.id === perspective ? '✓' : ''}</span>
         <span><strong>{item.name}</strong><small>{item.role}</small></span>
       </button>)}
-      <div className="perspective-menu-divider" role="separator" /><button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate(settingsPath) }}>Settings &amp; demo</button>
     </div>}
   </div>
 }
@@ -100,8 +98,13 @@ function PortalAccountControl({ navigate }: { navigate: Navigate }) {
     : <button className="text-button portal-account-link" onClick={() => navigate(signInPath('/claim/my-identities'))}>Sign in</button>
 }
 
+/** My Agent is a persistent object pinned to the bottom of the sidebar — not a
+ * top-level nav item — so the agent stays visible from every workspace screen. It
+ * is a real nav target (keyboard-reachable button) and picks up an active state
+ * on any agent-related route. */
 function ProductShell({ children, navigate, section, perspective = 'pcp' }: { children: React.ReactNode; navigate: Navigate; section: string; perspective?: 'pcp' | 'specialist' }) {
   const items = perspective === 'specialist' ? SPECIALIST_NAV_ITEMS : navItems
+  const onAgent = section === 'agent' || section === 'specialist-agent'
   return <div className="app-shell">
     <aside className="sidebar">
       <div><button className="brand-button" onClick={() => navigate('/')} aria-label="Return to Lamina portal"><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
@@ -110,8 +113,8 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
         </nav>
       </div>
       {perspective === 'specialist'
-        ? <button className="sidebar-clinician" onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><NetworkMark /><div><span>Your physician agent</span><strong>{SPECIALIST_AGENT_NAME}</strong><small>Synthetic demo profile · {SPECIALIST_SPECIALTY}</small></div></button>
-        : <button className="sidebar-clinician" onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><NetworkMark active /><div><span>Your physician agent</span><strong>{PCP_AGENT_NAME}</strong><small>Active · Primary Care</small></div></button>}
+        ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><NetworkMark /><div><span>Your agent</span><strong>{SPECIALIST_AGENT_NAME}</strong><small>Synthetic demo profile · {SPECIALIST_SPECIALTY}</small></div></button>
+        : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><NetworkMark active /><div><span>Your agent</span><strong>{PCP_AGENT_NAME}</strong><small>Active · Primary Care</small></div></button>}
     </aside>
     <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><PerspectiveSwitch navigate={navigate} perspective={perspective} /></div></header>{children}</div>
   </div>
@@ -156,16 +159,28 @@ function eventTimestamp(value: string) {
   return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(', ', ' · ')
 }
 
+/** Feed is the default/primary tab — a colleague directory is secondary. */
 function LucyNetworkPage({ navigate, params }: { navigate: Navigate; params: URLSearchParams }) {
   const tabParam = params.get('tab')
-  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
-  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
-  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/network?tab=feed' : '/network') }
+  const [tab, setTab] = useState<NetworkTab>(tabParam === 'my-network' ? 'my-network' : 'feed')
+  useEffect(() => { setTab(tabParam === 'my-network' ? 'my-network' : 'feed') }, [tabParam])
+  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'my-network' ? '/network?tab=my-network' : '/network') }
   return <main className="page-shell physician-directory-page">
     <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
     <NetworkTabs tab={tab} onSelect={selectTab} />
     {tab === 'my-network' ? <MyNetworkTab navigate={navigate} /> : <NetworkFeedTab personaId="lucy" navigate={navigate} />}
   </main>
+}
+
+type NeedsYouItem = { id: string; title: string; detail: string; href: string; avatar: string; kind: 'patient' | 'agent' }
+
+function NeedsYouList({ items, navigate }: { items: NeedsYouItem[]; navigate: Navigate }) {
+  if (items.length === 0) return <p className="dashboard-empty-note">Nothing needs you right now.</p>
+  return <div className="lam-list needs-attention">{items.map((item) => <button className="lam-row" key={item.id} onClick={() => navigate(item.href)}>
+    <span className={`lam-row-mark ${item.kind === 'agent' ? 'agent-row-avatar' : 'patient-row-avatar'}`}>{item.avatar}</span>
+    <span className="lam-row-main"><strong>{item.title}</strong><small>{item.detail}</small></span>
+    <span className="lam-row-status your-move">Your move</span>
+  </button>)}</div>
 }
 
 function HomePage({ navigate }: { navigate: Navigate }) {
@@ -184,22 +199,43 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const ordered = [...records].sort((a, b) => b.completed_at.localeCompare(a.completed_at))
   const latestByPatient = ordered.filter((record, index) => ordered.findIndex((item) => item.patient_id === record.patient_id) === index)
   const currentWork = latestByPatient.slice(0, 3)
-  const workCount = currentWork.length
   const activity = agentActivity(ordered).slice(0, 3)
-  return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page">
-    <header className="home-header"><div><h1>Home</h1><p>Current work and recent agent activity.</p></div><button className="button-primary home-start" onClick={() => navigate('/patients')}>Start consultation <span>→</span></button></header>
+  const training = overview?.training ?? null
+  const needsYou: NeedsYouItem[] = [
+    ...currentWork.map((record): NeedsYouItem => ({
+      id: `consult-${record.id}`, kind: 'patient',
+      title: `Review referral options for ${patientName(record.patient_id)}`,
+      detail: `${record.result.recommended_physician.specialty} recommended · ${cleanName(record.result.recommended_physician.physician_name)}`,
+      href: consultationPath(record.id), avatar: DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials ?? '··',
+    })),
+    ...(training?.state === 'review_pending' && training.review_session_id ? [{
+      id: 'agent-review', kind: 'agent' as const, title: 'Confirm proposed learning',
+      detail: 'Your agent finished a training session and has a proposed learning ready for review.',
+      href: `${trainingPath('lucy')}?review=${training.review_session_id}`, avatar: '◇',
+    }] : []),
+  ]
+  const greetingName = `Dr. ${PCP_NAME.split(' ').at(-1)}`
+  const situationSummary = currentWork.length > 0 ? `${currentWork.length} referral${currentWork.length === 1 ? '' : 's'} ${currentWork.length === 1 ? 'is' : 'are'} ready for your review.` : null
+  return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page dashboard-page">
+    <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1>{situationSummary && <p className="dashboard-situation">{situationSummary}</p>}</header>
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
-      {workCount > 0
-        ? <section className="home-attention"><div className="home-section-heading"><div><h2>Current work</h2></div><span>{workCount}</span></div><div className="lam-list needs-attention">{currentWork.map((record) => <button className="lam-row" key={record.id} onClick={() => navigate(consultationPath(record.id))}><span className="lam-row-mark patient-row-avatar">{DEMO_PATIENTS.find((item) => item.id === record.patient_id)?.initials}</span><span className="lam-row-main"><strong>{patientName(record.patient_id)}</strong><span>{record.result.recommended_physician.specialty} recommended{record.patient_id === MARIA_ID ? ' first' : ''}</span><small>{cleanName(record.result.recommended_physician.physician_name)} · Workup identified</small></span><span className="lam-row-action">Review consultation <b>→</b></span></button>)}</div></section>
-        : <p className="home-current-work-empty">No current cases need your attention.</p>}
+      <section className="dashboard-needs-you"><div className="home-section-heading"><div><h2>Needs you</h2></div>{needsYou.length > 0 && <span>{needsYou.length}</span>}</div><NeedsYouList items={needsYou} navigate={navigate} /></section>
       <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" />
-      <section className="home-activity"><div className="home-section-heading"><div><h2>Recent agent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=activity')}>View all activity →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span><em className="activity-kind">{item.kind === 'interaction' ? 'Agent interaction' : 'Consultation milestone'}</em><strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
+      <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View your agent →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span>{item.kind === 'interaction' && <em className="activity-kind agent-event-label">Agent</em>}<strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
       <NetworkHighlights feed={feed} navigate={navigate} perspective="lucy" />
     </>}
   </main></ProductShell>
 }
+
+/** A small controlled status vocabulary, derived only from real data (has_consultation /
+ * implemented) — never invented. "Ready for your review" and "Not yet consulted" are
+ * physician-action states; "No action needed" covers demo patients with no wired case. */
+type WorklistStatus = 'Ready for your review' | 'Not yet consulted' | 'No action needed'
+const WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = { 'Ready for your review': 0, 'Not yet consulted': 1, 'No action needed': 2 }
+const WORKLIST_NEXT_STEP: Record<WorklistStatus, string> = { 'Ready for your review': 'Review options', 'Not yet consulted': 'Consult network', 'No action needed': 'View demo' }
+const WORKLIST_STATUS_TONE: Record<WorklistStatus, string> = { 'Ready for your review': 'copper', 'Not yet consulted': 'slate', 'No action needed': 'quiet' }
 
 function PatientSelector({ navigate }: { navigate: Navigate }) {
   const [query, setQuery] = useState('')
@@ -208,15 +244,23 @@ function PatientSelector({ navigate }: { navigate: Navigate }) {
   useEffect(() => { getPatientActivity().then(setActivity).catch(() => setActivityError(true)) }, [])
   const activityFor = (id: string) => activity.find((item) => item.patient_id === id)
   const visible = DEMO_PATIENTS.filter((patient) => `${patient.name} ${patient.reason} ${patient.location}`.toLowerCase().includes(query.toLowerCase()))
-  const consulted = visible.filter((item) => activityFor(item.id)?.has_consultation).sort((a, b) => (activityFor(b.id)?.latest_consulted_at || '').localeCompare(activityFor(a.id)?.latest_consulted_at || ''))
-  const ready = visible.filter((item) => item.implemented && !activityFor(item.id)?.has_consultation).sort((a, b) => (activityFor(b.id)?.last_opened || '').localeCompare(activityFor(a.id)?.last_opened || ''))
-  const other = visible.filter((item) => !item.implemented && !activityFor(item.id)?.has_consultation)
-  const group = (title: string, patients: DemoPatientSummary[]) => patients.length > 0 && <section className="patient-group" key={title}><div className="patient-group-heading"><h2>{title}</h2><span>{patients.length}</span></div><div className="lam-list">{patients.map((patient) => { const record = activityFor(patient.id); return <button key={patient.id} className="lam-row" onClick={() => navigate(`/patients/${patient.id}`)}><span className="lam-row-mark patient-row-avatar">{patient.initials}</span><span className="lam-row-main"><strong>{patient.name}</strong><span>{patient.reason}</span><small>{patient.age} years · {patient.location}{record?.has_consultation && record.latest_consulted_at ? ` · Latest: ${record.latest_recommended_specialty || 'consultation'} · ${shortDate(record.latest_consulted_at)}` : record?.last_opened ? ` · Opened ${formatTime(record.last_opened)}` : ''}</small></span><span className={`lam-row-status ${patient.implemented ? 'ready' : ''}`}>{record?.has_consultation ? 'Consulted' : patient.status}</span><span className="lam-row-action">{patient.implemented ? 'Open patient' : 'View demo'} <b>→</b></span></button> })}</div></section>
-  return <ProductShell navigate={navigate} section="patients"><main className="page-shell selector-page">
-    <header className="selector-header"><div><p className="eyebrow">Specialty Referral</p><h1>Select a patient</h1><p>Choose the patient whose next specialty referral needs clarification.</p></div><span>{DEMO_PATIENTS.length} synthetic patients</span></header>
+  const rows = visible.map((patient) => {
+    const record = activityFor(patient.id)
+    const status: WorklistStatus = record?.has_consultation ? 'Ready for your review' : patient.implemented ? 'Not yet consulted' : 'No action needed'
+    const updated = record?.has_consultation && record.latest_consulted_at ? shortDate(record.latest_consulted_at) : record?.last_opened ? shortDate(record.last_opened) : null
+    return { patient, status, updated }
+  }).sort((a, b) => WORKLIST_STATUS_PRIORITY[a.status] - WORKLIST_STATUS_PRIORITY[b.status])
+  return <ProductShell navigate={navigate} section="patients"><main className="page-shell selector-page worklist-page">
+    <header className="selector-header"><div><h1>Patients</h1><p>Your active referral worklist.</p></div><span>{DEMO_PATIENTS.length} synthetic patients</span></header>
     <label className="patient-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients or clinical problem…" aria-label="Search patients" /></label>
     {activityError && <p className="muted-note">Lamina activity is temporarily unavailable; patient clinical records remain accessible.</p>}
-    {group('Recently consulted', consulted)}{group('Ready for network consultation', ready)}{group('Other demo patients', other)}
+    {rows.length > 0 && <div className="lam-list patient-worklist">{rows.map(({ patient, status, updated }) => <button key={patient.id} className="lam-row worklist-row" onClick={() => navigate(`/patients/${patient.id}`)}>
+      <span className="lam-row-mark patient-row-avatar">{patient.initials}</span>
+      <span className="lam-row-main"><strong>{patient.name}</strong><small>{patient.age} years · {patient.reason}</small></span>
+      <span className={`worklist-status ${WORKLIST_STATUS_TONE[status]}`}>{status}</span>
+      <span className="worklist-next-step">{WORKLIST_NEXT_STEP[status]}</span>
+      <span className="worklist-updated">{updated ? `Updated ${updated}` : ''}</span>
+    </button>)}</div>}
     {!visible.length && <div className="empty-state"><NetworkMark /><h2>No patients found</h2><p>Try a different name or clinical problem.</p></div>}
   </main></ProductShell>
 }
@@ -227,7 +271,7 @@ function ConsultationsPage({ navigate }: { navigate: Navigate }) {
   const [error, setError] = useState('')
   useEffect(() => { getConsultationHistory().then(setRecords).catch((err: Error) => setError(err.message)).finally(() => setLoading(false)) }, [])
   const groups = groupConsultationsByPatient(records)
-  return <ProductShell navigate={navigate} section="consultations"><main className="page-shell history-page"><p className="eyebrow">Patient consult records</p><h1>Consultations</h1><p className="page-intro">Completed specialty-care consultations from this Lamina workspace, grouped by patient.</p><p className="page-fineprint">No referral has been submitted.</p>
+  return <ProductShell navigate={navigate} section="patients"><main className="page-shell history-page"><p className="eyebrow">Patient consult records</p><h1>Consultations</h1><p className="page-intro">Completed specialty-care consultations from this Lamina workspace, grouped by patient.</p><p className="page-fineprint">No referral has been submitted.</p>
     {loading && <p className="muted-note">Loading consultations…</p>}{error && <div className="error-banner" role="alert">{error}</div>}
     {!loading && !error && !groups.length && <div className="empty-state history-empty"><NetworkMark /><h2>No network consultations yet</h2><p>Completed physician-network consultations will appear here.</p><button className="button-primary" onClick={() => navigate('/patients')}>Select a patient →</button></div>}
     {groups.length > 0 && <div className="lam-list">{groups.map((group) => <button className="lam-row" key={group.patientId} onClick={() => navigate(`/consultations/patient/${group.patientId}`)}><span className="lam-row-mark patient-row-avatar">{group.initials}</span><span className="lam-row-main"><strong>{group.patientLabel}</strong><span>{group.count} consultation{group.count === 1 ? '' : 's'}</span><small>Latest: {formatTime(group.latest.completed_at)}</small><small>Latest outcome: {group.latestPhysician} · {group.latestSpecialty}</small></span><span className="lam-row-action">View consultation history <b>→</b></span></button>)}</div>}
@@ -240,7 +284,7 @@ function PatientConsultationsPage({ patientId, navigate }: { patientId: string; 
   const [error, setError] = useState('')
   useEffect(() => { getConsultationHistory().then(setRecords).catch((err: Error) => setError(err.message)).finally(() => setLoading(false)) }, [])
   const group = groupConsultationsByPatient(records).find((item) => item.patientId === patientId)
-  return <ProductShell navigate={navigate} section="consultations"><main className="page-shell history-page">
+  return <ProductShell navigate={navigate} section="patients"><main className="page-shell history-page">
     <nav className="page-breadcrumb" aria-label="Breadcrumb"><button className="text-button" onClick={() => navigate('/consultations')}>Consultations</button><span aria-hidden="true">→</span><b>{patientName(patientId)}</b></nav>
     <h1>{patientName(patientId)}</h1>
     {loading && <p className="muted-note">Loading consultation history…</p>}{error && <div className="error-banner" role="alert">{error}</div>}
@@ -254,12 +298,15 @@ function ConsultationRecordPage({ id, focusEventId, navigate }: { id: number; fo
   const [record, setRecord] = useState<ConsultationRecord | null>(null)
   const [error, setError] = useState('')
   useEffect(() => { getConsultationRecord(id).then(setRecord).catch((err: Error) => setError(err.message)) }, [id])
-  return <ProductShell navigate={navigate} section="consultations"><main className="page-shell history-detail">{record ? <nav className="page-breadcrumb" aria-label="Breadcrumb"><button className="text-button" onClick={() => navigate('/consultations')}>Consultations</button><span aria-hidden="true">→</span><button className="text-button" onClick={() => navigate(`/consultations/patient/${record.patient_id}`)}>{patientName(record.patient_id)}</button></nav> : <button className="text-button back-link" onClick={() => navigate('/consultations')}>← Consultations</button>}{error && <div className="error-banner" role="alert">{error}</div>}{!record && !error && <p className="muted-note">Loading consultation record…</p>}{record && <><p className="eyebrow">Completed consultation · {formatTime(record.completed_at)}</p><h1>{patientName(record.patient_id)}</h1><p className="page-intro">A saved structured consultation. Clinical context remains in the patient workspace.</p><button className="text-button record-open-patient" onClick={() => navigate(`/patients/${record.patient_id}`)}>Open patient →</button><RecommendationView consultation={record.result} navigate={navigate} focusEventId={focusEventId} recordId={record.id} /></>}</main></ProductShell>
+  return <ProductShell navigate={navigate} section="patients"><main className="page-shell history-detail">{record ? <nav className="page-breadcrumb" aria-label="Breadcrumb"><button className="text-button" onClick={() => navigate('/consultations')}>Consultations</button><span aria-hidden="true">→</span><button className="text-button" onClick={() => navigate(`/consultations/patient/${record.patient_id}`)}>{patientName(record.patient_id)}</button></nav> : <button className="text-button back-link" onClick={() => navigate('/consultations')}>← Consultations</button>}{error && <div className="error-banner" role="alert">{error}</div>}{!record && !error && <p className="muted-note">Loading consultation record…</p>}{record && <><p className="eyebrow">Completed consultation · {formatTime(record.completed_at)}</p><h1>{patientName(record.patient_id)}</h1><p className="page-intro">A saved structured consultation. Clinical context remains in the patient workspace.</p><button className="text-button record-open-patient" onClick={() => navigate(`/patients/${record.patient_id}`)}>Open patient →</button><RecommendationView consultation={record.result} navigate={navigate} focusEventId={focusEventId} recordId={record.id} /></>}</main></ProductShell>
 }
 
-const AGENT_TABS = ['overview', 'practice', 'train', 'chat', 'activity'] as const
+/** Overview absorbed the old separate Practice tab (post-8B consolidation) — the
+ * physician's confirmed representation now lives in one place, not split across two
+ * tabs. Activity moved to the Dashboard's "Recent activity" section. */
+const AGENT_TABS = ['overview', 'train', 'test'] as const
 type AgentTab = typeof AGENT_TABS[number]
-const LEGACY_AGENT_TAB_ALIASES: Record<string, AgentTab> = { knowledge: 'practice', calibration: 'practice' }
+const LEGACY_AGENT_TAB_ALIASES: Record<string, AgentTab> = { knowledge: 'overview', calibration: 'overview', practice: 'overview', chat: 'test', activity: 'overview' }
 const resolveAgentTab = (value: string | null): AgentTab => {
   if (value && (AGENT_TABS as readonly string[]).includes(value)) return value as AgentTab
   if (value && value in LEGACY_AGENT_TAB_ALIASES) return LEGACY_AGENT_TAB_ALIASES[value]
@@ -272,8 +319,6 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   const caseParam = params.get('case')
   const recordParam = params.get('record')
   const [agent, setAgent] = useState<MyAgent | null>(null)
-  const [records, setRecords] = useState<ConsultationRecord[]>([])
-  const [posts, setPosts] = useState<ProfessionalPost[]>([])
   const [tab, setTab] = useState<AgentTab>(() => resolveAgentTab(tabParam))
   const [selected, setSelected] = useState(learningParam || 'renal')
   const [focusedLearning, setFocusedLearning] = useState<string | null>(learningParam)
@@ -289,14 +334,12 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   const refreshTraining = () => getTrainingHistory('lucy').then(setTrainProjection).catch(() => {})
   useEffect(() => {
     refresh(); refreshRepresentation(); refreshOverview(); refreshTraining()
-    getConsultationHistory().then(setRecords).catch(() => {})
-    getProfessionalPosts('lucy').then(setPosts).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setTab(resolveAgentTab(tabParam)) }, [tabParam])
   useEffect(() => { setFocusedLearning(learningParam); if (learningParam) setSelected(learningParam) }, [learningParam])
   useEffect(() => { if (editing) document.getElementById(`edit-${editing}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }, [editing])
   useEffect(() => {
-    if (!focusedLearning || !agent || tab !== 'practice') return
+    if (!focusedLearning || !agent || tab !== 'overview') return
     const frame = window.requestAnimationFrame(() => document.getElementById(`learning-${focusedLearning}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
     return () => window.cancelAnimationFrame(frame)
   }, [focusedLearning, agent, tab])
@@ -305,37 +348,17 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   }
   const pending = agent?.learnings.filter((item) => item.status === 'suggested').length ?? 0
   const selectTab = (next: AgentTab) => { setTab(next); setFocusedLearning(null); window.history.replaceState({}, '', `/agent?tab=${next}`) }
-  const reviewHref = trainProjection ? (() => {
-    const entry = findPendingReviewHistoryEntry(trainProjection.recent_training_history)
-    return entry ? `${trainingPath('lucy')}?review=${entry.session_id}` : null
-  })() : null
-  const activityRows: AgentActivityRow[] = [
-    ...agentActivity(records).slice(0, 12).map((event) => ({
-      id: event.id, kind: event.kind, title: event.title, detail: event.detail, time: event.time,
-      onClick: () => navigate(activityPath(event)),
-    })),
-    ...(trainProjection?.recent_training_history ?? []).filter((entry) => entry.lifecycle_state !== 'active').map((entry) => ({
-      id: `training-${entry.session_id}`, kind: 'training' as const,
-      title: 'Completed agent training', detail: `${entry.target_count} question${entry.target_count === 1 ? '' : 's'}`,
-      time: entry.completed_at ?? entry.started_at,
-    })),
-    ...posts.filter((item) => item.status === 'published').map((item) => ({
-      id: `post-${item.id}`, kind: 'update' as const, title: 'Published practice update', detail: item.title, time: item.published_at ?? item.created_at,
-    })),
-  ].sort((a, b) => b.time.localeCompare(a.time))
   return <ProductShell navigate={navigate} section="agent"><main className="page-shell agent-page">
     {error && <div className="error-banner" role="alert">{error}</div>}{!agent && !error && <p className="muted-note">Opening your agent…</p>}
     {agent && <><section className="agent-hero"><div className="agent-hero-mark"><NetworkMark active /></div><div><p className="eyebrow">Your physician agent</p><h1>{PCP_AGENT_NAME}</h1><p>Primary Care · Represents how you practise across the Lamina network.</p><span className="agent-state"><i /> ACTIVE</span></div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-      {tab === 'overview' && <AgentOverviewPanel overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} onViewPractice={() => selectTab('practice')} />}
-      {tab === 'practice' && representation && <PracticeTab representation={representation} portrait={overview?.portrait} reviewHref={reviewHref} navigate={navigate} extra={<>
-        {tabParam === 'calibration' && pending > 0 && <section className="agent-panel learning-panel practice-legacy-review"><div className="panel-header"><div><p className="eyebrow">Needs your review</p><h2>Case-raised preferences</h2><p className="panel-intro">Suggestions raised from a completed consultation are not silently treated as your preferences. A proposal stays proposed until you confirm or edit it.</p></div></div>
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('lucy')} extra={
+        tabParam === 'calibration' && pending > 0 && <section className="agent-panel learning-panel practice-legacy-review"><div className="panel-header"><div><p className="eyebrow">Needs your review</p><h2>Case-raised preferences</h2><p className="panel-intro">Suggestions raised from a completed consultation are not silently treated as your preferences. A proposal stays proposed until you confirm or edit it.</p></div></div>
           <div className="learning-grid">{(agent?.learnings ?? []).filter((learning) => learning.status === 'suggested').map((learning) => <article className={`learning-card ${focusedLearning === learning.key ? 'focused' : ''}`} id={`learning-${learning.key}`} key={learning.key}><span className={`learning-status ${learning.status}`}>Proposed · needs confirmation</span><p>{learning.statement}</p><small>Source: {learning.provenance}</small>{focusedLearning === learning.key && caseParam && <p className="learning-case-source">Raised from the {patientName(caseParam)} consultation.{recordParam && <button className="text-button" onClick={() => navigate(consultationPath(Number(recordParam)))}>View consultation →</button>}</p>}{editing === learning.key ? <div className="learning-edit"><label htmlFor={`edit-${learning.key}`}>Correct this preference</label><textarea id={`edit-${learning.key}`} maxLength={240} value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="button-primary" disabled={!draft.trim()} onClick={() => act(learning, 'edit', draft)}>Save draft</button><button className="text-button" onClick={() => setEditing(null)}>Cancel</button></div></div> : <div className="learning-actions"><button onClick={() => act(learning, 'confirm')}>Confirm</button><button onClick={() => { setEditing(learning.key); setDraft(learning.statement) }}>Edit</button><button onClick={() => act(learning, 'reject')}>Reject</button></div>}</article>)}</div>
-        </section>}
-      </>} />}
+        </section>
+      } />}
       {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('lucy')} />}
-      {tab === 'chat' && <ChatTab personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} trainPath={trainingPath('lucy')} />}
-      {tab === 'activity' && <section className="agent-panel agent-activity"><div className="panel-header"><div><p className="eyebrow">Your agent's actions</p><h2>Recent activity</h2></div></div><AgentActivityList rows={activityRows} /></section>}
+      {tab === 'test' && <ChatTab personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} trainPath={trainingPath('lucy')} />}
     </>}
   </main></ProductShell>
 }
@@ -515,11 +538,11 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   return <section className="recommendations" aria-label="Specialist recommendations" tabIndex={-1}>
     <article className="best-fit-card"><div className="best-fit-label"><span>{anemiaCase ? 'Recommended first referral' : 'Recommended physician'}</span><small>Network resolved · {consultation.consultation.length} agents consulted</small></div><div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(primary.physician_name)}</span><div><h2>{cleanName(primary.physician_name)}</h2><p>{primary.specialty}</p></div><div className="fit-summary"><span>Strong clinical fit</span><span>{primary.availability.replace('Approximately ', '')}</span><span>{insuranceLabel(primary.insurance_status)}</span></div></div>
       <div className="best-fit-body"><section><p className="section-label">Why Dr. {shortName}</p><ul className="reason-list">{reasons.map((reason) => <li key={reason}><span>✓</span>{reason}</li>)}</ul>{selectedClarificationAnswer && <p className="clarification-note">Clarified before referral: {selectedClarificationAnswer.summary}</p>}</section><section className="before-visit"><p className="section-label">Required before referral</p>{consultation.before_referral.map((item) => <span key={item}>{item.includes('(') ? item.match(/\(([^)]+)\)/)?.[1] : item}<small>{item}</small></span>)}</section></div>
-      <div className="recommendation-access"><div><span>Access</span><strong>{primary.availability}</strong></div><div><span>Insurance</span><strong>{primary.insurance_status}</strong></div></div>
-      <button className="agent-handling-toggle" aria-expanded={handlingOpen} onClick={() => setHandlingOpen(!handlingOpen)}>How my agent handled this case <span>{handlingOpen ? '−' : '+'}</span></button>
-      {handlingOpen && <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}<p>These are structured inputs and recorded conclusions, not private model reasoning.</p></div>}
-      <div className="best-fit-actions"><button className="button-primary" onClick={() => setReferralStarted(true)}>Start Referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(primary.physician_name)} · {primary.specialty}</span><span>Workup: {consultation.before_referral.join(' · ')}</span><span>No referral was transmitted.</span></div>}</div>
       <div className="recommendation-feedback"><span>Does this reflect how you would practice?</span>{affirmed ? <em role="status">Noted. Nothing was changed on your agent.</em> : <><button className="text-button" onClick={() => setAffirmed(true)}>Yes</button><button className="text-button" onClick={() => navigate(calibrationPath(learningKeyForPatient(consultation.patient_id), consultation.patient_id, recordId))}>Not quite <b>→</b></button></>}</div>
+      <div className="recommendation-access"><div><span>Access</span><strong>{primary.availability}</strong></div><div><span>Insurance</span><strong>{primary.insurance_status}</strong></div></div>
+      <button className="agent-handling-toggle" aria-expanded={handlingOpen} onClick={() => setHandlingOpen(!handlingOpen)}>How your agent handled this case <span>{handlingOpen ? '−' : '+'}</span></button>
+      {handlingOpen && <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}<p>These are structured inputs and recorded conclusions, not private model reasoning.</p></div>}
+      <div className="best-fit-actions"><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(primary.physician_name)} · {primary.specialty}</span><span>Workup: {consultation.before_referral.join(' · ')}</span><span>No referral was transmitted.</span></div>}</div>
     </article>
 
     <section className="options-section"><div className="options-heading"><div><p className="eyebrow">Other appropriate choices</p><h2>Referral options</h2></div><p>{anemiaCase ? 'Both specialties may be relevant; sequencing matters.' : 'Different practice focus or access, based on the same supplied evidence.'}</p></div><div className="option-grid">{consultation.alternatives.map((option, index) => <article className="option-card" key={option.physician_id}><div><span className="mini-avatar">{physicianInitials(option.physician_name)}</span><span className="option-label">{anemiaCase && option.specialty === 'Haematology' ? 'Appropriate later' : index === 0 ? 'Strong alternative' : 'Additional option'}</span></div><h3>{cleanName(option.physician_name)}</h3><p className="option-specialty">{option.specialty}</p><div className="option-meta"><span>{option.clinical_fit} fit</span><span>{option.availability.replace('Approximately ', '')}</span><span>{insuranceLabel(option.insurance_status)}</span></div><p className="option-reason">{option.reason}</p></article>)}</div></section>
@@ -600,7 +623,6 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const sharedResultDate = resultDates.size === 1 ? trends.latest[0].date : null
   const clinicalSource = patient.clinical_data_source === 'medplum_fhir' ? 'Synthetic FHIR via Medplum' : 'Local synthetic fixture'
   const priorConsultation = activity?.has_consultation === true && activity.latest_consultation_id !== null
-  const showPriorConsult = priorConsultation && !consulting && !consultation
   const careContext = [
     { label: 'Referring clinician', value: `${PCP_NAME} · Primary Care` },
     { label: 'Insurance', value: patient.insurance },
@@ -621,84 +643,92 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
     {specialty && <div className="context-suggestion-group"><span>Specialty</span><div className="context-chip-row">{chip(specialty)}</div></div>}
     {access.length > 0 && <div className="context-suggestion-group"><span>Access</span><div className="context-chip-row">{access.map(chip)}</div></div>}
   </div>
-  return <ProductShell navigate={navigate} section="patients"><main className="page-shell patient-page"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
-    <header className="patient-identity"><h1>{demoPatient?.name ?? cleanName(patient.display_name)}</h1><p>{patient.age} years · {patient.location}</p></header>
+  const optionalGuidance = (label: string) => <details className="network-optional">
+    <summary className="optional-guidance-label">Optional guidance</summary>
+    <div className="network-field"><label htmlFor="patient-context-input">{label}</label><input id="patient-context-input" value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="Add a referral question, specialty preference, or care constraint" /></div>
+    {suggestionChips}
+  </details>
+  const nextStepState: 'idle' | 'idle-prior' | 'consulting' | 'ready' = consulting ? 'consulting' : consultation ? 'ready' : priorConsultation ? 'idle-prior' : 'idle'
+  const currentIssue = demoPatient?.reason ?? patient.diagnoses[0] ?? null
+  return <ProductShell navigate={navigate} section="patients"><main className="page-shell patient-page">
+    <button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
+    <header className="patient-identity"><h1>{demoPatient?.name ?? cleanName(patient.display_name)}</h1><p>{patient.age} years · {patient.location} · <span className="patient-id">ID {patient.id}</span></p></header>
+    {currentIssue && <p className="patient-current-issue"><span className="section-label">Current issue</span>{currentIssue}</p>}
     {error && <div className="error-banner" role="alert"><strong>Unable to complete this action.</strong> {error}</div>}
-    {showPriorConsult
-      ? <>
-        <section className="prior-consult">
-          <div className="prior-consult-copy"><NetworkMark resolved /><div>
-            <p className="eyebrow">{PCP_AGENT_NAME}</p>
-            <h2>Previous network consultation available.</h2>
-            <span className="prior-consult-outcome"><b>{cleanName(activity?.latest_recommended_physician || '')}</b>{activity?.latest_recommended_specialty ? ` · ${activity.latest_recommended_specialty}` : ''}<small>{activity?.latest_consulted_at ? formatTime(activity.latest_consulted_at) : ''}</small></span>
-          </div></div>
-          <div className="prior-consult-actions"><button className="button-primary" onClick={() => navigate(consultationPath(activity?.latest_consultation_id as number))}>View consultation <span>→</span></button></div>
-        </section>
-        {reconsulting
-          ? <section className="reconsult-panel"><div className="network-optional"><p className="optional-guidance-label">Optional guidance</p><div className="network-field"><label htmlFor="patient-context-input">Add what changed, if anything, since the last consultation.</label><input id="patient-context-input" value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="Add a referral question, specialty preference, or care constraint" /></div>{suggestionChips}</div><button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button></section>
-          : <p className="reconsult-prompt"><span>New information or want another network review?</span><button className="text-button" onClick={() => setReconsulting(true)}>Re-consult the network →</button></p>}
-      </>
-      : <section className="network-action brief-action">
-        <div className="network-hero">
-          <div className="network-copy"><NetworkMark active={consulting} resolved={Boolean(consultation)} /><div><p className="eyebrow">{PCP_AGENT_NAME}</p><h2>{priorConsultation ? 'Ready for another network consultation.' : 'Ready for network consultation.'}</h2>{!priorConsultation && <p>Consult the physician-agent network to identify an appropriate referral destination and required next steps.</p>}</div></div>
-          <button className="consult-button consult-button-hero" disabled={consulting} onClick={runConsult}>{consulting ? <>Consulting… <span className="consult-button-arrow">→</span></> : <>Consult network <span className="consult-button-tail">for referral<span className="consult-button-arrow">→</span></span></>}</button>
-        </div>
-        <div className="network-optional">
-          <p className="optional-guidance-label">Optional guidance</p>
-          <div className="network-field"><label htmlFor="patient-context-input">{priorConsultation ? 'Add what changed, if anything, since the last consultation.' : 'Add context only if you want to guide the network consultation.'}</label><input id="patient-context-input" value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="Add a referral question, specialty preference, or care constraint" /></div>
-          {suggestionChips}
-        </div>
-      </section>}
-    <p className="agent-task"><b>Agent task</b><span>Evaluate appropriate specialty, required workup, and viable access options using the available clinical context.</span></p>
-    {(consulting || (consultation && !networkCollapsed)) && <ConsultationNetwork result={consultation} visibleCount={visibleMessageCount} consulting={consulting} networkAgents={networkAgents} completion={completion} />}
-    {consultation && !consulting && networkCollapsed && <NetworkConsultationSummary result={consultation} onViewNetwork={() => setOpenNetworkSignal((count) => count + 1)} />}
-    {consultation && !consulting && <RecommendationView consultation={consultation} navigate={navigate} openNetworkSignal={openNetworkSignal} />}
-    <section className="clinical-overview" aria-labelledby="clinical-overview-heading">
-      <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
-      <div className="clinical-columns">
-        <section><h3>Problems</h3><ul className="clinical-list">{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section>
-        <section><h3>Current medications</h3><ul className="clinical-list">{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></section>
-      </div>
-      {trends.domain && trends.series.length > 0 && <section className="clinical-block">
-        <h3>Clinical trajectory</h3>
-        <div className={`trend-chart-stack ${trends.series.length > 1 ? 'paired' : 'single'}`}>{trends.series.map((series, index) => <TrendChart key={series.test} series={series} domain={trends.domain as [number, number]} tone={index === 0 ? 'accent' : 'clinical'} />)}</div>
-      </section>}
-      {trends.latest.length > 0 && <section className="clinical-block">
-        <h3>Latest relevant results{sharedResultDate && <em>{labDate(sharedResultDate)}</em>}</h3>
-        <div className="result-grid">{trends.latest.map((item) => <div key={item.test}>
-          <strong>{item.value} <i>{labUnit(item.unit)}</i></strong>
-          <span>{item.label}</span>
-          {!sharedResultDate && <small>{labDate(item.date)}</small>}
-        </div>)}</div>
-      </section>}
-      {patient.clinical_notes.length > 0 && <section className="clinical-block">
-        <h3>Recent relevant context</h3>
-        <ul className="clinical-list">{patient.clinical_notes.map((note) => <li key={note}>{note}</li>)}</ul>
-      </section>}
-      <section className="clinical-block care-context">
-        <h3>Care context</h3>
-        <dl>{careContext.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
-      </section>
-    </section>
-    <details className="source-record"><summary>View source clinical data <span>Problems, medications, full laboratory history and provenance</span></summary>
-      <div className="source-record-body">
-        <section><h3>Problems</h3><ul className="record-rows">{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section>
-        <section><h3>Medications</h3><ul className="record-rows">{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></section>
-        <section><h3>Laboratory history</h3>
-          <div className="record-table-scroll">
-            <table className="record-table">
-              <caption>Every recorded synthetic result, oldest first. A dash means no result was recorded on that date.</caption>
-              <thead><tr><th scope="col">Date</th>{flowsheet.columns.map((column) => <th key={column.test} scope="col">{column.label}<small>{labUnit(column.unit)}</small></th>)}</tr></thead>
-              <tbody>{flowsheet.rows.map((row) => <tr key={row.date}><th scope="row">{labDate(row.date)}</th>{row.cells.map((cell, index) => <td key={flowsheet.columns[index].test}>{cell === null ? <span aria-label="No result recorded">—</span> : cell}</td>)}</tr>)}</tbody>
-            </table>
+    <div className="patient-detail-grid">
+      <aside className="patient-next-step">
+        <p className="eyebrow">Next step</p>
+        {nextStepState === 'consulting' && <div className="next-step-card consulting"><NetworkMark active /><h2>Your agent is consulting the network…</h2><p>Evaluating specialty fit, required workup, and access.</p></div>}
+        {nextStepState === 'ready' && consultation && <div className="next-step-card ready"><NetworkMark resolved /><h2>A recommendation is ready for your review.</h2><p><strong>{cleanName(consultation.recommended_physician.physician_name)}</strong><br />{consultation.recommended_physician.specialty}</p><button className="text-button" onClick={() => scrollToRecommendation('smooth')}>Review recommendation ↓</button></div>}
+        {nextStepState === 'idle-prior' && <div className="next-step-card idle">
+          <NetworkMark resolved /><h2>Previous network consultation available.</h2>
+          <p><strong>{cleanName(activity?.latest_recommended_physician || '')}</strong>{activity?.latest_recommended_specialty ? <><br />{activity.latest_recommended_specialty}</> : null}</p>
+          <small>{activity?.latest_consulted_at ? formatTime(activity.latest_consulted_at) : ''}</small>
+          <button className="button-primary" onClick={() => navigate(consultationPath(activity?.latest_consultation_id as number))}>View consultation <span>→</span></button>
+          {reconsulting
+            ? <>{optionalGuidance('Add what changed, if anything, since the last consultation.')}<button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button></>
+            : <button className="text-button" onClick={() => setReconsulting(true)}>Re-consult the network →</button>}
+        </div>}
+        {nextStepState === 'idle' && <div className="next-step-card idle">
+          <NetworkMark /><h2>Ask agent for referral options</h2>
+          <p>Your agent consults the network to identify an appropriate referral destination and required next steps.</p>
+          <button className="consult-button consult-button-hero" disabled={consulting} onClick={runConsult}>Consult network <span>→</span></button>
+          {optionalGuidance('Add context only if you want to guide the network consultation.')}
+        </div>}
+      </aside>
+      <div className="patient-clinical-main">
+        <p className="agent-task"><b>Agent task</b><span>Evaluate appropriate specialty, required workup, and viable access options using the available clinical context.</span></p>
+        {(consulting || (consultation && !networkCollapsed)) && <ConsultationNetwork result={consultation} visibleCount={visibleMessageCount} consulting={consulting} networkAgents={networkAgents} completion={completion} />}
+        {consultation && !consulting && networkCollapsed && <NetworkConsultationSummary result={consultation} onViewNetwork={() => setOpenNetworkSignal((count) => count + 1)} />}
+        {consultation && !consulting && <RecommendationView consultation={consultation} navigate={navigate} openNetworkSignal={openNetworkSignal} />}
+        <section className="clinical-overview" aria-labelledby="clinical-overview-heading">
+          <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
+          <div className="clinical-columns">
+            <section><h3>Problems</h3><ul className="clinical-list">{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section>
+            <section><h3>Current medications</h3><ul className="clinical-list">{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></section>
           </div>
+          {trends.domain && trends.series.length > 0 && <section className="clinical-block">
+            <h3>Clinical trajectory</h3>
+            <div className={`trend-chart-stack ${trends.series.length > 1 ? 'paired' : 'single'}`}>{trends.series.map((series, index) => <TrendChart key={series.test} series={series} domain={trends.domain as [number, number]} tone={index === 0 ? 'accent' : 'clinical'} />)}</div>
+          </section>}
+          {trends.latest.length > 0 && <section className="clinical-block">
+            <h3>Latest relevant results{sharedResultDate && <em>{labDate(sharedResultDate)}</em>}</h3>
+            <div className="result-grid">{trends.latest.map((item) => <div key={item.test}>
+              <strong>{item.value} <i>{labUnit(item.unit)}</i></strong>
+              <span>{item.label}</span>
+              {!sharedResultDate && <small>{labDate(item.date)}</small>}
+            </div>)}</div>
+          </section>}
+          {patient.clinical_notes.length > 0 && <section className="clinical-block">
+            <h3>Recent relevant context</h3>
+            <ul className="clinical-list">{patient.clinical_notes.map((note) => <li key={note}>{note}</li>)}</ul>
+          </section>}
+          <section className="clinical-block care-context">
+            <h3>Care context</h3>
+            <dl>{careContext.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+          </section>
         </section>
-        {patient.clinical_notes.length > 0 && <section><h3>Clinical notes</h3><ul className="record-rows">{patient.clinical_notes.map((note) => <li key={note}>{note}</li>)}</ul></section>}
-        <section><h3>Care context</h3>
-          <dl className="record-context">{[...careContext, { label: 'Provenance', value: 'Synthetic demo record · no PHI' }].map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
-        </section>
+        <details className="source-record"><summary>View source clinical data <span>Problems, medications, full laboratory history and provenance</span></summary>
+          <div className="source-record-body">
+            <section><h3>Problems</h3><ul className="record-rows">{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section>
+            <section><h3>Medications</h3><ul className="record-rows">{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></section>
+            <section><h3>Laboratory history</h3>
+              <div className="record-table-scroll">
+                <table className="record-table">
+                  <caption>Every recorded synthetic result, oldest first. A dash means no result was recorded on that date.</caption>
+                  <thead><tr><th scope="col">Date</th>{flowsheet.columns.map((column) => <th key={column.test} scope="col">{column.label}<small>{labUnit(column.unit)}</small></th>)}</tr></thead>
+                  <tbody>{flowsheet.rows.map((row) => <tr key={row.date}><th scope="row">{labDate(row.date)}</th>{row.cells.map((cell, index) => <td key={flowsheet.columns[index].test}>{cell === null ? <span aria-label="No result recorded">—</span> : cell}</td>)}</tr>)}</tbody>
+                </table>
+              </div>
+            </section>
+            {patient.clinical_notes.length > 0 && <section><h3>Clinical notes</h3><ul className="record-rows">{patient.clinical_notes.map((note) => <li key={note}>{note}</li>)}</ul></section>}
+            <section><h3>Care context</h3>
+              <dl className="record-context">{[...careContext, { label: 'Provenance', value: 'Synthetic demo record · no PHI' }].map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+            </section>
+          </div>
+        </details>
       </div>
-    </details>
+    </div>
   </main></ProductShell>
 }
 
@@ -744,9 +774,9 @@ export default function App() {
   const claimNpi = path.match(/^\/claim\/provider\/([^/]+)$/)?.[1]
   if (claimNpi) return <ProviderIdentityPage npi={claimNpi} navigate={navigate} params={params} />
   if (path === '/specialist' || path === '/specialist/home') return <ProductShell navigate={navigate} section="specialist-home" perspective="specialist"><SpecialistHomePage navigate={navigate} /></ProductShell>
-  if (path === '/specialist/cases') return <ProductShell navigate={navigate} section="specialist-cases" perspective="specialist"><SpecialistCasesPage navigate={navigate} /></ProductShell>
+  if (path === '/specialist/cases') return <ProductShell navigate={navigate} section="specialist-patients" perspective="specialist"><SpecialistCasesPage navigate={navigate} /></ProductShell>
   const specialistRecordId = path.match(/^\/specialist\/cases\/(\d+)$/)?.[1]
-  if (specialistRecordId) return <ProductShell navigate={navigate} section="specialist-cases" perspective="specialist"><SpecialistCaseDetailPage recordId={Number(specialistRecordId)} navigate={navigate} /></ProductShell>
+  if (specialistRecordId) return <ProductShell navigate={navigate} section="specialist-patients" perspective="specialist"><SpecialistCaseDetailPage recordId={Number(specialistRecordId)} navigate={navigate} /></ProductShell>
   if (path === '/specialist/agent') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><SpecialistAgentPage navigate={navigate} params={params} /></ProductShell>
   if (path === '/specialist/agent/train') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><TrainingPage personaId="iain" agentName={SPECIALIST_AGENT_NAME} navigate={navigate} exitPath="/specialist/agent?tab=train" params={params} /></ProductShell>
   if (path === '/specialist/profile') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><ProfessionalProfilePage personaId="iain" navigate={navigate} params={params} /></ProductShell>

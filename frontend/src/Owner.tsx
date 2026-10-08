@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
 import { displayName, initials, signInPath } from './Claim.tsx'
@@ -21,8 +21,6 @@ import {
 import {
   AgentOverviewPanel,
   ChatTab,
-  findPendingReviewHistoryEntry,
-  PracticeTab,
   ProfessionalProfilePage,
   TrainTab,
   TrainingPage,
@@ -38,32 +36,46 @@ function OwnerBrand() {
   return <div className="brand" aria-label="Lamina"><span className="brand-symbol" aria-hidden="true"><img src={laminaLogo} alt="" /></span><span className="wordmark">LAMINA</span></div>
 }
 
+/** Dashboard is the only top-level destination for the owner shell — there is no
+ * Patients/Network capability yet. My Agent lives as a persistent sidebar object
+ * (see .sidebar-clinician below); Profile moved to the avatar menu, matching the
+ * synthetic demo shell's nav pattern. */
 const OWNER_NAV_ITEMS = [
-  { id: 'home', title: 'Home', icon: '⌂', path: ownerHomePath },
-  { id: 'profile', title: 'Profile', icon: '◐', path: ownerProfilePath },
-  { id: 'agent', title: 'My Agent', icon: '◇', path: ownerAgentPath },
+  { id: 'home', title: 'Dashboard', icon: '⌂', path: ownerHomePath },
 ] as const
 
-/** Owner-identity picker, shown inline when a signed-in physician has more than one
- * eligible claim. Switching is always explicit and goes through the real selection
- * endpoint — the client never infers or remembers a selection on its own. */
-function IdentitySwitcher({ claims, current, onSwitch }: {
-  claims: Array<ProviderClaim & { profile: PhysicianNetworkProfile | null }>
+/** The top-right avatar/account menu: profile access, sign out, and — only when a
+ * physician has more than one eligible claim — explicit identity switching through the
+ * real selection endpoint. The client never infers or remembers a selection on its own. */
+function AccountMenu({ claims, current, onSwitch, navigate, onSignOut, email }: {
+  claims: Array<ProviderClaim & { profile: PhysicianNetworkProfile | null }> | null
   current: PhysicianSandboxStatus['provider_identity']
   onSwitch: (claimId: number) => void
+  navigate: Navigate; onSignOut: () => void; email: string | null
 }) {
   const [open, setOpen] = useState(false)
-  if (claims.length <= 1) return null
-  return <div className="owner-identity-switcher">
-    <button className="profile-control" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open}>
-      <span>{current ? initials(displayName(current.display_name)) : '··'}</span><strong>{current ? displayName(current.display_name) : 'Select identity'}</strong>
+  const containerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onClick = (event: MouseEvent) => { if (containerRef.current && !containerRef.current.contains(event.target as Node)) setOpen(false) }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  const switchableClaims = (claims ?? []).filter((claim) => claim.npi !== current?.npi)
+  return <div className="owner-identity-switcher" ref={containerRef}>
+    <button className="profile-control avatar-control" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label="Account menu">
+      <span>{current ? initials(displayName(current.display_name)) : '··'}</span><strong>{current ? displayName(current.display_name) : email ?? 'Account'}</strong>
     </button>
-    {open && <div className="perspective-menu" role="menu" aria-label="Switch physician identity">
-      <p className="perspective-menu-label">Your claimed identities</p>
-      {claims.map((claim) => <button key={claim.id} role="menuitemradio" aria-checked={claim.npi === current?.npi} className={`perspective-option ${claim.npi === current?.npi ? 'active' : ''}`} onClick={() => { setOpen(false); onSwitch(claim.id) }}>
-        <span className="perspective-option-check" aria-hidden="true">{claim.npi === current?.npi ? '✓' : ''}</span>
-        <span><strong>{claim.profile ? displayName(claim.profile.display_name) : `NPI ${claim.npi}`}</strong><small>{claim.profile?.specialty ?? ''}</small></span>
-      </button>)}
+    {open && <div className="perspective-menu" role="menu" aria-label="Account menu">
+      <button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate(ownerProfilePath) }}>Profile</button>
+      <div className="perspective-menu-divider" role="separator" /><button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); onSignOut() }}>Sign out</button>
+      {switchableClaims.length > 0 && <><div className="perspective-menu-divider" role="separator" /><p className="perspective-menu-label">Your other claimed identities</p>
+        {switchableClaims.map((claim) => <button key={claim.id} role="menuitem" className="perspective-option" onClick={() => { setOpen(false); onSwitch(claim.id) }}>
+          <span><strong>{claim.profile ? displayName(claim.profile.display_name) : `NPI ${claim.npi}`}</strong><small>{claim.profile?.specialty ?? ''}</small></span>
+        </button>)}
+      </>}
     </div>}
   </div>
 }
@@ -94,7 +106,7 @@ export function OwnerShell({ children, navigate, section }: { children: React.Re
       setClaims(withProfiles)
     }).catch(() => setClaims([]))
   }
-  useEffect(() => { if (user && status && !status.has_claim) loadClaims() }, [user, status]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (user && status) loadClaims() }, [user, status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const switchTo = async (claimId: number) => {
     setSwitching(true)
@@ -135,18 +147,16 @@ export function OwnerShell({ children, navigate, section }: { children: React.Re
           {OWNER_NAV_ITEMS.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span><b>{item.title}</b></span></button>)}
         </nav>
       </div>
-      <button className="sidebar-clinician" onClick={() => navigate(ownerAgentPath)} aria-label="Open your agent overview">
+      <button className={`sidebar-clinician ${section === 'agent' ? 'active' : ''}`} aria-current={section === 'agent' ? 'page' : undefined} onClick={() => navigate(ownerAgentPath)} aria-label="Open your agent overview">
         <LaminaMark active={status.initialized} />
-        <div><span>Your physician agent</span><strong>{identity ? `${displayName(identity.display_name)}'s Agent` : 'Your Agent'}</strong><small>{status.initialized ? 'Private · initialized' : 'Private · not yet initialized'}</small></div>
+        <div><span>Your agent</span><strong>{identity ? `${displayName(identity.display_name)}'s Agent` : 'Your Agent'}</strong><small>{status.initialized ? 'Private · initialized' : 'Private · not yet initialized'}</small></div>
       </button>
     </aside>
     <div className="workspace">
       <header className="workspace-bar">
         <div className="workspace-bar-actions">
           <div className="synthetic-status owner-status"><span />Private workspace · not public</div>
-          {claims && <IdentitySwitcher claims={claims} current={identity} onSwitch={(id) => void switchTo(id)} />}
-          <span className="claim-account-chip" title={user.email ?? undefined}>{user.email ?? 'Account'}</span>
-          <button className="text-button" onClick={() => void handleSignOut()}>Sign out</button>
+          <AccountMenu claims={claims} current={identity} onSwitch={(id) => void switchTo(id)} navigate={navigate} onSignOut={() => void handleSignOut()} email={user.email ?? null} />
         </div>
       </header>
       {children}
@@ -204,9 +214,15 @@ export function OwnerHomePage({ navigate }: { navigate: Navigate }) {
 
 /* ---------------------------------------------------------------- My Agent */
 
-const OWNER_AGENT_TABS = ['overview', 'practice', 'train', 'chat'] as const
+/** Overview absorbed the old separate Practice tab (post-8B consolidation). */
+const OWNER_AGENT_TABS = ['overview', 'train', 'test'] as const
 type OwnerAgentTab = typeof OWNER_AGENT_TABS[number]
-const resolveOwnerAgentTab = (value: string | null): OwnerAgentTab => (value && (OWNER_AGENT_TABS as readonly string[]).includes(value) ? value as OwnerAgentTab : 'overview')
+const LEGACY_OWNER_AGENT_TAB_ALIASES: Record<string, OwnerAgentTab> = { practice: 'overview', chat: 'test' }
+const resolveOwnerAgentTab = (value: string | null): OwnerAgentTab => {
+  if (value && (OWNER_AGENT_TABS as readonly string[]).includes(value)) return value as OwnerAgentTab
+  if (value && value in LEGACY_OWNER_AGENT_TAB_ALIASES) return LEGACY_OWNER_AGENT_TAB_ALIASES[value]
+  return 'overview'
+}
 
 export function OwnerAgentPage({ navigate, params }: { navigate: Navigate; params: URLSearchParams }) {
   const tabParam = params.get('tab')
@@ -220,19 +236,12 @@ export function OwnerAgentPage({ navigate, params }: { navigate: Navigate; param
   useEffect(() => { refreshOverview(); refreshRepresentation(); refreshTraining() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setTab(resolveOwnerAgentTab(tabParam)) }, [tabParam])
   const selectTab = (next: OwnerAgentTab) => { setTab(next); window.history.replaceState({}, '', `${ownerAgentPath}?tab=${next}`) }
-  const reviewHref = trainProjection ? (() => {
-    const entry = findPendingReviewHistoryEntry(trainProjection.recent_training_history)
-    return entry ? `${ownerTrainPath}?review=${entry.session_id}` : null
-  })() : null
   return <OwnerShell navigate={navigate} section="agent"><main className="page-shell agent-page">
     <section className="agent-hero"><div className="agent-hero-mark"><LaminaMark active={overview?.training.initialized ?? false} /></div><div><p className="eyebrow">Your physician agent</p><h1>{overview?.physician.agent_name ?? 'Your Agent'}</h1><p>Private · represents how you practice. Not visible to the network.</p></div></section>
     <nav className="agent-tabs" aria-label="My Agent sections">{OWNER_AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-    {tab === 'overview' && <AgentOverviewPanel overview={overview} navigate={navigate} trainPath={trainingPath('owner')} onViewPractice={() => selectTab('practice')} />}
-    {tab === 'practice' && (representation
-      ? <PracticeTab representation={representation} portrait={overview?.portrait} reviewHref={reviewHref} navigate={navigate} />
-      : <div className="page-state embedded"><div className="loading-line" /><p>Opening your practice representation…</p></div>)}
+    {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('owner')} />}
     {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={ownerTrainPath} />}
-    {tab === 'chat' && <ChatTab personaId="owner" agentName={overview?.physician.agent_name ?? 'Your Agent'} navigate={navigate} trainPath={ownerTrainPath} />}
+    {tab === 'test' && <ChatTab personaId="owner" agentName={overview?.physician.agent_name ?? 'Your Agent'} navigate={navigate} trainPath={ownerTrainPath} />}
   </main></OwnerShell>
 }
 

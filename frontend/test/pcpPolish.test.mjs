@@ -13,43 +13,46 @@ const consultationsIndex = () => slice('function ConsultationsPage', 'function P
 
 /* ------------------------------------------------------------------ banner */
 
+/** Post-8B: the hero/CTA/optional-guidance banner moved into the sticky Next step
+ * card in the right-hand column (see .next-step-card / .patient-next-step). */
 test('the agent identity hero sits before optional guidance in source order', () => {
-  const banner = slice('network-action brief-action', 'agent-task')
-  const heroIndex = banner.indexOf('network-hero')
-  const optionalIndex = banner.indexOf('network-optional')
-  assert.ok(heroIndex > 0 && optionalIndex > heroIndex, 'network-hero precedes network-optional in markup')
+  const card = slice("nextStepState === 'idle' && <div className=\"next-step-card idle\">", '</div>}\n      </aside>')
+  const heroIndex = card.indexOf('<h2>Ask agent for referral options</h2>')
+  const optionalIndex = card.indexOf('optionalGuidance(')
+  assert.ok(heroIndex > 0 && optionalIndex > heroIndex, 'the hero headline precedes optional guidance in markup')
 })
 
-test('the primary CTA sits in the hero row and is enabled with empty optional context', () => {
+test('the primary CTA sits in the Next step card and is enabled with empty optional context', () => {
   const page = patientPage()
-  assert.match(page, /network-hero[\s\S]*consult-button consult-button-hero[\s\S]*disabled=\{consulting\}[\s\S]*Consult network[\s\S]*for referral/)
+  assert.match(page, /consult-button consult-button-hero[\s\S]{0,40}disabled=\{consulting\}[\s\S]{0,20}onClick=\{runConsult\}/)
   assert.doesNotMatch(page, /disabled=\{consulting \|\| !context/, 'the CTA is never gated on the optional field having a value')
 })
 
-test('optional guidance is explicitly labeled and visually secondary', () => {
+test('optional guidance is explicitly labeled, collapsed by default, and visually secondary', () => {
   const page = patientPage()
   assert.match(page, /optional-guidance-label">Optional guidance/)
   assert.match(page, /Add context only if you want to guide the network consultation\./)
+  assert.match(page, /<details className="network-optional">/, 'optional guidance collapses by default behind a <details> disclosure')
   assert.ok(someRule('.network-optional', /border-top: 1px solid var\(--border\)/), 'optional guidance is visually separated below the hero')
 })
 
 test('no optional interaction is required before consulting the network', () => {
-  const banner = slice('network-action brief-action', 'agent-task')
-  assert.doesNotMatch(banner, /<input[^>]*\brequired\b/)
-  assert.match(banner, /onClick=\{runConsult\}/)
+  const card = slice("nextStepState === 'idle' && <div className=\"next-step-card idle\">", '</div>}\n      </aside>')
+  assert.doesNotMatch(card, /<input[^>]*\brequired\b/)
+  assert.match(card, /onClick=\{runConsult\}/)
 })
 
-test('the hero is top-aligned, not centered against the taller optional column', () => {
-  assert.ok(someRule('.brief-action .network-copy', /align-items: flex-start/))
-  assert.ok(someRule('.network-action.brief-action', /flex-direction: column/))
+test('the Next step panel is sticky and sits beside clinical context on desktop', () => {
+  assert.ok(someRule('.patient-next-step', /position: sticky/))
+  assert.ok(someRule('.patient-detail-grid', /grid-template-columns: 1fr 300px/))
 })
 
 /* ----------------------------------------------------------------- mobile */
 
-test('mobile stacks the hero above optional guidance with a full-width CTA', () => {
-  const mobileRule = [...styles.matchAll(/@media \(max-width: 700px\) \{([^]*?)\n\}/g)].map((m) => m[1]).join('\n')
-  assert.match(mobileRule, /\.network-hero \{ flex-direction: column/)
-  assert.match(mobileRule, /\.consult-button-hero \{ width: 100%/)
+test('mobile stacks the Next step panel above the clinical context, full width', () => {
+  const mobileRule = [...styles.matchAll(/@media \(max-width: 900px\) \{([^]*?)\n\}/g)].map((m) => m[1]).join('\n')
+  assert.match(mobileRule, /\.patient-next-step \{ grid-column: 1; grid-row: 1; position: static; \}/)
+  assert.ok(someRule('.consult-button-hero', /width: 100%/), 'the hero CTA is full-width unconditionally, not just on mobile')
 })
 
 /* -------------------------------------------------------------- specialty */
@@ -98,11 +101,11 @@ test('the empty-state CTA is structurally grouped with the centered content', ()
 
 /* ----------------------------------------------------------- regression */
 
-test('previous-consultation and re-consult states still work', () => {
+test('previous-consultation and re-consult states still work (now inside the idle-prior Next step card)', () => {
   const page = patientPage()
   assert.match(page, /Previous network consultation available\./)
   assert.match(page, /Re-consult the network/)
-  assert.match(page, /reconsult-panel/)
+  assert.match(page, /nextStepState === 'idle-prior' && <div className="next-step-card idle">/)
 })
 
 test('completion behavior from the prior pass is unchanged', () => {

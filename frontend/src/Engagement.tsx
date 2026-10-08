@@ -98,43 +98,55 @@ export const settingsPath = '/settings'
 /* ------------------------------------------------------------- Home: engagement */
 
 /**
- * Maps the canonical TrainProjection directly to a Home CTA. Only `.state`/`.action`/
- * `.active_session_id`/`.review_session_id`/`.answered_count`/`.answer_target` are read —
- * never independently inferred (e.g. never "unfinished", never guessing resume vs start
- * from answered_count alone).
+ * Maps the canonical TrainProjection directly to the agent banner's CTA and supporting
+ * line. Only `.state`/`.action`/`.active_session_id`/`.review_session_id`/
+ * `.answered_count`/`.answer_target` are read — never independently inferred (e.g. never
+ * "unfinished", never guessing resume vs start from answered_count alone). Counts describe
+ * *this* session only — never a finite completion percentage for the open-ended
+ * representation as a whole.
  */
-function homeTrainingCta(training: TrainProjection, trainPath: string): { label: string; href: string } | null {
+function agentBannerPlan(training: TrainProjection, trainPath: string): { label: string; href: string; support: string } | null {
   const activeId = training.active_session_id
   const reviewId = training.review_session_id
-  if (training.action === 'continue_setup') return { label: 'Continue setup', href: `${trainPath}?mode=initialization` }
-  if (training.action === 'resume_training' && activeId) return { label: 'Resume training', href: `${trainPath}?resume=${activeId}` }
-  if (training.action === 'start_training' && activeId) return { label: 'Start training', href: `${trainPath}?resume=${activeId}` }
-  if (training.action === 'start_training') return { label: 'Start training', href: `${trainPath}?mode=daily` }
-  if (training.action === 'review_training' && reviewId) return { label: 'Review what your agent learned', href: `${trainPath}?review=${reviewId}` }
+  const target = training.answer_target ?? 10
+  const remaining = Math.max(1, target - training.answered_count)
+  if (training.action === 'continue_setup') {
+    return { label: 'Continue setup', href: `${trainPath}?mode=initialization`, support: "Let's build your agent's starting picture of your practice." }
+  }
+  if (training.action === 'resume_training' && activeId) {
+    return { label: `Answer ${remaining} question${remaining === 1 ? '' : 's'}`, href: `${trainPath}?resume=${activeId}`, support: `${remaining} quick question${remaining === 1 ? '' : 's'} ${remaining === 1 ? 'is' : 'are'} ready.` }
+  }
+  if (training.action === 'start_training' && activeId) {
+    return { label: `Answer ${target} question${target === 1 ? '' : 's'}`, href: `${trainPath}?resume=${activeId}`, support: `${target} quick question${target === 1 ? '' : 's'} ${target === 1 ? 'is' : 'are'} ready.` }
+  }
+  if (training.action === 'start_training') {
+    return { label: `Answer ${target} question${target === 1 ? '' : 's'}`, href: `${trainPath}?mode=daily`, support: 'Continue refining how your agent represents your practice.' }
+  }
+  if (training.action === 'review_training' && reviewId) {
+    return { label: 'Review what your agent learned', href: `${trainPath}?review=${reviewId}`, support: 'A proposed learning from training is ready for your review.' }
+  }
   return null
 }
 
+/** The persistent agent object woven through the workspace, not a separate module.
+ * Muted sage surface — "your agent" is a distinct semantic color from physician-action
+ * copper. Never an artificial quality score, XP, consecutive-day mechanic, or finite
+ * completion percentage for the open-ended representation. */
 export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath }: {
   overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string
 }) {
   if (!overview) return null
   const training = overview.training
-  const cta = homeTrainingCta(training, trainPath)
-  const summary = practiceSummarySentence(overview.portrait)
-  return <section className="home-agent-card-v2">
-    <p className="eyebrow">Your agent</p>
-    <h2>{overview.physician.agent_name}</h2>
-    {summary && <p className="home-agent-portrait">{summary}</p>}
-    <div className="home-agent-stats">
-      <span>{overview.stats.questions_answered_total} question{overview.stats.questions_answered_total === 1 ? '' : 's'} answered</span>
-      <span>{overview.stats.confirmed_practice_learnings} practice rule{overview.stats.confirmed_practice_learnings === 1 ? '' : 's'}</span>
-      {training.state === 'active_in_progress'
-        ? <span>{training.answered_count} of {training.answer_target ?? 10} answered</span>
-        : overview.last_trained_at && <span>Last trained {relativeDayLabel(overview.last_trained_at)}</span>}
+  const plan = agentBannerPlan(training, trainPath)
+  return <section className="agent-banner">
+    <div className="agent-banner-glyph"><LaminaMark active /></div>
+    <div className="agent-banner-body">
+      <p className="eyebrow">Your agent</p>
+      <h2>Make your agent more like you.</h2>
+      <p className="agent-banner-support">{plan?.support ?? 'Training is up to date.'}</p>
+      {plan && <button className="button-primary" onClick={() => navigate(plan.href)}>{plan.label} <span>→</span></button>}
     </div>
-    {training.state === 'caught_up' && <p className="home-agent-caught-up">Training is up to date.</p>}
-    {cta && <button className="button-primary" onClick={() => navigate(cta.href)}>{cta.label} <span>→</span></button>}
-    <button className="text-button home-agent-view-link" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
+    <button className="text-button agent-banner-view" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
   </section>
 }
 
@@ -173,7 +185,7 @@ export function NetworkHighlights({ feed, navigate, perspective }: { feed: Netwo
 
 export const NETWORK_TABS = ['my-network', 'feed'] as const
 export type NetworkTab = typeof NETWORK_TABS[number]
-const NETWORK_TAB_LABELS: Record<NetworkTab, string> = { 'my-network': 'My Network', feed: 'Feed' }
+const NETWORK_TAB_LABELS: Record<NetworkTab, string> = { 'my-network': 'Colleagues', feed: 'Feed' }
 
 export function NetworkTabs({ tab, onSelect }: { tab: NetworkTab; onSelect: (next: NetworkTab) => void }) {
   return <nav className="network-tabs" aria-label="Network sections">{NETWORK_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => onSelect(item)}>{NETWORK_TAB_LABELS[item]}</button>)}</nav>
@@ -993,12 +1005,16 @@ export function InitializationCard({ initialization, navigate, trainPath }: { in
 
 /* ------------------------------------------------------------- My Agent: Overview */
 
-export function AgentOverviewPanel({ overview, navigate, trainPath, onViewPractice }: {
-  overview: AgentOverview | null
-  navigate: Navigate; trainPath: string; onViewPractice: () => void
+/**
+ * Overview now absorbs what used to be a separate Practice tab (post-8B consolidation):
+ * identity/summary, confirmed representation, and gaps all live in one place — "How does
+ * my agent currently represent me?" is answered on one screen, not split across two.
+ */
+export function AgentOverviewPanel({ overview, representation, navigate, trainPath, extra }: {
+  overview: AgentOverview | null; representation: PracticeRepresentation | null
+  navigate: Navigate; trainPath: string; extra?: ReactNode
 }) {
   if (!overview) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
-  const firstName = overview.physician.name.replace(/^Dr\.\s*/, '').split(/\s+/)[0]
   const training = overview.training
   const primary = training.action === 'continue_setup'
     ? { label: 'Continue setup', href: `${trainPath}?mode=initialization` }
@@ -1011,24 +1027,27 @@ export function AgentOverviewPanel({ overview, navigate, trainPath, onViewPracti
         : training.action === 'review_training' && training.review_session_id
           ? { label: 'Review training', href: `${trainPath}?review=${training.review_session_id}` }
         : null
+  const reviewHref = training.state === 'review_pending' && training.review_session_id ? `${trainPath}?review=${training.review_session_id}` : null
   return <div className="agent-overview-v2">
     <section className="agent-portrait-card">
-      <p className="eyebrow">Hi, Dr. {firstName}.</p>
+      <p className="eyebrow">Your agent currently represents you as</p>
       <p className="agent-portrait-text">{overview.portrait}</p>
     </section>
     <div className="agent-stats-row">
       <div><em>{overview.stats.questions_answered_total}</em><span>Questions answered</span></div>
       <div><em>{overview.stats.confirmed_practice_learnings}</em><span>Practice rules confirmed</span></div>
-      <div><em>{overview.stats.case_interests_count}</em><span>Case interests</span></div>
-      <div><em>{overview.stats.network_cases_count}</em><span>Network cases</span></div>
+      {overview.stats.case_interests_count > 0 && <div><em>{overview.stats.case_interests_count}</em><span>Case interests</span></div>}
+      {overview.stats.network_cases_count > 0 && <div><em>{overview.stats.network_cases_count}</em><span>Network cases</span></div>}
     </div>
     {overview.last_trained_at && <p className="agent-last-trained">Last trained {relativeDayLabel(overview.last_trained_at)}</p>}
     <InitializationCard initialization={overview.initialization} navigate={navigate} trainPath={trainPath} />
     <div className="agent-overview-actions">
       {primary && <button className="button-primary" onClick={() => navigate(primary.href)}>{primary.label} <span>→</span></button>}
       {!primary && <p className="agent-empty-note">Your agent is up to date.</p>}
-      <button className="text-button" onClick={onViewPractice}>View my practice representation →</button>
     </div>
+    {representation
+      ? <PracticeTab representation={representation} portrait={null} reviewHref={reviewHref} navigate={navigate} heading={false} extra={extra} />
+      : <div className="page-state embedded"><div className="loading-line" /><p>Opening your confirmed representation…</p></div>}
   </div>
 }
 
@@ -1108,8 +1127,8 @@ function ExpandableList({ items, initialCount = 5 }: { items: ReactNode[]; initi
   </>
 }
 
-export function PracticeTab({ representation, portrait, reviewHref, navigate, extra }: {
-  representation: PracticeRepresentation; portrait?: string | null; reviewHref?: string | null; navigate: Navigate; extra?: ReactNode
+export function PracticeTab({ representation, portrait, reviewHref, navigate, extra, heading = true }: {
+  representation: PracticeRepresentation; portrait?: string | null; reviewHref?: string | null; navigate: Navigate; extra?: ReactNode; heading?: boolean
 }) {
   const sections = representation.sections
   const gaps = representation.gaps
@@ -1135,8 +1154,7 @@ export function PracticeTab({ representation, portrait, reviewHref, navigate, ex
   const extraLearnings = sections.confirmed_learnings.filter((item) => !ruleLabels.has(normalizeLabel(item.statement)))
 
   return <div className="practice-tab">
-    <p className="eyebrow">Practice representation</p>
-    <h2>How your agent represents your practice</h2>
+    {heading && <><p className="eyebrow">Practice representation</p><h2>How your agent represents your practice</h2></>}
     {summary && <p className="practice-summary">{summary}</p>}
     {reviewHref && <p className="practice-review-link"><button className="text-button" onClick={() => navigate(reviewHref)}>Review training results →</button></p>}
 
@@ -1177,12 +1195,12 @@ export function PracticeTab({ representation, portrait, reviewHref, navigate, ex
     </section>}
 
     {extraLearnings.length > 0 && <section className="practice-section practice-section-learnings">
-      <h3 className="practice-section-heading">Learned from training</h3>
+      <h3 className="practice-section-heading">Confirmed from your training</h3>
       <ExpandableList items={extraLearnings.map((item) => <li key={item.id}>{item.statement}</li>)} />
     </section>}
 
     {gaps.practice_areas_needing_input.length > 0 && <section className="practice-section practice-section-gaps">
-      <h3 className="practice-section-heading">Still building this representation</h3>
+      <h3 className="practice-section-heading">Still needs input</h3>
       <p className="practice-subcopy">Your agent does not yet have a confirmed answer for these practice areas. Training fills these in.</p>
       <ExpandableList items={gaps.practice_areas_needing_input.map((item) => <li key={item}>{item}</li>)} initialCount={3} />
     </section>}
@@ -1349,9 +1367,9 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
   }
 
   return <div className="chat-tab">
-    <p className="eyebrow">Chat</p>
-    <h2>Talk to your agent</h2>
-    <p className="panel-intro">Ask about how it understands your practice, or try it on a synthetic case.</p>
+    <p className="eyebrow">Test</p>
+    <h2>Test how your agent currently represents you.</h2>
+    <p className="panel-intro">Ask how your agent represents your practice, or try it on a synthetic case.</p>
     <p className="chat-boundary-note">Synthetic · no PHI. Use synthetic or hypothetical cases in this demo.</p>
     {messages.length === 0 && cases.length > 0 && <section className="chat-case-cards">
       <p className="section-label">Try your agent on a case</p>

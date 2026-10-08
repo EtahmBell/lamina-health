@@ -15,14 +15,14 @@ const recordPage = () => slice('function ConsultationRecordPage', 'const AGENT_T
 
 /* ------------------------------------------------------------- §1, §2, §17 */
 
-test('the patients page frames the task as a specialty referral, not a vague consult', () => {
-  assert.match(patients(), /Specialty Referral/)
-  assert.match(patients(), /Choose the patient whose next specialty referral needs clarification\./)
+test('the patients page frames itself as a referral worklist (post-8B: a worklist, not a directory)', () => {
+  assert.match(patients(), /<h1>Patients<\/h1><p>Your active referral worklist\.<\/p>/)
   assert.doesNotMatch(patients(), /Specialty Care Consult/)
 })
 
-test('the ready-to-consult group is named for the network consultation it starts', () => {
-  assert.match(patients(), /group\('Ready for network consultation', ready\)/)
+test('the worklist uses a small controlled status vocabulary tied to real consultation/implementation data, sorted physician-action-first', () => {
+  assert.match(app, /type WorklistStatus = 'Ready for your review' \| 'Not yet consulted' \| 'No action needed'/)
+  assert.match(app, /WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = \{ 'Ready for your review': 0, 'Not yet consulted': 1, 'No action needed': 2 \}/)
   assert.doesNotMatch(patients(), /'Ready to consult'/)
 })
 
@@ -40,12 +40,11 @@ test('patient-group section counts sit beside their heading, not pushed to the f
 
 /* ------------------------------------------------------------------- §4 */
 
-test('the never-consulted banner explains why the network is being consulted', () => {
+test('the Next step panel explains why the network is being consulted, for both the never-consulted and previously-consulted states', () => {
   const page = patientPage()
-  assert.match(page, /Ready for network consultation\./)
-  assert.match(page, /Consult the physician-agent network to identify an appropriate referral destination and required next steps\./)
-  assert.match(page, /Ready for another network consultation\./, 'the previously-consulted state is preserved with network-consultation terminology')
-  assert.match(page, /Previous network consultation available\./)
+  assert.match(page, /Ask agent for referral options/)
+  assert.match(page, /Your agent consults the network to identify an appropriate referral destination and required next steps\./)
+  assert.match(page, /Previous network consultation available\./, 'the previously-consulted state is preserved with network-consultation terminology')
 })
 
 /* ------------------------------------------------------------------- §5 */
@@ -147,6 +146,6 @@ test('no hidden-reasoning language leaks into PCP-facing copy', () => {
 })
 
 test('the existing agent-handling and referral affordances are preserved', () => {
-  assert.match(app, /How my agent handled this case/)
-  assert.match(app, />Start Referral </)
+  assert.match(app, /How your agent handled this case/)
+  assert.match(app, />Start referral </)
 })

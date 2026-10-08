@@ -19,13 +19,15 @@ import { membershipLabel, networkRoster, physicianDisplayName, rosterSize, type 
 
 type Navigate = (path: string) => void
 
+/** Physician-facing participation language — never internal lifecycle jargon like
+ * "Reserved · not activated". */
 const statusCopy: Record<AgentStatus, { label: string; detail: string }> = {
-  reserved: { label: 'Reserved · not activated', detail: 'A Lamina agent identity is held for this directory profile.' },
-  claimed: { label: 'Claimed · verification not submitted', detail: 'The claim owner has not yet submitted identity verification.' },
-  verification_pending: { label: 'Claimed · verification pending', detail: 'A profile claim has started. Identity verification is not complete.' },
-  verified: { label: 'Verified · configuration needed', detail: 'Identity is verified; practice details and preferences can now be configured.' },
-  active: { label: 'Verified · Active', detail: 'This physician’s configured agent is active.' },
-  disabled: { label: 'Disabled', detail: 'This agent identity is not currently active.' },
+  reserved: { label: 'Not yet on Lamina', detail: 'A directory identity exists, but this physician has not joined Lamina yet.' },
+  claimed: { label: 'Joining Lamina', detail: 'This physician has started joining Lamina; verification is not yet complete.' },
+  verification_pending: { label: 'Joining Lamina', detail: 'A profile claim has started. Identity verification is not complete.' },
+  verified: { label: 'Verified · setting up', detail: 'Identity is verified; practice details and preferences can now be configured.' },
+  active: { label: 'On Lamina', detail: 'This physician’s agent is active.' },
+  disabled: { label: 'Not currently active', detail: 'This agent identity is not currently active.' },
 }
 
 function NetworkGlyph({ active = false }: { active?: boolean }) {
@@ -45,14 +47,13 @@ function DirectoryResult({ profile, navigate, inNetwork, busy, onAdd, onRemove }
   const location = `${profile.city || 'Location not listed'}${profile.state ? `, ${profile.state}` : ''}`
   return <div className={`lam-row directory-result ${profile.agent.status === 'active' ? '' : 'muted'}`}>
     <span className="lam-row-mark directory-avatar">{initials}</span>
-    <span className="lam-row-main"><strong>{name}</strong><span>{profile.specialty}</span><small>{location} · {profile.source === 'NPPES' ? 'NPPES identity' : 'Synthetic demo identity'}</small></span>
+    <span className="lam-row-main"><strong>{name}</strong><span>{profile.specialty}</span><small>{location}</small></span>
     <StatusBadge status={profile.agent.status} />
     <span className="directory-result-actions">
       {inNetwork
-        ? <><span className="relationship-chip">In your network</span><button className="text-button quiet-remove" disabled={busy} onClick={onRemove}>Remove</button></>
-        : <button className="button-secondary add-to-network" disabled={busy} onClick={onAdd}>Add to my network <span>→</span></button>}
+        ? <button className="text-button quiet-remove" disabled={busy} onClick={onRemove}>Remove colleague</button>
+        : <button className="button-secondary add-to-network" disabled={busy} onClick={onAdd}>Add colleague <span>→</span></button>}
       <button className="text-button" onClick={() => navigate(`/network/${profile.npi}`)}>View profile →</button>
-      {profile.agent.status === 'reserved' && profile.claimable && <button className="text-button claim-link" onClick={() => navigate(`/claim/provider/${encodeURIComponent(profile.npi)}`)}>Claim this identity →</button>}
     </span>
   </div>
 }
@@ -140,6 +141,7 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
   const [error, setError] = useState<string | null>(null)
   const [pendingNpi, setPendingNpi] = useState<string | null>(null)
   const [graphFilter, setGraphFilter] = useState<GraphFilter>(DEFAULT_GRAPH_FILTER)
+  const [addOpen, setAddOpen] = useState(false)
 
   const runSearch = async (event?: FormEvent) => {
     event?.preventDefault(); setLoading(true); setError(null); setShowAllResults(false)
@@ -149,6 +151,12 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
   }
   const loadNetwork = () => getAgentNetwork().then(setNetwork).catch((loadError: Error) => setNetworkError(loadError.message))
   useEffect(() => { void runSearch(); void loadNetwork() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!addOpen) return
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setAddOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [addOpen])
   useEffect(() => { if (selectedId) document.querySelector('.network-detail-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [selectedId])
   /** A filtered-out physician must not keep an open detail panel behind the graph. */
   useEffect(() => {
@@ -163,12 +171,6 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
     finally { setPendingNpi(null) }
   }
 
-  const scrollToAdd = () => {
-    const input = document.querySelector<HTMLInputElement>('.directory-search-main input')
-    input?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    input?.focus()
-  }
-
   const selected = network?.nodes.find((node) => node.id === selectedId)
   const groups = network ? networkRoster(network) : []
   const memberNpis = new Set([
@@ -180,20 +182,18 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
   const hiddenResults = results.length - visibleResults.length
 
   return <div className="my-network-tab">
-    <p className="network-intro">Your professional network grows through physicians you add and meaningful interactions between physician agents.</p>
+    <div className="my-network-tab-header">
+      <p className="network-intro">Your professional network grows through physicians you add and meaningful interactions between physician agents.</p>
+      <button className="button-secondary add-colleague-trigger" onClick={() => setAddOpen(true)}>Add a colleague <span>+</span></button>
+    </div>
 
-    <section className="network-visual-section"><div className="network-section-heading"><div><h2>Network visualization</h2></div><p>Select a physician agent to inspect its practice footprint, activation state, and relationship to yours. Edges appear only for completed Lamina consultations.</p></div>
-      {network && <><NetworkGraph network={network} selectedId={selectedId} onSelect={setSelectedId} filter={graphFilter} onFilter={setGraphFilter} />{selected && <AgentDetail agent={selected} navigate={navigate} close={() => setSelectedId(null)} />}</>}
-      <p className="network-roster-note">The visualization shows physician agents involved in Lamina consultations. Added relationships without a consultation appear in Your network below.</p>
-    </section>
-
-    <section className="network-primary-section"><div className="network-section-heading"><div><h2>Your network</h2></div><p>Physicians you have recorded a relationship with, and recommendation destinations from completed Lamina consultations.</p></div>
+    <section className="network-primary-section">
       {networkError && <div className="error-banner" role="alert">Network relationships unavailable: {networkError}</div>}
       {!network && !networkError && <div className="directory-loading"><NetworkGlyph active /><p>Loading your physician relationships…</p></div>}
       {network && !groups.length && <div className="empty-state">
         <NetworkGlyph />
         <h2>Your network will grow as you consult physician agents and add colleagues you already work with.</h2>
-        <button className="button-primary" onClick={scrollToAdd}>Add a physician <span>→</span></button>
+        <button className="button-primary" onClick={() => setAddOpen(true)}>Add a colleague <span>→</span></button>
       </div>}
       {groups.map((group) => <section className="network-specialty-group" key={group.specialty}>
         <div className="network-specialty-heading"><h3>{group.specialty}</h3><span>{group.members.length}</span></div>
@@ -202,29 +202,41 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
       {network && groups.length > 0 && <p className="network-roster-note">{rosterSize(groups)} physician{rosterSize(groups) === 1 ? '' : 's'} across {groups.length} specialt{groups.length === 1 ? 'y' : 'ies'}.</p>}
     </section>
 
-    <section className="network-build-section">
-      <div className="network-build-banner"><NetworkGlyph active /><div><p className="eyebrow">Add your network</p><h2>Add physicians and practices you already work with.</h2><p>Lamina can preserve those relationships alongside the broader network. Added physicians become part of your Lamina network.</p></div></div>
-      <form className="directory-search-panel quiet" onSubmit={runSearch}>
-        <label className="directory-search-main"><span>Physician name</span><input value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} placeholder="e.g. Jane Smith" /></label>
-        <label><span>Specialty</span><input value={filters.specialty} onChange={(event) => setFilters({ ...filters, specialty: event.target.value })} placeholder="e.g. Nephrology" /></label>
-        <label><span>Location</span><input value={filters.location} onChange={(event) => setFilters({ ...filters, location: event.target.value })} placeholder="City or state" /></label>
-        <button className="button-secondary" type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button>
-      </form>
-      <p className="network-boundary-notice quiet">Directory identities are sourced from NPPES; a reserved identity does not imply that the physician participates in Lamina. Adding a physician records your relationship — it does not activate their agent.</p>
-      {error && <div className="error-banner" role="alert">{error}</div>}
-      <div className="directory-results-heading quiet"><h3>{filters.q || filters.specialty || filters.location ? 'Matching physicians' : 'Synthetic demo physicians'}</h3><span>{response?.count ?? 0} shown{response?.directory_available ? ` · ${response.directory_records.toLocaleString()} directory records` : ''}</span></div>
-      {response?.directory_status === 'unavailable' && <p className="directory-status-notice" role="status">{response.directory_message ?? 'The national provider directory is temporarily unavailable.'} Your Lamina network remains accessible.</p>}
-      {response?.directory_status === 'invalid_query' && <p className="directory-status-notice" role="status">{response.directory_message ?? 'Try a more specific name, specialty, or location.'}</p>}
-      {loading ? <div className="directory-loading"><NetworkGlyph active /><p>Searching physician identities…</p></div> : <><div className="lam-list quiet">{visibleResults.map((profile) => <DirectoryResult
-        key={profile.npi}
-        profile={profile}
-        navigate={navigate}
-        inNetwork={memberNpis.has(profile.npi)}
-        busy={pendingNpi === profile.npi}
-        onAdd={() => void changeMembership(profile.npi, () => addNetworkMember(profile.npi))}
-        onRemove={() => void changeMembership(profile.npi, () => removeNetworkMember(profile.npi))}
-      />)}{results.length === 0 && response?.directory_status !== 'unavailable' && response?.directory_status !== 'invalid_query' && <div className="empty-state"><NetworkGlyph /><h2>No physicians found</h2><p>Try fewer terms or search by a city, state, or specialty.</p></div>}</div>{hiddenResults > 0 && <button className="text-button results-expand" onClick={() => setShowAllResults(true)}>Show {hiddenResults} more result{hiddenResults === 1 ? '' : 's'} →</button>}</>}
-    </section>
+    <details className="network-visual-section quiet">
+      <summary><h2>Network visualization</h2><em>View</em></summary>
+      <p className="network-visual-intro">Select a physician agent to inspect its practice footprint, activation state, and relationship to yours. Edges appear only for completed Lamina consultations.</p>
+      {network && <><NetworkGraph network={network} selectedId={selectedId} onSelect={setSelectedId} filter={graphFilter} onFilter={setGraphFilter} />{selected && <AgentDetail agent={selected} navigate={navigate} close={() => setSelectedId(null)} />}</>}
+      <p className="network-roster-note">The visualization shows physician agents involved in Lamina consultations. Added relationships without a consultation appear in Your network above.</p>
+    </details>
+
+    {addOpen && <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setAddOpen(false) }}>
+      <div className="post-flow-dialog" role="dialog" aria-modal="true" aria-label="Add a colleague">
+        <button className="text-button post-flow-close" onClick={() => setAddOpen(false)} aria-label="Close">×</button>
+        <p className="eyebrow">Add a colleague</p>
+        <h2>Add physicians and practices you already work with.</h2>
+        <p className="panel-intro">Lamina preserves this relationship alongside your broader network.</p>
+        <p className="network-boundary-notice quiet">Directory identities are sourced from NPPES; a reserved identity does not imply that the physician participates in Lamina. Adding a physician records your relationship — it does not activate their agent.</p>
+        <form className="directory-search-panel quiet" onSubmit={runSearch}>
+          <label className="directory-search-main"><span>Physician name</span><input value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} placeholder="e.g. Jane Smith" /></label>
+          <label><span>Specialty</span><input value={filters.specialty} onChange={(event) => setFilters({ ...filters, specialty: event.target.value })} placeholder="e.g. Nephrology" /></label>
+          <label><span>Location</span><input value={filters.location} onChange={(event) => setFilters({ ...filters, location: event.target.value })} placeholder="City or state" /></label>
+          <button className="button-secondary" type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button>
+        </form>
+        {error && <div className="error-banner" role="alert">{error}</div>}
+        <div className="directory-results-heading quiet"><h3>{filters.q || filters.specialty || filters.location ? 'Matching physicians' : 'Synthetic demo physicians'}</h3><span>{response?.count ?? 0} shown{response?.directory_available ? ` · ${response.directory_records.toLocaleString()} directory records` : ''}</span></div>
+        {response?.directory_status === 'unavailable' && <p className="directory-status-notice" role="status">{response.directory_message ?? 'The national provider directory is temporarily unavailable.'} Your Lamina network remains accessible.</p>}
+        {response?.directory_status === 'invalid_query' && <p className="directory-status-notice" role="status">{response.directory_message ?? 'Try a more specific name, specialty, or location.'}</p>}
+        {loading ? <div className="directory-loading"><NetworkGlyph active /><p>Searching physician identities…</p></div> : <><div className="lam-list quiet">{visibleResults.map((profile) => <DirectoryResult
+          key={profile.npi}
+          profile={profile}
+          navigate={navigate}
+          inNetwork={memberNpis.has(profile.npi)}
+          busy={pendingNpi === profile.npi}
+          onAdd={() => void changeMembership(profile.npi, () => addNetworkMember(profile.npi))}
+          onRemove={() => void changeMembership(profile.npi, () => removeNetworkMember(profile.npi))}
+        />)}{results.length === 0 && response?.directory_status !== 'unavailable' && response?.directory_status !== 'invalid_query' && <div className="empty-state"><NetworkGlyph /><h2>No physicians found</h2><p>Try fewer terms or search by a city, state, or specialty.</p></div>}</div>{hiddenResults > 0 && <button className="text-button results-expand" onClick={() => setShowAllResults(true)}>Show {hiddenResults} more result{hiddenResults === 1 ? '' : 's'} →</button>}</>}
+      </div>
+    </div>}
   </div>
 }
 

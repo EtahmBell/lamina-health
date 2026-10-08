@@ -45,8 +45,8 @@ test('switching identity remounts the owner subtree so every page refetches with
 })
 
 test('the owner shell never offers Patients, Consultations, Network, or Feed — those capabilities do not exist yet', () => {
-  const navBlock = slice(owner, 'const OWNER_NAV_ITEMS', 'function IdentitySwitcher')
-  assert.deepEqual([...navBlock.matchAll(/title: '([^']+)'/g)].map((m) => m[1]), ['Home', 'Profile', 'My Agent'])
+  const navBlock = slice(owner, 'const OWNER_NAV_ITEMS', 'function AccountMenu')
+  assert.deepEqual([...navBlock.matchAll(/title: '([^']+)'/g)].map((m) => m[1]), ['Dashboard'])
   assert.doesNotMatch(navBlock, /Patients|Consultations|Network|Feed/)
 })
 
@@ -106,10 +106,9 @@ test('the owner Train route reuses the exact same TrainingPage the demo uses, no
   assert.match(owner, /<TrainingPage personaId="owner"/)
 })
 
-test('OwnerAgentPage reuses AgentOverviewPanel, PracticeTab, TrainTab, and ChatTab directly rather than re-implementing them', () => {
+test('OwnerAgentPage reuses AgentOverviewPanel (which itself absorbs PracticeTab), TrainTab, and ChatTab directly rather than re-implementing them', () => {
   const page = agentPage()
-  assert.match(page, /<AgentOverviewPanel overview=\{overview\}/)
-  assert.match(page, /<PracticeTab representation=\{representation\}/)
+  assert.match(page, /<AgentOverviewPanel overview=\{overview\} representation=\{representation\}/)
   assert.match(page, /<TrainTab trainProjection=\{trainProjection\}/)
   assert.match(page, /<ChatTab personaId="owner"/)
 })
@@ -145,7 +144,7 @@ test('posts/publishing are not a major owner surface: no Publish button is wired
 test('Practice Representation surfaces unresolved gaps honestly instead of silently showing a sparse, unexplained page', () => {
   const tab = slice(engagement, 'export function PracticeTab', 'function trainHistorySummaryLine')
   assert.match(tab, /gaps\.practice_areas_needing_input/)
-  assert.match(tab, /Still building this representation/)
+  assert.match(tab, /Still needs input/)
 })
 
 test('pending proposed learnings are never displayed as confirmed Practice Representation', () => {

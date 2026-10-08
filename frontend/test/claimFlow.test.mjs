@@ -297,7 +297,7 @@ test('refreshing at /claim/provider/:npi re-derives state from the backend, not 
 test('the Physician Network claim link routes into the one canonical claim route', () => {
   assert.match(network, /navigate\(claimPath\)/)
   assert.match(network, /const claimPath = `\/claim\/provider\/\$\{encodeURIComponent\(profile\.npi\)\}`/)
-  assert.match(network, /claim this identity →/i)
+  assert.match(network, /Claim this identity <span>→<\/span>/)
 })
 
 test('Physician Network no longer runs a second claim/verify/activate UX', () => {
@@ -305,16 +305,13 @@ test('Physician Network no longer runs a second claim/verify/activate UX', () =>
   assert.doesNotMatch(providerProfile(), /preferences-form|Configure physician preferences/)
 })
 
-test('Add to my network and Claim this identity stay separate actions in search results', () => {
+test('a colleague-directory row offers Add/Remove and View profile only — no claim action on another physician\'s row (post-8B consolidation)', () => {
   const result = slice(network, 'function DirectoryResult', 'function NetworkRelationshipRow')
-  assert.match(result, /Add to my network/)
-  assert.match(result, /Claim this identity/)
-  const addIndex = result.indexOf('Add to my network')
-  const claimIndex = result.indexOf('Claim this identity')
-  assert.notEqual(addIndex, -1)
-  assert.notEqual(claimIndex, -1)
+  assert.match(result, /Add colleague/)
+  assert.match(result, /Remove colleague/)
+  assert.doesNotMatch(result, /Claim this identity/)
   assert.match(result, /onClick=\{onAdd\}/)
-  assert.match(result, /onClick=\{\(\) => navigate\(`\/claim\/provider\/\$\{encodeURIComponent\(profile\.npi\)\}`\)\}/)
+  assert.match(result, /onClick=\{onRemove\}/)
 })
 
 test('Profile links to My physician identities only when a real account session exists, and never represents Lucy as that account', () => {
