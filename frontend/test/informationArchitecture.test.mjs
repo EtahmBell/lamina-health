@@ -111,7 +111,6 @@ test('the editorial referral brief is gone from the patient page', () => {
   assert.doesNotMatch(source, /Specialty care referral brief/)
   assert.doesNotMatch(source, /Clinical question/)
   assert.doesNotMatch(source, /Progressive renal decline is occurring/)
-  assert.doesNotMatch(source, /patient-row-avatar large/)
 })
 
 test('the patient page leads with a compact identity, current issue, then the Next step panel and clinical context', () => {

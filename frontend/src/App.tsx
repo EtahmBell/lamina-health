@@ -650,10 +650,18 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   </details>
   const nextStepState: 'idle' | 'idle-prior' | 'consulting' | 'ready' = consulting ? 'consulting' : consultation ? 'ready' : priorConsultation ? 'idle-prior' : 'idle'
   const currentIssue = demoPatient?.reason ?? patient.diagnoses[0] ?? null
+  const patientDisplayName = demoPatient?.name ?? cleanName(patient.display_name)
+  const patientInitials = patientDisplayName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
   return <ProductShell navigate={navigate} section="patients"><main className="page-shell patient-page">
     <button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
-    <header className="patient-identity"><h1>{demoPatient?.name ?? cleanName(patient.display_name)}</h1><p>{patient.age} years · {patient.location} · <span className="patient-id">ID {patient.id}</span></p></header>
+    <header className="patient-identity"><span className="patient-row-avatar large">{patientInitials}</span><div><h1>{patientDisplayName}</h1><p>{patient.age} years · {patient.location} · <span className="patient-id">ID {patient.id}</span></p></div></header>
     {currentIssue && <p className="patient-current-issue"><span className="section-label">Current issue</span>{currentIssue}</p>}
+    <div className="patient-fact-strip">
+      <div><span className="section-label">Age</span><strong>{patient.age}</strong></div>
+      <div><span className="section-label">Patient ID</span><strong>{patient.id}</strong></div>
+      <div><span className="section-label">Primary clinician</span><strong>{PCP_NAME}</strong></div>
+      <div><span className="section-label">Care focus</span><strong>{currentIssue ?? 'General care'}</strong></div>
+    </div>
     {error && <div className="error-banner" role="alert"><strong>Unable to complete this action.</strong> {error}</div>}
     <div className="patient-detail-grid">
       <aside className="patient-next-step">
