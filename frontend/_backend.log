@@ -1,0 +1,30 @@
+INFO:     Started server process [42204]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51639 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49959 - "OPTIONS /api/workspace/consultations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49847 - "OPTIONS /api/workspace/network/feed?perspective=lucy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62290 - "OPTIONS /api/workspace/physician/agent-overview?perspective=lucy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49959 - "OPTIONS /api/workspace/consultations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64590 - "OPTIONS /api/workspace/network/feed?perspective=lucy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49669 - "OPTIONS /api/workspace/physician/agent-overview?perspective=lucy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51653 - "GET /api/workspace/consultations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59731 - "GET /api/workspace/network/feed?perspective=lucy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53116 - "GET /api/workspace/network/feed?perspective=lucy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51653 - "GET /api/workspace/consultations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64757 - "GET /api/workspace/physician/agent-overview?perspective=lucy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51653 - "GET /api/workspace/physician/agent-overview?perspective=lucy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49669 - "OPTIONS /api/workspace/activity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64590 - "OPTIONS /api/workspace/activity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51653 - "GET /api/workspace/activity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64757 - "GET /api/workspace/activity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64590 - "OPTIONS /api/patients/patient-ckd-htn-001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49669 - "OPTIONS /api/workspace/network HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64590 - "OPTIONS /api/workspace/network HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64757 - "GET /api/workspace/activity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59731 - "GET /api/workspace/activity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53116 - "GET /api/workspace/network HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59731 - "GET /api/workspace/network HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51653 - "GET /api/patients/patient-ckd-htn-001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59731 - "GET /api/patients/patient-ckd-htn-001 HTTP/1.1" 200 OK
