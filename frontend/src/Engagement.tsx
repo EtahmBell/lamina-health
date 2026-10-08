@@ -140,12 +140,12 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath }: 
   const plan = agentBannerPlan(training, trainPath)
   return <section className="agent-banner">
     <div className="agent-banner-main">
+      <div className="agent-banner-glyph" aria-hidden="true"><span className="agent-banner-ring one" /><span className="agent-banner-ring two" /><LaminaMark active /></div>
       <p className="eyebrow">Your agent is active</p>
       <h2>A little more you. A lot more helpful.</h2>
       <p className="agent-banner-support">{plan?.support ?? 'Training is up to date.'}</p>
       <button className="text-button agent-banner-view" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
     </div>
-    <div className="agent-banner-glyph" aria-hidden="true"><span className="agent-banner-ring one" /><span className="agent-banner-ring two" /><LaminaMark active /></div>
     <div className="agent-banner-action">
       <p className="eyebrow">A little input. More thoughtful care.</p>
       <h3>Make your agent more like you.</h3>

@@ -44,7 +44,7 @@ test('no optional interaction is required before consulting the network', () => 
 
 test('the Next step panel is sticky and sits beside clinical context on desktop', () => {
   assert.ok(someRule('.patient-next-step', /position: sticky/))
-  assert.ok(someRule('.patient-detail-grid', /grid-template-columns: 1fr 300px/))
+  assert.ok(someRule('.patient-detail-grid', /grid-template-columns: 1\.25fr 1fr/))
 })
 
 /* ----------------------------------------------------------------- mobile */

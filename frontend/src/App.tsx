@@ -109,7 +109,7 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
     <aside className="sidebar">
       <div><button className="brand-button" onClick={() => navigate('/')} aria-label="Return to Lamina portal"><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
         <nav aria-label="Primary navigation">
-          {items.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span><b>{item.title}</b></span></button>)}
+          {items.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span className="nav-item-label">{item.title}</span></button>)}
         </nav>
       </div>
       {perspective === 'specialist'
@@ -667,7 +667,10 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
       <aside className="patient-next-step">
         <p className="eyebrow">Next step</p>
         {nextStepState === 'consulting' && <div className="next-step-card consulting"><NetworkMark active /><h2>Your agent is consulting the network…</h2><p>Evaluating specialty fit, required workup, and access.</p></div>}
-        {nextStepState === 'ready' && consultation && <div className="next-step-card ready"><NetworkMark resolved /><h2>A recommendation is ready for your review.</h2><p><strong>{cleanName(consultation.recommended_physician.physician_name)}</strong><br />{consultation.recommended_physician.specialty}</p><button className="text-button" onClick={() => scrollToRecommendation('smooth')}>Review recommendation ↓</button></div>}
+        {nextStepState === 'ready' && consultation && <>
+          <div className="next-step-card ready"><span className="next-step-pill"><NetworkMark resolved />Your agent got back to you</span><h2>A recommendation is ready for your review.</h2><p>Review the match below, then choose how to move care forward.</p></div>
+          <div className="next-step-match"><p className="match-label">Matched by your agent</p><strong>{cleanName(consultation.recommended_physician.physician_name)}</strong><span>{consultation.recommended_physician.specialty}</span><button className="text-button" onClick={() => scrollToRecommendation('smooth')}>Review recommendation ↓</button></div>
+        </>}
         {nextStepState === 'idle-prior' && <div className="next-step-card idle">
           <NetworkMark resolved /><h2>Previous network consultation available.</h2>
           <p><strong>{cleanName(activity?.latest_recommended_physician || '')}</strong>{activity?.latest_recommended_specialty ? <><br />{activity.latest_recommended_specialty}</> : null}</p>
