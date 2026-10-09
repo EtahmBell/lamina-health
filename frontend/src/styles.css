@@ -1522,43 +1522,69 @@ button.lam-row:hover { background: #fff9f1; }
 .patient-current-issue { max-width: 68ch; margin: 14px 0 0; color: var(--clinical); font-family: var(--font-display); font-size: 1.02rem; line-height: 1.5; }
 .patient-current-issue .section-label { display: block; margin-bottom: 4px; }
 .patient-header-divider { margin: 22px 0 0; border: 0; border-top: 1px solid var(--border); }
+/* design_references/index_lamina.html's .detail-grid uses this exact ratio --
+   the complaint was never the column proportions, only the right column's
+   content density (see .best-fit-card.compact etc. below). */
 .patient-detail-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 23px; margin-top: 24px; align-items: start; }
-.patient-next-step { grid-column: 2; grid-row: 1; position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow-y: auto; }
+/* Sticky, but never its own scroll container -- the main page is the only
+   scroller. A disclosure that makes this column tall simply scrolls past the
+   bottom of the viewport like any sticky element would; that's acceptable. */
+.patient-next-step { grid-column: 2; grid-row: 1; position: sticky; top: 76px; }
+.patient-next-step > .eyebrow { margin-bottom: 14px; }
 .patient-clinical-main { grid-column: 1; grid-row: 1; min-width: 0; }
 .next-step-card { border: 1px solid transparent; border-radius: 7px; background: #f3f4ed; padding: 19px; }
-.next-step-card h2 { margin: 10px 0 0; font-size: 1.05rem; }
+.next-step-card h2 { margin: 6px 0 0; font-size: 1.05rem; }
 .next-step-card p { margin: 8px 0 0; color: var(--text-secondary); font-size: .76rem; line-height: 1.5; }
 .next-step-card small { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .62rem; }
 .next-step-card .button-primary, .next-step-card .consult-button { margin-top: 16px; }
 .next-step-card .text-button { margin-top: 14px; }
 .next-step-card.consulting { background: var(--sage-surface); text-align: center; }
-.next-step-ready-lead { margin: 10px 0 14px; color: var(--clinical); font-family: var(--font-display); font-size: .96rem; }
+.next-step-state-label { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: .62rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.next-step-card.consulting .next-step-state-label { color: var(--accent-hover); justify-content: center; width: 100%; }
 .ai-spark { display: inline-block; color: var(--accent); }
-.next-step-card.consulting .ai-spark { display: block; margin: 0 auto 10px; font-size: 1.4rem; }
 .ai-spark.pulsing { animation: ai-spark-pulse 1.6s ease-in-out infinite; }
 @keyframes ai-spark-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .ai-spark.pulsing { animation: none; } }
 .next-step-card details.network-optional { margin-top: 16px; }
 details.network-optional summary { min-height: 0; padding: 0; border: 0; background: none; margin: 14px 0 9px; color: var(--text-secondary); font-size: .58rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 details.network-optional { border: 0; background: none; margin-top: 0; padding: 0; }
-/* The full recommendation now renders inside the narrower sticky rail (see
-   .patient-next-step) instead of the wide main column -- the two-column
-   sub-grids used by .best-fit-body/.option-grid/.evidence-grid need to
-   stack here, while ConsultationRecordPage's wide single-column usage of
-   the same component is untouched. */
-.patient-next-step .recommendations { margin-top: 0; }
-.patient-next-step .best-fit-body { grid-template-columns: 1fr; }
-.patient-next-step .option-grid { grid-template-columns: 1fr; }
-.patient-next-step .evidence-grid { grid-template-columns: repeat(2, 1fr); }
-.patient-next-step .best-fit-physician h2 { font-size: 1.4rem; }
-.clinical-timeline-list { margin: 0; padding: 0; list-style: none; }
-.clinical-timeline-list li { display: flex; flex-direction: column; gap: 2px; }
-.clinical-timeline-list li + li { margin-top: 10px; }
-.clinical-timeline-list strong { color: var(--clinical); font-size: .68rem; }
-.clinical-timeline-list span { color: var(--text-secondary); font-size: .64rem; }
+
+/* Recommendation card: compact by default (design_references/'s .specialist is
+   the model -- name, specialty, one fit line, one metadata line, one rationale
+   sentence, one action). Everything denser lives behind a disclosure. */
+.best-fit-card.compact { padding: 19px; }
+.best-fit-card.compact .best-fit-physician { padding: 0; gap: 12px; }
+.best-fit-card.compact .best-fit-physician h2 { margin: 0; font-size: 1.15rem; }
+.best-fit-card.compact .best-fit-physician p { margin: 2px 0 0; }
+.fit-indicator { margin: 14px 0 0; color: var(--success); font-size: .68rem; font-weight: 700; }
+.fit-meta { margin: 3px 0 0; color: var(--text-secondary); font-size: .68rem; }
+.fit-rationale { margin: 10px 0 0; color: var(--clinical); font-size: .74rem; line-height: 1.5; }
+.match-details { margin-top: 10px; }
+.alternatives-list { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+.alternative-row { padding: 10px 0; border-top: 1px solid var(--border); }
+.alternative-row:first-child { border-top: 0; }
+.alternative-row > div { display: flex; align-items: baseline; gap: 8px; }
+.alternative-row strong { font-size: .76rem; }
+.alternative-row > div > span { color: var(--text-secondary); font-size: .62rem; }
+.alternative-row p { margin: 4px 0 0; color: var(--text-secondary); font-size: .66rem; line-height: 1.45; }
+.agent-consult-count { margin: 0 0 12px; color: var(--text-secondary); font-size: .6rem; }
+
+/* Patient history: a quiet narrative timeline (design_references/'s .event),
+   not another dense data card. One thin connecting line, generous vertical
+   rhythm, date as quiet metadata, a title, one supporting sentence. */
+.patient-history-section { margin-top: 30px; }
+.patient-history-section h2 { margin: 0; font-size: 1.3rem; }
+.patient-history-section > .page-intro { margin: 7px 0 0; }
+.clinical-timeline { margin-top: 24px; }
+.timeline-event { position: relative; margin-left: 5px; border-left: 1px solid var(--border); padding: 0 0 24px 22px; }
+.timeline-event:last-child { padding-bottom: 0; }
+.timeline-event time { display: block; margin-bottom: 4px; color: var(--text-secondary); font-size: .6rem; }
+.timeline-event h4 { margin: 0; color: var(--clinical); font-family: var(--font-display); font-size: .85rem; font-weight: 500; }
+.timeline-event p { margin: 5px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.6; }
+
 @media (max-width: 900px) {
   .patient-detail-grid { grid-template-columns: 1fr; }
-  .patient-next-step { grid-column: 1; grid-row: 1; position: static; max-height: none; overflow-y: visible; }
+  .patient-next-step { grid-column: 1; grid-row: 1; position: static; }
   .patient-clinical-main { grid-column: 1; grid-row: 2; }
 }
 

@@ -529,6 +529,7 @@ function ConsultationLog({ messages, focusEventId, highlight }: { messages: Cons
 function RecommendationView({ consultation, navigate, focusEventId = null, recordId }: { consultation: Consultation; navigate: Navigate; focusEventId?: string | null; recordId?: number }) {
   const [networkOpen, setNetworkOpen] = useState(Boolean(focusEventId))
   const [highlight, setHighlight] = useState(Boolean(focusEventId))
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [alternativesOpen, setAlternativesOpen] = useState(false)
   const [referralStarted, setReferralStarted] = useState(false)
   const [affirmed, setAffirmed] = useState(false)
@@ -550,23 +551,41 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   const anemiaCase = primary.specialty === 'Gastroenterology'
   const patientFact = (term: string) => consultation.patient_facts_used.find((fact) => fact.toLowerCase().includes(term))
   const reasons = (anemiaCase ? [patientFact('hemoglobin declined'), patientFact('no documented prior'), explicitRule] : [patientFact('creatinine'), patientFact('egfr'), explicitRule]).filter(Boolean) as string[]
+  const leadReason = reasons[0]
   const shortName = cleanName(primary.physician_name).split(' ').at(-1)
   const selectedClarificationIndex = consultation.messages.findIndex((message) => message.message_type === 'follow_up_question' && message.sender_name.includes(shortName || ''))
   const selectedClarificationAnswer = selectedClarificationIndex >= 0 ? consultation.messages.slice(selectedClarificationIndex + 1).find((message) => message.message_type === 'follow_up_answer') : undefined
   return <section className="recommendations" aria-label="Specialist recommendations" tabIndex={-1}>
-    <article className="best-fit-card"><div className="best-fit-label"><span>{anemiaCase ? 'Recommended first referral' : 'Recommended physician'}</span><small>Network resolved · {consultation.consultation.length} agents consulted</small></div><div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(primary.physician_name)}</span><div><h2>{cleanName(primary.physician_name)}</h2><p>{primary.specialty}</p></div><div className="fit-summary"><span>Strong clinical fit</span><span>{primary.availability.replace('Approximately ', '')}</span><span>{insuranceLabel(primary.insurance_status)}</span></div></div>
-      <div className="best-fit-body"><section><p className="section-label">Why this match</p><ul className="reason-list">{reasons.map((reason) => <li key={reason}><span>✓</span>{reason}</li>)}</ul>{selectedClarificationAnswer && <p className="clarification-note">Clarified before referral: {selectedClarificationAnswer.summary}</p>}</section><section className="before-visit"><p className="section-label">Before referral</p>{consultation.before_referral.map((item) => <span key={item}>{item.includes('(') ? item.match(/\(([^)]+)\)/)?.[1] : item}<small>{item}</small></span>)}</section></div>
-      <div className="recommendation-access"><div><span>Access</span><strong>{primary.availability}</strong></div><div><span>Insurance</span><strong>{primary.insurance_status}</strong></div></div>
-      <div className="recommendation-feedback"><span>Does this reflect how you would practice?</span>{affirmed ? <em role="status">Noted. Nothing was changed on your agent.</em> : <><button className="text-button" onClick={() => setAffirmed(true)}>Yes</button><button className="text-button" onClick={() => navigate(calibrationPath(learningKeyForPatient(consultation.patient_id), consultation.patient_id, recordId))}>Not quite <b>→</b></button></>}</div>
+    {/* Compact by default (see design_references/) -- only name, specialty, one fit
+     * indicator, one metadata line, one rationale sentence, and the primary action.
+     * Everything denser lives behind "Review match details" below. */}
+    <article className="best-fit-card compact">
+      <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(primary.physician_name)}</span><div><h2>{cleanName(primary.physician_name)}</h2><p>{primary.specialty}</p></div></div>
+      <p className="fit-indicator">Strong clinical fit</p>
+      <p className="fit-meta">{insuranceLabel(primary.insurance_status)} · {primary.availability}</p>
+      {leadReason && <p className="fit-rationale">{leadReason}</p>}
       <div className="best-fit-actions"><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(primary.physician_name)} · {primary.specialty}</span><span>Workup: {consultation.before_referral.join(' · ')}</span><span>No referral was transmitted.</span></div>}</div>
     </article>
 
+    <div className="recommendation-feedback"><span>Does this reflect how you would practice?</span>{affirmed ? <em role="status">Noted. Nothing was changed on your agent.</em> : <><button className="text-button" onClick={() => setAffirmed(true)}>Yes</button><button className="text-button" onClick={() => navigate(calibrationPath(learningKeyForPatient(consultation.patient_id), consultation.patient_id, recordId))}>Not quite <b>→</b></button></>}</div>
+
+    <section className="options-section"><button className="options-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Review match details <span>{detailsOpen ? '−' : '+'}</span></button>
+      {detailsOpen && <div className="match-details">
+        <div className="best-fit-body"><section><p className="section-label">Why this match</p><ul className="reason-list">{reasons.map((reason) => <li key={reason}><span>✓</span>{reason}</li>)}</ul>{selectedClarificationAnswer && <p className="clarification-note">Clarified before referral: {selectedClarificationAnswer.summary}</p>}</section><section className="before-visit"><p className="section-label">Before referral</p>{consultation.before_referral.map((item) => <span key={item}>{item.includes('(') ? item.match(/\(([^)]+)\)/)?.[1] : item}<small>{item}</small></span>)}</section></div>
+        <div className="recommendation-access"><div><span>Access</span><strong>{primary.availability}</strong></div><div><span>Insurance</span><strong>{primary.insurance_status}</strong></div></div>
+      </div>}
+    </section>
+
     <section className="options-section"><button className="options-toggle" aria-expanded={alternativesOpen} onClick={() => setAlternativesOpen(!alternativesOpen)}>Other referral options <span>{alternativesOpen ? '−' : '+'}</span></button>
-      {alternativesOpen && <div className="option-grid">{consultation.alternatives.map((option, index) => <article className="option-card" key={option.physician_id}><div><span className="mini-avatar">{physicianInitials(option.physician_name)}</span><span className="option-label">{anemiaCase && option.specialty === 'Haematology' ? 'Appropriate later' : index === 0 ? 'Strong alternative' : 'Additional option'}</span></div><h3>{cleanName(option.physician_name)}</h3><p className="option-specialty">{option.specialty}</p><div className="option-meta"><span>{option.clinical_fit} fit</span><span>{option.availability.replace('Approximately ', '')}</span><span>{insuranceLabel(option.insurance_status)}</span></div><p className="option-reason">{option.reason}</p></article>)}</div>}
+      {alternativesOpen && <div className="alternatives-list">{consultation.alternatives.map((option) => <div className="alternative-row" key={option.physician_id}>
+        <div><strong>{cleanName(option.physician_name)}</strong><span>{option.specialty}</span></div>
+        <p>{option.reason}{option.availability ? ` · ${option.availability.replace('Approximately ', '')}` : ''}</p>
+      </div>)}</div>}
     </section>
 
     <section className="network-transparency"><button className="network-transparency-toggle" onClick={() => setNetworkOpen(!networkOpen)} aria-expanded={networkOpen}><span><b>How your agent handled this</b></span><em>{networkOpen ? 'Hide' : 'View'} <i>⌄</i></em></button>
       {networkOpen && <div className="network-record">
+        <p className="agent-consult-count">{consultation.consultation.length} physician agent{consultation.consultation.length === 1 ? '' : 's'} consulted</p>
         <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}</div>
         <div className="record-note">Deliberate structured messages and evidence only. Hidden model chain-of-thought is not stored or shown.</div><ConsultationLog messages={consultation.messages} focusEventId={focusEventId} highlight={highlight} /><div className="evaluation-record-heading">Physician evaluation records</div>{consultation.consultation.map((agent) => { const rule = evidenceFor(agent, 'explicit_physician_rule'); const history = evidenceFor(agent, 'historical_practice_similarity'); return <details key={agent.physician_id} open={agent.physician_id === primary.physician_id}><summary><span className="mini-avatar">{physicianInitials(agent.physician_name)}</span><span className="agent-name"><b>{cleanName(agent.physician_name)}</b><small>{agent.specialty}</small></span><span className={`decision-badge ${agent.clinical_fit}`}>{agent.accepts_case ? agent.clinical_fit === 'strong' ? 'Strong fit' : 'Accepts' : 'Redirect'}</span><span className="chevron">⌄</span></summary><div className="structured-evidence"><p>{agent.reason}</p><div className="evidence-grid"><div><span>Decision</span><strong>{agent.accepts_case ? 'Accepts case' : 'Redirects / does not accept'}</strong></div><div><span>Availability</span><strong>{agent.availability}</strong></div><div><span>Insurance</span><strong>{insuranceLabel(agent.insurance_status)}</strong></div><div><span>Required workup</span><strong>{agent.required_workup.join(' · ')}</strong></div>{rule && <div className="wide"><span>Relevant physician rule</span><strong>{rule}</strong></div>}{history && <div className="wide"><span>Historical-practice signal</span><strong>{history}</strong></div>}</div></div></details> })}
         <p>These are structured inputs and recorded conclusions, not private model reasoning.</p>
@@ -678,9 +697,9 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
     <div className="patient-detail-grid">
       <aside className="patient-next-step">
         <p className="eyebrow">Next step</p>
-        {nextStepState === 'consulting' && <div className="next-step-card consulting"><span className="ai-spark pulsing" aria-hidden="true">✦</span><h2>Finding a specialist</h2><p>Your agent is consulting the network and comparing clinical fit, referral requirements, and access.</p></div>}
+        {nextStepState === 'consulting' && <div className="next-step-card consulting"><span className="next-step-state-label"><span className="ai-spark pulsing" aria-hidden="true">✦</span> Consulting the network</span><h2>Your agent is finding a match.</h2><p>Comparing clinical fit, referral requirements, access, and your practice preferences…</p></div>}
         {nextStepState === 'ready' && consultation && <>
-          <p className="next-step-ready-lead">A specialist is ready for your review.</p>
+          <div className="next-step-card ready"><span className="next-step-state-label">✓ Your agent got back to you</span><h2>A specialist is ready for your review.</h2><p>Review the match below, then choose how to move care forward.</p></div>
           <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} />
         </>}
         {nextStepState === 'idle-prior' && <div className="next-step-card idle">
@@ -700,6 +719,21 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
         </div>}
       </aside>
       <div className="patient-clinical-main">
+        {(consultation || currentIssue) && <section className="patient-history-section" aria-labelledby="patient-history-heading">
+          <h2 id="patient-history-heading">Patient history</h2>
+          <p className="page-intro">The story so far, all in one place.</p>
+          <div className="clinical-timeline">
+            {consultation && <div className="timeline-event">
+              {activity?.latest_consulted_at && <time>{formatTime(activity.latest_consulted_at)}</time>}
+              <h4>Agent returned a specialist recommendation</h4>
+              <p>{cleanName(consultation.recommended_physician.physician_name)} · {consultation.recommended_physician.specialty}</p>
+            </div>}
+            {currentIssue && <div className="timeline-event">
+              <h4>{currentIssue}</h4>
+              <p>Reason for this referral workflow, as recorded in the patient's chart.</p>
+            </div>}
+          </div>
+        </section>}
         <section className="clinical-overview" aria-labelledby="clinical-overview-heading">
           <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
           <div className="clinical-columns">
@@ -726,10 +760,6 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
             <h3>Care context</h3>
             <dl>{careContext.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
           </section>
-          {consultation && <section className="clinical-block patient-timeline">
-            <h3>Patient history</h3>
-            <ul className="clinical-timeline-list"><li><strong>Agent returned a specialist recommendation</strong><span>{cleanName(consultation.recommended_physician.physician_name)} · {consultation.recommended_physician.specialty}</span></li></ul>
-          </section>}
         </section>
         <details className="source-record"><summary>View source clinical data <span>Problems, medications, full laboratory history and provenance</span></summary>
           <div className="source-record-body">

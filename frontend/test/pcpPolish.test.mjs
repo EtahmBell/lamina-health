@@ -51,8 +51,22 @@ test('the Next step panel is sticky and sits beside clinical context on desktop'
 
 test('mobile stacks the Next step panel above the clinical context, full width', () => {
   const mobileRule = [...styles.matchAll(/@media \(max-width: 900px\) \{([^]*?)\n\}/g)].map((m) => m[1]).join('\n')
-  assert.match(mobileRule, /\.patient-next-step \{ grid-column: 1; grid-row: 1; position: static;/)
+  assert.match(mobileRule, /\.patient-next-step \{ grid-column: 1; grid-row: 1; position: static; \}/)
   assert.ok(someRule('.consult-button-hero', /width: 100%/), 'the hero CTA is full-width unconditionally, not just on mobile')
+})
+
+test('the sticky Next step rail has no nested/internal scroll container', () => {
+  assert.doesNotMatch(styles, /\.patient-next-step \{[^}]*overflow-y/, 'the rail must not create a second scrollbar')
+  assert.ok(someRule('.patient-next-step', /position: sticky/))
+})
+
+test('Patient history renders as a quiet narrative timeline, not a dense data card', () => {
+  const page = patientPage()
+  assert.match(page, /className="patient-history-section"/)
+  assert.match(page, /className="clinical-timeline"/)
+  assert.match(page, /className="timeline-event"/)
+  assert.ok(someRule('.timeline-event', /border-left: 1px solid var\(--border\)/), 'a thin connecting line, not individually boxed cards')
+  assert.doesNotMatch(page, /className="timeline-event card"|className="clinical-block patient-timeline"/)
 })
 
 /* -------------------------------------------------------------- specialty */

@@ -126,8 +126,9 @@ test('consulting shows a single calm loading card in the rail -- no graph, no mu
   assert.match(run, /await consultNetwork\(patientId, context\)/)
   assert.doesNotMatch(run, /setVisibleMessageCount|setCompletion|setNetworkCollapsed/, 'no per-message replay or completion state machine remains')
   assert.doesNotMatch(app, /function ConsultationNetwork|function NetworkConsultationSummary/, 'the old graph/compact-summary components are removed, not just unused')
-  assert.match(patientPage(), /Finding a specialist/)
-  assert.match(patientPage(), /Your agent is consulting the network and comparing clinical fit, referral requirements, and access\./)
+  assert.match(patientPage(), /Consulting the network/)
+  assert.match(patientPage(), /Your agent is finding a match\./)
+  assert.match(patientPage(), /Comparing clinical fit, referral requirements, access, and your practice preferences…/)
 })
 
 test('a completed live run scrolls to the recommendation once, with no artificial delay loop', () => {

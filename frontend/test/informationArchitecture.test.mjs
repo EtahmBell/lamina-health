@@ -116,7 +116,7 @@ test('the editorial referral brief is gone from the patient page', () => {
 
 test('the patient page leads with a compact identity, current issue, then the Next step panel and clinical context', () => {
   const page = patientPage()
-  const order = ['patient-identity', 'patient-current-issue', 'patient-next-step', 'Find a specialist', 'Clinical overview']
+  const order = ['patient-identity', 'patient-current-issue', 'patient-next-step', 'Find a specialist', 'Patient history', 'Clinical overview']
   const positions = order.map((token) => page.indexOf(token))
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b))

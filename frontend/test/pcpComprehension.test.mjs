@@ -104,9 +104,28 @@ test('alternatives and the technical transparency section are both collapsed by 
   const view = recommendation()
   assert.match(view, /const \[alternativesOpen, setAlternativesOpen\] = useState\(false\)/)
   assert.match(view, /Other referral options <span>\{alternativesOpen \? '−' : '\+'\}<\/span>/)
-  assert.match(view, /alternativesOpen && <div className="option-grid">/)
+  assert.match(view, /alternativesOpen && <div className="alternatives-list">/, 'alternatives render as compact rows, not full duplicate cards')
   assert.match(view, /How your agent handled this/)
   assert.match(view, /networkOpen && <div className="network-record">/)
+})
+
+test('the recommendation-ready default card is compact -- one fit indicator, one metadata line, one rationale sentence', () => {
+  const view = recommendation()
+  assert.match(view, /<article className="best-fit-card compact">/)
+  assert.match(view, /<p className="fit-indicator">Strong clinical fit<\/p>/)
+  assert.match(view, /<p className="fit-meta">\{insuranceLabel\(primary\.insurance_status\)\} · \{primary\.availability\}<\/p>/)
+  assert.match(view, /leadReason && <p className="fit-rationale">\{leadReason\}<\/p>/)
+  assert.doesNotMatch(view, /Network resolved · \{consultation\.consultation\.length\} agents consulted/, 'the consult count is demoted out of the header')
+  assert.match(view, /\{consultation\.consultation\.length\} physician agent\{consultation\.consultation\.length === 1 \? '' : 's'\} consulted/, 'the count still exists, inside How your agent handled this')
+})
+
+test('Review match details is a collapsed-by-default disclosure holding the richer reasoning', () => {
+  const view = recommendation()
+  assert.match(view, /const \[detailsOpen, setDetailsOpen\] = useState\(false\)/)
+  assert.match(view, /Review match details <span>\{detailsOpen \? '−' : '\+'\}<\/span>/)
+  assert.match(view, /detailsOpen && <div className="match-details">/)
+  assert.match(view, /Why this match/)
+  assert.match(view, /Before referral/)
 })
 
 test('the ready state renders the full recommendation directly in the sticky rail, not a tiny teaser card', () => {
