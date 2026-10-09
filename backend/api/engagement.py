@@ -1472,7 +1472,10 @@ def network_feed(
 ) -> dict:
     records = workflow_store.history(workspace_id, limit=200)
     members = workflow_store.network_members(workspace_id)
-    eligible = related_personas(persona_id, records, members)
+    # A physician always sees their own posts in their own feed -- related_personas
+    # deliberately excludes the viewer (it answers "who else is related to me", not
+    # "what can I see"), so self-authored content is added back in here.
+    eligible = related_personas(persona_id, records, members) | {persona_id}
     items: list[dict] = []
     for fixture in SYNTHETIC_FEED_FIXTURES:
         author = fixture["physician_persona"]

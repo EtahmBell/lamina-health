@@ -292,14 +292,45 @@ test('publishing is always an explicit physician action, never automatic', () =>
 /* ------------------------------------------------------------- network feed */
 
 test('the network feed renders chronologically and never computes its own popularity ordering', () => {
-  const section = slice(engagement, 'export function NetworkFeedSection', '/* --------------------------------------------------------------------- Train */')
+  const section = slice(engagement, 'export function NetworkFeedTab', '/* --------------------------------------------------------------------- Train */')
   assert.doesNotMatch(section, /\.sort\(/, 'ordering comes from the backend (chronological_only), not a client-side re-sort')
 })
 
 test('feed cards offer professional actions only — no likes, comments, or follower counts', () => {
   const card = slice(engagement, 'function FeedCard', 'export function NetworkHighlights')
-  assert.match(card, /View profile/)
+  assert.match(card, /networkProfilePath\(perspective, item\.physician\.id\)/, 'the author name links to their profile')
   assert.doesNotMatch(card, /like|heart|comment|follower|repost/i)
+})
+
+test('the feed reads as a content-first professional stream, not a grid of action cards', () => {
+  const card = slice(engagement, 'function FeedCard', 'export function NetworkHighlights')
+  assert.match(card, /feed-post-avatar/)
+  assert.match(card, /feed-post-title/)
+  assert.match(card, /feed-post-body/)
+  assert.match(engagement, /className="feed-stream"/)
+  assert.doesNotMatch(engagement, /feed-grid|feed-card\b/)
+})
+
+test('long feed posts truncate with a See more/See less expansion instead of always showing full body', () => {
+  const card = slice(engagement, 'function FeedCard', 'export function NetworkHighlights')
+  assert.match(card, /isLong[\s\S]*See more/)
+  assert.match(card, /See less/)
+})
+
+test('feed posts render an optional static image from the Vite public directory, with no external fetching or embedded data URIs', () => {
+  const section = slice(engagement, 'function FeedPostImage', 'function feedInitials')
+  assert.match(section, /if \(!item\.image_url\) return null/, 'a post with no image_url renders text-only')
+  assert.match(section, /<img className="feed-post-image" src=\{item\.image_url\} alt=\{item\.image_alt \?\? ''\} loading="lazy" \/>/)
+  assert.doesNotMatch(engagement, /https?:\/\/.*\.(png|jpe?g|gif|webp)/i, 'no external image URLs')
+  assert.doesNotMatch(engagement, /data:image\//, 'no embedded base64 images')
+})
+
+test('image posts pick cover vs. contain media treatment from media_style, with a neutral surface behind contain figures', () => {
+  const section = slice(engagement, 'function FeedPostImage', 'function feedInitials')
+  assert.match(section, /item\.media_style === 'contain' \? 'contain' : 'cover'/)
+  assert.match(styles, /\.fit-contain \{[^}]*background: var\(--mineral-surface\)/, 'research/figure images get a neutral backing, not raw transparency')
+  assert.match(styles, /\.fit-cover \.feed-post-image \{ object-fit: cover/)
+  assert.match(styles, /\.fit-contain \.feed-post-image \{ object-fit: contain/)
 })
 
 /* ------------------------------------------------------- Physician Network */
@@ -436,7 +467,7 @@ test('caught_up renders no CTA button at all — just quiet up-to-date support t
   const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
   assert.match(card, /\{plan \? 'A few quick answers help your agent represent your practice more faithfully\.' : 'Training is up to date\.'\}/)
   assert.match(card, /\{plan && isReview && <button/, 'the review CTA only renders when agentBannerPlan returns a review action')
-  assert.match(card, /\{plan && !isReview && <>/, 'the quick-training CTA only renders when agentBannerPlan returns a non-review action')
+  assert.match(card, /\{plan && !isReview && <button/, 'the quick-training CTA only renders when agentBannerPlan returns a non-review action')
 })
 
 test('Lucy and Iain Home share the same dashboard architecture: Your Agent card + compact activity + optional network highlights, no separate specialist design', () => {

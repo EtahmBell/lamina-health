@@ -7,25 +7,24 @@ const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const network = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to))
-const directory = () => slice(network, 'export function MyNetworkTab', 'export function PhysicianProfilePage')
+const directory = () => slice(network, 'function NetworkHero', 'export function PhysicianProfilePage')
 const profile = () => slice(app, 'function SettingsPage', 'function UnfinishedPatient')
 
 /* ---------------------------------------------------------- network hero */
 
-test('the network page leads with relationships; the visualization is gone entirely, not merely collapsed (Dashboard+Network polish pass)', () => {
-  assert.match(directory(), /Your network/)
-  assert.match(directory(), /networkRoster\(network\)/)
-  assert.match(directory(), /network-specialty-group/)
-  assert.doesNotMatch(directory(), /Network visualization|network-visual-section|NetworkGraph|AgentDetail/)
+test('the network page leads with a hero, then relationships ranked by connection; the visualization is gone entirely, not merely collapsed (Dashboard+Network polish pass)', () => {
+  assert.match(directory(), /Grow your Lamina network/)
+  assert.match(directory(), /rankedNetworkList\(network\)/)
+  assert.match(directory(), /Most connected in your network/)
+  assert.doesNotMatch(directory(), /Network visualization|network-visual-section|NetworkGraph|AgentDetail|network-specialty-group/)
 })
 
-test('physicians are grouped by real specialty with their own relationship row', () => {
-  assert.match(directory(), /groups\.map\(\(group\) => .*group\.specialty/s)
-  assert.match(directory(), /<NetworkRelationshipRow key=\{member\.npi\} member=\{member\} navigate=\{navigate\} \/>/)
-  const row = slice(network, 'function NetworkRelationshipRow', 'const graphRoster')
-  assert.match(row, /membershipLabel\(member\.source\)/)
-  assert.match(row, /Last recommended \$\{interactionDate\(member\.lastRecommendation\)\}/)
-  assert.doesNotMatch(row, /member\.consultationCount/, 'synthetic run volume is not primary row copy')
+test('physicians are ranked by connection strength, not grouped by specialty', () => {
+  assert.match(directory(), /top\.map\(\(member\) => <ConnectionRow/)
+  assert.match(directory(), /rest\.map\(\(member\) => <ConnectionRow/)
+  const row = slice(network, 'function ConnectionRow', 'function NetworkHero')
+  assert.match(row, /connectionLine\(member\)/)
+  assert.doesNotMatch(row, /member\.consultationCount\b.*(?:times|time)/, 'the row uses connectionLine, not an inline literal count')
 })
 
 test('the redundant Recently consulted block is gone and marketing copy with it', () => {
@@ -45,12 +44,12 @@ test('one reserved-identity notice covers the page and states what adding does n
 /* ------------------------------------------------------- add to network */
 
 test('a directory result can be added to, and removed from, the network', () => {
-  const result = slice(network, 'function DirectoryResult', 'function NetworkRelationshipRow')
+  const result = slice(network, 'function DirectoryResult', 'function ConnectionRow')
   assert.match(result, /Add colleague/)
   assert.match(result, /inNetwork[\s\S]*Remove colleague/)
   assert.match(directory(), /addNetworkMember\(profile\.npi\)/)
   assert.match(directory(), /removeNetworkMember\(profile\.npi\)/)
-  assert.match(directory(), /await action\(\); await loadNetwork\(\)/, 'membership reloads canonical state')
+  assert.match(directory(), /await action\(\); onChanged\(\)/, 'membership reloads canonical state via the parent-owned loadNetwork')
 })
 
 test('membership is canonical workspace state, never a local presentation cache', () => {
@@ -64,7 +63,7 @@ test('membership is canonical workspace state, never a local presentation cache'
 })
 
 test('a directory row keeps the human avatar and the separate agent status badge', () => {
-  const result = slice(network, 'function DirectoryResult', 'function NetworkRelationshipRow')
+  const result = slice(network, 'function DirectoryResult', 'function ConnectionRow')
   assert.match(result, /className="lam-row-mark directory-avatar">\{initials\}/)
   assert.match(result, /<StatusBadge status=\{profile\.agent\.status\} \/>/)
   assert.doesNotMatch(result, /LaminaMark|NetworkGlyph/, 'a physician row is not an agent mark')

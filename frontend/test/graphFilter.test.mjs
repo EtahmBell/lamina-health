@@ -15,7 +15,8 @@ test('the network graph/visualization is gone from Colleagues, not merely collap
   assert.doesNotMatch(network, /GraphFilter|graphVisibility/)
 })
 
-test('Colleagues still renders the physician list directly, grouped by specialty', () => {
-  assert.match(network, /networkRoster\(network\)/)
-  assert.match(network, /network-specialty-group/)
+test('Colleagues still renders the physician list directly -- ranked by connection, not grouped by specialty (Network+Feed refinement pass)', () => {
+  assert.match(network, /rankedNetworkList\(network\)/)
+  assert.match(network, /Most connected in your network/)
+  assert.doesNotMatch(network, /networkRoster\(network\)|network-specialty-group/)
 })

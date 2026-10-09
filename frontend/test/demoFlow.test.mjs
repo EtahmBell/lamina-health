@@ -23,8 +23,8 @@ const someRule = (selector, pattern) => rulesFor(selector).some((body) => patter
 test('the add-colleague flow is a focused modal, not a dominant inline banner (post-8B)', () => {
   assert.match(network, /<p className="eyebrow">Add a colleague<\/p>/)
   assert.doesNotMatch(network, /Build your network/)
-  assert.match(network, /Add physicians and practices you already work with\./)
-  assert.match(network, /Lamina preserves this relationship alongside your broader network\./)
+  assert.match(network, /Find a physician to add to your network\./)
+  assert.match(network, /Search any physician in the U\.S\. using NPPES/)
   assert.match(network, /searchProviders/, 'the NPPES search is preserved')
   assert.match(network, /addNetworkMember\(profile\.npi\)/, 'Add colleague is preserved')
 })
@@ -87,9 +87,14 @@ test('the previous-consultation state reads as resolved, not as an alert', () =>
 })
 
 test('the patient worklist derives status from canonical consultation/implementation data, not an inferred counter', () => {
-  assert.match(patientsList(), /record\?\.has_consultation \? 'Ready for your review' : patient\.implemented \? 'Not yet consulted' : 'No action needed'/)
+  assert.match(patientsList(), /record\?\.has_consultation \? 'Ready for your review' : patient\.implemented \? 'Not yet consulted' : null/)
   assert.match(patientsList(), /record\?\.has_consultation && record\.latest_consulted_at \? shortDate\(record\.latest_consulted_at\)/)
   assert.doesNotMatch(patientsList(), /record\?\.last_consultation/)
+})
+
+test('non-implemented patients show a believable stage label, not a blanket "no action needed"', () => {
+  assert.match(patientsList(), /PATIENT_STAGE_META\[patient\.stage\]/)
+  assert.doesNotMatch(patientsList(), /No action needed/, 'the old one-size-fits-all fallback label is gone')
 })
 
 /* --------------------------------------------------------------- reset */

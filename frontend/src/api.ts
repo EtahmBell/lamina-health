@@ -317,6 +317,7 @@ export type PracticeUpdate = {
   authored_by?: 'physician'; drafted_by?: 'physician' | 'lamina_agent'
   physician_approved?: boolean; visibility?: 'network' | 'private'; source_input?: Record<string, unknown> | null
   synthetic_case?: boolean; case_safety_label?: string | null
+  image_url?: string | null; image_alt?: string | null; media_style?: 'cover' | 'contain' | null
 }
 export type ProfessionalPost = Omit<PracticeUpdate, 'type'> & { type: PostType }
 export type AgentInitializationStatus = {

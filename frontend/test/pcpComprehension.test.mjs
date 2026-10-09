@@ -21,9 +21,23 @@ test('the patients page frames itself as a referral worklist (post-8B: a worklis
 })
 
 test('the worklist uses a small controlled status vocabulary tied to real consultation/implementation data, sorted physician-action-first', () => {
-  assert.match(app, /type WorklistStatus = 'Ready for your review' \| 'Not yet consulted' \| 'No action needed'/)
-  assert.match(app, /WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = \{ 'Ready for your review': 0, 'Not yet consulted': 1, 'No action needed': 2 \}/)
+  assert.match(app, /type WorklistStatus = 'Ready for your review' \| 'Not yet consulted'/)
+  assert.match(app, /WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = \{ 'Ready for your review': 0, 'Not yet consulted': 1 \}/)
+  assert.match(app, /PATIENT_STAGE_META: Record<PatientStage,/, 'non-implemented patients get an honest stage label, not a blanket fallback')
   assert.doesNotMatch(patients(), /'Ready to consult'/)
+})
+
+test('the synthetic patient population spans a believable spread of stages, not every patient "ready for review"', () => {
+  const demoPatients = readFileSync(new URL('../src/demoPatients.ts', import.meta.url), 'utf8')
+  assert.match(demoPatients, /export type PatientStage = 'new' \| 'in_review' \| 'referred' \| 'workup' \| 'followup' \| 'closed'/)
+  const implementedCount = (demoPatients.match(/implemented: true/g) || []).length
+  assert.equal(implementedCount, 2, 'only Jordan and Maria carry a wired consult-engine case')
+  const stages = new Set([...demoPatients.matchAll(/stage: '(\w+)'/g)].map((match) => match[1]))
+  for (const stage of ['new', 'in_review', 'workup', 'referred', 'followup', 'closed']) {
+    assert.ok(stages.has(stage), `at least one patient should be in the ${stage} stage`)
+  }
+  const patientCount = (demoPatients.match(/^ {2}\{\s*$/gm) || []).length
+  assert.ok(patientCount >= 8, 'the roster should feel like an established practice, not a four-patient demo')
 })
 
 test('primary consult CTAs name the network and the referral purpose', () => {

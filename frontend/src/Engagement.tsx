@@ -129,46 +129,47 @@ function agentBannerPlan(training: TrainProjection, trainPath: string): { label:
   return null
 }
 
-type DigestTile = { key: string; label: string; headline: string; detail: string }
+type DigestTile = { key: string; count: number; label: string; detail: string }
 
 /** A recap of outcomes, never a duplicate of the raw event log (that's Recent
  * Activity). Built only from records/overview stats already fetched by the caller —
- * no new data source, and nothing is shown that current state doesn't support. */
-function buildAgentDigest(records: ConsultationRecord[], overview: AgentOverview): { summary: string | null; tiles: DigestTile[] } {
-  if (records.length === 0) return { summary: null, tiles: [] }
+ * no new data source, and nothing is shown that current state doesn't support.
+ * Structured as scannable number-first tiles, not prose — see HomeAgentCard's
+ * expanded digest grid. */
+function buildAgentDigest(records: ConsultationRecord[], overview: AgentOverview): DigestTile[] {
+  if (records.length === 0) return []
   const totalConsulted = records.reduce((sum, record) => sum + record.result.consultation.length, 0)
-  const summary = `Your agent consulted ${totalConsulted} physician agent${totalConsulted === 1 ? '' : 's'} and brought back ${records.length} recommendation${records.length === 1 ? '' : 's'}.`
   const tiles: DigestTile[] = [
     {
       key: 'coordination',
-      label: 'Patient coordination',
-      headline: `Consulted physician agents for ${records.map((record) => patientName(record.patient_id)).join(' and ')}.`,
-      detail: `${totalConsulted} physician-agent consultation${totalConsulted === 1 ? '' : 's'} across ${records.length} case${records.length === 1 ? '' : 's'}.`,
+      count: totalConsulted,
+      label: `Physician agent${totalConsulted === 1 ? '' : 's'} consulted`,
+      detail: records.map((record) => patientName(record.patient_id)).join(' · '),
     },
     {
       key: 'recommendations',
-      label: 'Recommendations returned',
-      headline: records.map((record) => `${patientName(record.patient_id)} → ${record.result.recommended_physician.specialty}`).join('   ·   '),
-      detail: records.map((record) => cleanName(record.result.recommended_physician.physician_name)).join(' · '),
+      count: records.length,
+      label: `Recommendation${records.length === 1 ? '' : 's'} returned`,
+      detail: records.map((record) => record.result.recommended_physician.specialty).join(' · '),
     },
   ]
   const confirmed = overview.stats.confirmed_practice_learnings
   if (confirmed > 0) {
     tiles.push({
       key: 'learning',
-      label: 'Agent learning',
-      headline: `${confirmed} practice preference${confirmed === 1 ? '' : 's'} ${confirmed === 1 ? 'was' : 'were'} confirmed from your training.`,
-      detail: 'Confirmed preferences shape how your agent represents your practice going forward.',
+      count: confirmed,
+      label: `Practice preference${confirmed === 1 ? '' : 's'} confirmed`,
+      detail: 'Shapes how your agent represents your practice.',
     })
   } else {
     tiles.push({
       key: 'guidance',
-      label: 'Network guidance',
-      headline: `${totalConsulted} physician agent${totalConsulted === 1 ? '' : 's'} returned workup and access guidance.`,
-      detail: 'Required workup and access details are ready in each referral record.',
+      count: totalConsulted,
+      label: 'Network guidance items surfaced',
+      detail: 'Workup and access details ready',
     })
   }
-  return { summary, tiles: tiles.slice(0, 3) }
+  return tiles.slice(0, 3)
 }
 
 /** The persistent agent object woven through the workspace, not a separate module.
@@ -188,7 +189,7 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, ma
   if (!overview) return null
   const training = overview.training
   const plan = agentBannerPlan(training, trainPath)
-  const digest = buildAgentDigest(records, overview)
+  const tiles = buildAgentDigest(records, overview)
   const isReview = training.action === 'review_training'
   return <section className="agent-banner">
     <div className="agent-banner-main">
@@ -198,28 +199,21 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, ma
       </div>
       <p className="eyebrow">Your agent</p>
       <h2>See what your agent has done while you've been away.</h2>
-      <p className="agent-banner-support">{digest.summary ?? 'No agent activity yet.'}</p>
-      {matchesReady > 0 && <p className="agent-banner-foot">✧ {matchesReady} specialist match{matchesReady === 1 ? '' : 'es'} ready for you to review</p>}
       <div className="agent-banner-view-row">
-        {digest.tiles.length > 0 && <button className="text-button agent-digest-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Hide agent update ↑' : 'See agent update ↓'}</button>}
+        {tiles.length > 0 && <button className="text-button agent-digest-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Hide agent update ↑' : 'See agent update ↓'}</button>}
         <button className="text-button agent-banner-view" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
       </div>
     </div>
     <div className="agent-banner-action">
-      <p className="eyebrow">A little input. More thoughtful care.</p>
       <h3>Make your agent more like you.</h3>
       <p className="agent-banner-support">{plan ? 'A few quick answers help your agent represent your practice more faithfully.' : 'Training is up to date.'}</p>
       {plan && isReview && <button className="button-primary" onClick={() => navigate(plan.href)}>{plan.label} <span>→</span></button>}
-      {plan && !isReview && <>
-        <button className="button-primary" onClick={() => setTrainingOpen(true)}>Answer 3 quick questions <span>→</span></button>
-        <p className="agent-banner-microcopy">3 questions · ~1 min</p>
-      </>}
+      {plan && !isReview && <button className="button-primary" onClick={() => setTrainingOpen(true)}>Answer 3 quick questions <span>→</span></button>}
     </div>
     <div className={`agent-digest-expanded ${expanded ? 'open' : ''}`} aria-hidden={!expanded}>
-      <div className="agent-digest-grid">{digest.tiles.map((tile) => <div className="agent-digest-tile" key={tile.key}>
-        <p className="agent-digest-tile-label">{tile.label}</p>
-        <strong>{tile.headline}</strong>
-        <p>{tile.detail}</p>
+      <div className="agent-digest-grid">{tiles.map((tile) => <div className="agent-digest-tile" key={tile.key}>
+        <span className="agent-digest-count" aria-hidden="true">{tile.count}</span>
+        <div><p className="agent-digest-tile-label">{tile.label}</p><p className="agent-digest-tile-detail">{tile.detail}</p></div>
       </div>)}</div>
     </div>
     {trainingOpen && <QuickTrainingModal personaId="lucy" onClose={() => setTrainingOpen(false)} onFinished={() => setTrainingOpen(false)} />}
@@ -367,14 +361,38 @@ const FEED_TYPE_LABELS: Record<string, string> = {
   share_paper: 'Research', interesting_case: 'Case reflection', other: 'Update',
 }
 
+/** Posts optionally carry a plain static path under frontend/public/post_images/
+ * (served by Vite as-is — never a data: URI, never fetched from an external host).
+ * A post with no image_url renders as text-only; nothing here requires an image. */
+function FeedPostImage({ item }: { item: NetworkFeedItem }) {
+  if (!item.image_url) return null
+  const fit = item.media_style === 'contain' ? 'contain' : 'cover'
+  return <div className={`feed-post-image-frame fit-${fit}`}>
+    <img className="feed-post-image" src={item.image_url} alt={item.image_alt ?? ''} loading="lazy" />
+  </div>
+}
+
+function feedInitials(name: string) {
+  return name.split(' ').filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase()
+}
+
 function FeedCard({ item, navigate, perspective }: { item: NetworkFeedItem; navigate: Navigate; perspective: DemoPhysicianPerspective }) {
   const when = item.published_at ?? item.created_at
-  return <article className="feed-card">
-    <div className="feed-card-physician"><strong>{item.physician.name}</strong><small>{item.physician.specialty}</small></div>
-    <span className="feed-card-tag">{FEED_TYPE_LABELS[item.type] ?? 'Update'}</span>
-    <p className="feed-card-title">{item.title}</p>
-    <p className="feed-card-body">{item.body}</p>
-    <div className="feed-card-footer"><i>{relativeDayLabel(when)}</i><button className="text-button" onClick={() => navigate(networkProfilePath(perspective, item.physician.id))}>View profile <b>→</b></button></div>
+  const [expanded, setExpanded] = useState(false)
+  const isLong = item.body.length > 220
+  const preview = isLong && !expanded ? `${item.body.slice(0, 220).trimEnd()}…` : item.body
+  return <article className="feed-post">
+    <div className="feed-post-header">
+      <span className="feed-post-avatar" aria-hidden="true">{feedInitials(item.physician.name)}</span>
+      <div className="feed-post-byline">
+        <button className="feed-post-author" onClick={() => navigate(networkProfilePath(perspective, item.physician.id))}>{item.physician.name}</button>
+        <small>{item.physician.specialty} · {relativeDayLabel(when)}</small>
+      </div>
+      <span className="feed-post-tag">{FEED_TYPE_LABELS[item.type] ?? 'Update'}</span>
+    </div>
+    <p className="feed-post-title">{item.title}</p>
+    <p className="feed-post-body">{preview}{isLong && <button type="button" className="text-button feed-post-more" onClick={() => setExpanded((value) => !value)}>{expanded ? 'See less' : 'See more'}</button>}</p>
+    <FeedPostImage item={item} />
   </article>
 }
 
@@ -419,7 +437,7 @@ export function NetworkFeedTab({ personaId, navigate, onPublished }: { personaId
       <h2>No updates from your network yet.</h2>
       <p>Updates will appear as physicians and agents in your network share professional changes.</p>
     </div>}
-    {feed && feed.items.length > 0 && <div className="feed-grid full-feed-grid">{feed.items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} />)}</div>}
+    {feed && feed.items.length > 0 && <div className="feed-stream">{feed.items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} />)}</div>}
   </div>
 }
 

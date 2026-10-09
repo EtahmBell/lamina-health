@@ -78,7 +78,8 @@ test('a selected suggestion gets a non-color-only indicator', () => {
 /* ---------------------------------------------------------------- copy */
 
 test('compact patient-row status uses network-consultation terminology', () => {
-  assert.match(demoPatients, /'Ready for network' \| 'Not yet consulted' \| 'Consultation complete'/)
+  assert.match(app, /'Ready for your review' \| 'Not yet consulted'/)
+  assert.doesNotMatch(app, /'Ready to consult'/)
   assert.doesNotMatch(demoPatients, /'Ready to consult'/)
 })
 

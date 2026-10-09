@@ -27,6 +27,9 @@ _DEFAULT_NETWORK_MEMBER_NPIS = (
     "9900000028",  # Dr. Natalie Rosen -- Hematology/Oncology
     "9900000016",  # Dr. Chris Mithel -- Dermatology
     "9900000021",  # Dr. Carson Murtuza-Lanier -- Psychiatry
+    "9900000015",  # Dr. Hamidou Guechtouli -- Infectious Disease
+    "9900000022",  # Dr. Dan Nakajima -- Pulmonology (Sleep medicine)
+    "9900000027",  # Dr. Amina Rahman -- Pulmonology
 )
 
 

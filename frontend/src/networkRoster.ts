@@ -57,12 +57,7 @@ const byRelationship = (a: Entry, b: Entry) =>
 const bySpecialty = (a: SpecialtyGroup, b: SpecialtyGroup) =>
   a.specialty.localeCompare(b.specialty)
 
-/**
- * The clinician's network: canonical recommendation destinations from completed
- * Lamina consultations, physicians they recorded a relationship with, or both.
- * Grouped by the specialty actually recorded for each physician.
- */
-export function networkRoster(network: AgentNetwork): SpecialtyGroup[] {
+function buildEntries(network: AgentNetwork): Entry[] {
   const entries: Entry[] = []
   for (const node of network.nodes) {
     const recommended = Boolean(node.relationship?.recommended_count)
@@ -107,7 +102,16 @@ export function networkRoster(network: AgentNetwork): SpecialtyGroup[] {
       added: member.added_at,
     })
   }
+  return entries
+}
 
+/**
+ * The clinician's network: canonical recommendation destinations from completed
+ * Lamina consultations, physicians they recorded a relationship with, or both.
+ * Grouped by the specialty actually recorded for each physician.
+ */
+export function networkRoster(network: AgentNetwork): SpecialtyGroup[] {
+  const entries = buildEntries(network)
   const groups = new Map<string, Entry[]>()
   for (const entry of entries) {
     const existing = groups.get(entry.specialty)
@@ -124,3 +128,30 @@ export function networkRoster(network: AgentNetwork): SpecialtyGroup[] {
 
 export const rosterSize = (groups: SpecialtyGroup[]) =>
   groups.reduce((total, group) => total + group.members.length, 0)
+
+/** A short, honest relationship line for the "most connected" ranked list — never
+ * a fabricated interaction count. */
+export const connectionLine = (member: NetworkRelationship): string =>
+  member.consultationCount > 0
+    ? `Consulted ${member.consultationCount} time${member.consultationCount === 1 ? '' : 's'}`
+    : member.recommendedCount > 0
+      ? 'Recent referral guidance'
+      : 'In your network'
+
+/**
+ * The clinician's network ranked flat by connection strength (most recommended,
+ * then most consulted, then explicitly-added, then most recently active, then
+ * name) -- "Most connected in your network", never grouped by specialty. Real
+ * derived counts only; a physician with zero interactions is never implied to
+ * have any.
+ */
+export function rankedNetworkList(network: AgentNetwork): NetworkRelationship[] {
+  const entries = buildEntries(network)
+  return [...entries].sort((a, b) =>
+    b.recommendedCount - a.recommendedCount
+    || b.consultationCount - a.consultationCount
+    || Number(isExplicit(b)) - Number(isExplicit(a))
+    || (b.lastRecommendation || b.added || '').localeCompare(a.lastRecommendation || a.added || '')
+    || a.name.localeCompare(b.name),
+  )
+}

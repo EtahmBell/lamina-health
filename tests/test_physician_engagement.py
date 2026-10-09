@@ -259,24 +259,31 @@ def test_update_lifecycle_controls_publication_and_feed_visibility(
 def test_feed_requires_membership_or_canonical_interaction(
     engagement_store: WorkflowStore,
 ) -> None:
+    """A fresh workspace is lazily seeded with a believable default network+feed
+    (see WorkflowStore._DEFAULT_NETWORK_MEMBER_NPIS) so Feed never opens empty --
+    this test asserts membership/interaction-gating on top of that baseline, not
+    against an empty-feed assumption."""
     with TestClient(app) as client:
-        assert client.get(_url("/api/workspace/network/feed", "lucy")).json()["items"] == []
+        baseline = {
+            item["physician_persona"]
+            for item in client.get(_url("/api/workspace/network/feed", "lucy")).json()["items"]
+        }
+        assert not baseline & {"iain", "onadeko", "sofia"}, "case-linked physicians are not pre-seeded"
 
         client.post("/api/workspace/network/members", json={"npi": IAIN_NPI})
         member_feed = client.get(_url("/api/workspace/network/feed", "lucy")).json()
-        assert {item["physician_persona"] for item in member_feed["items"]} == {"iain"}
-        assert member_feed["items"][0]["relationship_basis"] == [
-            "explicit_network_member"
-        ]
+        assert {item["physician_persona"] for item in member_feed["items"]} == baseline | {"iain"}
+        iain_item = next(item for item in member_feed["items"] if item["physician_persona"] == "iain")
+        assert iain_item["relationship_basis"] == ["explicit_network_member"]
 
         client.post("/api/workspace/network/members", json={"npi": CHEN_NPI})
         assert {item["physician_persona"] for item in client.get(
             _url("/api/workspace/network/feed", "lucy")
-        ).json()["items"]} == {"iain"}
+        ).json()["items"]} == baseline | {"iain"}
 
         _consult(client)
         jordan_feed = client.get(_url("/api/workspace/network/feed", "lucy")).json()
-        assert {item["physician_persona"] for item in jordan_feed["items"]} == {
+        assert {item["physician_persona"] for item in jordan_feed["items"]} == baseline | {
             "iain",
             "onadeko",
         }
@@ -284,13 +291,49 @@ def test_feed_requires_membership_or_canonical_interaction(
         _consult(client, MARIA_PATIENT_ID)
         full_feed = client.get(_url("/api/workspace/network/feed", "lucy")).json()
 
-    assert {item["physician_persona"] for item in full_feed["items"]} == {
+    assert {item["physician_persona"] for item in full_feed["items"]} == baseline | {
         "iain",
         "onadeko",
         "sofia",
+        "tiffany",
     }
     assert all(item["physician"]["synthetic"] for item in full_feed["items"])
     assert full_feed["ranking"] == "chronological_only"
+
+
+def test_synthetic_feed_is_richly_populated_with_required_themes(
+    engagement_store: WorkflowStore,
+) -> None:
+    """The feed should read like an established network, not three isolated
+    fixtures -- and must include the two required easter-egg posts (TCMNet,
+    Oyakodon) regardless of exact copy. Case-linked authors (iain/onadeko/
+    sofia/tiffany) only surface once their case is consulted, per the
+    membership/canonical-interaction gate -- see
+    test_feed_requires_membership_or_canonical_interaction."""
+    with TestClient(app) as client:
+        _consult(client)
+        _consult(client, MARIA_PATIENT_ID)
+        items = client.get(_url("/api/workspace/network/feed", "lucy")).json()["items"]
+
+    assert len(items) >= 10, "the synthetic feed should feel populated, not sparse"
+    personas = {item["physician_persona"] for item in items}
+    assert {"iain", "onadeko", "tiffany", "sofia", "lucy", "nakajima", "islam"} <= personas
+
+    bodies = " ".join(item["title"] + " " + item["body"] for item in items)
+    assert "TCMNet" in bodies, "the TCMNet easter egg must be present"
+    assert "Oyakodon" in bodies or "oyakodon" in bodies, "the Oyakodon easter egg must be present"
+
+    tcmnet = next(item for item in items if item["id"] == "fixture-lucy-tcmnet")
+    assert tcmnet["physician_persona"] == "lucy", "TCMNet is an easter egg authored by the PCP herself"
+    assert tcmnet["image_url"] == "/post_images/p11_tcmnet_knowledge_graph.jpg.png"
+    assert tcmnet["media_style"] == "contain"
+
+    oyakodon = next(item for item in items if item["id"] == "fixture-nakajima-oyakodon")
+    assert oyakodon["image_url"] == "/post_images/p12_oyakodon_health.jpg"
+
+    text_only = next(item for item in items if item["id"] == "fixture-lianne-consult-value")
+    assert text_only["image_url"] is None
+    assert text_only["media_style"] is None
 
 
 def test_full_iain_engagement_loop_is_isolated_between_workspaces(
@@ -326,7 +369,8 @@ def test_full_iain_engagement_loop_is_isolated_between_workspaces(
     assert all(question["status"] == "unanswered" for question in training_b["questions"])
     assert training_b["proposed_learnings"] == []
     assert updates_b == []
-    assert feed_b["items"] == []
+    feed_b_personas = {item["physician_persona"] for item in feed_b["items"]}
+    assert "iain" not in feed_b_personas, "visitor A's Iain consult/post must not leak into visitor B's feed"
 
 
 def test_engagement_does_not_change_clinical_recommendation(

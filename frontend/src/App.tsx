@@ -11,7 +11,7 @@ import { groupConsultationsByPatient } from './consultationGrouping.ts'
 import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, cleanName, patientName } from './demoIdentity.ts'
-import { DEMO_PATIENTS, type DemoPatientSummary } from './demoPatients.ts'
+import { DEMO_PATIENTS, type DemoPatientSummary, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkPhysicianProfilePage, NetworkTabs, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, type NetworkTab } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
@@ -237,9 +237,8 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const activity = agentActivity(ordered).slice(0, 3)
   const watchRows = buildWatchRows(latestByPatient)
   const greetingName = `Dr. ${PCP_NAME.split(' ').at(-1)}`
-  const situationSummary = currentWork.length > 0 ? `${currentWork.length} referral${currentWork.length === 1 ? '' : 's'} ${currentWork.length === 1 ? 'is' : 'are'} ready for your review.` : null
   return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page dashboard-page">
-    <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1>{situationSummary && <p className="dashboard-situation">{situationSummary}</p>}</header>
+    <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1><p className="dashboard-situation">Here's what needs your attention today.</p></header>
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
@@ -253,13 +252,27 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   </main></ProductShell>
 }
 
-/** A small controlled status vocabulary, derived only from real data (has_consultation /
- * implemented) — never invented. "Ready for your review" and "Not yet consulted" are
- * physician-action states; "No action needed" covers demo patients with no wired case. */
-type WorklistStatus = 'Ready for your review' | 'Not yet consulted' | 'No action needed'
-const WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = { 'Ready for your review': 0, 'Not yet consulted': 1, 'No action needed': 2 }
-const WORKLIST_NEXT_STEP: Record<WorklistStatus, string> = { 'Ready for your review': 'Review options', 'Not yet consulted': 'Consult network', 'No action needed': 'View demo' }
-const WORKLIST_STATUS_TONE: Record<WorklistStatus, string> = { 'Ready for your review': 'copper', 'Not yet consulted': 'slate', 'No action needed': 'quiet' }
+/** A small controlled status vocabulary for the two patients with a wired
+ * consult-engine case, derived only from real data (has_consultation / implemented)
+ * — never invented. Every other patient gets a stage label from PATIENT_STAGE_META
+ * below, which is honest cosmetic detail, not a claimed agent interaction. */
+type WorklistStatus = 'Ready for your review' | 'Not yet consulted'
+const WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = { 'Ready for your review': 0, 'Not yet consulted': 1 }
+const WORKLIST_NEXT_STEP: Record<WorklistStatus, string> = { 'Ready for your review': 'Review options', 'Not yet consulted': 'Consult network' }
+const WORKLIST_STATUS_TONE: Record<WorklistStatus, string> = { 'Ready for your review': 'copper', 'Not yet consulted': 'slate' }
+
+/** Cosmetic worklist stage for the patients who have no wired consult-engine case
+ * (everyone but Jordan and Maria — see demoPatients.ts). These never claim a real
+ * agent interaction happened; they exist only so the worklist reads like an
+ * established practice with cases at every stage, not a two-patient demo. */
+const PATIENT_STAGE_META: Record<PatientStage, { label: string; tone: string; nextStep: string; priority: number }> = {
+  new: { label: 'Newly received', tone: 'slate', nextStep: 'Review intake', priority: 3 },
+  in_review: { label: "Agent reviewing", tone: 'slate', nextStep: 'View demo', priority: 4 },
+  workup: { label: 'Awaiting workup', tone: 'slate', nextStep: 'View demo', priority: 5 },
+  referred: { label: 'Referred · pending', tone: 'quiet', nextStep: 'View demo', priority: 6 },
+  followup: { label: 'Follow-up scheduled', tone: 'quiet', nextStep: 'View demo', priority: 7 },
+  closed: { label: 'Case closed', tone: 'quiet', nextStep: 'View demo', priority: 8 },
+}
 
 function PatientSelector({ navigate }: { navigate: Navigate }) {
   const [query, setQuery] = useState('')
@@ -270,19 +283,23 @@ function PatientSelector({ navigate }: { navigate: Navigate }) {
   const visible = DEMO_PATIENTS.filter((patient) => `${patient.name} ${patient.reason} ${patient.location}`.toLowerCase().includes(query.toLowerCase()))
   const rows = visible.map((patient) => {
     const record = activityFor(patient.id)
-    const status: WorklistStatus = record?.has_consultation ? 'Ready for your review' : patient.implemented ? 'Not yet consulted' : 'No action needed'
+    const implementedStatus: WorklistStatus | null = record?.has_consultation ? 'Ready for your review' : patient.implemented ? 'Not yet consulted' : null
     const updated = record?.has_consultation && record.latest_consulted_at ? shortDate(record.latest_consulted_at) : record?.last_opened ? shortDate(record.last_opened) : null
-    return { patient, status, updated }
-  }).sort((a, b) => WORKLIST_STATUS_PRIORITY[a.status] - WORKLIST_STATUS_PRIORITY[b.status])
+    if (implementedStatus) {
+      return { patient, label: implementedStatus, tone: WORKLIST_STATUS_TONE[implementedStatus], nextStep: WORKLIST_NEXT_STEP[implementedStatus], priority: WORKLIST_STATUS_PRIORITY[implementedStatus], updated }
+    }
+    const meta = PATIENT_STAGE_META[patient.stage]
+    return { patient, label: meta.label, tone: meta.tone, nextStep: meta.nextStep, priority: meta.priority, updated }
+  }).sort((a, b) => a.priority - b.priority)
   return <ProductShell navigate={navigate} section="patients"><main className="page-shell selector-page worklist-page">
     <header className="selector-header"><div><h1>Patients</h1><p>Your active referral worklist.</p></div><span>{DEMO_PATIENTS.length} synthetic patients</span></header>
     <label className="patient-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients or clinical problem…" aria-label="Search patients" /></label>
     {activityError && <p className="muted-note">Lamina activity is temporarily unavailable; patient clinical records remain accessible.</p>}
-    {rows.length > 0 && <div className="lam-list patient-worklist">{rows.map(({ patient, status, updated }) => <button key={patient.id} className="lam-row worklist-row" onClick={() => navigate(`/patients/${patient.id}`)}>
+    {rows.length > 0 && <div className="lam-list patient-worklist">{rows.map(({ patient, label, tone, nextStep, updated }) => <button key={patient.id} className="lam-row worklist-row" onClick={() => navigate(`/patients/${patient.id}`)}>
       <span className="lam-row-mark patient-row-avatar">{patient.initials}</span>
       <span className="lam-row-main"><strong>{patient.name}</strong><small>{patient.age} years · {patient.reason}</small></span>
-      <span className={`worklist-status ${WORKLIST_STATUS_TONE[status]}`}>{status}</span>
-      <span className="worklist-next-step">{WORKLIST_NEXT_STEP[status]}</span>
+      <span className={`worklist-status ${tone}`}>{label}</span>
+      <span className="worklist-next-step">{nextStep}</span>
       <span className="worklist-updated">{updated ? `Updated ${updated}` : ''}</span>
     </button>)}</div>}
     {!visible.length && <div className="empty-state"><NetworkMark /><h2>No patients found</h2><p>Try a different name or clinical problem.</p></div>}
@@ -470,7 +487,7 @@ function SettingsPage({ navigate }: { navigate: Navigate }) {
 }
 
 function UnfinishedPatient({ patient, navigate }: { patient: DemoPatientSummary; navigate: Navigate }) {
-  return <ProductShell navigate={navigate} section="patients"><main className="page-shell unfinished-page"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button><div className="unfinished-card"><p className="eyebrow">Synthetic patient</p><h1>{patient.name}</h1><p className="unfinished-meta">{patient.age} years · {patient.location}</p><div className="unfinished-reason"><span>Reason for consult</span><strong>{patient.reason}</strong></div><NetworkMark /><h2>This demo case is not implemented yet.</h2><p>Choose Jordan Lee or Maria Santos for a grounded physician-agent consultation. No recommendation has been fabricated for this patient.</p><button className="button-secondary" onClick={() => navigate(`/patients/${JORDAN_ID}`)}>Open Jordan Lee demo</button></div></main></ProductShell>
+  return <ProductShell navigate={navigate} section="patients"><main className="page-shell unfinished-page"><button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button><div className="unfinished-card"><p className="eyebrow">Synthetic patient</p><h1>{patient.name}</h1><p className="unfinished-meta">{patient.age} years · {patient.location}</p><div className="unfinished-reason"><span>Reason for consult</span><strong>{patient.reason}</strong></div><p className="unfinished-stage-note">{patient.stageNote}</p><NetworkMark /><h2>This demo does not simulate a live agent consultation for {patient.name}.</h2><p>Choose Jordan Lee or Maria Santos for a grounded physician-agent consultation. No recommendation has been fabricated for this patient.</p><button className="button-secondary" onClick={() => navigate(`/patients/${JORDAN_ID}`)}>Open Jordan Lee demo</button></div></main></ProductShell>
 }
 
 const physicianInitials = (name: string) => name.replace('Dr. ', '').replace(' (synthetic)', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')

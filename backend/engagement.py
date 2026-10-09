@@ -34,6 +34,16 @@ PERSONA_BY_PHYSICIAN_ID = {
     "physician-jung": "iain",
     "physician-onadeko": "onadeko",
     "physician-alvarez": "sofia",
+    "physician-sanchez": "tiffany",
+    "physician-cha": "lianne",
+    "physician-park": "nina",
+    "physician-ramanathan": "maya",
+    "physician-rosen": "natalie",
+    "physician-mithel": "chris",
+    "physician-rahman": "amina",
+    "physician-guechtouli": "hamidou",
+    "physician-islam": "islam",
+    "physician-nakajima": "nakajima",
 }
 PERSONA_BY_NPI = {
     SYNTHETIC_PHYSICIAN_NPIS[physician_id]: persona_id
@@ -83,6 +93,116 @@ PERSONAS: dict[str, dict[str, Any]] = {
         "location": "Oakland, CA",
         "agent_id": synthetic_agent_id("physician-alvarez"),
         "agent_name": "Dr. Sofia Alvarez's Agent",
+        "synthetic": True,
+    },
+    "tiffany": {
+        "id": "tiffany",
+        "physician_id": "physician-sanchez",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-sanchez"],
+        "name": "Dr. Tiffany Sanchez",
+        "specialty": "Gastroenterology",
+        "location": "Oakland, CA",
+        "agent_id": synthetic_agent_id("physician-sanchez"),
+        "agent_name": "Dr. Tiffany Sanchez's Agent",
+        "synthetic": True,
+    },
+    "lianne": {
+        "id": "lianne",
+        "physician_id": "physician-cha",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-cha"],
+        "name": "Dr. Lianne Cha",
+        "specialty": "Primary Care",
+        "location": "Oakland, CA",
+        "agent_id": synthetic_agent_id("physician-cha"),
+        "agent_name": "Dr. Lianne Cha's Agent",
+        "synthetic": True,
+    },
+    "nina": {
+        "id": "nina",
+        "physician_id": "physician-park",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-park"],
+        "name": "Dr. Nina Park",
+        "specialty": "Obstetrics & Gynecology",
+        "location": "Berkeley, CA",
+        "agent_id": synthetic_agent_id("physician-park"),
+        "agent_name": "Dr. Nina Park's Agent",
+        "synthetic": True,
+    },
+    "maya": {
+        "id": "maya",
+        "physician_id": "physician-ramanathan",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-ramanathan"],
+        "name": "Dr. Maya Ramanathan",
+        "specialty": "Endocrinology",
+        "location": "Oakland, CA",
+        "agent_id": synthetic_agent_id("physician-ramanathan"),
+        "agent_name": "Dr. Maya Ramanathan's Agent",
+        "synthetic": True,
+    },
+    "natalie": {
+        "id": "natalie",
+        "physician_id": "physician-rosen",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-rosen"],
+        "name": "Dr. Natalie Rosen",
+        "specialty": "Hematology/Oncology",
+        "location": "San Francisco, CA",
+        "agent_id": synthetic_agent_id("physician-rosen"),
+        "agent_name": "Dr. Natalie Rosen's Agent",
+        "synthetic": True,
+    },
+    "chris": {
+        "id": "chris",
+        "physician_id": "physician-mithel",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-mithel"],
+        "name": "Dr. Chris Mithel",
+        "specialty": "Dermatology",
+        "location": "Berkeley, CA",
+        "agent_id": synthetic_agent_id("physician-mithel"),
+        "agent_name": "Dr. Chris Mithel's Agent",
+        "synthetic": True,
+    },
+    "amina": {
+        "id": "amina",
+        "physician_id": "physician-rahman",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-rahman"],
+        "name": "Dr. Amina Rahman",
+        "specialty": "Pulmonology",
+        "location": "Berkeley, CA",
+        "agent_id": synthetic_agent_id("physician-rahman"),
+        "agent_name": "Dr. Amina Rahman's Agent",
+        "synthetic": True,
+    },
+    "hamidou": {
+        "id": "hamidou",
+        "physician_id": "physician-guechtouli",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-guechtouli"],
+        "name": "Dr. Hamidou Guechtouli",
+        "specialty": "Infectious Disease",
+        "location": "Oakland, CA",
+        "agent_id": synthetic_agent_id("physician-guechtouli"),
+        "agent_name": "Dr. Hamidou Guechtouli's Agent",
+        "synthetic": True,
+    },
+    "islam": {
+        "id": "islam",
+        "physician_id": "physician-islam",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-islam"],
+        "name": "Dr. Noah Islam",
+        "specialty": "Pulmonology",
+        "location": "Oakland, CA",
+        "agent_id": synthetic_agent_id("physician-islam"),
+        "agent_name": "Dr. Noah Islam's Agent",
+        "synthetic": True,
+    },
+    "nakajima": {
+        "id": "nakajima",
+        "physician_id": "physician-nakajima",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-nakajima"],
+        "name": "Dr. Dan Nakajima",
+        "specialty": "Pulmonology",
+        "location": "San Francisco, CA",
+        "agent_id": synthetic_agent_id("physician-nakajima"),
+        "agent_name": "Dr. Dan Nakajima's Agent",
         "synthetic": True,
     },
 }
@@ -729,43 +849,144 @@ BRANCH_TRANSITIONS = {
     ("iain-branch-proteinuria-absence", "Depends"): "iain-branch-declining-egfr-normal-upcr",
 }
 
+def _feed(
+    id: str, persona: str, kind: str, title: str, body: str, when: str,
+    image_filename: str | None = None, image_alt: str | None = None, media_style: str = "cover",
+) -> dict:
+    """One synthetic feed fixture. `image_filename` names a file under
+    frontend/public/post_images/ -- served as a plain static path, never fetched
+    externally or embedded as base64. Text-only posts pass image_filename=None."""
+    return {
+        "id": id,
+        "physician_persona": persona,
+        "type": kind,
+        "title": title,
+        "body": body,
+        "provenance": "synthetic_demo",
+        "status": "published",
+        "created_at": when,
+        "published_at": when,
+        "synthetic": True,
+        "image_url": f"/post_images/{image_filename}" if image_filename else None,
+        "image_alt": image_alt,
+        "media_style": media_style if image_filename else None,
+    }
+
+
+# A richly populated synthetic feed -- Network -> Feed should read like an
+# established professional network, not three isolated fixtures. Each author must
+# exist in PERSONAS and (for a fresh workspace to show it without extra setup) be
+# case-linked or in _DEFAULT_NETWORK_MEMBER_NPIS -- see workflow.py. Mixed media
+# rhythm is intentional: 8 of 13 posts carry a real photo/figure, the rest are
+# text-only, and image posts are not allowed to stack more than two deep.
 SYNTHETIC_FEED_FIXTURES = [
-    {
-        "id": "fixture-onadeko-referral-guidance",
-        "physician_persona": "onadeko",
-        "type": "referral_guidance",
-        "title": "Updated referral guidance for resistant hypertension",
-        "body": "Progressive renal dysfunction should prompt nephrology-first evaluation; hypertension cardiology can follow or co-manage.",
-        "provenance": "synthetic_demo",
-        "status": "published",
-        "created_at": "2026-09-12T16:00:00+00:00",
-        "published_at": "2026-09-12T16:00:00+00:00",
-        "synthetic": True,
-    },
-    {
-        "id": "fixture-sofia-publication",
-        "physician_persona": "sofia",
-        "type": "publication",
-        "title": "New synthetic-demo publication on iron-deficiency source evaluation",
-        "body": "A controlled demo update about gastrointestinal source evaluation for persistent iron deficiency.",
-        "provenance": "synthetic_demo",
-        "status": "published",
-        "created_at": "2026-09-10T16:00:00+00:00",
-        "published_at": "2026-09-10T16:00:00+00:00",
-        "synthetic": True,
-    },
-    {
-        "id": "fixture-iain-workup-guidance",
-        "physician_persona": "iain",
-        "type": "referral_guidance",
-        "title": "Updated CKD referral workup guidance",
-        "body": "Current BMP and UPCR are useful before review of progressive CKD referrals.",
-        "provenance": "synthetic_demo",
-        "status": "published",
-        "created_at": "2026-09-15T16:00:00+00:00",
-        "published_at": "2026-09-15T16:00:00+00:00",
-        "synthetic": True,
-    },
+    _feed(
+        "fixture-lucy-tcmnet", "lucy", "research",
+        "Building TCMNet: mapping traditional medicine knowledge for AI",
+        "Excited to share some early work on TCMNet, a structured traditional medicine knowledge base "
+        "designed to make syndrome patterns, herb relationships, and evidence links more navigable for "
+        "clinicians and researchers. One of the interesting challenges is preserving the structure of "
+        "traditional diagnostic systems while still making the information compatible with modern "
+        "clinical and computational reasoning. Still early, but I'm increasingly convinced there's value "
+        "in building better interfaces between traditional knowledge systems and modern medicine.",
+        "2026-10-09T09:15:00+00:00",
+        "p11_tcmnet_knowledge_graph.jpg.png", "TCMNet knowledge graph concept connecting traditional medicine information.", "contain",
+    ),
+    _feed(
+        "fixture-iain-workup-guidance", "iain", "referral_guidance",
+        "Updated CKD referral workup guidance",
+        "Current BMP and UPCR are useful before review of progressive CKD referrals. A nephrology-first "
+        "evaluation tends to move faster when those two results already accompany the chart.",
+        "2026-10-07T14:00:00+00:00",
+    ),
+    _feed(
+        "fixture-sofia-publication", "sofia", "research",
+        "New work on evaluating persistent iron deficiency",
+        "A synthetic-demo update on gastrointestinal source evaluation for persistent iron deficiency, and "
+        "where general gastroenterology fits alongside a more occult-bleeding-focused practice.",
+        "2026-10-05T16:00:00+00:00",
+        "p04_iron_deficiency_paper.jpg.png", "Research paper and figures about iron-deficiency evaluation.", "contain",
+    ),
+    _feed(
+        "fixture-lianne-consult-value", "lianne", "professional_update",
+        "What makes a specialist consultation genuinely useful from primary care",
+        "The consults I come back to are the ones that name a clear next step, not just an impression. "
+        "A short list of what's needed before the visit saves everyone a round trip.",
+        "2026-10-03T13:30:00+00:00",
+    ),
+    _feed(
+        "fixture-chris-telederm-photo", "chris", "practice_focus",
+        "What makes a teledermatology photo actually useful",
+        "Good lighting and a ruler for scale beat a high-resolution camera almost every time. A close-up "
+        "and a wide shot together save a follow-up visit more often than people expect.",
+        "2026-10-01T11:00:00+00:00",
+        "p09_telederm_photo.jpg", "Smartphone camera being used for standardized dermatology photography.", "cover",
+    ),
+    _feed(
+        "fixture-natalie-anemia-workup", "natalie", "teaching",
+        "When persistent anemia deserves a more structured workup",
+        "Anaemia that doesn't resolve with the obvious first-line explanation deserves a structured look -- "
+        "iron studies, B12/folate, and a reticulocyte count before it becomes a diagnosis of exclusion.",
+        "2026-09-29T15:00:00+00:00",
+        "p08_anemia_timeline.jpg", "Clinical timeline showing longitudinal anemia-related laboratory trends.", "contain",
+    ),
+    _feed(
+        "fixture-nina-aub-escalation", "nina", "teaching",
+        "When I escalate abnormal uterine bleeding workup",
+        "Persistent bleeding with a normal initial workup, or any bleeding in a patient over 45, is where I "
+        "stop watching and start imaging. A short checklist has saved a few referrals from bouncing back.",
+        "2026-09-26T12:00:00+00:00",
+    ),
+    _feed(
+        "fixture-amina-inhaler-counseling", "amina", "teaching",
+        "Simple ways to make inhaler counseling stick",
+        "Having the patient demonstrate technique back to me, rather than just watching mine, catches most "
+        "of the real-world errors. It takes two extra minutes and changes a lot of outcomes.",
+        "2026-09-23T17:00:00+00:00",
+        "p10_inhaler_counseling.jpg", "A metered-dose inhaler used for pulmonary medication counseling.", "cover",
+    ),
+    _feed(
+        "fixture-tiffany-gi-workup", "tiffany", "practice_focus",
+        "What I want completed before an iron-deficiency GI referral",
+        "For persistent iron-deficiency anaemia without a documented prior endoscopy, I'm usually ready to "
+        "see the patient directly -- a recent CBC, ferritin, and iron studies are the main thing I ask for first.",
+        "2026-09-19T15:00:00+00:00",
+    ),
+    _feed(
+        "fixture-onadeko-referral-guidance", "onadeko", "referral_guidance",
+        "Updated referral guidance for resistant hypertension",
+        "Progressive renal dysfunction should prompt nephrology-first evaluation; hypertension cardiology "
+        "can follow or co-manage once the renal trajectory is clearer.",
+        "2026-09-16T10:00:00+00:00",
+        "p02_resistant_hypertension.jpg", "Blood pressure being measured during a clinical visit.", "cover",
+    ),
+    _feed(
+        "fixture-maya-diabetes-adherence", "maya", "practice_focus",
+        "Small workflow changes that improved diabetes follow-up",
+        "Moving our follow-up scheduling to the point of visit, instead of a callback later, measurably "
+        "cut our no-show rate. Sometimes the workflow change matters more than the clinical one.",
+        "2026-09-12T13:00:00+00:00",
+    ),
+    _feed(
+        "fixture-nakajima-oyakodon", "nakajima", "professional_update",
+        "Healthy eating doesn't always need to look complicated",
+        "Oyakodon is a good reminder that healthy eating does not always have to mean complexity. A simple "
+        "bowl built around rice, chicken, egg, and onions can be comforting, protein-forward, and "
+        "reasonably balanced depending on preparation and portion size. I've been thinking more about how "
+        "culturally familiar foods can fit into sustainable nutrition conversations instead of asking "
+        "people to abandon the foods they already enjoy.",
+        "2026-09-08T18:30:00+00:00",
+        "p12_oyakodon_health.jpg", "A bowl of Japanese oyakodon with chicken, egg, onions, and rice.", "cover",
+    ),
+    _feed(
+        "fixture-islam-home-spirometry", "islam", "practice_focus",
+        "Where home spirometry may fit into longitudinal pulmonary care",
+        "A single home reading isn't a diagnosis, but a trend line over weeks can be genuinely useful "
+        "context alongside a visit -- especially for patients whose symptoms wax and wane between "
+        "appointments. The value is in the trend and the clinical context around it, not the isolated number.",
+        "2026-09-03T12:00:00+00:00",
+        "p13_home_spirometry.jpg", "Person using a portable home spirometry device.", "cover",
+    ),
 ]
 
 

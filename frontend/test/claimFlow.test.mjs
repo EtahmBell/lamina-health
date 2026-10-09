@@ -306,7 +306,7 @@ test('Physician Network no longer runs a second claim/verify/activate UX', () =>
 })
 
 test('a colleague-directory row offers Add/Remove and View profile only — no claim action on another physician\'s row (post-8B consolidation)', () => {
-  const result = slice(network, 'function DirectoryResult', 'function NetworkRelationshipRow')
+  const result = slice(network, 'function DirectoryResult', 'function ConnectionRow')
   assert.match(result, /Add colleague/)
   assert.match(result, /Remove colleague/)
   assert.doesNotMatch(result, /Claim this identity/)
