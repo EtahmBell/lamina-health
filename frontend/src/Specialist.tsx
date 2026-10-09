@@ -125,7 +125,7 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
           </div>
           : <p className="dashboard-empty-note">Nothing needs you right now.</p>}
       </section>
-      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('iain')} viewAgentPath="/specialist/agent?tab=overview" />
+      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('iain')} viewAgentPath="/specialist/agent?tab=overview" personaId="iain" />
       {workspace.case_count > 0
         ? <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
           <div className="lam-list quiet">{recent.slice(0, 5).map((item) => <SpecialistActivityRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>

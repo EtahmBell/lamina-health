@@ -344,6 +344,32 @@ def training_queue(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
     }
 
 
+def _mode_track(mode: str) -> str:
+    """Quick (Dashboard-burst) sessions and standard (initialization/daily/extended/
+    focused, i.e. the full My Agent -> Train flow) sessions are tracked as two
+    independent "which session is active" lanes, so starting/resuming one never
+    surfaces or disturbs a session that belongs to the other."""
+    return "quick" if mode == "quick" else "standard"
+
+
+def _progress_count(
+    workspace_id: str, persona_id: str, mode: str, responses: list[dict]
+) -> int:
+    """Quick sessions promise N *top-level* questions, not N raw responses -- a
+    Depends clarifier must not silently consume one of the three slots or shrink
+    how many fresh top-level questions get assigned on resume. Every other mode
+    keeps counting raw responses, exactly as before (do not change full Train
+    behavior)."""
+    if mode != "quick":
+        return len(responses)
+    return sum(
+        1
+        for item in responses
+        if (question := _question(workspace_id, persona_id, item["question_id"])) is not None
+        and question.get("branch_depth", 0) == 0
+    )
+
+
 def _materialize_training_session(
     workspace_id: str, persona_id: str, session: dict
 ) -> dict:
@@ -355,7 +381,11 @@ def _materialize_training_session(
         workspace_id, persona_id, session["id"]
     )
     assigned_ids = {item["question_id"] for item in assigned}
-    remaining_budget = max(0, session["answer_target"] - len(session_responses))
+    remaining_budget = max(
+        0,
+        session["answer_target"]
+        - _progress_count(workspace_id, persona_id, session["mode"], session_responses),
+    )
     selected = [
         question
         for item in assigned
@@ -442,23 +472,33 @@ def _materialize_training_session(
         )
         if (question := _question(workspace_id, persona_id, item["question_id"])) is not None
     ]
-    return {**session, "questions": materialized, "responses": session_responses}
+    return {
+        **session,
+        "questions": materialized,
+        "responses": session_responses,
+        "answered_count": _progress_count(workspace_id, persona_id, session["mode"], session_responses),
+    }
 
 
 def _recover_active_training_session(
-    workspace_id: str, persona_id: str
+    workspace_id: str, persona_id: str, track: str = "standard"
 ) -> dict | None:
     sessions = workflow_store.training_sessions(workspace_id, persona_id)
     active = [
         item
         for item in sessions
-        if item["status"] == "active" and item["lifecycle_state"] == "active"
+        if item["status"] == "active"
+        and item["lifecycle_state"] == "active"
+        and _mode_track(item["mode"]) == track
     ]
     if not active:
         return None
     response_counts = {
-        item["id"]: len(
-            workflow_store.training_responses(workspace_id, persona_id, item["id"])
+        item["id"]: _progress_count(
+            workspace_id,
+            persona_id,
+            item["mode"],
+            workflow_store.training_responses(workspace_id, persona_id, item["id"]),
         )
         for item in active
     }
@@ -522,9 +562,9 @@ def _recover_active_training_session(
     return materialized
 
 
-def _training_projection(workspace_id: str, persona_id: str) -> dict:
+def _training_projection(workspace_id: str, persona_id: str, track: str = "standard") -> dict:
     responses = workflow_store.training_responses(workspace_id, persona_id)
-    active = _recover_active_training_session(workspace_id, persona_id)
+    active = _recover_active_training_session(workspace_id, persona_id, track)
     sessions = workflow_store.training_sessions(workspace_id, persona_id)
     history = workflow_store.training_history(workspace_id, persona_id)
     pending_learnings = [
@@ -597,8 +637,12 @@ def _training_projection(workspace_id: str, persona_id: str) -> dict:
 
 
 @router.get("/physician/training/history")
-def training_history(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -> dict:
-    return _training_projection(workspace_id, persona_id)
+def training_history(
+    workspace_id: DemoWorkspace,
+    persona_id: ControlledPersona,
+    track: Literal["standard", "quick"] = Query("standard"),
+) -> dict:
+    return _training_projection(workspace_id, persona_id, track)
 
 
 @router.get("/physician/agent-overview")
@@ -781,7 +825,7 @@ def start_training_session(
     update: TrainingSessionInput | None = None,
 ) -> dict:
     update = update or TrainingSessionInput()
-    existing = _recover_active_training_session(workspace_id, persona_id)
+    existing = _recover_active_training_session(workspace_id, persona_id, _mode_track(update.mode))
     if existing is not None:
         return existing
     # "quick" is the Dashboard's small-batch entry point (see Dashboard+Network
@@ -792,7 +836,8 @@ def start_training_session(
     # client-supplied limit (a pre-existing invariant this must not relax).
     question_limit = (update.limit or 3) if update.mode == "quick" else NORMAL_TRAINING_TARGET
     session = workflow_store.start_training_session(
-        workspace_id, persona_id, update.mode, question_limit
+        workspace_id, persona_id, update.mode, question_limit,
+        track=_mode_track(update.mode),
     )
     materialized = _materialize_training_session(workspace_id, persona_id, session)
     if not materialized["questions"]:
@@ -809,7 +854,7 @@ def start_focused_training(
     workspace_id: MutableDemoWorkspace,
     persona_id: ControlledPersona,
 ) -> dict:
-    if _recover_active_training_session(workspace_id, persona_id) is not None:
+    if _recover_active_training_session(workspace_id, persona_id, "standard") is not None:
         raise HTTPException(409, "Complete the current training session before starting focused training")
     seed = workflow_store.focused_training_seed(
         workspace_id, persona_id, update.seed_id
@@ -822,6 +867,7 @@ def start_focused_training(
         "focused",
         update.answer_target,
         focused_seed_id=update.seed_id,
+        track="standard",
     )
     if session.get("focused_seed_id") != update.seed_id:
         raise HTTPException(409, "Another training session is already active")
@@ -849,7 +895,7 @@ def resume_training_session(
     if not session:
         raise HTTPException(404, "Training session not found")
     if session["status"] == "active":
-        recovered = _recover_active_training_session(workspace_id, persona_id)
+        recovered = _recover_active_training_session(workspace_id, persona_id, _mode_track(session["mode"]))
         if recovered is None or recovered["id"] != session_id:
             raise HTTPException(409, "This training session is no longer active")
         return recovered
@@ -907,7 +953,12 @@ def _complete_training_questions(
         workspace_id, persona_id
     )
     summary = {
-        "answered_count": sum(not item["skipped"] for item in responses),
+        "answered_count": _progress_count(
+            workspace_id,
+            persona_id,
+            session["mode"],
+            [item for item in responses if not item["skipped"]],
+        ),
         "target_count": session["answer_target"],
         "proposed_learning_count": len(proposed),
         "unresolved_question_count": sum(
@@ -965,10 +1016,9 @@ def answer_training_question(
     response = workflow_store.save_training_response(
         workspace_id, persona_id, session_id, question_id, answer, update.skipped
     )
-    response_count = len(
-        workflow_store.training_responses(workspace_id, persona_id, session_id)
-    )
-    target_reached = response_count >= session["answer_target"]
+    responses_so_far = workflow_store.training_responses(workspace_id, persona_id, session_id)
+    progress_count = _progress_count(workspace_id, persona_id, session["mode"], responses_so_far)
+    target_reached = progress_count >= session["answer_target"]
     focused_resolved = bool(
         session["mode"] == "focused"
         and (update.skipped or answer != "Depends")
@@ -1065,7 +1115,7 @@ def answer_training_question(
     return {
         **response,
         "next_question": next_question,
-        "answered_count": response_count,
+        "answered_count": progress_count,
         "answer_target": session["answer_target"],
         "questions_complete": questions_complete,
         "deferred_branch": deferred_question,

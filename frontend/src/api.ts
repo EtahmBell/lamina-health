@@ -271,7 +271,7 @@ export type TrainingSession = {
   answer_target?: number; lifecycle_state?: 'active' | 'questions_complete' | 'review_complete' | 'abandoned'
   questions_complete_at?: string | null; review_completed_at?: string | null
   review_deferred?: boolean; focused_seed_id?: string | null
-  completion_summary?: TrainingCompletionSummary
+  completion_summary?: TrainingCompletionSummary; answered_count?: number
 }
 export type TrainingCompletionSummary = {
   answered_count: number; target_count: number; proposed_learning_count: number
@@ -518,7 +518,7 @@ export const updateProfessionalProfileItem = (
 export const getPracticeRepresentation = (perspective: PhysicianIdentity) => isOwner(perspective) ? getOwnedPracticeRepresentation().then(normalizeOwnedRepresentation) : request<PracticeRepresentation>(physicianPerspectivePath('/api/workspace/physician/agent-representation', perspective))
 export const getPhysicianTraining = (perspective: DemoPhysicianPerspective) => request<TrainingWorkspace>(physicianPerspectivePath('/api/workspace/physician/training', perspective))
 export const getAgentOverview = (perspective: PhysicianIdentity) => isOwner(perspective) ? getOwnedAgentOverview().then(normalizeOwnedOverview) : request<AgentOverview>(physicianPerspectivePath('/api/workspace/physician/agent-overview', perspective))
-export const getTrainingHistory = (perspective: PhysicianIdentity) => isOwner(perspective) ? getOwnedTrainProjection() as Promise<TrainProjection> : request<TrainProjection>(physicianPerspectivePath('/api/workspace/physician/training/history', perspective))
+export const getTrainingHistory = (perspective: PhysicianIdentity, track: 'standard' | 'quick' = 'standard') => isOwner(perspective) ? getOwnedTrainProjection() as Promise<TrainProjection> : request<TrainProjection>(physicianPerspectivePath(`/api/workspace/physician/training/history?track=${track}`, perspective))
 export const getAgentTestCases = (perspective: PhysicianIdentity) => isOwner(perspective) ? getOwnedAgentTestCases() : request<AgentTestCase[]>(physicianPerspectivePath('/api/workspace/physician/agent-test-cases', perspective))
 export const chatWithAgent = (perspective: PhysicianIdentity, input: AgentChatRequest) => isOwner(perspective) ? chatWithOwnedAgent(input) : request<AgentChatResponse>(physicianPerspectivePath('/api/workspace/physician/agent-chat', perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
 export const submitAgentChatFeedback = (perspective: PhysicianIdentity, responseId: string, feedback: 'reflects' | 'not_quite') => isOwner(perspective) ? submitOwnedChatFeedback(responseId, feedback) : request<AgentChatFeedback>(physicianPerspectivePath(`/api/workspace/physician/agent-chat/${encodeURIComponent(responseId)}/feedback`, perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }) })

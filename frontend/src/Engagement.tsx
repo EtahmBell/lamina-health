@@ -181,8 +181,8 @@ function buildAgentDigest(records: ConsultationRecord[], overview: AgentOverview
  * expandable into up to three outcome tiles — never a raw activity duplicate). Right
  * side answers "how can I make my agent more like me?" (a small training burst that
  * opens a modal, not the full My Agent -> Train environment). */
-export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, matchesReady = 0, records = [] }: {
-  overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string; matchesReady?: number; records?: ConsultationRecord[]
+export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, matchesReady = 0, records = [], personaId }: {
+  overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string; matchesReady?: number; records?: ConsultationRecord[]; personaId: PhysicianIdentity
 }) {
   const [expanded, setExpanded] = useState(false)
   const [trainingOpen, setTrainingOpen] = useState(false)
@@ -216,7 +216,7 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, ma
         <div><p className="agent-digest-tile-label">{tile.label}</p><p className="agent-digest-tile-detail">{tile.detail}</p></div>
       </div>)}</div>
     </div>
-    {trainingOpen && <QuickTrainingModal personaId="lucy" onClose={() => setTrainingOpen(false)} onFinished={() => setTrainingOpen(false)} />}
+    {trainingOpen && <QuickTrainingModal personaId={personaId} onClose={() => setTrainingOpen(false)} onFinished={() => setTrainingOpen(false)} />}
   </section>
 }
 
@@ -243,7 +243,7 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
   useEffect(() => {
     let cancelled = false
     const open = async () => {
-      const training = await getTrainingHistory(personaId)
+      const training = await getTrainingHistory(personaId, 'quick')
       if (cancelled) return
       const activeId = training.active_session_id
       const started = activeId
@@ -254,7 +254,7 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
       const remaining = (started.questions ?? []).filter((item) => !answeredIds.has(item.id))
       setSession(started)
       setQueue(remaining)
-      setAnsweredCount((started.responses ?? []).length)
+      setAnsweredCount(started.answered_count ?? (started.responses ?? []).length)
       setAnswerTarget(started.answer_target ?? 3)
       setPhase(remaining.length > 0 ? 'questions' : 'completed')
     }
@@ -958,24 +958,32 @@ function PostCard({ post, personaId, onChanged }: { post: ProfessionalPost; pers
 
 /* --------------------------------------------------------------------- Post */
 
-const POST_INTENTS: Array<{ type: PostType; label: string; prompt: string }> = [
-  { type: 'practice_update', label: 'Practice update', prompt: 'What changed in your practice?' },
-  { type: 'referral_guidance', label: 'Referral guidance', prompt: 'What should referring physicians know?' },
-  { type: 'share_paper', label: 'Share a paper', prompt: 'What should your network know about it?' },
-  { type: 'research_update', label: 'Research', prompt: 'What would you like to share?' },
-  { type: 'teaching_update', label: 'Teaching', prompt: 'What are you teaching or presenting?' },
-  { type: 'interesting_case', label: 'Interesting case', prompt: 'Describe the synthetic/demo case reflection.' },
-  { type: 'availability', label: 'Availability', prompt: 'What should your network know about your availability?' },
-  { type: 'professional_update', label: 'Professional update', prompt: 'What would you like to share?' },
-  { type: 'other', label: 'Other', prompt: 'What would you like to share?' },
+/** Tags are metadata, not the first decision — the composer opens straight to a
+ * blank page a physician can start writing in immediately. A tag only narrows how
+ * the post is categorized afterward, with a quiet default (Practice) already
+ * selected so publishing never requires picking one first. */
+const PRIMARY_POST_TAGS: Array<{ type: PostType; label: string }> = [
+  { type: 'practice_update', label: 'Practice' },
+  { type: 'research_update', label: 'Research' },
+  { type: 'referral_guidance', label: 'Referral guidance' },
+  { type: 'teaching_update', label: 'Teaching' },
+]
+const MORE_POST_TAGS: Array<{ type: PostType; label: string }> = [
+  { type: 'share_paper', label: 'Share a paper' },
+  { type: 'interesting_case', label: 'Interesting case' },
+  { type: 'availability', label: 'Availability' },
+  { type: 'professional_update', label: 'Professional update' },
+  { type: 'other', label: 'Other' },
 ]
 
-type PostFlowStage = 'closed' | 'intent' | 'compose' | 'preview'
+type PostFlowStage = 'closed' | 'compose' | 'preview'
 
 export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 'Share update', compact = false }: { personaId: DemoPhysicianPerspective; onPublished?: (post: ProfessionalPost) => void; paperTitle?: string; triggerLabel?: string; compact?: boolean }) {
   const [stage, setStage] = useState<PostFlowStage>('closed')
-  const [intent, setIntent] = useState<PostType | null>(null)
+  const [intent, setIntent] = useState<PostType>('practice_update')
   const [title, setTitle] = useState(paperTitle ?? '')
+  const [showLink, setShowLink] = useState(Boolean(paperTitle))
+  const [moreTagsOpen, setMoreTagsOpen] = useState(false)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -984,7 +992,10 @@ export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 
   const [previewTitle, setPreviewTitle] = useState('')
   const [previewBody, setPreviewBody] = useState('')
 
-  const reset = () => { setStage('closed'); setIntent(null); setTitle(paperTitle ?? ''); setNote(''); setError(''); setDraftPost(null); setEditingPreview(false) }
+  const reset = () => {
+    setStage('closed'); setIntent('practice_update'); setTitle(paperTitle ?? ''); setShowLink(Boolean(paperTitle))
+    setMoreTagsOpen(false); setNote(''); setError(''); setDraftPost(null); setEditingPreview(false)
+  }
 
   useEffect(() => {
     if (stage === 'closed') return
@@ -994,10 +1005,7 @@ export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage])
 
-  const chooseIntent = (type: PostType) => { setIntent(type); setStage('compose') }
-
   const draftWithAgent = async () => {
-    if (!intent) return
     setBusy(true); setError('')
     try {
       const result = await draftProfessionalPost(personaId, { type: intent, source_material: { title, note }, case_origin: intent === 'interesting_case' ? 'synthetic_demo' : undefined })
@@ -1029,26 +1037,31 @@ export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 
     } finally { setBusy(false) }
   }
 
-  const selected = POST_INTENTS.find((item) => item.type === intent)
   return <>
-    <button className={compact ? 'text-button' : 'button-secondary post-trigger'} onClick={() => { if (paperTitle) { setIntent('share_paper'); setStage('compose') } else { setStage('intent') } }}>{triggerLabel} <span>{compact ? '→' : '+'}</span></button>
+    <button className={compact ? 'text-button' : 'button-secondary post-trigger'} onClick={() => { if (paperTitle) setIntent('share_paper'); setStage('compose') }}>{triggerLabel} <span>{compact ? '→' : '+'}</span></button>
     {stage !== 'closed' && <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) reset() }}>
-      <div className="post-flow-dialog" role="dialog" aria-modal="true" aria-label="Share a professional update">
+      <div className="post-flow-dialog" role="dialog" aria-modal="true" aria-label="Share an update">
         <button className="text-button post-flow-close" onClick={reset} aria-label="Close">×</button>
-        {stage === 'intent' && <>
+        {stage === 'compose' && <>
           <p className="eyebrow">Share update</p>
-          <h2>What would you like to share?</h2>
-          <div className="post-intent-grid">{POST_INTENTS.map((item) => <button key={item.type} className="post-intent-option" onClick={() => chooseIntent(item.type)}>{item.label}</button>)}</div>
-        </>}
-        {stage === 'compose' && selected && <>
-          <p className="eyebrow">{selected.label}</p>
-          {selected.type === 'interesting_case' && <p className="post-synthetic-notice">Demo mode supports synthetic case reflections only.</p>}
-          <label htmlFor="post-title">{selected.type === 'share_paper' ? <>Paper title or citation <em>Optional</em></> : <>Title <em>Optional</em></>}</label>
-          <input id="post-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={240} placeholder={selected.type === 'share_paper' ? 'Title, citation, or DOI/URL' : undefined} />
-          <label htmlFor="post-note">{selected.prompt}</label>
-          <textarea id="post-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} />
+          <h2>Share an update</h2>
+          {intent === 'interesting_case' && <p className="post-synthetic-notice">Demo mode supports synthetic case reflections only.</p>}
+          <textarea id="post-note" className="post-composer-body" aria-label="Update text" value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} placeholder="What would you like to share with your network?" autoFocus />
+          <div className="post-optional-controls">
+            <button type="button" className="text-button" disabled title="Coming soon">+ Add image</button>
+            <button type="button" className="text-button" onClick={() => setShowLink((value) => !value)} aria-expanded={showLink}>+ Add paper/link</button>
+          </div>
+          {showLink && <input id="post-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={240} placeholder="Title, citation, or DOI/URL" aria-label="Paper title or link" />}
+          <div className="post-tag-area">
+            <span className="post-tag-label">Tag</span>
+            <div className="post-tag-chips">
+              {PRIMARY_POST_TAGS.map((tag) => <button key={tag.type} type="button" className={`post-tag-chip ${intent === tag.type ? 'active' : ''}`} aria-pressed={intent === tag.type} onClick={() => setIntent(tag.type)}>{tag.label}</button>)}
+              <button type="button" className={`post-tag-chip ${moreTagsOpen ? 'active' : ''}`} aria-expanded={moreTagsOpen} onClick={() => setMoreTagsOpen((value) => !value)}>More</button>
+            </div>
+            {moreTagsOpen && <div className="post-tag-chips post-tag-chips-more">{MORE_POST_TAGS.map((tag) => <button key={tag.type} type="button" className={`post-tag-chip ${intent === tag.type ? 'active' : ''}`} aria-pressed={intent === tag.type} onClick={() => setIntent(tag.type)}>{tag.label}</button>)}</div>}
+          </div>
           {error && <p className="demo-reset-error" role="alert">{error}</p>}
-          <div className="post-flow-actions"><button className="button-primary" disabled={!note.trim() || busy} onClick={draftWithAgent}>Draft with my agent <span>→</span></button><button className="text-button" onClick={() => setStage('intent')}>Back</button></div>
+          <div className="post-flow-actions"><button className="button-primary" disabled={!note.trim() || busy} onClick={draftWithAgent}>Draft with my agent <span>→</span></button></div>
         </>}
         {stage === 'preview' && draftPost && <>
           <p className="post-drafted-label">Drafted with your Lamina agent</p>

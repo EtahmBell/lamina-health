@@ -141,12 +141,30 @@ test('the agent banner (post-8B rename of the Your Agent card) never shows a ref
   assert.doesNotMatch(mapping, /\d+ of \d+/, 'never a finite "x of y" completion count for the open-ended representation')
 })
 
+test('the quick-training modal is its own session track, isolated from the full My Agent -> Train flow', () => {
+  const modal = slice(engagement, 'function QuickTrainingModal', 'export function TrainingPage')
+  assert.match(modal, /getTrainingHistory\(personaId, 'quick'\)/, 'the Dashboard burst must ask for the quick track, never the shared/standard one')
+  assert.match(modal, /startTrainingSession\(personaId, \{ mode: 'quick', limit: 3 \}\)/)
+})
+
+test('the quick modal reads its progress from the backend-computed answered_count, never a raw response-list length (a Depends clarifier is not a top-level question)', () => {
+  const modal = slice(engagement, 'function QuickTrainingModal', 'export function TrainingPage')
+  assert.match(modal, /setAnsweredCount\(started\.answered_count \?\?/, 'resume/start progress prefers the backend-computed top-level count')
+  assert.match(modal, /setAnsweredCount\(response\.answered_count \?\? answeredCount \+ 1\)/, 'per-answer progress comes from the backend response, not a local index increment')
+})
+
+test('HomeAgentCard threads the real viewing persona into the quick-training modal, never a hardcoded identity', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
+  assert.match(card, /<QuickTrainingModal personaId=\{personaId\}/)
+  assert.doesNotMatch(card, /<QuickTrainingModal personaId="lucy"/, 'the specialist Dashboard must not open a quick session for the PCP persona')
+})
+
 test('Home (both personas) renders the Your Agent card from AgentOverview, with a quiet link to My Agent', () => {
   assert.match(homePageFn(), /getAgentOverview\('lucy'\)\.then\(setOverview\)/)
-  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} \/>/)
+  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} personaId="lucy" \/>/)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.match(specialistHome, /getAgentOverview\('iain'\)\.then\(setOverview\)/)
-  assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" \/>/)
+  assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" personaId="iain" \/>/)
 })
 
 test('the full Network Pulse feed section is gone from Home; only the compact 2-item highlight preview remains', () => {
@@ -519,12 +537,34 @@ test('Network Feed uses canonical getNetworkFeed and never renders drafts', () =
   assert.doesNotMatch(feedTab, /status === 'draft'/, 'the public feed never shows draft/suggested posts')
 })
 
-test('Post intents map to backend-supported PostType values with friendly labels', () => {
-  const intents = slice(engagement, 'const POST_INTENTS', 'type PostFlowStage')
+test('the composer Tag vocabulary covers every backend-supported PostType, with friendly labels', () => {
+  const tags = slice(engagement, 'const PRIMARY_POST_TAGS', 'type PostFlowStage')
   for (const type of ['practice_update', 'referral_guidance', 'share_paper', 'research_update', 'teaching_update', 'interesting_case', 'availability', 'professional_update', 'other']) {
-    assert.match(intents, new RegExp(`type: '${type}'`))
+    assert.match(tags, new RegExp(`type: '${type}'`))
   }
-  assert.doesNotMatch(intents, /type: 'profile_update'/, 'profile_update stays system-generated only, never a user-facing intent')
+  assert.doesNotMatch(tags, /type: 'profile_update'/, 'profile_update stays system-generated only, never a user-facing intent')
+})
+
+test('the Post composer opens directly to a blank writable body -- no up-front category-selection splash screen', () => {
+  const postButton = slice(engagement, 'export function PostButton', '/* ------------------------------------------------------------------ Interests */')
+  assert.doesNotMatch(postButton, /post-intent-grid|post-intent-option|What would you like to share\?/, 'the old category-first screen is gone')
+  assert.match(postButton, /setStage\('compose'\)/)
+  assert.match(postButton, /<textarea id="post-note" className="post-composer-body"/)
+  assert.match(postButton, /useState<PostType>\('practice_update'\)/, 'a quiet default type is set so publishing never requires picking a category first')
+})
+
+test('the composer has a lightweight Tag row (Practice/Research/Referral guidance/Teaching/More), plus optional Add image and Add paper/link controls', () => {
+  const postButton = slice(engagement, 'export function PostButton', '/* ------------------------------------------------------------------ Interests */')
+  assert.match(postButton, /<span className="post-tag-label">Tag<\/span>/)
+  assert.match(postButton, /PRIMARY_POST_TAGS\.map/)
+  assert.match(postButton, />More</)
+  assert.match(postButton, /\+ Add image/)
+  assert.match(postButton, /\+ Add paper\/link/)
+})
+
+test('Feed header spacing is tightened with a divider, not a large floating gap, before the first post', () => {
+  assert.match(styles, /\.network-feed-tab-header \{[^}]*border-bottom: 1px solid var\(--border\)/)
+  assert.match(styles, /\.network-feed-tab \.feed-stream \{ margin-top: 0; \}/)
 })
 
 test('agent-drafted posts stay unpublished until explicit physician approval, never auto-published', () => {

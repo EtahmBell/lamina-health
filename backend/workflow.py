@@ -968,14 +968,20 @@ class WorkflowStore:
         question_limit: int = 10,
         *,
         focused_seed_id: str | None = None,
+        track: str = "standard",
     ) -> dict:
+        """`track` ("quick" or "standard") scopes the one-active-session-per-persona
+        invariant to sessions of the same track, so the Dashboard's quick-training
+        burst and the full My Agent -> Train flow can each have their own active
+        session without one silently reusing/blocking the other."""
         now = self._now()
+        track_clause = "AND mode = 'quick'" if track == "quick" else "AND mode != 'quick'"
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute(
-                """SELECT id FROM training_sessions
+                f"""SELECT id FROM training_sessions
                    WHERE workspace_id=? AND persona_id=? AND status='active'
-                     AND lifecycle_state='active'
+                     AND lifecycle_state='active' {track_clause}
                    ORDER BY id DESC LIMIT 1""",
                 (workspace_id, persona_id),
             ).fetchone()
