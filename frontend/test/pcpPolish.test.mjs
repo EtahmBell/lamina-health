@@ -17,15 +17,28 @@ const consultationsIndex = () => slice('function ConsultationsPage', 'function P
  * card in the right-hand column (see .next-step-card / .patient-next-step). */
 test('the agent identity hero sits before optional guidance in source order', () => {
   const card = slice("nextStepState === 'idle' && <div className=\"next-step-card idle\">", '</div>}\n      </aside>')
-  const heroIndex = card.indexOf('<h2>Find a specialist</h2>')
+  const heroIndex = card.indexOf('<h3>Find a specialist</h3>')
   const optionalIndex = card.indexOf('optionalGuidance(')
   assert.ok(heroIndex > 0 && optionalIndex > heroIndex, 'the hero headline precedes optional guidance in markup')
 })
 
 test('the primary CTA sits in the Next step card and is enabled with empty optional context', () => {
   const page = patientPage()
-  assert.match(page, /consult-button consult-button-hero[\s\S]{0,40}disabled=\{consulting\}[\s\S]{0,20}onClick=\{runConsult\}/)
+  assert.match(page, /className="consult-button" disabled=\{consulting\}[\s\S]{0,20}onClick=\{runConsult\}/)
   assert.doesNotMatch(page, /disabled=\{consulting \|\| !context/, 'the CTA is never gated on the optional field having a value')
+})
+
+test('the Find specialist CTA is the plain compact button size, not an oversized full-width "hero"', () => {
+  assert.doesNotMatch(app, /consult-button-hero/, 'the oversized hero modifier is gone, not merely unused')
+  const card = slice("nextStepState === 'idle' && <div className=\"next-step-card idle\">", '</div>}\n      </aside>')
+  assert.match(card, /<button className="consult-button" disabled=\{consulting\} onClick=\{runConsult\}>Find specialist/)
+})
+
+test('the spark icon matches the reference\'s open/outline star, never a filled one or a special accent color', () => {
+  const card = slice("nextStepState === 'idle' && <div className=\"next-step-card idle\">", '</div>}\n      </aside>')
+  assert.match(card, /<span className="spark-icon" aria-hidden="true">✧<\/span>/, 'U+2727 WHITE FOUR POINTED STAR, matching design_references/ exactly')
+  assert.doesNotMatch(patientPage(), /✦/, 'the filled U+2726 BLACK FOUR POINTED STAR must not remain anywhere on the patient page (the sidebar nav icon is a separate, unrelated glyph)')
+  assert.doesNotMatch(styles, /\.spark-icon \{[^}]*color:/, 'the icon inherits surrounding color -- it is never given its own fill')
 })
 
 test('optional guidance is explicitly labeled, collapsed by default, and visually secondary', () => {
@@ -49,10 +62,10 @@ test('the Next step panel is sticky and sits beside clinical context on desktop'
 
 /* ----------------------------------------------------------------- mobile */
 
-test('mobile stacks the Next step panel above the clinical context, full width', () => {
+test('mobile stacks the Next step panel above Patient history, full width, un-stuck', () => {
   const mobileRule = [...styles.matchAll(/@media \(max-width: 900px\) \{([^]*?)\n\}/g)].map((m) => m[1]).join('\n')
   assert.match(mobileRule, /\.patient-next-step \{ grid-column: 1; grid-row: 1; position: static; \}/)
-  assert.ok(someRule('.consult-button-hero', /width: 100%/), 'the hero CTA is full-width unconditionally, not just on mobile')
+  assert.match(mobileRule, /\.patient-history-section \{ grid-column: 1; grid-row: 2;/)
 })
 
 test('the sticky Next step rail has no nested/internal scroll container', () => {
@@ -62,11 +75,31 @@ test('the sticky Next step rail has no nested/internal scroll container', () => 
 
 test('Patient history renders as a quiet narrative timeline, not a dense data card', () => {
   const page = patientPage()
-  assert.match(page, /className="patient-history-section"/)
+  assert.match(page, /className="patient-history-section patient-top-card"/)
   assert.match(page, /className="clinical-timeline"/)
   assert.match(page, /className="timeline-event"/)
   assert.ok(someRule('.timeline-event', /border-left: 1px solid var\(--border\)/), 'a thin connecting line, not individually boxed cards')
   assert.doesNotMatch(page, /className="timeline-event card"|className="clinical-block patient-timeline"/)
+})
+
+test('Patient history and Next step are matching bordered boxes, aligned in the same grid row (design_references/\'s detail-grid)', () => {
+  const page = patientPage()
+  assert.match(page, /<aside className="patient-next-step patient-top-card">/)
+  assert.match(page, /<section className="patient-history-section patient-top-card"/)
+  assert.ok(someRule('.patient-top-card', /border: 1px solid var\(--border\)/), 'both boxes share one bordered-surface style')
+  assert.ok(someRule('.patient-top-card', /padding: 25px/))
+  assert.ok(someRule('.patient-next-step', /grid-column: 2; grid-row: 1/))
+  assert.ok(someRule('.patient-history-section', /grid-column: 1; grid-row: 1/), 'same row, opposite column -- not uneven stacked sections')
+})
+
+test('Next step has its own h2 heading + supporting line, matching Patient history\'s header treatment', () => {
+  const page = patientPage()
+  assert.match(page, /<aside className="patient-next-step patient-top-card">\s*<h2>Next step<\/h2>\s*<p className="page-intro">Your agent helps with the follow-through\.<\/p>/)
+  assert.ok(someRule('.patient-top-card > h2', /font-size: 1\.5rem/))
+})
+
+test('the Next step box ends with a quiet simulated-workflow note, like the reference', () => {
+  assert.match(patientPage(), /<p className="bottom-note">Simulated workflow · No referral is sent<\/p>/)
 })
 
 /* -------------------------------------------------------------- specialty */

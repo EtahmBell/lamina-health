@@ -694,16 +694,31 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
     {currentIssue && <p className="patient-current-issue"><span className="section-label">Current issue</span>{currentIssue}</p>}
     <hr className="patient-header-divider" />
     {error && <div className="error-banner" role="alert"><strong>Unable to complete this action.</strong> {error}</div>}
+    {/* design_references/index_lamina.html's detail-grid, copied literally: two
+     * matching bordered .patient-top-card boxes in one row -- the history
+     * timeline (left) and next-step action (right). DOM order keeps the
+     * action box first so mobile (single column) still surfaces it before
+     * the timeline; grid-column flips the visual order on desktop to match
+     * the reference exactly. */}
     <div className="patient-detail-grid">
-      <aside className="patient-next-step">
-        <p className="eyebrow">Next step</p>
-        {nextStepState === 'consulting' && <div className="next-step-card consulting"><span className="next-step-state-label"><span className="ai-spark pulsing" aria-hidden="true">✦</span> Consulting the network</span><h2>Your agent is finding a match.</h2><p>Comparing clinical fit, referral requirements, access, and your practice preferences…</p></div>}
+      <aside className="patient-next-step patient-top-card">
+        <h2>Next step</h2>
+        <p className="page-intro">Your agent helps with the follow-through.</p>
+        {nextStepState === 'consulting' && <div className="next-step-card consulting">
+          <span className="status-label pulse">Consulting the network</span>
+          <h3>Your agent is finding a match.</h3>
+          <p>Comparing clinical fit, referral requirements, access, and your practice preferences…</p>
+        </div>}
         {nextStepState === 'ready' && consultation && <>
-          <div className="next-step-card ready"><span className="next-step-state-label">✓ Your agent got back to you</span><h2>A specialist is ready for your review.</h2><p>Review the match below, then choose how to move care forward.</p></div>
+          <div className="next-step-card ready">
+            <span className="status-label success">Your agent got back to you</span>
+            <h3>A specialist is ready for your review.</h3>
+            <p>Review the match below, then choose how to move care forward.</p>
+          </div>
           <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} />
         </>}
         {nextStepState === 'idle-prior' && <div className="next-step-card idle">
-          <h2>Previous network consultation available.</h2>
+          <h3>Previous network consultation available.</h3>
           <p><strong>{cleanName(activity?.latest_recommended_physician || '')}</strong>{activity?.latest_recommended_specialty ? <><br />{activity.latest_recommended_specialty}</> : null}</p>
           <small>{activity?.latest_consulted_at ? formatTime(activity.latest_consulted_at) : ''}</small>
           <button className="button-primary" onClick={() => navigate(consultationPath(activity?.latest_consultation_id as number))}>View consultation <span>→</span></button>
@@ -712,28 +727,31 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
             : <button className="text-button" onClick={() => setReconsulting(true)}>Re-consult the network →</button>}
         </div>}
         {nextStepState === 'idle' && <div className="next-step-card idle">
-          <h2>Find a specialist</h2>
+          <span className="status-label warning">Referral needed</span>
+          <h3>Find a specialist</h3>
           <p>Let your agent consult the network and bring back referral options that fit this patient's needs.</p>
-          <button className="consult-button consult-button-hero" disabled={consulting} onClick={runConsult}><span className="ai-spark" aria-hidden="true">✦</span> Find specialist <span>→</span></button>
+          <button className="consult-button" disabled={consulting} onClick={runConsult}>Find specialist <span className="spark-icon" aria-hidden="true">✧</span></button>
           {optionalGuidance('Add context only if you want to guide the network consultation.')}
         </div>}
+        <p className="bottom-note">Simulated workflow · No referral is sent</p>
       </aside>
-      <div className="patient-clinical-main">
-        {(consultation || currentIssue) && <section className="patient-history-section" aria-labelledby="patient-history-heading">
-          <h2 id="patient-history-heading">Patient history</h2>
-          <p className="page-intro">The story so far, all in one place.</p>
-          <div className="clinical-timeline">
-            {consultation && <div className="timeline-event">
-              {activity?.latest_consulted_at && <time>{formatTime(activity.latest_consulted_at)}</time>}
-              <h4>Agent returned a specialist recommendation</h4>
-              <p>{cleanName(consultation.recommended_physician.physician_name)} · {consultation.recommended_physician.specialty}</p>
-            </div>}
-            {currentIssue && <div className="timeline-event">
-              <h4>{currentIssue}</h4>
-              <p>Reason for this referral workflow, as recorded in the patient's chart.</p>
-            </div>}
-          </div>
-        </section>}
+      {(consultation || currentIssue) && <section className="patient-history-section patient-top-card" aria-labelledby="patient-history-heading">
+        <h2 id="patient-history-heading">Patient history</h2>
+        <p className="page-intro">The story so far, all in one place.</p>
+        <div className="clinical-timeline">
+          {consultation && <div className="timeline-event">
+            {activity?.latest_consulted_at && <time>{formatTime(activity.latest_consulted_at)}</time>}
+            <h4>Agent returned a specialist recommendation</h4>
+            <p>{cleanName(consultation.recommended_physician.physician_name)} · {consultation.recommended_physician.specialty}</p>
+          </div>}
+          {currentIssue && <div className="timeline-event">
+            <h4>{currentIssue}</h4>
+            <p>Reason for this referral workflow, as recorded in the patient's chart.</p>
+          </div>}
+        </div>
+      </section>}
+    </div>
+    <div className="patient-clinical-main">
         <section className="clinical-overview" aria-labelledby="clinical-overview-heading">
           <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
           <div className="clinical-columns">
@@ -780,7 +798,6 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
             </section>
           </div>
         </details>
-      </div>
     </div>
   </main></ProductShell>
 }

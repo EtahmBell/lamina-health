@@ -830,8 +830,9 @@ button.lam-row:hover { background: #fff9f1; }
 
 /* post-8B: the agent identity hero + primary CTA + optional guidance all now live
    together inside one Next step card (see .next-step-card) rather than a standalone
-   network-action banner. */
-.consult-button-hero { width: 100%; padding: 15px 26px; font-size: .95rem; text-align: center; }
+   network-action banner. The CTA itself intentionally stays the plain compact
+   .consult-button size (design_references/'s .btn.primary) -- no oversized/
+   full-width "hero" treatment. */
 
 /* Optional guidance reads as a secondary, clearly-labeled enhancement layer
    below the hero, not a second setup step the clinician must pass through. */
@@ -1522,29 +1523,40 @@ button.lam-row:hover { background: #fff9f1; }
 .patient-current-issue { max-width: 68ch; margin: 14px 0 0; color: var(--clinical); font-family: var(--font-display); font-size: 1.02rem; line-height: 1.5; }
 .patient-current-issue .section-label { display: block; margin-bottom: 4px; }
 .patient-header-divider { margin: 22px 0 0; border: 0; border-top: 1px solid var(--border); }
-/* design_references/index_lamina.html's .detail-grid uses this exact ratio --
-   the complaint was never the column proportions, only the right column's
-   content density (see .best-fit-card.compact etc. below). */
+/* design_references/index_lamina.html's detail() is the literal copy guide for
+   this row: two matching bordered .patient-top-card boxes (its .card.padded),
+   Patient history left / Next step right, same top alignment, same padding
+   rhythm. DOM order keeps Next step first (so mobile's single column still
+   surfaces it before the history timeline); grid-column flips history to the
+   visual left on desktop, matching the reference exactly. */
 .patient-detail-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 23px; margin-top: 24px; align-items: start; }
+.patient-top-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 25px; }
+.patient-top-card > h2 { margin: 0; font-size: 1.5rem; }
+.patient-top-card > p.page-intro { margin: 10px 0 0; }
 /* Sticky, but never its own scroll container -- the main page is the only
-   scroller. A disclosure that makes this column tall simply scrolls past the
-   bottom of the viewport like any sticky element would; that's acceptable. */
+   scroller. Paired with a same-height Patient history box, the sticky range
+   is naturally modest; that's fine (no sacrificing usability for perpetual
+   stickiness -- see the prior pass's note on this tradeoff). */
 .patient-next-step { grid-column: 2; grid-row: 1; position: sticky; top: 76px; }
-.patient-next-step > .eyebrow { margin-bottom: 14px; }
-.patient-clinical-main { grid-column: 1; grid-row: 1; min-width: 0; }
-.next-step-card { border: 1px solid transparent; border-radius: 7px; background: #f3f4ed; padding: 19px; }
-.next-step-card h2 { margin: 6px 0 0; font-size: 1.05rem; }
+.patient-history-section { grid-column: 1; grid-row: 1; }
+.patient-clinical-main { margin-top: 32px; min-width: 0; }
+.bottom-note { margin: 18px 0 0; color: var(--text-secondary); font-size: .6rem; }
+.next-step-card { margin-top: 18px; border: 1px solid transparent; border-radius: 7px; background: #f3f4ed; padding: 19px; }
+.next-step-card h3 { margin: 10px 0 0; font-size: 1.05rem; font-weight: 500; }
 .next-step-card p { margin: 8px 0 0; color: var(--text-secondary); font-size: .76rem; line-height: 1.5; }
 .next-step-card small { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .62rem; }
 .next-step-card .button-primary, .next-step-card .consult-button { margin-top: 16px; }
 .next-step-card .text-button { margin-top: 14px; }
+.next-step-card .status-label { display: inline-flex; align-items: center; }
 .next-step-card.consulting { background: var(--sage-surface); text-align: center; }
-.next-step-state-label { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: .62rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-.next-step-card.consulting .next-step-state-label { color: var(--accent-hover); justify-content: center; width: 100%; }
-.ai-spark { display: inline-block; color: var(--accent); }
-.ai-spark.pulsing { animation: ai-spark-pulse 1.6s ease-in-out infinite; }
-@keyframes ai-spark-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .ai-spark.pulsing { animation: none; } }
+.next-step-card.consulting .status-label { justify-content: center; width: 100%; }
+/* Reference uses the plain outline star (U+2727) everywhere, never a filled
+   one, and never gives it a special accent color -- it just inherits whatever
+   color the surrounding text/button already has. */
+.spark-icon { margin-left: 4px; }
+.status-label.pulse { background: var(--mineral-surface); color: var(--mineral-deep); animation: status-pulse 1s infinite; }
+@keyframes status-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .status-label.pulse { animation: none; } }
 .next-step-card details.network-optional { margin-top: 16px; }
 details.network-optional summary { min-height: 0; padding: 0; border: 0; background: none; margin: 14px 0 9px; color: var(--text-secondary); font-size: .58rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 details.network-optional { border: 0; background: none; margin-top: 0; padding: 0; }
@@ -1552,7 +1564,7 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 /* Recommendation card: compact by default (design_references/'s .specialist is
    the model -- name, specialty, one fit line, one metadata line, one rationale
    sentence, one action). Everything denser lives behind a disclosure. */
-.best-fit-card.compact { padding: 19px; }
+.best-fit-card.compact { margin-top: 18px; padding: 18px; }
 .best-fit-card.compact .best-fit-physician { padding: 0; gap: 12px; }
 .best-fit-card.compact .best-fit-physician h2 { margin: 0; font-size: 1.15rem; }
 .best-fit-card.compact .best-fit-physician p { margin: 2px 0 0; }
@@ -1572,9 +1584,6 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 /* Patient history: a quiet narrative timeline (design_references/'s .event),
    not another dense data card. One thin connecting line, generous vertical
    rhythm, date as quiet metadata, a title, one supporting sentence. */
-.patient-history-section { margin-top: 30px; }
-.patient-history-section h2 { margin: 0; font-size: 1.3rem; }
-.patient-history-section > .page-intro { margin: 7px 0 0; }
 .clinical-timeline { margin-top: 24px; }
 .timeline-event { position: relative; margin-left: 5px; border-left: 1px solid var(--border); padding: 0 0 24px 22px; }
 .timeline-event:last-child { padding-bottom: 0; }
@@ -1585,7 +1594,7 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 @media (max-width: 900px) {
   .patient-detail-grid { grid-template-columns: 1fr; }
   .patient-next-step { grid-column: 1; grid-row: 1; position: static; }
-  .patient-clinical-main { grid-column: 1; grid-row: 2; }
+  .patient-history-section { grid-column: 1; grid-row: 2; margin-top: 23px; }
 }
 
 /* --------------------------------------------------------------- Post-8B: Network */
