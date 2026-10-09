@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { LaminaMark } from './LaminaMark.tsx'
 import {
   addNetworkMember,
@@ -8,13 +8,11 @@ import {
   searchProviders,
   type AgentNetwork,
   type AgentStatus,
-  type NetworkAgent,
   type PhysicianNetworkProfile,
   type ProviderSearchResponse,
 } from './api.ts'
 import { ENGAGEMENT_PERSONA_BY_NPI } from './demoIdentity.ts'
 import { networkProfilePath } from './Engagement.tsx'
-import { DEFAULT_GRAPH_FILTER, GRAPH_FILTERS, graphVisibility, type GraphFilter } from './graphFilter.ts'
 import { membershipLabel, networkRoster, physicianDisplayName, rosterSize, type NetworkRelationship } from './networkRoster.ts'
 
 type Navigate = (path: string) => void
@@ -74,73 +72,18 @@ function NetworkRelationshipRow({ member, navigate }: { member: NetworkRelations
   </button>
 }
 
-const graphRoster = ['physician-jung', 'physician-onadeko', 'physician-alvarez', 'physician-patel', 'physician-brooks', 'physician-rossi']
-const graphSlots = [
-  { x: 20, y: 25 }, { x: 80, y: 25 }, { x: 50, y: 16 },
-  { x: 20, y: 75 }, { x: 80, y: 75 }, { x: 50, y: 84 },
-]
-const shortName = (name: string) => name.replace(/^Dr\.\s*/, '')
 const interactionDate = (value: string) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-function relationshipLabel(agent: NetworkAgent) {
-  const count = agent.relationship?.consultation_count || 0
-  if (!count) return 'No recorded consult yet'
-  return `${count} recorded consultation${count === 1 ? '' : 's'}`
-}
-
-function NetworkGraph({ network, selectedId, onSelect, filter, onFilter }: {
-  network: AgentNetwork; selectedId: string | null; onSelect: (id: string) => void
-  filter: GraphFilter; onFilter: (filter: GraphFilter) => void
-}) {
-  const { edges, visible } = graphVisibility(network, filter)
-  /** Each physician keeps its own slot, so filtering changes visibility, never position. */
-  const placed = graphRoster
-    .map((id, index) => ({ agent: network.nodes.find((node) => node.physician_id === id), slot: graphSlots[index] }))
-    .filter((entry): entry is { agent: NetworkAgent; slot: typeof graphSlots[number] } => Boolean(entry.agent))
-    .filter((entry) => visible(entry.agent.id))
-  return <div className="agent-network-stage">
-    <div className="agent-network-caption">
-      <div className="agent-network-legend"><span className="legend-recommended"><i /> Recommended</span><span className="legend-consulted"><i /> Consulted</span><span className="legend-redirected"><i /> Redirected</span></div>
-      <div className="graph-filter" role="group" aria-label="Show physician agents">
-        {GRAPH_FILTERS.map((option) => <button
-          key={option.id}
-          type="button"
-          className={filter === option.id ? 'active' : ''}
-          aria-pressed={filter === option.id}
-          onClick={() => onFilter(option.id)}
-        >{option.label}</button>)}
-      </div>
-    </div>
-    <div className="agent-network-canvas">
-      <svg className="agent-network-edges" viewBox="0 0 1000 560" preserveAspectRatio="none" aria-hidden="true">{placed.map(({ agent, slot }) => { const edge = edges.get(agent.id); return edge && <line key={agent.id} x1="500" y1="280" x2={slot.x * 10} y2={slot.y * 5.6} className={`relationship-edge ${edge.relationship_type}`} /> })}</svg>
-      <div className="agent-network-center"><LaminaMark active /><span>Your agent</span><strong>{network.center.name}</strong><small>{network.center.specialty}</small><em>ACTIVE</em></div>
-      {placed.map(({ agent, slot }) => <button key={agent.id} className={`agent-network-node ${agent.relationship ? 'connected' : 'unconnected'} ${selectedId === agent.id ? 'selected' : ''}`} style={{ '--node-x': `${slot.x}%`, '--node-y': `${slot.y}%` } as CSSProperties} onClick={() => onSelect(agent.id)} aria-label={`${agent.name}'s Agent · ${agent.specialty} · ${statusCopy[agent.status].label} · ${relationshipLabel(agent)}. Open agent details.`}><LaminaMark active={agent.status === 'active'} /><strong>{agent.name}</strong><small>{agent.specialty}</small><i className={`node-dot ${agent.status}`} aria-hidden="true" /></button>)}
-    </div>
-  </div>
-}
-
-function AgentDetail({ agent, navigate, close }: { agent: NetworkAgent; navigate: Navigate; close: () => void }) {
-  const relation = agent.relationship
-  return <section className="network-detail-panel" aria-label={`${agent.name} agent details`}><header><div><p className="eyebrow">Physician agent</p><h2>{agent.name}'s Agent</h2><p>{agent.specialty} · {agent.location}</p></div><button className="detail-close" onClick={close} aria-label="Close agent details">×</button></header><StatusBadge status={agent.status} />
-    {agent.status !== 'reserved' && <p className="detail-status-note">{statusCopy[agent.status].detail}</p>}
-    <div className="network-detail-grid"><div><span>What this agent represents</span><strong>{agent.subspecialty}</strong><p>{agent.focus_areas.slice(0, 3).join(' · ')}</p></div><div><span>Configured referral rule</span><p>{agent.explicit_rules[0] || 'Not specified'}</p></div><div><span>Pre-referral requirements</span><p>{agent.required_workup.join(' · ') || 'Not specified'}</p></div><div><span>Relationship to your agent</span><strong>{relationshipLabel(agent)}</strong><p>{relation ? `${relation.recommended_count} recommendation${relation.recommended_count === 1 ? '' : 's'} · ${relation.redirect_count} redirect${relation.redirect_count === 1 ? '' : 's'}` : 'No completed Lamina consultation connects these agents yet.'}</p></div><div><span>Last interaction</span><strong>{relation ? relation.last_patient_name : 'None recorded'}</strong>{relation && <p>{interactionDate(relation.most_recent_interaction)}</p>}</div><div><span>Provenance</span><p>{agent.provenance}</p>{relation && <small>Relationship: completed Lamina synthetic consultation record</small>}</div></div>
-    {agent.confirmed_preferences && <div className="confirmed-agent-preference"><span>Physician-confirmed demo preferences</span><p>{agent.confirmed_preferences.areas_of_focus.join(' · ')}</p></div>}
-    <footer><button className="text-button" onClick={() => navigate(`/network/${agent.npi}`)}>View full physician profile →</button>{relation && <button className="text-button" onClick={() => navigate(`/consultations/${relation.last_record_id}`)}>View recent consultation →</button>}</footer>
-  </section>
-}
-
-/** Network → My Network content for Lucy (the only persona with a workspace-scoped graph/roster today — see Pass 7C report). */
+/** Network → My Network content for Lucy (the only persona with a workspace-scoped roster today — see Pass 7C report). The network graph/visualization was removed in the Dashboard+Network polish pass: Colleagues is a focused list now, not a visualization. */
 export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
   const [filters, setFilters] = useState({ q: '', specialty: '', location: '' })
   const [response, setResponse] = useState<ProviderSearchResponse | null>(null)
   const [network, setNetwork] = useState<AgentNetwork | null>(null)
   const [networkError, setNetworkError] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [showAllResults, setShowAllResults] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingNpi, setPendingNpi] = useState<string | null>(null)
-  const [graphFilter, setGraphFilter] = useState<GraphFilter>(DEFAULT_GRAPH_FILTER)
   const [addOpen, setAddOpen] = useState(false)
 
   const runSearch = async (event?: FormEvent) => {
@@ -157,12 +100,6 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [addOpen])
-  useEffect(() => { if (selectedId) document.querySelector('.network-detail-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [selectedId])
-  /** A filtered-out physician must not keep an open detail panel behind the graph. */
-  useEffect(() => {
-    if (!network || !selectedId) return
-    if (!graphVisibility(network, graphFilter).visible(selectedId)) setSelectedId(null)
-  }, [network, selectedId, graphFilter])
 
   const changeMembership = async (npi: string, action: () => Promise<unknown>) => {
     setPendingNpi(npi); setError(null)
@@ -171,7 +108,6 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
     finally { setPendingNpi(null) }
   }
 
-  const selected = network?.nodes.find((node) => node.id === selectedId)
   const groups = network ? networkRoster(network) : []
   const memberNpis = new Set([
     ...(network?.nodes.filter((node) => node.in_network).map((node) => node.npi) || []),
@@ -201,13 +137,6 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
       </section>)}
       {network && groups.length > 0 && <p className="network-roster-note">{rosterSize(groups)} physician{rosterSize(groups) === 1 ? '' : 's'} across {groups.length} specialt{groups.length === 1 ? 'y' : 'ies'}.</p>}
     </section>
-
-    <details className="network-visual-section quiet">
-      <summary><h2>Network visualization</h2><em>View</em></summary>
-      <p className="network-visual-intro">Select a physician agent to inspect its practice footprint, activation state, and relationship to yours. Edges appear only for completed Lamina consultations.</p>
-      {network && <><NetworkGraph network={network} selectedId={selectedId} onSelect={setSelectedId} filter={graphFilter} onFilter={setGraphFilter} />{selected && <AgentDetail agent={selected} navigate={navigate} close={() => setSelectedId(null)} />}</>}
-      <p className="network-roster-note">The visualization shows physician agents involved in Lamina consultations. Added relationships without a consultation appear in Your network above.</p>
-    </details>
 
     {addOpen && <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setAddOpen(false) }}>
       <div className="post-flow-dialog" role="dialog" aria-modal="true" aria-label="Add a colleague">

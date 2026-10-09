@@ -18,6 +18,7 @@ from backend.synthetic_data import PRIMARY_PATIENT_ID
 from backend.workflow import WorkflowStore
 
 JUNG_NPI = "9900000001"
+WU_NPI = "9900000008"  # Not part of the default seeded roster -- safe for isolation checks.
 
 
 @pytest.fixture
@@ -172,13 +173,18 @@ def test_two_visitors_are_isolated_end_to_end(isolated_app: WorkflowStore) -> No
             f"/api/workspace/consultations/{record_a['id']}"
         ).status_code == 404
 
+        visitor_b_baseline = visitor_b.get("/api/workspace/network/members").json()
+        assert len(visitor_b_baseline) > 0, "each workspace is lazily seeded with its own default roster"
+        assert all(member["npi"] != WU_NPI for member in visitor_b_baseline)
         assert visitor_a.post(
-            "/api/workspace/network/members", json={"npi": JUNG_NPI}
+            "/api/workspace/network/members", json={"npi": WU_NPI}
         ).status_code == 201
         assert visitor_a.put(
             "/api/workspace/agent/learnings/renal", json={"action": "confirm"}
         ).status_code == 200
-        assert visitor_b.get("/api/workspace/network/members").json() == []
+        assert visitor_b.get("/api/workspace/network/members").json() == visitor_b_baseline, (
+            "visitor A's explicit addition never leaks into visitor B's independently-seeded roster"
+        )
         renal_b = next(
             item
             for item in visitor_b.get("/api/workspace/agent").json()["learnings"]

@@ -72,7 +72,7 @@ test('the demo perspective menu never references Supabase auth or identity claim
 test('PCP shell navigation and Lucy sidebar card are unchanged aside from the header control', () => {
   assert.match(shell(), /const items = perspective === 'specialist' \? SPECIALIST_NAV_ITEMS : navItems/)
   assert.match(shell(), /items\.map/)
-  assert.match(shell(), /Active · Primary Care/)
+  assert.match(shell(), /<strong>\{PCP_AGENT_NAME\}<\/strong>/)
 })
 
 test('specialist shell uses the consolidated three-item navigation (post-8B): Dashboard/Patients/Network, with My Agent as the persistent sidebar object and Profile in the avatar menu', () => {
@@ -80,9 +80,9 @@ test('specialist shell uses the consolidated three-item navigation (post-8B): Da
   assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
 })
 
-test('the specialist sidebar card never claims Active status for a reserved provider', () => {
-  assert.match(shell(), /Synthetic demo profile · \{SPECIALIST_SPECIALTY\}/)
-  assert.doesNotMatch(shell(), /perspective === 'specialist'[\s\S]{0,400}Active/)
+test('the specialist sidebar card never claims Active status for a reserved provider (Dashboard+Network polish pass: the bottom-left object was simplified to a name only — "Active"/"Synthetic demo profile" status lines are gone for both personas, so there is nothing left to misclaim)', () => {
+  assert.match(shell(), /<strong>\{SPECIALIST_AGENT_NAME\}<\/strong>/)
+  assert.doesNotMatch(shell(), /Active · Primary Care|Synthetic demo profile/)
 })
 
 /* -------------------------------------------------------------- §48 cases */

@@ -42,7 +42,8 @@ strong, b { font-weight: 600; }
 .nav-item-label, .nav-item small { display: block; }.nav-item-label { font-size: .82rem; font-weight: 400; }.nav-item.active .nav-item-label { font-weight: 600; }.nav-item small { margin-top: 2px; font-size: .64rem; }
 .sidebar-clinician { display: flex; align-items: center; gap: 11px; border-top: 1px solid var(--border); padding: 18px 4px 0; }
 .clinician-avatar { width: 39px; height: 39px; display: grid; flex: 0 0 39px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--clinical); box-shadow: 0 0 0 1px var(--border); color: #fff; font-family: var(--font-display); font-size: .72rem; font-weight: 700; }
-.sidebar-clinician span, .sidebar-clinician strong, .sidebar-clinician small { display: block; }.sidebar-clinician span { color: var(--text-secondary); font-size: .58rem; text-transform: uppercase; }.sidebar-clinician strong { margin-top: 2px; font-family: var(--font-display); font-size: .9rem; }.sidebar-clinician small { color: var(--text-secondary); font-size: .66rem; }
+.you-avatar { width: 39px; height: 39px; display: grid; flex: 0 0 39px; place-items: center; border-radius: 50%; background: var(--sand); color: var(--mineral-deep); }
+.sidebar-clinician span, .sidebar-clinician strong, .sidebar-clinician small { display: block; }.sidebar-clinician span { color: var(--text-secondary); font-size: .58rem; text-transform: uppercase; }.sidebar-clinician strong { margin-top: 2px; font-family: var(--font-display); font-size: .9rem; font-weight: 500; }.sidebar-clinician small { color: var(--text-secondary); font-size: .66rem; }
 
 .workspace { min-width: 0; flex: 1; }.workspace-bar { height: 76px; display: flex; align-items: center; justify-content: flex-end; padding: 0 32px; border-bottom: 1px solid var(--border); background: rgb(255 254 250 / 82%); }
 .synthetic-status { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: .65rem; }.synthetic-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
@@ -1197,7 +1198,7 @@ button.lam-row:hover { background: #fff9f1; }
 .initialization-card { border-left-color: var(--accent-hover); }
 
 /* -------------------------------------------------------- Pass 5B: post flow */
-.post-trigger { display: inline-flex; }
+.post-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .post-flow-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgb(36 30 24 / 45%); padding: 24px; }
 .post-flow-dialog { position: relative; width: min(100%, 560px); max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 30px 32px; box-shadow: 0 24px 60px rgb(36 52 71 / 18%); }
 .post-flow-close { position: absolute; top: 16px; right: 18px; font-size: 1.1rem; line-height: 1; color: var(--text-secondary); }
@@ -1376,9 +1377,12 @@ button.lam-row:hover { background: #fff9f1; }
 .home-network-highlight-physician { grid-column: 1 / -1; color: var(--text-secondary); font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
 .home-network-highlight-title { font-size: .76rem; }
 .home-network-highlight-row b { color: var(--mineral-deep); font-size: .62rem; font-weight: 700; white-space: nowrap; }
-.home-activity, .home-network-highlights { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 22px; }
-.home-activity > .home-section-heading, .home-network-highlights > .home-section-heading { margin-bottom: 4px; }
-.dashboard-bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+/* Recent activity renders directly on the page — heading, rows, light dividers,
+ * whitespace — never a bordered card (see .dashboard-bottom-row). Recent network
+ * keeps a contained card since it's the smaller, more self-sufficient of the two. */
+.home-network-highlights { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 22px; }
+.home-network-highlights > .home-section-heading { margin-bottom: 4px; }
+.dashboard-bottom-row { display: grid; grid-template-columns: 1.15fr .85fr; gap: 32px; align-items: start; margin-top: var(--section-space); padding-top: 22px; border-top: 1px solid var(--border); }
 .dashboard-bottom-row .home-activity, .dashboard-bottom-row .home-network-highlights { margin-top: 0; }
 @media (max-width: 900px) { .dashboard-bottom-row { grid-template-columns: 1fr; } }
 
@@ -1454,15 +1458,11 @@ button.lam-row:hover { background: #fff9f1; }
 .dashboard-situation { margin: 8px 0 0; color: var(--text-secondary); font-size: .88rem; font-family: var(--font-display); }
 .dashboard-needs-you { margin-top: 34px; }
 .dashboard-empty-note { margin: 4px 0 0; color: var(--text-secondary); font-size: .74rem; }
-.dashboard-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; }
-.dashboard-stat-card { display: flex; align-items: center; gap: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 18px 21px; }
-.dashboard-stat-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 8px; background: var(--sand); color: var(--mineral-deep); font-size: 1.05rem; }
-.dashboard-stat-value { font-family: var(--font-display); font-size: 1.85rem; line-height: 1; }
-.dashboard-stat-label { margin-top: 4px; color: var(--text-secondary); font-size: .7rem; }
-@media (max-width: 760px) { .dashboard-stats { grid-template-columns: 1fr; } }
+/* Dashboard vertical rhythm: agent banner -> watchlist and watchlist -> bottom row
+ * use the same section gap, so the page feels deliberately paced rather than
+ * compressed at the top and loose at the bottom (see --section-space). */
 .dashboard-watchlist { margin-top: var(--section-space); }
 .dashboard-watchlist-sub { margin: 4px 0 0; color: var(--text-secondary); font-size: .72rem; }
-.watch-row-flag { margin-left: 7px; border-radius: 4px; padding: 3px 7px; background: #f8ece3; color: var(--copper-hover); font-size: .58rem; font-weight: 600; white-space: nowrap; }
 .lam-row-status.your-move { border: 1px solid rgb(182 106 69 / 28%); background: #f8ece3; color: var(--copper-hover); font-weight: 600; }
 .lam-row-mark.agent-row-avatar { display: grid; place-items: center; background: var(--sage-surface); color: var(--sage-ink); font-size: 1rem; }
 .activity-kind.agent-event-label { display: inline-block; margin: 0 7px 0 0; border-radius: 999px; background: var(--sage-surface); padding: 2px 8px; color: var(--sage-ink); font-weight: 700; }
@@ -1493,7 +1493,39 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-banner-action h3 { margin: 4px 0 0; font-size: 1.3rem; }
 .agent-banner-action .agent-banner-support { font-size: .76rem; }
 .agent-banner-action .button-primary { margin-top: 16px; }
-@media (max-width: 960px) { .agent-banner { grid-template-columns: 1fr; } .agent-banner-glyph { display: none; } }
+.agent-banner-microcopy { position: relative; z-index: 1; margin: 8px 0 0; color: var(--text-secondary); font-size: .64rem; }
+.agent-banner-view-row { position: relative; z-index: 1; display: flex; align-items: center; gap: 20px; margin-top: 16px; flex-wrap: wrap; }
+.agent-digest-toggle { white-space: nowrap; }
+/* Collapsed by default; expands inline beneath both columns, never a dropdown or
+ * separate page. Height-only transition, no motion beyond that. */
+.agent-digest-expanded { grid-column: 1 / -1; max-height: 0; opacity: 0; overflow: hidden; transition: max-height 280ms ease, opacity 200ms ease; }
+.agent-digest-expanded.open { max-height: 420px; opacity: 1; }
+.agent-digest-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; padding: 6px 35px 30px; }
+.agent-digest-tile { border-top: 1px solid var(--sage-surface-strong); padding-top: 14px; }
+.agent-digest-tile-label { margin: 0 0 7px; color: var(--mineral); font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.agent-digest-tile strong { display: block; color: var(--text-primary); font-family: var(--font-display); font-size: .92rem; font-weight: 400; line-height: 1.35; }
+.agent-digest-tile p { margin: 6px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .agent-digest-expanded { transition: none; } }
+@media (max-width: 960px) { .agent-banner { grid-template-columns: 1fr; } .agent-banner-glyph { display: none; } .agent-digest-grid { grid-template-columns: 1fr; padding: 6px 20px 20px; } }
+
+/* Dashboard quick-training modal: a small batch (~3 questions), never the full My
+ * Agent -> Train page. Reuses .post-flow-overlay and the .training-choices /
+ * .training-progress-row / .training-prompt system TrainingPage already defines. */
+.training-modal { position: relative; width: min(100%, 520px); max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 32px; box-shadow: 0 24px 60px rgb(36 52 71 / 18%); text-align: center; }
+.training-modal .eyebrow { text-align: left; }
+.training-modal .training-progress-row { margin: 14px 0 0; max-width: none; }
+.training-modal .training-prompt { margin: 22px 0 10px; font-size: 1.3rem; }
+.training-modal-why { margin: 0 0 22px; color: var(--text-secondary); font-size: .72rem; line-height: 1.55; }
+.training-choices.column { flex-direction: column; max-width: 420px; margin: 0 auto; }
+.training-choices.column .training-choice-plain { text-align: left; }
+.training-modal-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 22px; }
+.training-modal-reassure { margin: 0; color: var(--text-secondary); font-size: .64rem; }
+.training-modal-loading { padding: 50px 0; display: flex; flex-direction: column; align-items: center; gap: 14px; color: var(--text-secondary); font-size: .75rem; }
+.training-modal-complete h2 { margin: 10px 0 8px; }
+.training-modal-sub { margin: 0; color: var(--text-secondary); font-size: .8rem; }
+.training-modal-complete .training-modal-reassure { margin-top: 8px; }
+.training-modal-complete .button-primary { margin: 22px auto 0; }
+@media (max-width: 600px) { .training-modal { padding: 24px 20px; } }
 
 /* -------------------------------------------------------------- Post-8B: Patients worklist */
 .worklist-row { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 14px; }

@@ -267,7 +267,7 @@ export type TrainingSession = {
   id: number; persona_id: string; status: 'active' | 'completed'
   created_at: string; completed_at: string | null; questions?: TrainingQuestion[]
   responses?: TrainingResponse[]; proposed_learnings?: ProposedLearning[]
-  mode?: 'initialization' | 'daily' | 'extended' | 'focused'; question_limit?: number
+  mode?: 'initialization' | 'daily' | 'extended' | 'focused' | 'quick'; question_limit?: number
   answer_target?: number; lifecycle_state?: 'active' | 'questions_complete' | 'review_complete' | 'abandoned'
   questions_complete_at?: string | null; review_completed_at?: string | null
   review_deferred?: boolean; focused_seed_id?: string | null
@@ -522,7 +522,7 @@ export const getAgentTestCases = (perspective: PhysicianIdentity) => isOwner(per
 export const chatWithAgent = (perspective: PhysicianIdentity, input: AgentChatRequest) => isOwner(perspective) ? chatWithOwnedAgent(input) : request<AgentChatResponse>(physicianPerspectivePath('/api/workspace/physician/agent-chat', perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
 export const submitAgentChatFeedback = (perspective: PhysicianIdentity, responseId: string, feedback: 'reflects' | 'not_quite') => isOwner(perspective) ? submitOwnedChatFeedback(responseId, feedback) : request<AgentChatFeedback>(physicianPerspectivePath(`/api/workspace/physician/agent-chat/${encodeURIComponent(responseId)}/feedback`, perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }) })
 export const startFocusedTraining = (perspective: PhysicianIdentity, seedId: string, answerTarget = 10) => isOwner(perspective) ? startOwnedFocusedTraining(seedId, answerTarget) as Promise<TrainingSession> : request<TrainingSession>(physicianPerspectivePath('/api/workspace/physician/training/focused', perspective), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seed_id: seedId, answer_target: answerTarget }) })
-export const startTrainingSession = (perspective: PhysicianIdentity, options?: { mode?: 'initialization' | 'daily' | 'extended'; limit?: number }) => isOwner(perspective) ? startOwnedTraining(options?.mode ?? 'daily') as Promise<TrainingSession> : request<TrainingSession>(physicianPerspectivePath('/api/workspace/physician/training/sessions', perspective), { method: 'POST', headers: options ? { 'Content-Type': 'application/json' } : undefined, body: options ? JSON.stringify(options) : undefined })
+export const startTrainingSession = (perspective: PhysicianIdentity, options?: { mode?: 'initialization' | 'daily' | 'extended' | 'quick'; limit?: number }) => isOwner(perspective) ? startOwnedTraining(options?.mode === 'quick' ? 'daily' : options?.mode ?? 'daily') as Promise<TrainingSession> : request<TrainingSession>(physicianPerspectivePath('/api/workspace/physician/training/sessions', perspective), { method: 'POST', headers: options ? { 'Content-Type': 'application/json' } : undefined, body: options ? JSON.stringify(options) : undefined })
 export const resumeTrainingSession = (perspective: PhysicianIdentity, sessionId: number) => isOwner(perspective) ? resumeOwnedTraining(sessionId) as Promise<TrainingSession> : request<TrainingSession>(physicianPerspectivePath(`/api/workspace/physician/training/sessions/${sessionId}`, perspective))
 export const answerTrainingQuestion = (
   perspective: PhysicianIdentity,

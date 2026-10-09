@@ -28,6 +28,19 @@ function NetworkMark({ active = false, resolved = false }: { active?: boolean; r
   return <LaminaMark active={active} resolved={resolved} />
 }
 
+/** A warm, personal mark for the persistent bottom-left agent object — not the
+ * abstract network glyph used elsewhere, and not animated. Simple enough to read as
+ * "you" at 39px without feeling childish or visually dominant. */
+function YouAvatar() {
+  return <span className="you-avatar" aria-hidden="true">
+    <svg viewBox="0 0 32 32" width="20" height="20" fill="none">
+      <circle cx="11.5" cy="13.5" r="1.7" fill="currentColor" />
+      <circle cx="20.5" cy="13.5" r="1.7" fill="currentColor" />
+      <path d="M10.5 19.5c2.2 2.4 8.8 2.4 11 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  </span>
+}
+
 function SyntheticStatus() {
   return <div className="synthetic-status"><span />Synthetic demo · no PHI</div>
 }
@@ -88,7 +101,7 @@ function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; pers
 }
 
 /** A quiet utility for returning physician-account holders — distinct from
- * Dr. Lucy Saru's demo-workspace identity, and never competing with Enter
+ * Dr. Lucy Saruhashi's demo-workspace identity, and never competing with Enter
  * workspace. Renders nothing while auth is unconfigured or still loading. */
 function PortalAccountControl({ navigate }: { navigate: Navigate }) {
   const { configured, loading, user } = useAuth()
@@ -113,8 +126,8 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
         </nav>
       </div>
       {perspective === 'specialist'
-        ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><NetworkMark /><div><span>Your agent</span><strong>{SPECIALIST_AGENT_NAME}</strong><small>Synthetic demo profile · {SPECIALIST_SPECIALTY}</small></div></button>
-        : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><NetworkMark active /><div><span>Your agent</span><strong>{PCP_AGENT_NAME}</strong><small>Active · Primary Care</small></div></button>}
+        ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><YouAvatar /><div><strong>{SPECIALIST_AGENT_NAME}</strong></div></button>
+        : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><YouAvatar /><div><strong>{PCP_AGENT_NAME}</strong></div></button>}
     </aside>
     <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><PerspectiveSwitch navigate={navigate} perspective={perspective} /></div></header>{children}</div>
   </div>
@@ -172,19 +185,17 @@ function LucyNetworkPage({ navigate, params }: { navigate: Navigate; params: URL
   </main>
 }
 
-function DashboardMetricCard({ icon, value, label }: { icon: string; value: number; label: string }) {
-  return <div className="dashboard-stat-card"><span className="dashboard-stat-icon" aria-hidden="true">{icon}</span><div><span className="dashboard-stat-value">{value}</span><p className="dashboard-stat-label">{label}</p></div></div>
-}
-
 /** Dashboard-scoped patient row. Deliberately built from `records` (already fetched
  * for currentWork), never `getPatientActivity` — Home stays on canonical consultation
- * state, matching the rest of the page, and never introduces a second data source. */
+ * state, matching the rest of the page, and never introduces a second data source.
+ * Only patients with a real, actionable next step are included here — this is a
+ * focused worklist, not a miniature Patients directory (see buildWatchRows' filter). */
 type PatientWatchRow = { patient: DemoPatientSummary; status: WorklistStatus; detail: string; nextStep: string; action: string }
 
 function buildWatchRows(records: ConsultationRecord[]): PatientWatchRow[] {
-  return DEMO_PATIENTS.map((patient): PatientWatchRow => {
+  return DEMO_PATIENTS.filter((patient) => patient.implemented).map((patient): PatientWatchRow => {
     const record = records.find((item) => item.patient_id === patient.id)
-    const status: WorklistStatus = record ? 'Ready for your review' : patient.implemented ? 'Not yet consulted' : 'No action needed'
+    const status: WorklistStatus = record ? 'Ready for your review' : 'Not yet consulted'
     const detail = record ? `${record.result.recommended_physician.specialty} · ${cleanName(record.result.recommended_physician.physician_name)}` : patient.reason
     return {
       patient, status, detail,
@@ -196,11 +207,11 @@ function buildWatchRows(records: ConsultationRecord[]): PatientWatchRow[] {
 
 function PatientWatchTable({ rows, navigate }: { rows: PatientWatchRow[]; navigate: Navigate }) {
   return <section className="dashboard-watchlist">
-    <div className="home-section-heading"><div><h2>Patients to keep an eye on</h2><p className="dashboard-watchlist-sub">Recent activity and the next step in their care.</p></div><button className="text-button" onClick={() => navigate('/patients')}>View all patients →</button></div>
+    <div className="home-section-heading"><div><h2>Patients with next steps</h2><p className="dashboard-watchlist-sub">Recent activity and the next step in their care.</p></div><button className="text-button" onClick={() => navigate('/patients')}>View all patients →</button></div>
     <div className="lam-list patient-worklist">{rows.map(({ patient, status, detail, nextStep, action }) => <button key={patient.id} className="lam-row worklist-row" onClick={() => navigate(`/patients/${patient.id}`)}>
       <span className="lam-row-mark patient-row-avatar">{patient.initials}</span>
       <span className="lam-row-main"><strong>{patient.name}</strong><small>{patient.age} years · {detail}</small></span>
-      <span className={`worklist-status ${WORKLIST_STATUS_TONE[status]}`}>{status}{status === 'Ready for your review' && <span className="watch-row-flag">Your move</span>}</span>
+      <span className={`worklist-status ${WORKLIST_STATUS_TONE[status]}`}>{status}</span>
       <span className="worklist-next-step">{nextStep}</span>
       <span className="lam-row-action">{action} <b>→</b></span>
     </button>)}</div>
@@ -225,7 +236,6 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const currentWork = latestByPatient.slice(0, 3)
   const activity = agentActivity(ordered).slice(0, 3)
   const watchRows = buildWatchRows(latestByPatient)
-  const needsNextStep = watchRows.filter((row) => row.status === 'Not yet consulted').length
   const greetingName = `Dr. ${PCP_NAME.split(' ').at(-1)}`
   const situationSummary = currentWork.length > 0 ? `${currentWork.length} referral${currentWork.length === 1 ? '' : 's'} ${currentWork.length === 1 ? 'is' : 'are'} ready for your review.` : null
   return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page dashboard-page">
@@ -233,8 +243,7 @@ function HomePage({ navigate }: { navigate: Navigate }) {
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
-      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" matchesReady={currentWork.length} />
-      <div className="dashboard-stats"><DashboardMetricCard icon="✦" value={DEMO_PATIENTS.length} label="Patients in your care" /><DashboardMetricCard icon="↗" value={currentWork.length} label="Specialist matches ready" /><DashboardMetricCard icon="◷" value={needsNextStep} label="Patients with a next step" /></div>
+      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" matchesReady={currentWork.length} records={records} />
       <PatientWatchTable rows={watchRows} navigate={navigate} />
       <div className="dashboard-bottom-row">
         <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View your agent →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span>{item.kind === 'interaction' && <em className="activity-kind agent-event-label">Agent</em>}<strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
@@ -454,7 +463,7 @@ function SettingsPage({ navigate }: { navigate: Navigate }) {
         <dl><div><dt>Environment</dt><dd>Synthetic data · no PHI</dd></div></dl>
         <DemoResetControl />
       </section>
-      {user && <p className="muted-note profile-identity-link">This workspace's Dr. Lucy Saru is a separate concept from your signed-in physician account. <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities →</button></p>}
+      {user && <p className="muted-note profile-identity-link">This workspace's Dr. Lucy Saruhashi is a separate concept from your signed-in physician account. <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities →</button></p>}
       <p className="muted-note">Read-only for this demonstration. Account settings, credentialing, and production practice verification are not implemented.</p>
     </>}
   </main></ProductShell>

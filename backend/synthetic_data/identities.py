@@ -10,6 +10,23 @@ SYNTHETIC_PHYSICIAN_NPIS = {
     "physician-kim": "9900000009",
     "physician-reed": "9900000010",
     "physician-cha": "9900000011",
+    "physician-sanchez": "9900000012",
+    "physician-islam": "9900000013",
+    "physician-muhammad": "9900000014",
+    "physician-guechtouli": "9900000015",
+    "physician-mithel": "9900000016",
+    "physician-daniels": "9900000017",
+    "physician-miller": "9900000018",
+    "physician-da-fieno-m": "9900000019",
+    "physician-da-fieno-l": "9900000020",
+    "physician-murtuza-lanier": "9900000021",
+    "physician-nakajima": "9900000022",
+    "physician-ramanathan": "9900000023",
+    "physician-park": "9900000024",
+    "physician-desai": "9900000025",
+    "physician-chen-emily": "9900000026",
+    "physician-rahman": "9900000027",
+    "physician-rosen": "9900000028",
 }
 
 

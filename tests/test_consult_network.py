@@ -158,9 +158,9 @@ def test_consultation_has_auditable_messages_and_meaningful_follow_up():
 def test_maria_recommends_gastroenterology_first_despite_faster_haematology() -> None:
     result = consult_network(PATIENTS[MARIA_PATIENT_ID], MARIA_PHYSICIANS)
 
-    assert result.recommended_physician.physician_id == "physician-alvarez"
+    assert result.recommended_physician.physician_id == "physician-sanchez"
     assert result.recommended_physician.specialty == "Gastroenterology"
-    assert result.recommended_physician.availability == "Approximately 12 days"
+    assert result.recommended_physician.availability == "Approximately 9 days"
     assert result.alternatives[0].physician_id == "physician-brooks"
     assert result.alternatives[0].specialty == "Haematology"
     assert result.alternatives[0].availability == "Approximately 8 days"
@@ -191,9 +191,9 @@ def test_maria_consultation_has_gi_clarification_acceptance_and_synthesis() -> N
         for message in result.messages
         if message.message_type == ConsultationMessageType.REFERRAL_REQUIREMENT
     )
-    assert question.sender_agent_id.endswith("0000006")
+    assert question.sender_agent_id.endswith("0000012")
     assert "colonoscopy" in question.summary.casefold()
-    assert answer.sender_name == "Dr. Lucy Saru Agent"
+    assert answer.sender_name == "Dr. Lucy Saruhashi Agent"
     assert "no prior" in answer.summary.casefold()
     assert acceptance.metadata["accepts_after_clarification"] is True
     assert acceptance.metadata["required_workup"] == "CBC · Ferritin · Iron studies"

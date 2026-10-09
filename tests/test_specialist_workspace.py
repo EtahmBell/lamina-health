@@ -81,7 +81,7 @@ def test_jordan_iain_case_detail_is_a_projection_of_canonical_events(
         "location": "Oakland, CA",
         "synthetic": True,
     }
-    assert case["case_context"]["referring_physician"]["name"] == "Dr. Lucy Saru"
+    assert case["case_context"]["referring_physician"]["name"] == "Dr. Lucy Saruhashi"
     assert case["case_context"]["referring_physician"]["specialty"] == "Primary Care"
     assert case["recommendation_physician"] == "Dr. Iain Jung"
     assert case["recommendation_specialty"] == "Nephrology"

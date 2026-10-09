@@ -109,7 +109,7 @@ class InterestInput(BaseModel):
 
 
 class TrainingSessionInput(BaseModel):
-    mode: Literal["initialization", "daily", "extended"] = "daily"
+    mode: Literal["initialization", "daily", "extended", "quick"] = "daily"
     limit: int | None = Field(default=None, ge=1, le=25)
 
 
@@ -476,7 +476,7 @@ def _recover_active_training_session(
         )
     if (
         response_counts[canonical["id"]] == 0
-        and canonical["mode"] != "focused"
+        and canonical["mode"] not in {"focused", "quick"}
         and canonical["answer_target"] != NORMAL_TRAINING_TARGET
     ):
         canonical = workflow_store.normalize_unstarted_training_session(
@@ -784,7 +784,13 @@ def start_training_session(
     existing = _recover_active_training_session(workspace_id, persona_id)
     if existing is not None:
         return existing
-    question_limit = NORMAL_TRAINING_TARGET
+    # "quick" is the Dashboard's small-batch entry point (see Dashboard+Network
+    # polish pass): a deliberately short session reusing the same question bank and
+    # branch architecture as the full My Agent -> Train experience, never a separate
+    # engine. `limit` is honored only for "quick" -- ordinary daily/extended/
+    # initialization sessions always stay at the normal target regardless of any
+    # client-supplied limit (a pre-existing invariant this must not relax).
+    question_limit = (update.limit or 3) if update.mode == "quick" else NORMAL_TRAINING_TARGET
     session = workflow_store.start_training_session(
         workspace_id, persona_id, update.mode, question_limit
     )

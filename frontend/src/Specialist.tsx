@@ -62,7 +62,7 @@ function networkOutcomeSentence(outcome: SpecialistCaseDetail['network_outcome']
 function SwitchToLucyHelper({ navigate, copy }: { navigate: Navigate; copy: string }) {
   return <div className="specialist-demo-helper">
     <p>{copy}</p>
-    <button className="button-secondary" onClick={() => navigate('/home')}>Switch to Dr. Lucy Saru →</button>
+    <button className="button-secondary" onClick={() => navigate('/home')}>Switch to Dr. Lucy Saruhashi →</button>
   </div>
 }
 

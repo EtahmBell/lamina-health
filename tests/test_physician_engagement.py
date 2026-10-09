@@ -71,7 +71,7 @@ def test_lucy_and_iain_profiles_are_separate_and_provenance_bearing(
             _url("/api/workspace/physician/training", "lucy")
         ).json()
 
-    assert lucy["physician"]["name"] == "Dr. Lucy Saru"
+    assert lucy["physician"]["name"] == "Dr. Lucy Saruhashi"
     assert lucy["physician"]["specialty"] == "Primary Care"
     assert iain["physician"]["name"] == "Dr. Iain Jung"
     assert iain["physician"]["specialty"] == "Nephrology"
@@ -87,6 +87,8 @@ def test_lucy_and_iain_profiles_are_separate_and_provenance_bearing(
         "lucy-progressive-ckd-routing",
         "lucy-ida-routing",
         "lucy-referral-context",
+        "lucy-referral-priority",
+        "lucy-workup-priority",
     ]
 
 

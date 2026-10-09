@@ -143,7 +143,7 @@ test('the agent banner (post-8B rename of the Your Agent card) never shows a ref
 
 test('Home (both personas) renders the Your Agent card from AgentOverview, with a quiet link to My Agent', () => {
   assert.match(homePageFn(), /getAgentOverview\('lucy'\)\.then\(setOverview\)/)
-  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} \/>/)
+  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} \/>/)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.match(specialistHome, /getAgentOverview\('iain'\)\.then\(setOverview\)/)
   assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" \/>/)
@@ -434,8 +434,9 @@ test('Needs you (post-8B rename of Current Work) has a calm, compact empty state
 
 test('caught_up renders no CTA button at all — just quiet up-to-date support text', () => {
   const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
-  assert.match(card, /\{plan\?\.support \?\? 'Training is up to date\.'\}/)
-  assert.match(card, /\{plan && <button/, 'the CTA button only renders when agentBannerPlan returns a mapped action')
+  assert.match(card, /\{plan \? 'A few quick answers help your agent represent your practice more faithfully\.' : 'Training is up to date\.'\}/)
+  assert.match(card, /\{plan && isReview && <button/, 'the review CTA only renders when agentBannerPlan returns a review action')
+  assert.match(card, /\{plan && !isReview && <>/, 'the quick-training CTA only renders when agentBannerPlan returns a non-review action')
 })
 
 test('Lucy and Iain Home share the same dashboard architecture: Your Agent card + compact activity + optional network highlights, no separate specialist design', () => {
@@ -473,12 +474,12 @@ test('Home "View network" lands on Network -> Feed, not a standalone feed route'
   assert.match(engagement, /export const networkUpdatesPath = \(perspective: DemoPhysicianPerspective\) => \(perspective === 'iain' \? '\/specialist\/network\?tab=feed' : '\/network\?tab=feed'\)/)
 })
 
-test('My Network retains the existing graph/search/add behavior unchanged', () => {
+test('My Network retains the existing search/add/list behavior; the graph is deliberately gone (Dashboard+Network polish pass)', () => {
   assert.match(network, /export function MyNetworkTab/)
   assert.match(network, /getAgentNetwork\(\)\.then\(setNetwork\)/)
   assert.match(network, /searchProviders\(filters\)/)
   assert.match(network, /addNetworkMember\(profile\.npi\)/)
-  assert.match(network, /<NetworkGraph network=\{network\}/)
+  assert.doesNotMatch(network, /NetworkGraph/)
 })
 
 test('Network Feed uses canonical getNetworkFeed and never renders drafts', () => {

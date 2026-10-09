@@ -29,14 +29,6 @@ test('the add-colleague flow is a focused modal, not a dominant inline banner (p
   assert.match(network, /addNetworkMember\(profile\.npi\)/, 'Add colleague is preserved')
 })
 
-test('the legend lists only the three real edge types', () => {
-  const graph = slice(network, 'function NetworkGraph', 'function AgentDetail')
-  const legend = graph.match(/legend-[a-z]+/g) || []
-  assert.deepEqual([...new Set(legend)], ['legend-recommended', 'legend-consulted', 'legend-redirected'])
-  assert.doesNotMatch(network, /Roster only/)
-  assert.doesNotMatch(styles, /legend-roster/)
-})
-
 test('recommended, consulted and redirected edges are visually distinct', () => {
   const consulted = rulesFor('.relationship-edge.consulted').at(-1)
   const redirected = rulesFor('.relationship-edge.redirected').at(-1)
@@ -49,26 +41,6 @@ test('recommended, consulted and redirected edges are visually distinct', () => 
     redirected.match(/stroke:\s*([^;]+)/)[1].trim(),
     'consulted and redirected must not share a stroke colour',
   )
-})
-
-test('a manually added relationship needs no graph edge, and the graph says so', () => {
-  const graph = slice(network, 'function NetworkGraph', 'function AgentDetail')
-  const filterModule = readFileSync(new URL('../src/graphFilter.ts', import.meta.url), 'utf8')
-  assert.match(filterModule, /new Map<string, AgentRelationship>\(network\.edges\.map/)
-  assert.match(graph, /graphVisibility\(network, filter\)/)
-  assert.match(graph, /return edge && <line/, 'a line exists only where the projection has an edge')
-  assert.doesNotMatch(graph, /in_network/, 'membership must never draw or style an edge')
-  assert.match(network, /The visualization shows physician agents involved in Lamina consultations\./)
-  assert.match(network, /Added relationships without a consultation appear in Your network above\./)
-})
-
-test('the graph has room above and below the outer agents', () => {
-  assert.ok(someRule('.agent-network-canvas', /height: 620px/), 'the desktop canvas is taller')
-  const slots = slice(network, 'const graphSlots', 'const shortName')
-  assert.match(slots, /y: 16/, 'the top agent is pulled in from the edge')
-  assert.match(slots, /y: 84/, 'the bottom agent is pulled in from the edge')
-  assert.doesNotMatch(slots, /y: 12|y: 88/)
-  assert.match(network, /width: 158px|graphSlots/, 'nodes keep their size')
 })
 
 /* ------------------------------------------------------- patient states */

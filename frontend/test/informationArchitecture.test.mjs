@@ -60,17 +60,18 @@ test('the sidebar physician-agent block is one clickable control into My Agent, 
 
 /* -------------------------------------------------------------------- home */
 
-test('the Dashboard (post-8B rename of Home) greets the physician and leads with the agent banner, then stats, then the patient watchlist, then activity (mineral-system pass: the standalone Needs You hero is gone — urgency now lives in the watchlist row)', () => {
+test('the Dashboard (post-8B rename of Home) greets the physician and leads with the agent banner, then the patient watchlist, then activity (Dashboard+Network polish pass: the standalone Needs You hero and the KPI row are both gone — no boxed metric-card row replaces them)', () => {
   assert.match(home(), /<p className="eyebrow">Dashboard<\/p><h1>\{timeAwareGreeting\(greetingName\)\}<\/h1>/)
   assert.doesNotMatch(source, /physician workspace/i)
   assert.doesNotMatch(home(), /Recent patients|home-patients|getPatientActivity/)
   assert.doesNotMatch(home(), /dashboard-needs-you/, 'the large standalone Needs You section is gone from the Dashboard')
+  assert.doesNotMatch(home(), /dashboard-stats|DashboardMetricCard/, 'no KPI/stat-card row replaces Needs You either')
   assert.match(home(), /<PatientWatchTable rows=\{watchRows\}/)
   assert.match(home(), /Recent activity/)
-  const order = ['<HomeAgentCard', 'dashboard-stats', 'PatientWatchTable', 'className="home-activity"']
+  const order = ['<HomeAgentCard', 'PatientWatchTable', 'className="home-activity"']
   const positions = order.map((token) => home().indexOf(token))
   assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
-  assert.deepEqual(positions, [...positions].sort((a, b) => a - b), 'the agent banner precedes the stat cards, which precede the patient watchlist, which precedes recent activity')
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b), 'the agent banner precedes the patient watchlist, which precedes recent activity')
 })
 
 test('the Dashboard activity header links to the agent, not to consultations', () => {
@@ -80,7 +81,7 @@ test('the Dashboard activity header links to the agent, not to consultations', (
 })
 
 test('Home renders the Your Agent card from canonical AgentOverview state only', () => {
-  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} \/>/)
+  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} \/>/)
   assert.doesNotMatch(home(), /Math\.|%|average|score|trend/i, 'no invented metrics on Home')
 })
 
@@ -241,7 +242,7 @@ test('Calibration can be addressed directly by query state', () => {
 test('My Agent exposes the consolidated post-8B Overview/Train/Test model (Practice absorbed into Overview, Chat renamed Test, Activity moved to the Dashboard)', () => {
   assert.match(source, /const AGENT_TABS = \['overview', 'train', 'test'\] as const/)
   const identity = readFileSync(new URL('../src/demoIdentity.ts', import.meta.url), 'utf8')
-  assert.match(identity, /PCP_NAME = 'Dr\. Lucy Saru'/)
-  assert.match(identity, /PCP_AGENT_NAME = "Dr\. Lucy Saru's Agent"/)
+  assert.match(identity, /PCP_NAME = 'Dr\. Lucy Saruhashi'/)
+  assert.match(identity, /PCP_AGENT_NAME = "Dr\. Lucy Saruhashi's Agent"/)
   assert.doesNotMatch(source, /Build your network|role selector/i)
 })

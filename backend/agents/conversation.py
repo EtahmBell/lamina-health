@@ -268,18 +268,18 @@ def _build_anemia_messages(
         )
         sequence += 1
 
-    alvarez = next(item for item in evaluations if item.physician_id == "physician-alvarez")
+    sanchez = next(item for item in evaluations if item.physician_id == "physician-sanchez")
     messages.append(
         _message(
             consultation_id=consultation_id,
             sequence=sequence,
-            sender_agent_id=synthetic_agent_id("physician-alvarez"),
-            sender_name="Dr. Sofia Alvarez Agent",
+            sender_agent_id=synthetic_agent_id("physician-sanchez"),
+            sender_name="Dr. Tiffany Sanchez Agent",
             sender_role="Gastroenterology",
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.FOLLOW_UP_QUESTION,
             summary="Is any prior colonoscopy or upper endoscopy documented?",
-            evidence=[item for item in alvarez.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
+            evidence=[item for item in sanchez.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
             related_patient_facts=[fact for fact in context.facts if "endoscopic" in fact],
         )
     )
@@ -291,7 +291,7 @@ def _build_anemia_messages(
             sender_agent_id=PCP_AGENT_ID,
             sender_name=PCP_SENDER_NAME,
             sender_role="Primary Care",
-            recipient_agent_id=synthetic_agent_id("physician-alvarez"),
+            recipient_agent_id=synthetic_agent_id("physician-sanchez"),
             message_type=ConsultationMessageType.FOLLOW_UP_ANSWER,
             summary="No prior colonoscopy or upper endoscopy is documented.",
             evidence=[],
@@ -304,8 +304,8 @@ def _build_anemia_messages(
         _message(
             consultation_id=consultation_id,
             sequence=sequence,
-            sender_agent_id=synthetic_agent_id("physician-alvarez"),
-            sender_name="Dr. Sofia Alvarez Agent",
+            sender_agent_id=synthetic_agent_id("physician-sanchez"),
+            sender_name="Dr. Tiffany Sanchez Agent",
             sender_role="Gastroenterology",
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.REFERRAL_REQUIREMENT,
@@ -313,7 +313,7 @@ def _build_anemia_messages(
                 "Accepts as the first referral for occult GI source evaluation; requests a "
                 "recent CBC, ferritin, and iron studies before the visit."
             ),
-            evidence=[item for item in alvarez.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
+            evidence=[item for item in sanchez.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
             related_patient_facts=related_facts,
             metadata={
                 "accepts_after_clarification": True,
@@ -332,7 +332,7 @@ def _build_anemia_messages(
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.SYNTHESIS,
             summary=(
-                "Recommends Dr. Sofia Alvarez in gastroenterology first for source evaluation. "
+                "Recommends Dr. Tiffany Sanchez in gastroenterology first for source evaluation. "
                 "Haematology remains appropriate later if evaluation is unrevealing, anaemia "
                 "persists, other abnormalities appear, or IV iron is required."
             ),

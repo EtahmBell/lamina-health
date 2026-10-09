@@ -104,7 +104,7 @@ INITIALIZATION_SECTIONS = (
 TRAINING_DAILY_LIMIT = 5
 TRAINING_EXTENDED_LIMIT = 25
 MAX_BRANCH_DEPTH = 3
-QUESTION_BANK_AVAILABLE = 104
+QUESTION_BANK_AVAILABLE = 106
 _CALIBRATION_DIMENSIONS = {
     "diagnosis_phenotype": (
         "the suspected diagnosis is not yet confirmed",
@@ -436,6 +436,36 @@ TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
             "question_type": "multi_select",
             "answer_options": ["Clinical trajectory", "Prior workup", "Access needs", "Insurance"],
             "why_this_matters": "Improves how the agent represents referral intent.",
+            "asked_count": None,
+            "synthetic": True,
+            "created_at": BASE_TIMESTAMP,
+        },
+        {
+            "id": "lucy-referral-priority",
+            "physician_persona": "lucy",
+            "source_type": "profile_confirmation",
+            "source_reference": "referral-priority",
+            "prompt": "Which factor matters most when you refer?",
+            "question_type": "single_choice",
+            "answer_options": [
+                "Specialist expertise for the patient's needs",
+                "Earliest available appointment",
+                "Continuity with specialists I already know",
+            ],
+            "why_this_matters": "Helps your agent weigh options the same way you would.",
+            "asked_count": None,
+            "synthetic": True,
+            "created_at": BASE_TIMESTAMP,
+        },
+        {
+            "id": "lucy-workup-priority",
+            "physician_persona": "lucy",
+            "source_type": "profile_confirmation",
+            "source_reference": "workup-priority",
+            "prompt": "Which workup do you usually want completed first?",
+            "question_type": "single_choice",
+            "answer_options": ["Core labs", "Imaging", "Whatever the specialist's office requests"],
+            "why_this_matters": "Shapes what your agent asks for before a referral is sent.",
             "asked_count": None,
             "synthetic": True,
             "created_at": BASE_TIMESTAMP,
@@ -1120,11 +1150,15 @@ def proposed_learning_statement(question_id: str, answer: str | list[str]) -> st
     if question_id == "iain-pre-referral-information":
         return f"Useful information before referral includes {', '.join(answer)}."
     if question_id == "lucy-progressive-ckd-routing":
-        return f"For Dr. Saru, nephrology-first routing for progressive CKD with resistant hypertension: {answer}."
+        return f"For Dr. Saruhashi, nephrology-first routing for progressive CKD with resistant hypertension: {answer}."
     if question_id == "lucy-ida-routing":
-        return f"Dr. Saru uses gastroenterology-first routing for persistent iron deficiency without source evaluation: {answer}."
+        return f"Dr. Saruhashi uses gastroenterology-first routing for persistent iron deficiency without source evaluation: {answer}."
     if question_id == "lucy-referral-context":
-        return f"Dr. Saru wants referral questions to include {', '.join(answer)}."
+        return f"Dr. Saruhashi wants referral questions to include {', '.join(answer)}."
+    if question_id == "lucy-referral-priority":
+        return f"When referring, Dr. Saruhashi prioritizes: {answer}."
+    if question_id == "lucy-workup-priority":
+        return f"Dr. Saruhashi usually wants {str(answer).casefold()} completed first."
     question = next(
         (
             item

@@ -37,7 +37,7 @@ def evaluate_physician(
         )
     )
 
-    if profile.id == "physician-alvarez":
+    if profile.id == "physician-sanchez":
         evidence.insert(
             0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
         )
@@ -45,6 +45,16 @@ def evaluate_physician(
         reason = (
             "Persistent unexplained iron-deficiency anaemia without prior GI source evaluation "
             "fits this gastroenterology practice."
+        )
+        urgency = "Routine outpatient source evaluation"
+    elif profile.id == "physician-alvarez":
+        evidence.insert(
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+        )
+        fit, accepts, confidence = ClinicalFit.MODERATE, True, "high"
+        reason = (
+            "General gastroenterology is also an appropriate source-evaluation option, with a "
+            "longer synthetic access interval than the recommended destination."
         )
         urgency = "Routine outpatient source evaluation"
     elif profile.id == "physician-brooks":

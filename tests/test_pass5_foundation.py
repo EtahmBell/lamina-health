@@ -255,5 +255,5 @@ def test_engagement_additions_do_not_change_jordan_or_maria(store: WorkflowStore
         assert after_maria[key] == before_maria[key]
     assert after_jordan["recommended_physician"]["physician_name"] == ("Dr. Iain Jung (synthetic)")
     assert after_maria["recommended_physician"]["physician_name"] == (
-        "Dr. Sofia Alvarez (synthetic)"
+        "Dr. Tiffany Sanchez (synthetic)"
     )

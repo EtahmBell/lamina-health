@@ -20,7 +20,7 @@ const relationship = (count, recommended, when) => ({
 })
 
 const network = {
-  center: { id: 'agent-pcp-lianne-cha', name: "Dr. Lucy Saru's Agent", specialty: 'Primary Care', location: 'Oakland, CA', status: 'active', source: 'demo' },
+  center: { id: 'agent-pcp-lianne-cha', name: "Dr. Lucy Saruhashi's Agent", specialty: 'Primary Care', location: 'Oakland, CA', status: 'active', source: 'demo' },
   nodes: [
     node('9900000001', 'Dr. Iain Jung', 'Nephrology', { relationship: relationship(8, 8, '2026-09-30T08:03:51+00:00') }),
     node('9900000002', 'Dr. Matthew Onadeko', 'Cardiology', { relationship: relationship(8, 0, '2026-09-30T08:03:51+00:00') }),

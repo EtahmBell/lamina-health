@@ -12,14 +12,11 @@ const profile = () => slice(app, 'function SettingsPage', 'function UnfinishedPa
 
 /* ---------------------------------------------------------- network hero */
 
-test('the network page leads with relationships, then a demoted/collapsed visualization (post-8B: Colleagues, not graph-first)', () => {
-  const order = ['Your network', 'Network visualization']
-  const positions = order.map((token) => directory().indexOf(token))
-  assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
-  assert.deepEqual(positions, [...positions].sort((a, b) => a - b))
-  assert.match(directory(), /<details className="network-visual-section quiet">/, 'the graph is collapsed by default, not the page hero')
+test('the network page leads with relationships; the visualization is gone entirely, not merely collapsed (Dashboard+Network polish pass)', () => {
+  assert.match(directory(), /Your network/)
   assert.match(directory(), /networkRoster\(network\)/)
   assert.match(directory(), /network-specialty-group/)
+  assert.doesNotMatch(directory(), /Network visualization|network-visual-section|NetworkGraph|AgentDetail/)
 })
 
 test('physicians are grouped by real specialty with their own relationship row', () => {
@@ -71,25 +68,6 @@ test('a directory row keeps the human avatar and the separate agent status badge
   assert.match(result, /className="lam-row-mark directory-avatar">\{initials\}/)
   assert.match(result, /<StatusBadge status=\{profile\.agent\.status\} \/>/)
   assert.doesNotMatch(result, /LaminaMark|NetworkGlyph/, 'a physician row is not an agent mark')
-})
-
-/* ---------------------------------------------------------------- graph */
-
-test('the graph still draws edges only from recorded consultations', () => {
-  const graph = slice(network, 'function NetworkGraph', 'function AgentDetail')
-  const filterModule = readFileSync(new URL('../src/graphFilter.ts', import.meta.url), 'utf8')
-  assert.match(filterModule, /new Map<string, AgentRelationship>\(network\.edges\.map/)
-  assert.match(graph, /graphVisibility\(network, filter\)/)
-  assert.match(graph, /return edge && <line/)
-  assert.match(graph, /agent\.relationship \? 'connected' : 'unconnected'/)
-  assert.doesNotMatch(graph, /Roster only · no edge/)
-  assert.doesNotMatch(graph, /in_network/, 'membership must never create or style an edge')
-})
-
-test('added physicians outside the consult roster are disclosed, not faked into the graph', () => {
-  assert.match(directory(), /The visualization shows physician agents involved in Lamina consultations\./)
-  assert.match(directory(), /Added relationships without a consultation appear in Your network above\./)
-  assert.doesNotMatch(directory(), /offGraphMembers/, 'one quiet line replaces the conditional note')
 })
 
 /* -------------------------------------------------------------- my agent */

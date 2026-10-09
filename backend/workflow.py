@@ -11,6 +11,24 @@ from pathlib import Path
 from backend.config import environment
 from backend.models import ConsultationResult
 
+# A believable starting roster for a brand-new workspace, so Network -> Colleagues
+# never opens empty (see WorkflowStore.network_members). Deliberately drawn only from
+# the network-only expansion physicians -- never a consult-engine participant
+# (physician-jung, -onadeko, -sanchez, etc.) or an engagement persona (iain, onadeko,
+# sofia) -- so existing consult/engagement tests that build up membership or feed
+# visibility from a clean slate are unaffected by this baseline. The rest of the
+# controlled population is discoverable via search/add or through consultations.
+_DEFAULT_NETWORK_MEMBER_NPIS = (
+    "9900000011",  # Dr. Lianne Cha -- Primary Care
+    "9900000018",  # Dr. Josh Miller -- Rheumatology
+    "9900000013",  # Dr. Noah Islam -- Pulmonology
+    "9900000023",  # Dr. Maya Ramanathan -- Endocrinology
+    "9900000024",  # Dr. Nina Park -- Obstetrics & Gynecology
+    "9900000028",  # Dr. Natalie Rosen -- Hematology/Oncology
+    "9900000016",  # Dr. Chris Mithel -- Dermatology
+    "9900000021",  # Dr. Carson Murtuza-Lanier -- Psychiatry
+)
+
 
 class WorkflowStore:
     LEGACY_WORKSPACE_ID = "legacy-local-workspace"
@@ -53,6 +71,9 @@ class WorkflowStore:
                 CREATE TABLE IF NOT EXISTS network_members (
                   workspace_id TEXT NOT NULL, npi TEXT NOT NULL, added_at TEXT NOT NULL,
                   PRIMARY KEY(workspace_id, npi)
+                );
+                CREATE TABLE IF NOT EXISTS network_seed_state (
+                  workspace_id TEXT NOT NULL PRIMARY KEY, seeded_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS specialist_case_reviews (
                   workspace_id TEXT NOT NULL,
@@ -1934,6 +1955,12 @@ class WorkflowStore:
 
         Membership is a workspace relationship only. It is deliberately separate
         from physician-agent activation state and never mutates directory identity.
+
+        A brand-new workspace is lazily seeded with a believable starting roster
+        (see `_DEFAULT_NETWORK_MEMBER_NPIS`) the first time membership is read, so
+        Network -> Colleagues never opens empty. This only fires when the table has
+        no rows at all for the workspace; once seeded (or once a physician
+        explicitly removes every colleague down to zero), it is not re-seeded.
         """
         with self._connect() as db:
             rows = db.execute(
@@ -1941,11 +1968,51 @@ class WorkflowStore:
                    ORDER BY added_at, npi""",
                 (workspace_id,),
             ).fetchall()
+            if not rows and not self._workspace_seeded(db, workspace_id):
+                self._seed_default_network_members(db, workspace_id)
+                rows = db.execute(
+                    """SELECT npi, added_at FROM network_members WHERE workspace_id=?
+                       ORDER BY added_at, npi""",
+                    (workspace_id,),
+                ).fetchall()
         return [dict(row) for row in rows]
 
+    def _workspace_seeded(self, db: sqlite3.Connection, workspace_id: str) -> bool:
+        row = db.execute(
+            "SELECT 1 FROM network_seed_state WHERE workspace_id=?", (workspace_id,)
+        ).fetchone()
+        return row is not None
+
+    def _seed_default_network_members(self, db: sqlite3.Connection, workspace_id: str) -> None:
+        base = self._now()
+        for offset, npi in enumerate(_DEFAULT_NETWORK_MEMBER_NPIS):
+            seeded_at = (
+                datetime.now(UTC) - timedelta(days=90 - offset * 7)
+            ).isoformat().replace("+00:00", "Z")
+            db.execute(
+                """INSERT INTO network_members(workspace_id, npi, added_at)
+                   VALUES (?, ?, ?) ON CONFLICT(workspace_id, npi) DO NOTHING""",
+                (workspace_id, npi, seeded_at),
+            )
+        db.execute(
+            "INSERT INTO network_seed_state(workspace_id, seeded_at) VALUES (?, ?) "
+            "ON CONFLICT(workspace_id) DO NOTHING",
+            (workspace_id, base),
+        )
+
     def add_network_member(self, workspace_id: str, npi: str) -> dict:
-        """Idempotent: re-adding an existing relationship keeps the original date."""
+        """Idempotent: re-adding an existing relationship keeps the original date.
+
+        Also marks the workspace as past the lazy-seed point (see `network_members`)
+        so an explicit add never races with — or is later undone by — auto-seeding,
+        and so removing every colleague down to zero never silently re-seeds them.
+        """
         with self._connect() as db:
+            db.execute(
+                "INSERT INTO network_seed_state(workspace_id, seeded_at) VALUES (?, ?) "
+                "ON CONFLICT(workspace_id) DO NOTHING",
+                (workspace_id, self._now()),
+            )
             db.execute(
                 """INSERT INTO network_members(workspace_id, npi, added_at)
                    VALUES (?, ?, ?) ON CONFLICT(workspace_id, npi) DO NOTHING""",

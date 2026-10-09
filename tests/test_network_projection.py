@@ -31,7 +31,7 @@ def _setup(tmp_path):
 def test_network_starts_with_center_and_no_invented_relationships(tmp_path):
     store, providers = _setup(tmp_path)
     network = project_agent_network(store.history(WORKSPACE), providers)
-    assert network["center"]["name"] == "Dr. Lucy Saru's Agent"
+    assert network["center"]["name"] == "Dr. Lucy Saruhashi's Agent"
     assert network["center"]["status"] == "active"
     assert network["record_count"] == 0
     assert network["edges"] == []
@@ -68,11 +68,11 @@ def test_jordan_and_maria_consults_project_real_edges_and_records(tmp_path, monk
     assert jung["relationship"]["last_recommendation_patient_name"] == "Jordan Lee"
     assert jung["status"] == "reserved"  # Consult demo participation is not activation.
 
-    alvarez = nodes["physician-alvarez"]
-    assert alvarez["relationship"]["last_patient_name"] == "Maria Santos"
-    assert alvarez["relationship"]["associated_consultation_ids"] == [maria_id]
-    assert alvarez["relationship"]["recommended_count"] == 1
-    assert alvarez["relationship"]["last_recommendation_record_id"] == maria_id
+    sanchez = nodes["physician-sanchez"]
+    assert sanchez["relationship"]["last_patient_name"] == "Maria Santos"
+    assert sanchez["relationship"]["associated_consultation_ids"] == [maria_id]
+    assert sanchez["relationship"]["recommended_count"] == 1
+    assert sanchez["relationship"]["last_recommendation_record_id"] == maria_id
     rossi = nodes["physician-rossi"]
     assert rossi["relationship"]["relationship_type"] == "redirected"
     assert rossi["relationship"]["recommended_count"] == 0

@@ -39,6 +39,7 @@ import {
   type AgentInitialization,
   type AgentOverview,
   type AgentTestCase,
+  type ConsultationRecord,
   type DemoPhysicianPerspective,
   type FocusedTrainingSeed,
   type NetworkFeed,
@@ -64,7 +65,7 @@ import {
   type TrainingSession,
   type TrainProjection,
 } from './api.ts'
-import { patientName } from './demoIdentity.ts'
+import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 
 type Navigate = (path: string) => void
@@ -128,35 +129,235 @@ function agentBannerPlan(training: TrainProjection, trainPath: string): { label:
   return null
 }
 
+type DigestTile = { key: string; label: string; headline: string; detail: string }
+
+/** A recap of outcomes, never a duplicate of the raw event log (that's Recent
+ * Activity). Built only from records/overview stats already fetched by the caller —
+ * no new data source, and nothing is shown that current state doesn't support. */
+function buildAgentDigest(records: ConsultationRecord[], overview: AgentOverview): { summary: string | null; tiles: DigestTile[] } {
+  if (records.length === 0) return { summary: null, tiles: [] }
+  const totalConsulted = records.reduce((sum, record) => sum + record.result.consultation.length, 0)
+  const summary = `Your agent consulted ${totalConsulted} physician agent${totalConsulted === 1 ? '' : 's'} and brought back ${records.length} recommendation${records.length === 1 ? '' : 's'}.`
+  const tiles: DigestTile[] = [
+    {
+      key: 'coordination',
+      label: 'Patient coordination',
+      headline: `Consulted physician agents for ${records.map((record) => patientName(record.patient_id)).join(' and ')}.`,
+      detail: `${totalConsulted} physician-agent consultation${totalConsulted === 1 ? '' : 's'} across ${records.length} case${records.length === 1 ? '' : 's'}.`,
+    },
+    {
+      key: 'recommendations',
+      label: 'Recommendations returned',
+      headline: records.map((record) => `${patientName(record.patient_id)} → ${record.result.recommended_physician.specialty}`).join('   ·   '),
+      detail: records.map((record) => cleanName(record.result.recommended_physician.physician_name)).join(' · '),
+    },
+  ]
+  const confirmed = overview.stats.confirmed_practice_learnings
+  if (confirmed > 0) {
+    tiles.push({
+      key: 'learning',
+      label: 'Agent learning',
+      headline: `${confirmed} practice preference${confirmed === 1 ? '' : 's'} ${confirmed === 1 ? 'was' : 'were'} confirmed from your training.`,
+      detail: 'Confirmed preferences shape how your agent represents your practice going forward.',
+    })
+  } else {
+    tiles.push({
+      key: 'guidance',
+      label: 'Network guidance',
+      headline: `${totalConsulted} physician agent${totalConsulted === 1 ? '' : 's'} returned workup and access guidance.`,
+      detail: 'Required workup and access details are ready in each referral record.',
+    })
+  }
+  return { summary, tiles: tiles.slice(0, 3) }
+}
+
 /** The persistent agent object woven through the workspace, not a separate module.
- * Muted sage surface — "your agent" is a distinct semantic color from physician-action
- * copper. Never an artificial quality score, XP, consecutive-day mechanic, or finite
- * completion percentage for the open-ended representation. */
-export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, matchesReady = 0 }: {
-  overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string; matchesReady?: number
+ * Muted mineral surface — "your agent" is a distinct semantic color from physician-
+ * action copper. Never an artificial quality score, XP, consecutive-day mechanic, or
+ * finite completion percentage for the open-ended representation.
+ *
+ * Left side answers "what has my agent been doing for me?" (a collapsed digest,
+ * expandable into up to three outcome tiles — never a raw activity duplicate). Right
+ * side answers "how can I make my agent more like me?" (a small training burst that
+ * opens a modal, not the full My Agent -> Train environment). */
+export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, matchesReady = 0, records = [] }: {
+  overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string; matchesReady?: number; records?: ConsultationRecord[]
 }) {
+  const [expanded, setExpanded] = useState(false)
+  const [trainingOpen, setTrainingOpen] = useState(false)
   if (!overview) return null
   const training = overview.training
   const plan = agentBannerPlan(training, trainPath)
+  const digest = buildAgentDigest(records, overview)
+  const isReview = training.action === 'review_training'
   return <section className="agent-banner">
     <div className="agent-banner-main">
       <div className="agent-banner-glyph" aria-hidden="true">
         <span className="agent-banner-ring r1" /><span className="agent-banner-ring r2" /><span className="agent-banner-ring r3" /><span className="agent-banner-ring r4" /><span className="agent-banner-ring r5" /><span className="agent-banner-ring r6" />
         <span className="agent-banner-sparkle">✧</span>
       </div>
-      <p className="eyebrow">Your agent is active</p>
-      <h2>A little more you. A lot more helpful.</h2>
-      <p className="agent-banner-support">{plan?.support ?? 'Training is up to date.'}</p>
+      <p className="eyebrow">Your agent</p>
+      <h2>See what your agent has done while you've been away.</h2>
+      <p className="agent-banner-support">{digest.summary ?? 'No agent activity yet.'}</p>
       {matchesReady > 0 && <p className="agent-banner-foot">✧ {matchesReady} specialist match{matchesReady === 1 ? '' : 'es'} ready for you to review</p>}
-      <button className="text-button agent-banner-view" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
+      <div className="agent-banner-view-row">
+        {digest.tiles.length > 0 && <button className="text-button agent-digest-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Hide agent update ↑' : 'See agent update ↓'}</button>}
+        <button className="text-button agent-banner-view" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
+      </div>
     </div>
     <div className="agent-banner-action">
       <p className="eyebrow">A little input. More thoughtful care.</p>
       <h3>Make your agent more like you.</h3>
       <p className="agent-banner-support">{plan ? 'A few quick answers help your agent represent your practice more faithfully.' : 'Training is up to date.'}</p>
-      {plan && <button className="button-primary" onClick={() => navigate(plan.href)}>{plan.label} <span>→</span></button>}
+      {plan && isReview && <button className="button-primary" onClick={() => navigate(plan.href)}>{plan.label} <span>→</span></button>}
+      {plan && !isReview && <>
+        <button className="button-primary" onClick={() => setTrainingOpen(true)}>Answer 3 quick questions <span>→</span></button>
+        <p className="agent-banner-microcopy">3 questions · ~1 min</p>
+      </>}
     </div>
+    <div className={`agent-digest-expanded ${expanded ? 'open' : ''}`} aria-hidden={!expanded}>
+      <div className="agent-digest-grid">{digest.tiles.map((tile) => <div className="agent-digest-tile" key={tile.key}>
+        <p className="agent-digest-tile-label">{tile.label}</p>
+        <strong>{tile.headline}</strong>
+        <p>{tile.detail}</p>
+      </div>)}</div>
+    </div>
+    {trainingOpen && <QuickTrainingModal personaId="lucy" onClose={() => setTrainingOpen(false)} onFinished={() => setTrainingOpen(false)} />}
   </section>
+}
+
+/** The Dashboard's small-batch training burst: a modal, never the full My Agent ->
+ * Train page. Reuses the exact same session/question/branch API as full training
+ * (including Depends -> narrower-follow-up) via the "quick" session mode, just
+ * scoped to ~3 questions instead of the normal 10. Question-type rendering mirrors
+ * TrainingPage's (yes_no / yes_no_depends / single_choice / multi_select /
+ * short_text) so a multiple-choice question looks and behaves identically here and
+ * in the full flow. */
+function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: PhysicianIdentity; onClose: () => void; onFinished: () => void }) {
+  const [phase, setPhase] = useState<'loading' | 'questions' | 'completed' | 'error'>('loading')
+  const [session, setSession] = useState<TrainingSession | null>(null)
+  const [queue, setQueue] = useState<TrainingQuestion[]>([])
+  const [index, setIndex] = useState(0)
+  const [answeredCount, setAnsweredCount] = useState(0)
+  const [answerTarget, setAnswerTarget] = useState(3)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [multiSelected, setMultiSelected] = useState<string[]>([])
+  const [textAnswer, setTextAnswer] = useState('')
+  const [learnings, setLearnings] = useState<ProposedLearning[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const open = async () => {
+      const training = await getTrainingHistory(personaId)
+      if (cancelled) return
+      const activeId = training.active_session_id
+      const started = activeId
+        ? await resumeTrainingSession(personaId, activeId)
+        : await startTrainingSession(personaId, { mode: 'quick', limit: 3 })
+      if (cancelled) return
+      const answeredIds = new Set((started.responses ?? []).map((item) => item.question_id))
+      const remaining = (started.questions ?? []).filter((item) => !answeredIds.has(item.id))
+      setSession(started)
+      setQueue(remaining)
+      setAnsweredCount((started.responses ?? []).length)
+      setAnswerTarget(started.answer_target ?? 3)
+      setPhase(remaining.length > 0 ? 'questions' : 'completed')
+    }
+    void open().catch((err: unknown) => {
+      if (!cancelled) { setError(err instanceof Error ? err.message : 'Could not open training'); setPhase('error') }
+    })
+    return () => { cancelled = true }
+  }, [personaId])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const current = queue[index]
+
+  const finish = async (activeSession: TrainingSession) => {
+    try {
+      const result = await finishTrainingSession(personaId, activeSession.id)
+      setLearnings(result.proposed_learnings ?? [])
+      setPhase('completed')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not finish training')
+      setPhase('error')
+    }
+  }
+
+  const submit = async (answer: string | string[] | null, skipped: boolean) => {
+    if (!session || !current || busy) return
+    setBusy(true); setError('')
+    try {
+      const response = await answerTrainingQuestion(personaId, session.id, current.id, skipped ? { skipped: true } : { answer: answer ?? undefined })
+      setAnsweredCount(response.answered_count ?? answeredCount + 1)
+      setAnswerTarget(response.answer_target ?? answerTarget)
+      setMultiSelected([]); setTextAnswer('')
+      const nextQuestion = response.next_question
+      if (response.questions_complete) {
+        void finish(session)
+      } else if (nextQuestion) {
+        setQueue((prev) => { const copy = [...prev]; copy.splice(index + 1, 0, nextQuestion); return copy })
+        setIndex((value) => value + 1)
+      } else if (index + 1 >= queue.length) {
+        void finish(session)
+      } else {
+        setIndex((value) => value + 1)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save your answer')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="training-modal" role="dialog" aria-modal="true" aria-label="Teach your agent">
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
+      {phase === 'loading' && <div className="training-modal-loading"><div className="loading-line" /><p>Opening a few quick questions…</p></div>}
+      {phase === 'error' && <div className="error-banner" role="alert">{error}</div>}
+      {phase === 'completed' && <div className="training-modal-complete">
+        <p className="eyebrow">Teach your agent</p>
+        <h2>A little more like you.</h2>
+        <p className="training-modal-sub">{learnings.length > 0 ? `${learnings.length} new preference${learnings.length === 1 ? '' : 's'} ready for your agent.` : 'Your agent is up to date.'}</p>
+        <p className="training-modal-reassure">You can refine these anytime.</p>
+        <button className="button-primary" onClick={onFinished}>Back to your Dashboard <span>→</span></button>
+      </div>}
+      {phase === 'questions' && current && <>
+        <p className="eyebrow">Teach your agent</p>
+        <div className="training-progress-row"><span>Question {Math.min(answerTarget, answeredCount + 1)} of {answerTarget}</span><div className="training-progress-bar" role="progressbar" aria-valuenow={Math.min(answerTarget, answeredCount + 1)} aria-valuemin={1} aria-valuemax={answerTarget}><span style={{ width: `${Math.round((answeredCount / answerTarget) * 100)}%` }} /></div></div>
+        <h2 className="training-prompt">{current.prompt}</h2>
+        {current.why_this_matters && <p className="training-modal-why">{current.why_this_matters}</p>}
+        {current.question_type === 'yes_no_depends' && <div className="training-choices spatial">
+          <button className="training-choice no" disabled={busy} onClick={() => submit('No', false)}>No</button>
+          <button className="training-choice depends" disabled={busy} onClick={() => submit('Depends', false)}>Depends</button>
+          <button className="training-choice yes" disabled={busy} onClick={() => submit('Yes', false)}>Yes</button>
+        </div>}
+        {current.question_type === 'yes_no' && <div className="training-choices spatial two">
+          <button className="training-choice no" disabled={busy} onClick={() => submit('No', false)}>No</button>
+          <button className="training-choice yes" disabled={busy} onClick={() => submit('Yes', false)}>Yes</button>
+        </div>}
+        {current.question_type === 'single_choice' && <div className="training-choices column">{current.answer_options.map((option) => <button key={option} className="training-choice-plain" disabled={busy} onClick={() => submit(option, false)}>{option}</button>)}</div>}
+        {current.question_type === 'multi_select' && <>
+          <div className="training-choices column multi">{current.answer_options.map((option) => { const selected = multiSelected.includes(option); return <button key={option} type="button" aria-pressed={selected} className={`training-choice-plain ${selected ? 'selected' : ''}`} onClick={() => setMultiSelected((prev) => (selected ? prev.filter((item) => item !== option) : [...prev, option]))}>{selected ? '✓ ' : ''}{option}</button> })}</div>
+          <button className="button-primary training-continue" disabled={!multiSelected.length || busy} onClick={() => submit(multiSelected, false)}>Continue <span>→</span></button>
+        </>}
+        {current.question_type === 'short_text' && <div className="training-text-answer">
+          <textarea value={textAnswer} onChange={(event) => setTextAnswer(event.target.value)} maxLength={500} />
+          <button className="button-primary" disabled={!textAnswer.trim() || busy} onClick={() => submit(textAnswer.trim(), false)}>Continue <span>→</span></button>
+        </div>}
+        {error && <p className="demo-reset-error" role="alert">{error}</p>}
+        <div className="training-modal-footer">
+          <button className="text-button" disabled={busy} onClick={() => submit(null, true)}>Skip</button>
+          <p className="training-modal-reassure">You can refine these anytime.</p>
+        </div>
+      </>}
+    </div>
+  </div>
 }
 
 const FEED_TYPE_LABELS: Record<string, string> = {

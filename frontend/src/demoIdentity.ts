@@ -3,8 +3,8 @@ import { DEMO_PATIENTS } from './demoPatients.ts'
 /** Stable synthetic demo identities shared by the workspace screens. */
 export const JORDAN_ID = 'patient-ckd-htn-001'
 export const MARIA_ID = 'patient-ida-002'
-export const PCP_NAME = 'Dr. Lucy Saru'
-export const PCP_AGENT_NAME = "Dr. Lucy Saru's Agent"
+export const PCP_NAME = 'Dr. Lucy Saruhashi'
+export const PCP_AGENT_NAME = "Dr. Lucy Saruhashi's Agent"
 export const PCP_AGENT_ID = 'agent-pcp-lianne-cha'
 
 /** The one controlled, workspace-isolated specialist demo persona (Pass 3A). */

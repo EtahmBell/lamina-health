@@ -46,7 +46,7 @@ test('general sign-in (not from a specific claim) defaults to My physician ident
 test('an authenticated visitor sees account access instead of Sign in, on the Portal and in the claim shell alike', () => {
   const control = slice(app, 'function PortalAccountControl', 'function ProductShell')
   assert.match(control, /user\s*\n?\s*\? <button className="text-button portal-account-link" onClick=\{\(\) => navigate\('\/claim\/my-identities'\)\}>My physician identities</)
-  assert.doesNotMatch(control, /PCP_NAME|Dr\. Lucy Saru/, 'the physician account is never rendered as Dr. Lucy Saru')
+  assert.doesNotMatch(control, /PCP_NAME|Dr\. Lucy Saruhashi/, 'the physician account is never rendered as Dr. Lucy Saruhashi')
 })
 
 test('the Lucy demo route table is untouched', () => {

@@ -178,10 +178,31 @@ PHYSICIANS = [
 
 MARIA_PHYSICIANS = [
     PhysicianProfile(
+        id="physician-sanchez",
+        name="Dr. Tiffany Sanchez (synthetic)",
+        specialty="Gastroenterology",
+        subspecialty="Occult gastrointestinal blood loss",
+        focus_areas=["iron-deficiency anaemia", "occult GI blood loss", "diagnostic endoscopy"],
+        accepts_signals=["iron_deficiency_anemia", "no_prior_endoscopy", "oral_iron_failure"],
+        explicit_rules=[
+            "Accept persistent iron-deficiency anaemia without prior GI source evaluation."
+        ],
+        required_workup=["Recent complete blood count (CBC)", "Ferritin", "Iron studies"],
+        historical_cases=[
+            HistoricalCase(
+                label="Persistent iron deficiency without prior endoscopic evaluation",
+                features=["iron_deficiency_anemia", "no_prior_endoscopy", "oral_iron_failure"],
+            )
+        ],
+        insurance_networks=["Lamina Demo PPO"],
+        location="Oakland, CA",
+        availability_days=9,
+    ),
+    PhysicianProfile(
         id="physician-alvarez",
         name="Dr. Sofia Alvarez (synthetic)",
         specialty="Gastroenterology",
-        subspecialty="Occult gastrointestinal blood loss",
+        subspecialty="General gastroenterology",
         focus_areas=["iron-deficiency anaemia", "occult GI blood loss", "diagnostic endoscopy"],
         accepts_signals=["iron_deficiency_anemia", "no_prior_endoscopy", "oral_iron_failure"],
         explicit_rules=[
@@ -291,7 +312,50 @@ DEMO_NETWORK_PHYSICIANS = [
     ),
 ]
 
-ALL_PHYSICIANS = [*PHYSICIANS, *MARIA_PHYSICIANS, *DEMO_NETWORK_PHYSICIANS]
+
+def _network_only(physician_id: str, name: str, specialty: str, subspecialty: str, location: str, availability_days: int) -> PhysicianProfile:
+    """A controlled directory-only physician: visible in Network/Colleagues, never a
+    consult-network candidate (not listed in PHYSICIANS_BY_PATIENT). Mirrors the
+    physician-cha pattern above."""
+    return PhysicianProfile(
+        id=physician_id,
+        name=f"{name} (synthetic)",
+        specialty=specialty,
+        subspecialty=subspecialty,
+        focus_areas=[],
+        accepts_signals=[],
+        explicit_rules=[],
+        required_workup=[],
+        historical_cases=[],
+        insurance_networks=["Lamina Demo PPO"],
+        location=location,
+        availability_days=availability_days,
+    )
+
+
+# Broadens the controlled synthetic network beyond the handful of consult-engine
+# participants, so Network/Colleagues reads as a real professional population rather
+# than an empty shell around five case-linked names.
+EXPANDED_NETWORK_PHYSICIANS = [
+    _network_only("physician-islam", "Dr. Noah Islam", "Pulmonology", "General pulmonology", "Oakland, CA", 11),
+    _network_only("physician-muhammad", "Dr. Ahmed Muhammad", "Orthopedic Surgery", "Sports medicine", "San Francisco, CA", 19),
+    _network_only("physician-guechtouli", "Dr. Hamidou Guechtouli", "Infectious Disease", "General infectious disease", "Oakland, CA", 14),
+    _network_only("physician-mithel", "Dr. Chris Mithel", "Dermatology", "Medical dermatology", "Berkeley, CA", 23),
+    _network_only("physician-daniels", "Dr. Connor Daniels", "Urology", "General urology", "San Francisco, CA", 17),
+    _network_only("physician-miller", "Dr. Josh Miller", "Rheumatology", "Inflammatory arthritis", "Oakland, CA", 26),
+    _network_only("physician-da-fieno-m", "Dr. Mattia Da Fieno", "Neurology", "General neurology", "Berkeley, CA", 20),
+    _network_only("physician-da-fieno-l", "Dr. Lorenzo Da Fieno", "General Surgery", "Elective general surgery", "San Francisco, CA", 28),
+    _network_only("physician-murtuza-lanier", "Dr. Carson Murtuza-Lanier", "Psychiatry", "Adult outpatient psychiatry", "Oakland, CA", 9),
+    _network_only("physician-nakajima", "Dr. Dan Nakajima", "Pulmonology", "Sleep medicine", "San Francisco, CA", 15),
+    _network_only("physician-ramanathan", "Dr. Maya Ramanathan", "Endocrinology", "Thyroid and metabolic disease", "Oakland, CA", 18),
+    _network_only("physician-park", "Dr. Nina Park", "Obstetrics & Gynecology", "General OB/GYN", "Berkeley, CA", 13),
+    _network_only("physician-desai", "Dr. Priya Desai", "Rheumatology", "Connective tissue disease", "San Francisco, CA", 22),
+    _network_only("physician-chen-emily", "Dr. Emily Chen", "Dermatology", "Procedural dermatology", "Oakland, CA", 16),
+    _network_only("physician-rahman", "Dr. Amina Rahman", "Pulmonology", "Asthma and COPD", "Berkeley, CA", 10),
+    _network_only("physician-rosen", "Dr. Natalie Rosen", "Hematology/Oncology", "Benign hematology", "San Francisco, CA", 24),
+]
+
+ALL_PHYSICIANS = [*PHYSICIANS, *MARIA_PHYSICIANS, *DEMO_NETWORK_PHYSICIANS, *EXPANDED_NETWORK_PHYSICIANS]
 PHYSICIANS_BY_PATIENT = {
     PRIMARY_PATIENT_ID: PHYSICIANS,
     MARIA_PATIENT_ID: MARIA_PHYSICIANS,

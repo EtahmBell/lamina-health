@@ -66,15 +66,25 @@ def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_adding_a_relationship_is_idempotent_and_removable(tmp_path):
+    """A brand-new workspace is lazily seeded with a believable starting roster
+    (see WorkflowStore._DEFAULT_NETWORK_MEMBER_NPIS) so Colleagues never opens
+    empty; this test exercises add/remove mechanics on top of that baseline using
+    an NPI (Claire Wu) that is deliberately not part of the seeded set."""
     store, _ = _setup(tmp_path)
-    assert store.network_members(WORKSPACE) == []
-    first = store.add_network_member(WORKSPACE, JUNG_NPI)
-    again = store.add_network_member(WORKSPACE, JUNG_NPI)
+    baseline = [member["npi"] for member in store.network_members(WORKSPACE)]
+    assert len(baseline) > 0, "a fresh workspace starts with a seeded default roster"
+    assert WU_NPI not in baseline
+    first = store.add_network_member(WORKSPACE, WU_NPI)
+    again = store.add_network_member(WORKSPACE, WU_NPI)
     assert first["added_at"] == again["added_at"], "re-adding keeps the original relationship"
-    assert [member["npi"] for member in store.network_members(WORKSPACE)] == [JUNG_NPI]
-    assert store.remove_network_member(WORKSPACE, JUNG_NPI) is True
-    assert store.remove_network_member(WORKSPACE, JUNG_NPI) is False
-    assert store.network_members(WORKSPACE) == []
+    assert WU_NPI in [member["npi"] for member in store.network_members(WORKSPACE)]
+    assert store.remove_network_member(WORKSPACE, WU_NPI) is True
+    assert store.remove_network_member(WORKSPACE, WU_NPI) is False
+    assert WU_NPI not in [member["npi"] for member in store.network_members(WORKSPACE)]
+    assert [member["npi"] for member in store.network_members(WORKSPACE)] == baseline, (
+        "removing the manually-added member returns exactly to the seeded baseline, "
+        "which is not itself re-seeded"
+    )
 
 
 def test_membership_marks_a_node_without_creating_an_edge(tmp_path):
@@ -182,29 +192,32 @@ def test_an_unresolvable_directory_record_is_reported_not_invented(tmp_path):
 
 
 def test_network_member_endpoints_round_trip(client: TestClient):
-    assert client.get("/api/workspace/network/members").json() == []
+    baseline = client.get("/api/workspace/network/members").json()
+    assert len(baseline) > 0, "a fresh workspace starts with a seeded default roster"
+    assert all(member["npi"] != WU_NPI for member in baseline)
 
-    created = client.post("/api/workspace/network/members", json={"npi": JUNG_NPI})
+    created = client.post("/api/workspace/network/members", json={"npi": WU_NPI})
     assert created.status_code == 201
-    assert created.json()["npi"] == JUNG_NPI
+    assert created.json()["npi"] == WU_NPI
 
-    repeat = client.post("/api/workspace/network/members", json={"npi": JUNG_NPI})
+    repeat = client.post("/api/workspace/network/members", json={"npi": WU_NPI})
     assert repeat.status_code == 201
     assert repeat.json()["added_at"] == created.json()["added_at"]
-    assert len(client.get("/api/workspace/network/members").json()) == 1
+    assert len(client.get("/api/workspace/network/members").json()) == len(baseline) + 1
 
     network = client.get("/api/workspace/network").json()
-    jung = next(node for node in network["nodes"] if node["npi"] == JUNG_NPI)
-    assert jung["in_network"] is True
-    assert jung["status"] == "reserved"
-    assert jung["relationship"] is None
+    wu = next(node for node in network["nodes"] if node["npi"] == WU_NPI)
+    assert wu["in_network"] is True
+    assert wu["status"] == "reserved"
+    assert wu["relationship"] is None
 
-    assert client.delete(f"/api/workspace/network/members/{JUNG_NPI}").status_code == 204
-    assert client.delete(f"/api/workspace/network/members/{JUNG_NPI}").status_code == 404
-    assert client.get("/api/workspace/network/members").json() == []
+    assert client.delete(f"/api/workspace/network/members/{WU_NPI}").status_code == 204
+    assert client.delete(f"/api/workspace/network/members/{WU_NPI}").status_code == 404
+    assert client.get("/api/workspace/network/members").json() == baseline
 
 
 def test_unknown_physician_cannot_be_added(client: TestClient):
+    baseline = client.get("/api/workspace/network/members").json()
     assert client.post("/api/workspace/network/members", json={"npi": "0000000000"}).status_code == 404
     assert client.post("/api/workspace/network/members", json={"npi": "not-an-npi"}).status_code == 422
-    assert client.get("/api/workspace/network/members").json() == []
+    assert client.get("/api/workspace/network/members").json() == baseline
