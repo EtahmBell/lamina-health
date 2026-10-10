@@ -751,33 +751,38 @@ test('My Agent\'s own copper theme is untouched by the sidebar icon color revert
   assert.match(styles, /\.agent-tabs button\.active \{ border-color: var\(--agent-copper\)/)
 })
 
-test('the Network hero is restructured into copy + a white inset action card over a decorative pane, a Network-specific sibling of the Dashboard banner shape (not a literal copy)', () => {
-  const hero = slice(network, 'function NetworkHero', 'function SuggestedConnectionRow')
+test('the Network hero is restructured as ONE continuous surface (copy + decorative motif + a white inset action card), a Network-specific sibling of the Dashboard banner shape (not a literal copy) -- see design_references/dash_banner.png', () => {
+  const hero = slice(network, 'function NetworkHero', 'function SuggestedConnectionCard')
   assert.match(hero, /<h2>Grow your Lamina network\.<\/h2>/)
   assert.match(hero, /<h3>Search and add your colleagues\.<\/h3>/)
   assert.match(hero, /Find physicians you already work with\./)
   assert.match(hero, /<button className="button-primary" onClick=\{onAdd\}>Add a colleague/, 'the existing add-colleague modal CTA, unchanged behavior')
   assert.doesNotMatch(hero, /<img\b/, 'no stock photography -- CSS/SVG only')
+  assert.match(styles, /\.network-hero \{ position: relative; display: flex;/, 'one flex surface, not a 2-column grid with a separately-colored sub-pane')
 })
 
-test('the network globe motif is an abstract CSS/SVG illustration -- tilted, several nodes, multiple arcs, mineral-toned with one copper "you" node, no literal map/airline-route imagery', () => {
-  const hero = slice(network, 'function NetworkHero', 'function SuggestedConnectionRow')
+test('the network globe motif is an abstract CSS/SVG illustration -- a tilted partial globe with several nodes and multiple hub-radiating arcs, mineral-toned with one copper "you" node, no literal map/airline-route imagery -- reinterpreting design_references/map_guidance_banner.png', () => {
+  const hero = slice(network, 'function NetworkHero', 'function SuggestedConnectionCard')
   const nodeCount = (hero.match(/className="globe-node/g) ?? []).length
   const arcCount = (hero.match(/className="globe-arc"/g) ?? []).length
   assert.ok(nodeCount >= 5 && nodeCount <= 8, `expected 5-8 nodes, found ${nodeCount}`)
   assert.ok(arcCount >= 3 && arcCount <= 5, `expected 3-5 arcs, found ${arcCount}`)
-  assert.match(styles, /\.network-hero-globe-art \{[^}]*transform: rotate\(-6deg\)/, 'the sphere is clearly tilted')
+  assert.match(hero, /className="globe-edge"/, 'a partial globe edge, not a closed sphere outline')
+  assert.match(styles, /\.globe-tilt \{ transform: rotate\(-9deg\)/, 'the sphere is clearly tilted')
   assert.match(styles, /\.globe-node\.hub \{ fill: var\(--accent\); opacity: 1; \}/, 'exactly one copper "you" node; the rest are mineral')
   assert.doesNotMatch(hero, /usa|united-states|map|airline/i)
 })
 
-test('Suggested connections exists below the hero, shows ~3 by default with a local expand, and never fabricates a reason', () => {
+test('Suggested connections exists below the hero as a 3-up card grid (not rows), shows ~3 by default with a local expand, a filled primary Add action, and never fabricates a reason', () => {
   assert.match(network, /function SuggestedConnections/)
   assert.match(network, /const visible = expanded \? suggestions : suggestions\.slice\(0, 3\)/)
   assert.match(network, /People your agent thinks you should know/)
-  const row = slice(network, 'function SuggestedConnectionRow', 'function SuggestedConnections')
-  assert.match(row, /<small>\{suggestion\.reason\}<\/small>/, 'every suggestion row renders its reason')
-  assert.match(row, /<button className="button-secondary suggestion-add" disabled=\{busy\} onClick=\{onAdd\}>Add/, 'a real Add action')
+  const card = slice(network, 'function SuggestedConnectionCard', 'function SuggestedConnections')
+  assert.match(card, /\[showReason, setShowReason\] = useState\(false\)/, 'the reason is a compact disclosure, not shown by default')
+  assert.match(card, /onClick=\{\(\) => setShowReason/)
+  assert.match(card, /\{showReason && <p className="suggestion-reason">\{suggestion\.reason\}<\/p>\}/)
+  assert.match(card, /<button className="button-primary suggestion-add" disabled=\{busy\} onClick=\{onAdd\}>Add/, 'a real, filled primary Add action')
+  assert.match(styles, /\.suggestion-grid \{ display: grid; grid-template-columns: repeat\(3, 1fr\);/, '3-up on desktop')
 })
 
 test('a consultation-driven suggestion reason is represented honestly -- real relationship data only, never a fabricated mutual-colleague count', () => {
@@ -803,8 +808,17 @@ test('the existing "Most connected in your network" colleague list, View physici
 
 test('Feed evolves into a two-column desktop layout -- main feed (2fr) + a narrow agent-assist rail (~0.85fr) -- and the feed stays visually dominant', () => {
   assert.match(styles, /\.feed-layout \{ display: grid; grid-template-columns: 2fr minmax\(240px, \.85fr\); align-items: start; gap: 32px; \}/)
-  assert.match(engagement, /<div className="feed-stream">\{items\.map/)
-  assert.match(engagement, /<AgentAssistRail personaId=\{personaId\} \/>/)
+  assert.match(engagement, /<div className="feed-stream">/)
+  assert.match(engagement, /<AgentAssistRail personaId=\{personaId\} onPublished=\{/)
+})
+
+test('the Post affordance is sticky in the Feed rail -- a dedicated card, first in the (position: sticky) rail, so posting stays reachable while scrolling, not stranded in the page header', () => {
+  assert.match(styles, /\.agent-assist-rail \{ position: sticky; top: 76px;/)
+  const rail = slice(engagement, 'function AgentAssistRail', 'export function NetworkFeedTab')
+  assert.match(rail, /<section className="agent-assist-card agent-assist-post-card">/)
+  assert.match(rail, /<PostButton personaId=\{personaId\} triggerLabel="Post" compact=\{false\} buttonClassName="button-primary agent-assist-post-trigger" onPublished=\{onPublished\} \/>/)
+  assert.doesNotMatch(engagement, /<PostButton personaId=\{personaId\} triggerLabel="Post" compact=\{false\} onPublished=\{\(post\) => \{ onPublished/, 'the old header Post button is gone, not duplicated')
+  assert.match(engagement, /The rail \(and its sticky Post action\) renders whenever the feed has/, 'the rail (and its Post card) still renders even with zero real feed items')
 })
 
 test('the agent-assist rail offers draft ideas (not KPIs), each opening a modal on Preview, plus lightweight local posting-preference chips -- no autonomous-post toggle anywhere', () => {
@@ -839,7 +853,25 @@ test('agent-authored feed posts are clearly labeled AGENT and never presented as
   const card = slice(engagement, 'function FeedCard', "/** Home's tiny network preview")
   assert.match(card, /<span className="feed-post-agent-badge">Agent<\/span>/)
   assert.match(card, /representing \$\{item\.representedPhysicianName\}/)
-  assert.match(card, /item\.isAgentAuthored\s*\n\s*\? <AgentAvatar/, 'the agent avatar renders instead of physician initials for agent posts')
+  assert.match(card, /item\.isAgentAuthored\s*\n\s*\? <span className="feed-post-agent-avatar"><AgentAvatar tone=\{item\.agentTone\} \/><\/span>/, 'the agent avatar (sized down via .feed-post-agent-avatar) renders instead of physician initials for agent posts')
+})
+
+test('agent-authored posts use varied, restrained Lamina-palette avatar tones (not every agent painted identically), and the icon itself is sized down from the default, never visually dominant', () => {
+  const avatar = readFileSync(new URL('../src/AgentAvatar.tsx', import.meta.url), 'utf8')
+  assert.match(engagement, /agentTone: 'copper-light'/)
+  assert.match(engagement, /agentTone: 'blue'/)
+  assert.match(styles, /\.feed-post-agent-avatar \{ display: block; width: 26px; height: 26px; flex: 0 0 26px; \}/, 'smaller than the 36px physician-initials avatar it stands beside')
+  assert.match(avatar, /export type AgentAvatarTone = 'blue' \| 'blue-light' \| 'copper' \| 'copper-light'/)
+  assert.match(styles, /\.agent-avatar-blue-light \{ color: var\(--mineral-subtle\); \}/)
+  assert.match(styles, /\.agent-avatar-copper \{ color: var\(--agent-copper\); \}/)
+  assert.match(styles, /\.agent-avatar-copper-light \{ color: var\(--agent-copper-mid\); \}/)
+})
+
+test('agent-authored posts carry enough body text to always trigger See more truncation -- real previewable posts, not placeholder blurbs', () => {
+  const posts = slice(engagement, 'const AGENT_FEED_POSTS: FeedListItem[] = [', ']\n\ntype DraftIdea')
+  const bodies = [...posts.matchAll(/body: "([^"]+)"/g)].map((m) => m[1])
+  assert.equal(bodies.length, 2)
+  for (const body of bodies) assert.ok(body.length > 220, `agent post body must exceed the 220-char See-more threshold (got ${body.length})`)
 })
 
 test('agent-authored posts use a quiet mineral accent, never copper -- Feed stays in the Network/mineral palette even for agent content', () => {

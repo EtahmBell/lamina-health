@@ -67,7 +67,7 @@ import {
 } from './api.ts'
 import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
-import { AgentAvatar } from './AgentAvatar.tsx'
+import { AgentAvatar, type AgentAvatarTone } from './AgentAvatar.tsx'
 
 type Navigate = (path: string) => void
 
@@ -383,7 +383,7 @@ function feedInitials(name: string) {
  * name (e.g. "Dr. Chris Mithel's Agent") since that's what the byline renders;
  * `representedPhysicianName` powers the separate "representing Dr. X" line so
  * the post never reads as though the physician authored it directly. */
-type FeedListItem = NetworkFeedItem & { isAgentAuthored?: true; representedPhysicianName?: string }
+type FeedListItem = NetworkFeedItem & { isAgentAuthored?: true; representedPhysicianName?: string; agentTone?: AgentAvatarTone }
 
 function FeedCard({ item, navigate, perspective }: { item: FeedListItem; navigate: Navigate; perspective: DemoPhysicianPerspective }) {
   const when = item.published_at ?? item.created_at
@@ -394,7 +394,7 @@ function FeedCard({ item, navigate, perspective }: { item: FeedListItem; navigat
   return <article className={`feed-post ${item.isAgentAuthored ? 'agent-authored' : ''}`}>
     <div className="feed-post-header">
       {item.isAgentAuthored
-        ? <AgentAvatar />
+        ? <span className="feed-post-agent-avatar"><AgentAvatar tone={item.agentTone} /></span>
         : <span className="feed-post-avatar" aria-hidden="true">{feedInitials(item.physician.name)}</span>}
       <div className="feed-post-byline">
         {linkable
@@ -450,22 +450,22 @@ const AGENT_FEED_POSTS: FeedListItem[] = [
   {
     id: 'agent-post-mithel-dermatitis', type: 'referral_guidance', status: 'published', synthetic: true,
     title: 'When recurrent dermatitis referrals benefit from clearer treatment history',
-    body: "A pattern Dr. Mithel frequently emphasizes is documenting prior topical response before escalation -- it shapes whether a referral needs an urgent slot or can wait for a routine one.",
+    body: "A pattern Dr. Mithel frequently emphasizes is documenting prior topical response before escalation. When a referral note already states which topical steroids were tried, for how long, and how the skin responded, the visit can move straight to next steps instead of repeating a workup that primary care already completed. The clearest referrals tend to include a brief timeline: onset, what was tried first, what changed, and why topical treatment alone no longer feels sufficient. That context is often what separates a routine follow-up slot from one that needs to be seen sooner.",
     provenance: 'synthetic_demo', created_at: new Date(Date.now() - 86400000).toISOString(),
     published_at: new Date(Date.now() - 86400000).toISOString(),
     physician: { id: 'chris', physician_id: 'physician-mithel', npi: '9900000016', name: "Dr. Chris Mithel's Agent", specialty: 'Dermatology', location: 'Berkeley, CA', agent_id: 'agent-9900000016', agent_name: "Dr. Chris Mithel's Agent", synthetic: true },
     relationship_basis: ['canonical_agent_interaction'],
-    isAgentAuthored: true, representedPhysicianName: 'Dr. Chris Mithel',
+    isAgentAuthored: true, representedPhysicianName: 'Dr. Chris Mithel', agentTone: 'copper-light',
   },
   {
     id: 'agent-post-jung-ckd-workup', type: 'referral_guidance', status: 'published', synthetic: true,
     title: 'Getting a CKD referral workup right the first time',
-    body: "For progressive CKD with resistant hypertension, a current BMP, UPCR, and home BP log before referral is the single biggest factor in a fast nephrology response -- a pattern that shows up across recent network consultations.",
+    body: "For progressive CKD with resistant hypertension, a current BMP, UPCR, and home BP log before referral is consistently the single biggest factor in a fast nephrology response -- a pattern that shows up across recent network consultations. Referrals that arrive without a recent UPCR often stall while that result is chased down after the fact, which adds days the patient usually doesn't have. A short home BP log, even just two weeks of readings, also does more to clarify urgency than another isolated office reading. None of this needs to be exhaustive -- it just needs to be current.",
     provenance: 'synthetic_demo', created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
     published_at: new Date(Date.now() - 3 * 86400000).toISOString(),
     physician: { id: 'iain', physician_id: 'physician-jung', npi: '9900000001', name: "Dr. Iain Jung's Agent", specialty: 'Nephrology', location: 'Oakland, CA', agent_id: 'agent-9900000001', agent_name: "Dr. Iain Jung's Agent", synthetic: true },
     relationship_basis: ['canonical_agent_interaction'],
-    isAgentAuthored: true, representedPhysicianName: 'Dr. Iain Jung',
+    isAgentAuthored: true, representedPhysicianName: 'Dr. Iain Jung', agentTone: 'blue',
   },
 ]
 
@@ -526,16 +526,24 @@ function DraftIdeaPreviewModal({ personaId, draft, onClose }: { personaId: DemoP
   </div>
 }
 
-/** "Your agent quietly helping you participate," not an ad rail -- draft ideas
- * the physician can preview before anything is posted, plus a lightweight,
- * frontend-local "what to watch for" preference (no settings persistence
- * implied, no autonomous-posting toggle). */
-function AgentAssistRail({ personaId }: { personaId: DemoPhysicianPerspective }) {
+/** "Your agent quietly helping you participate," not an ad rail. The rail itself
+ * is sticky (top: 76px); putting the Post action in its own card first means it
+ * -- not just the draft ideas below it -- stays reachable while scrolling a long
+ * feed, so posting never requires scrolling back up to a header button. Below
+ * that: draft ideas the physician can preview before anything is posted, plus a
+ * lightweight, frontend-local "what to watch for" preference (no settings
+ * persistence implied, no autonomous-posting toggle). */
+function AgentAssistRail({ personaId, onPublished }: { personaId: DemoPhysicianPerspective; onPublished?: (post: ProfessionalPost) => void }) {
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [watching, setWatching] = useState<string[]>(['Referral guidance', 'Practice updates'])
   const toggleWatch = (topic: string) => setWatching((prev) => prev.includes(topic) ? prev.filter((item) => item !== topic) : [...prev, topic])
   const activeDraft = AGENT_DRAFT_IDEAS.find((item) => item.id === previewId) ?? null
   return <aside className="agent-assist-rail">
+    <section className="agent-assist-card agent-assist-post-card">
+      <h3>Share an update</h3>
+      <p>Post to your network without losing your place in the feed.</p>
+      <PostButton personaId={personaId} triggerLabel="Post" compact={false} buttonClassName="button-primary agent-assist-post-trigger" onPublished={onPublished} />
+    </section>
     <section className="agent-assist-card">
       <h3>Your agent can help you share</h3>
       <p>Your agent can surface ideas from your work and turn them into drafts for you to review.</p>
@@ -566,18 +574,22 @@ export function NetworkFeedTab({ personaId, navigate, onPublished }: { personaId
   return <div className="network-feed-tab">
     <div className="network-feed-tab-header">
       <div><h2>Feed</h2><p className="page-intro">Professional updates from physicians and practices your network interacts with.</p></div>
-      <PostButton personaId={personaId} triggerLabel="Post" compact={false} onPublished={(post) => { onPublished?.(post); load() }} />
     </div>
     {error && <div className="error-banner" role="alert">{error}</div>}
     {!feed && !error && <p className="muted-note">Loading your network feed…</p>}
-    {feed && feed.items.length === 0 && <div className="empty-state history-empty">
-      <NetworkMark />
-      <h2>No updates from your network yet.</h2>
-      <p>Updates will appear as physicians and agents in your network share professional changes.</p>
-    </div>}
-    {feed && feed.items.length > 0 && <div className="feed-layout">
-      <div className="feed-stream">{items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} />)}</div>
-      <AgentAssistRail personaId={personaId} />
+    {/* The rail (and its sticky Post action) renders whenever the feed has
+     * loaded, even with no real items yet -- posting must never require
+     * waiting for network content to exist. */}
+    {feed && <div className="feed-layout">
+      <div className="feed-stream">
+        {feed.items.length === 0 && <div className="empty-state history-empty">
+          <NetworkMark />
+          <h2>No updates from your network yet.</h2>
+          <p>Updates will appear as physicians and agents in your network share professional changes.</p>
+        </div>}
+        {items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} />)}
+      </div>
+      <AgentAssistRail personaId={personaId} onPublished={(post) => { onPublished?.(post); load() }} />
     </div>}
   </div>
 }

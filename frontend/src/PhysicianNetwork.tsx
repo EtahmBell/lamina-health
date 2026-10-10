@@ -132,11 +132,14 @@ function ConnectionRow({ member, navigate }: { member: NetworkRelationship; navi
 }
 
 /** The Colleagues hero: a Network-specific sibling of the Dashboard agent banner
- * (same "copy beside a decorative motif, with a white inset action card" shape --
- * see .agent-banner-main/.agent-banner-action), adapted rather than copied: the
- * motif is an abstract, tilted professional-network globe (CSS/SVG only, no stock
- * imagery, no literal map), and the inset card carries the actual CTA instead of
- * the main headline block. */
+ * (design_references/dash_banner.png) -- same composition language, adapted
+ * rather than copied: one continuous surface (not a separately-colored sub-pane),
+ * large headline+support on the left, a decorative motif floating centrally
+ * behind everything, a white inset action card on the right. The motif itself
+ * follows design_references/map_guidance_banner.png's feeling (a tilted partial
+ * globe with a hub radiating multiple connection arcs to scattered nodes across
+ * its surface), reinterpreted in Lamina's restrained vector-line language -- no
+ * dot-matrix continents, no stock imagery, no literal map. */
 function NetworkHero({ onAdd }: { onAdd: () => void }) {
   return <section className="network-hero">
     <div className="network-hero-copy">
@@ -144,47 +147,50 @@ function NetworkHero({ onAdd }: { onAdd: () => void }) {
       <h2>Grow your Lamina network.</h2>
       <p>Search any physician in the U.S. using NPPES and add them to your network.</p>
     </div>
-    <div className="network-hero-globe">
-      <svg className="network-hero-globe-art" viewBox="0 0 220 220" fill="none" aria-hidden="true">
-        <ellipse className="globe-ring" cx="110" cy="112" rx="84" ry="84" />
-        <ellipse className="globe-ring" cx="110" cy="112" rx="84" ry="30" />
-        <ellipse className="globe-ring" cx="110" cy="112" rx="84" ry="58" transform="rotate(-24 110 112)" />
-        <ellipse className="globe-ring" cx="110" cy="112" rx="50" ry="84" transform="rotate(14 110 112)" />
-        <path className="globe-arc" d="M34,124 Q110,54 182,98" />
-        <path className="globe-arc" d="M46,150 Q116,170 176,126" />
-        <path className="globe-arc" d="M60,80 Q118,60 168,86" />
-        <circle className="globe-node" cx="58" cy="122" r="3" />
-        <circle className="globe-node" cx="92" cy="92" r="2.4" />
-        <circle className="globe-node" cx="138" cy="96" r="3" />
-        <circle className="globe-node" cx="174" cy="110" r="2.4" />
-        <circle className="globe-node" cx="78" cy="152" r="2.4" />
-        <circle className="globe-node" cx="150" cy="142" r="3" />
-        <circle className="globe-node hub" cx="112" cy="120" r="4.5" />
-      </svg>
-      <div className="network-hero-action">
-        <h3>Search and add your colleagues.</h3>
-        <p>Find physicians you already work with.</p>
-        <button className="button-primary" onClick={onAdd}>Add a colleague <span>→</span></button>
-      </div>
+    <svg className="network-hero-globe-art" viewBox="0 0 240 240" fill="none" aria-hidden="true">
+      <g className="globe-tilt">
+        <path className="globe-edge" d="M26,166 Q40,68 138,38 Q202,24 218,88" />
+        <path className="globe-ring" d="M44,148 Q120,184 200,136" />
+        <path className="globe-ring" d="M32,106 Q122,76 208,102" />
+        <path className="globe-arc" d="M118,120 Q84,74 58,98" />
+        <path className="globe-arc" d="M118,120 Q152,58 190,72" />
+        <path className="globe-arc" d="M118,120 Q170,122 200,158" />
+        <path className="globe-arc" d="M118,120 Q92,162 72,188" />
+        <path className="globe-arc" d="M118,120 Q62,132 40,152" />
+        <circle className="globe-node" cx="58" cy="98" r="3" />
+        <circle className="globe-node" cx="190" cy="72" r="2.6" />
+        <circle className="globe-node" cx="200" cy="158" r="3" />
+        <circle className="globe-node" cx="72" cy="188" r="2.6" />
+        <circle className="globe-node" cx="40" cy="152" r="2.6" />
+        <circle className="globe-node hub" cx="118" cy="120" r="4.5" />
+      </g>
+    </svg>
+    <div className="network-hero-action">
+      <h3>Search and add your colleagues.</h3>
+      <p>Find physicians you already work with.</p>
+      <button className="button-primary" onClick={onAdd}>Add a colleague <span>→</span></button>
     </div>
   </section>
 }
 
-/** A single compact row -- lighter than the main colleague list, never a full
- * card. The reason line is the whole point: every suggestion explains itself. */
-function SuggestedConnectionRow({ suggestion, navigate, busy, onAdd }: {
+/** A discovery tile, not a list row -- avatar/name/specialty/location, a filled
+ * primary Add action, a quiet View profile link when a real profile exists, and
+ * a compact "Why suggested?" disclosure so the reason stays available without
+ * crowding the card by default. */
+function SuggestedConnectionCard({ suggestion, navigate, busy, onAdd }: {
   suggestion: SuggestedConnection; navigate: Navigate; busy: boolean; onAdd: () => void
 }) {
+  const [showReason, setShowReason] = useState(false)
   const persona = ENGAGEMENT_PERSONA_BY_NPI[suggestion.npi]
-  return <div className="suggestion-row">
+  return <div className="suggestion-card">
     <span className="lam-row-mark directory-avatar">{physicianInitials(suggestion.name)}</span>
-    <div className="suggestion-row-main">
-      <strong>{suggestion.name}</strong>
-      <span>{suggestion.specialty} · {suggestion.location}</span>
-      <small>{suggestion.reason}</small>
-    </div>
-    <div className="suggestion-row-actions">
-      <button className="button-secondary suggestion-add" disabled={busy} onClick={onAdd}>Add <span>→</span></button>
+    <strong>{suggestion.name}</strong>
+    <span className="suggestion-card-meta">{suggestion.specialty}</span>
+    <span className="suggestion-card-meta">{suggestion.location}</span>
+    <button type="button" className="text-button suggestion-why-toggle" aria-expanded={showReason} onClick={() => setShowReason((value) => !value)}>{showReason ? 'Hide reason' : 'Why suggested?'}</button>
+    {showReason && <p className="suggestion-reason">{suggestion.reason}</p>}
+    <div className="suggestion-card-actions">
+      <button className="button-primary suggestion-add" disabled={busy} onClick={onAdd}>Add <span>→</span></button>
       {persona && <button className="text-button" onClick={() => navigate(networkProfilePath('lucy', persona))}>View profile →</button>}
     </div>
   </div>
@@ -207,7 +213,7 @@ function SuggestedConnections({ suggestions, navigate, pendingNpi, onAdd }: {
   const hidden = suggestions.length - visible.length
   return <section className="suggested-connections">
     <h2 className="network-section-title">People your agent thinks you should know</h2>
-    <div className="suggestion-list">{visible.map((suggestion) => <SuggestedConnectionRow
+    <div className="suggestion-grid">{visible.map((suggestion) => <SuggestedConnectionCard
       key={suggestion.npi}
       suggestion={suggestion}
       navigate={navigate}

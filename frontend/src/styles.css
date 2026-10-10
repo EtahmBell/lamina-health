@@ -1462,47 +1462,56 @@ button.lam-row:hover { background: #fff9f1; }
 .network-intro { max-width: 680px; margin: 0 0 4px; color: var(--text-secondary); font-size: .74rem; line-height: 1.6; }
 .network-boundary-notice.quiet { margin-top: 12px; }
 
-/* Colleagues hero -- analogous to the Dashboard agent banner (2-column surface,
- * copper primary CTA) but its decorative motif is network geography, not rings. */
-.network-hero { display: grid; grid-template-columns: 1.1fr 1fr; align-items: stretch; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
-.network-hero-copy { padding: 35px; align-self: center; }
+/* Colleagues hero -- a Network-specific sibling of the Dashboard agent banner
+ * (design_references/dash_banner.png): ONE continuous light surface (not a
+ * separately-colored sub-pane), headline+support on the left, a decorative
+ * motif floating centrally behind everything, a white inset action card on the
+ * right. Copper stays out of this card deliberately -- the primary CTA is the
+ * shared mineral .button-primary, like every other Network/Dashboard action. */
+.network-hero { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 28px; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--mineral-surface); padding: 40px 44px; }
+.network-hero-copy { position: relative; z-index: 1; max-width: 300px; }
 .network-hero-copy .eyebrow { margin: 0 0 7px; }
-.network-hero-copy h2 { max-width: 16ch; font-size: 1.7rem; line-height: 1.2; }
-.network-hero-copy p:not(.eyebrow) { max-width: 38ch; margin: 10px 0 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
-/* The decorative globe fills the pane as a background layer; the white action
-   card sits on top of it, same "inset card over a colored pane" shape as the
-   Dashboard banner's .agent-banner-action. */
-.network-hero-globe { position: relative; min-height: 260px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--mineral-surface); }
-.network-hero-globe-art { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; opacity: .9; transform: rotate(-6deg) scale(1.05); }
-.globe-ring { stroke: var(--mineral-subtle); stroke-width: 1; opacity: .4; }
-.globe-arc { stroke: var(--mineral); stroke-width: 1.1; opacity: .55; stroke-dasharray: 2 4; stroke-linecap: round; }
-.globe-node { fill: var(--mineral-deep); opacity: .7; }
+.network-hero-copy h2 { font-size: 1.7rem; line-height: 1.2; }
+.network-hero-copy p:not(.eyebrow) { max-width: 36ch; margin: 10px 0 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
+/* The motif: a tilted partial globe (one visible edge arc + two latitude arcs,
+   never a closed sphere outline) with a hub radiating several connection arcs
+   to scattered nodes -- design_references/map_guidance_banner.png's feeling,
+   reinterpreted as restrained vector lines, not a literal dotted world map. */
+.network-hero-globe-art { position: absolute; left: 50%; top: 50%; z-index: 0; width: 360px; height: 300px; transform: translate(-50%, -50%); opacity: .6; }
+.globe-tilt { transform: rotate(-9deg); transform-origin: 120px 120px; }
+.globe-edge { stroke: var(--mineral-subtle); stroke-width: 1.2; opacity: .5; }
+.globe-ring { stroke: var(--mineral-subtle); stroke-width: 1; opacity: .35; }
+.globe-arc { stroke: var(--mineral); stroke-width: 1.1; opacity: .6; stroke-dasharray: 2 4; stroke-linecap: round; }
+.globe-node { fill: var(--mineral-deep); opacity: .75; }
 .globe-node.hub { fill: var(--accent); opacity: 1; }
-.network-hero-action { position: relative; z-index: 1; margin: 19px; max-width: 230px; border: 1px solid var(--border); border-radius: 9px; background: rgb(255 254 251 / 92%); padding: 22px; }
+.network-hero-action { position: relative; z-index: 1; flex: 0 0 auto; width: 240px; border: 1px solid var(--border); border-radius: 10px; background: rgb(255 254 251 / 94%); padding: 24px; }
 .network-hero-action h3 { margin: 0; font-size: 1.05rem; line-height: 1.35; }
 .network-hero-action p { margin: 8px 0 16px; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
 .network-hero-action .button-primary { width: 100%; }
-@media (max-width: 860px) { .network-hero { grid-template-columns: 1fr; } .network-hero-globe { min-height: 200px; } }
+@media (max-width: 860px) {
+  .network-hero { flex-direction: column; align-items: stretch; padding: 32px 26px; }
+  .network-hero-action { width: auto; }
+  .network-hero-globe-art { opacity: .4; }
+}
 
 .network-section-title { margin: 32px 0 14px; font-size: 1.1rem; }
 
-/* Suggested connections: lighter than the main colleague list (.lam-list/.lam-row)
-   -- small individual rows, not one connected bordered block. */
+/* Suggested connections: discovery tiles, deliberately distinct from the
+   connected-physician list rows below (.lam-list/.lam-row) -- see
+   SuggestedConnectionCard. A 3-up grid on desktop, stacking on narrower
+   viewports. */
 .suggested-connections { margin-top: 30px; }
-.suggestion-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
-.suggestion-row { display: flex; align-items: center; gap: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 13px 16px; }
-.suggestion-row .directory-avatar { flex: 0 0 auto; }
-.suggestion-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.suggestion-row-main strong { font-size: .8rem; }
-.suggestion-row-main span { color: var(--text-secondary); font-size: .66rem; }
-.suggestion-row-main small { margin-top: 2px; color: var(--clinical); font-size: .68rem; line-height: 1.4; }
-.suggestion-row-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; }
-.suggestion-add { min-height: 32px; padding: 0 12px; font-size: .68rem; }
-.suggestion-expand { display: inline-block; margin-top: 12px; }
-@media (max-width: 620px) {
-  .suggestion-row { flex-wrap: wrap; }
-  .suggestion-row-actions { flex-basis: 100%; justify-content: space-between; margin-top: 8px; padding-left: 50px; }
-}
+.suggestion-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 4px; }
+.suggestion-card { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 18px; }
+.suggestion-card strong { margin-top: 12px; font-size: .82rem; }
+.suggestion-card-meta { color: var(--text-secondary); font-size: .66rem; }
+.suggestion-why-toggle { margin-top: 10px; font-size: .62rem; }
+.suggestion-reason { margin: 6px 0 0; color: var(--clinical); font-size: .68rem; line-height: 1.45; }
+.suggestion-card-actions { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.suggestion-add { min-height: 32px; padding: 0 14px; font-size: .68rem; }
+.suggestion-expand { display: inline-block; margin-top: 14px; }
+@media (max-width: 900px) { .suggestion-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { .suggestion-grid { grid-template-columns: 1fr; } }
 .network-see-all { display: inline-block; margin-top: 14px; }
 /* Variable-height disclosure via grid-template-rows, not max-height -- a long
  * colleague list never clips or needs a magic-number ceiling. */
@@ -1543,6 +1552,10 @@ button.lam-row:hover { background: #fff9f1; }
 
 .agent-authored.feed-post { border-color: rgb(83 110 125 / 28%); }
 .feed-post-agent-badge { flex: 0 0 auto; border-radius: 999px; background: var(--mineral-surface); padding: 2px 7px; color: var(--mineral-deep); font-size: .5rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+/* Restrained, not dominant -- smaller than the physician-initials avatar it
+   stands beside, never competing with the post content for attention. */
+.feed-post-agent-avatar { display: block; width: 26px; height: 26px; flex: 0 0 26px; }
+.feed-post-agent-avatar .agent-avatar { width: 100%; height: 100%; }
 .feed-post-author.no-link { font-family: var(--font-display); font-size: .86rem; color: var(--text-primary); cursor: default; }
 .feed-post-byline { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
 .feed-post-byline small { flex-basis: 100%; }
@@ -1551,6 +1564,9 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-assist-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 20px; }
 .agent-assist-card h3 { margin: 0; font-size: .88rem; }
 .agent-assist-card > p { margin: 7px 0 0; color: var(--text-secondary); font-size: .67rem; line-height: 1.5; }
+/* The rail itself is sticky; this being the first card is what keeps posting
+   reachable while scrolling a long feed. */
+.agent-assist-post-card .agent-assist-post-trigger { width: 100%; margin-top: 14px; }
 .draft-idea-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .draft-idea-card { border: 1px solid var(--border); border-radius: 9px; background: var(--mineral-surface); padding: 12px 14px; }
 .draft-idea-label { display: block; margin-bottom: 4px; color: var(--mineral-deep); font-size: .52rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
@@ -1626,6 +1642,9 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-avatar { display: inline-block; border-radius: 50%; overflow: hidden; line-height: 0; }
 .agent-avatar svg { display: block; }
 .agent-avatar-blue { color: var(--mineral); }
+.agent-avatar-blue-light { color: var(--mineral-subtle); }
+.agent-avatar-copper { color: var(--agent-copper); }
+.agent-avatar-copper-light { color: var(--agent-copper-mid); }
 .sidebar-clinician > .agent-avatar { width: 39px; height: 39px; flex: 0 0 39px; }
 .agent-hero-mark .agent-avatar { width: 64px; height: 64px; }
 .chat-agent-label .agent-avatar { width: 18px; height: 18px; flex: 0 0 18px; }

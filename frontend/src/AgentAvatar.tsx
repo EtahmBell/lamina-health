@@ -1,9 +1,14 @@
+export type AgentAvatarTone = 'blue' | 'blue-light' | 'copper' | 'copper-light'
+
 /** A simplified, agent-specific identity mark -- distinct from the Lamina network
  * logo (connected orbs). One solid-color orb per agent with a dark outline and a
  * small white smiley tucked toward the upper-left, per design_references/
- * agent_profile_picture_example.png. `tone` lets a future second demo agent use a
- * different palette color (fill only -- the dark outline stays constant). */
-export function AgentAvatar({ tone = 'blue' }: { tone?: 'blue' }) {
+ * agent_profile_picture_example.png. `tone` is fill-only (the dark outline stays
+ * constant) and picks from four restrained Lamina-palette variants -- e.g. the
+ * Feed assigns a different tone per agent-authored post so several agents
+ * reading in one stream stay visually distinct without any of them going loud.
+ * Dr. Lucy Saruhashi's own agent identity stays the default 'blue'. */
+export function AgentAvatar({ tone = 'blue' }: { tone?: AgentAvatarTone }) {
   return <span className={`agent-avatar agent-avatar-${tone}`} aria-hidden="true">
     <svg viewBox="0 0 32 32" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
       <circle cx="16" cy="16" r="14.4" fill="currentColor" stroke="var(--text-primary)" strokeWidth="2.2" />

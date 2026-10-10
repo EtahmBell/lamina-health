@@ -231,6 +231,13 @@ function PatientWatchTable({ rows, navigate }: { rows: PatientWatchRow[]; naviga
   </section>
 }
 
+/* TODO (not yet designed): a lightweight "Share something your agent should
+ * know" CTA -- e.g. "Share a paper" / "Share research" -- feeding agent
+ * knowledge, post drafts, and profile/interests. Dashboard is the right home
+ * for it (not Network): this is "tell your agent something," closer in spirit
+ * to HomeAgentCard than to Network's discovery/posting surfaces. Likely a
+ * quiet secondary link near HomeAgentCard, reusing PostButton's existing
+ * compose -> draft-with-agent pipeline rather than a new posting path. */
 function HomePage({ navigate }: { navigate: Navigate }) {
   const [records, setRecords] = useState<ConsultationRecord[]>([])
   const [loading, setLoading] = useState(true)
