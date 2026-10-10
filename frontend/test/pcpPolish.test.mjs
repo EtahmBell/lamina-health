@@ -101,12 +101,21 @@ test('Patient history has no subtitle -- the heading leads straight into the tim
   assert.doesNotMatch(page, /The story so far/)
 })
 
-test('the resolved-state badge carries an outline sparkle (never the filled copper one) and the headline gets extra breathing room', () => {
+test('the resolved-state badge carries a checkmark (matching the demo\'s consulting->resolved pill swap) and the headline gets extra breathing room', () => {
   const page = patientPage()
   const ready = page.slice(page.indexOf("nextStepState === 'ready'"), page.indexOf('<RecommendationView'))
-  assert.match(ready, /<span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✧<\/span>Your agent got back to you<\/span>/)
+  assert.match(ready, /<span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓<\/span>Your agent got back to you<\/span>/)
   assert.doesNotMatch(ready, /✦/, 'never the filled copper diamond/star')
-  assert.ok(someRule('.next-step-card.ready h3', /margin-top: 18px/))
+  assert.ok(someRule('.next-step-card .status-label + h3', /margin-top: 18px/))
+})
+
+test('the loading-state pill mirrors the resolved pill\'s structure -- sparkle icon, left-aligned, same grey box, not centered/all-caps-only', () => {
+  const page = patientPage()
+  const consulting = page.slice(page.indexOf("nextStepState === 'consulting'"), page.indexOf("nextStepState === 'ready'"))
+  assert.match(consulting, /<span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧<\/span>Consulting the network<\/span>/)
+  assert.doesNotMatch(styles, /\.next-step-card\.consulting \{[^}]*text-align: center/, 'the loading state must be left-aligned like the demo, not centered')
+  assert.doesNotMatch(styles, /\.next-step-card\.consulting \.status-label \{[^}]*width: 100%/, 'the pill must stay intrinsic width, not stretched full-width')
+  assert.doesNotMatch(styles, /\.next-step-card\.consulting \{[^}]*background: var\(--sage-surface\)/, 'loading and resolved must share the same grey box color, not a different tint')
 })
 
 test('Patient history and Next step are matching bordered boxes, top-aligned at the head of their respective columns', () => {

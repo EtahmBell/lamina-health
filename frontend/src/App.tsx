@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
 import { consultNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, resetJordanDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type TrainProjection } from './api.ts'
@@ -391,12 +391,14 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
   const [overview, setOverview] = useState<AgentOverview | null>(null)
   const [trainProjection, setTrainProjection] = useState<TrainProjection | null>(null)
+  const [consultationRecords, setConsultationRecords] = useState<ConsultationRecord[]>([])
   const refresh = () => getMyAgent().then(setAgent).catch((err: Error) => setError(err.message))
   const refreshRepresentation = () => getPracticeRepresentation('lucy').then(setRepresentation).catch(() => {})
   const refreshOverview = () => getAgentOverview('lucy').then(setOverview).catch(() => {})
   const refreshTraining = () => getTrainingHistory('lucy').then(setTrainProjection).catch(() => {})
+  const refreshConsultationRecords = () => getConsultationHistory().then(setConsultationRecords).catch(() => {})
   useEffect(() => {
-    refresh(); refreshRepresentation(); refreshOverview(); refreshTraining()
+    refresh(); refreshRepresentation(); refreshOverview(); refreshTraining(); refreshConsultationRecords()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setTab(resolveAgentTab(tabParam)) }, [tabParam])
   useEffect(() => { setFocusedLearning(learningParam); if (learningParam) setSelected(learningParam) }, [learningParam])
@@ -415,7 +417,7 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
     {error && <div className="error-banner" role="alert">{error}</div>}{!agent && !error && <p className="muted-note">Opening your agent…</p>}
     {agent && <><section className="agent-hero"><div className="agent-hero-mark"><AgentAvatar /></div><div><p className="eyebrow">Your physician agent</p><h1>{PCP_AGENT_NAME}</h1><p>Primary Care · Represents how you practise across the Lamina network.</p><span className="agent-state"><i /> ACTIVE</span></div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('lucy')} personaId="lucy" extra={
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('lucy')} personaId="lucy" consultationRecords={consultationRecords} extra={
         tabParam === 'calibration' && pending > 0 && <section className="agent-panel learning-panel practice-legacy-review"><div className="panel-header"><div><p className="eyebrow">Needs your review</p><h2>Case-raised preferences</h2><p className="panel-intro">Suggestions raised from a completed consultation are not silently treated as your preferences. A proposal stays proposed until you confirm or edit it.</p></div></div>
           <div className="learning-grid">{(agent?.learnings ?? []).filter((learning) => learning.status === 'suggested').map((learning) => <article className={`learning-card ${focusedLearning === learning.key ? 'focused' : ''}`} id={`learning-${learning.key}`} key={learning.key}><span className={`learning-status ${learning.status}`}>Proposed · needs confirmation</span><p>{learning.statement}</p><small>Source: {learning.provenance}</small>{focusedLearning === learning.key && caseParam && <p className="learning-case-source">Raised from the {patientName(caseParam)} consultation.{recordParam && <button className="text-button" onClick={() => navigate(consultationPath(Number(recordParam)))}>View consultation →</button>}</p>}{editing === learning.key ? <div className="learning-edit"><label htmlFor={`edit-${learning.key}`}>Correct this preference</label><textarea id={`edit-${learning.key}`} maxLength={240} value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="button-primary" disabled={!draft.trim()} onClick={() => act(learning, 'edit', draft)}>Save draft</button><button className="text-button" onClick={() => setEditing(null)}>Cancel</button></div></div> : <div className="learning-actions"><button onClick={() => act(learning, 'confirm')}>Confirm</button><button onClick={() => { setEditing(learning.key); setDraft(learning.statement) }}>Edit</button><button onClick={() => act(learning, 'reject')}>Reject</button></div>}</article>)}</div>
         </section>
@@ -634,7 +636,6 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const [activity, setActivity] = useState<PatientActivity | null>(null)
   const [reconsulting, setReconsulting] = useState(false)
   const [nextStepPinned, setNextStepPinned] = useState(false)
-  const nextStepRef = useRef<HTMLElement>(null)
   const demoPatient = DEMO_PATIENTS.find((item) => item.id === patientId)
   const refreshActivity = () => getPatientActivity()
     .then((records) => setActivity(records.find((item) => item.patient_id === patientId) ?? null))
@@ -663,17 +664,21 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
     return () => { cancelled = true }
   }, [patientId])
   /**
-   * The Next step rail stays sticky only while its own content (recommendation
-   * plus any expanded disclosures) still fits the viewport below the sticky
-   * header -- otherwise it would pin content the physician can never scroll
-   * to. Re-measures on mount, on window resize, and on every height change
-   * inside the rail itself (disclosures opening/closing, a candidate swap),
-   * via one ResizeObserver on the rail -- never by synchronizing scroll
-   * positions between the two columns, and never on mobile, where the rail
-   * already renders in normal flow.
+   * The Next step rail stays sticky only while its own content (loading card,
+   * compact result, or expanded disclosures) still fits the viewport below the
+   * sticky header -- otherwise it would pin content the physician can never
+   * scroll to. A callback ref (not useRef+useLayoutEffect) is deliberate: this
+   * page renders a loading placeholder before the real <aside> exists, so a
+   * one-shot effect keyed to mount would attach while the ref is still null and
+   * never observe anything. The callback ref instead fires exactly when the
+   * node attaches (after loading resolves) and detaches, and its React 19
+   * cleanup return handles teardown. Re-measures on attach, on window resize,
+   * and on every height change inside the rail itself (disclosures opening/
+   * closing, a candidate swap) via ResizeObserver -- never by synchronizing
+   * scroll positions between the two columns, and never on mobile, where the
+   * rail already renders in normal flow.
    */
-  useLayoutEffect(() => {
-    const node = nextStepRef.current
+  const nextStepRef = useCallback((node: HTMLElement | null) => {
     if (!node) return
     const STICKY_TOP_OFFSET = 76
     const BOTTOM_BREATHING_ROOM = 24
@@ -764,13 +769,13 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
         <h2>Next step</h2>
         <p className="page-intro">Your agent helps with the follow-through.</p>
         {nextStepState === 'consulting' && <div className="next-step-card consulting">
-          <span className="status-label pulse">Consulting the network</span>
+          <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Consulting the network</span>
           <h3>Your agent is finding a match.</h3>
           <p>Comparing clinical fit, referral requirements, access, and your practice preferences…</p>
         </div>}
         {nextStepState === 'ready' && consultation && <>
           <div className="next-step-card ready">
-            <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✧</span>Your agent got back to you</span>
+            <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Your agent got back to you</span>
             <h3>A specialist is ready for your review.</h3>
             <p>Review the match below, then choose how to move care forward.</p>
           </div>

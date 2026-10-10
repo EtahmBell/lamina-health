@@ -141,12 +141,9 @@ test('posts/publishing are not a major owner surface: no Publish button is wired
 
 /* --------------------------------------------------------------- honesty / gaps */
 
-test('unresolved gaps are represented gracefully in the Overview analytics glance, not a standalone "Still needs input" section', () => {
-  const analytics = slice(engagement, 'function AgentAnalyticsOverview', 'export function AgentOverviewPanel')
-  assert.match(analytics, /gaps\.practice_areas_needing_input/)
-  assert.match(analytics, /Still being clarified/)
-  const tab = slice(engagement, 'export function PracticeTab', 'function trainHistorySummaryLine')
-  assert.doesNotMatch(tab, /Still needs input/, 'the literal standalone section is gone from Practice Representation')
+test('unresolved gaps are never reintroduced as a "Still needs input" / "Still being clarified" section anywhere in My Agent', () => {
+  assert.doesNotMatch(engagement, /Still needs input/, 'the literal standalone section is gone from Practice Representation')
+  assert.doesNotMatch(engagement, /Still being clarified/, 'the gaps-as-a-stat framing is gone from Overview too')
 })
 
 test('pending proposed learnings are never displayed as confirmed Practice Representation', () => {

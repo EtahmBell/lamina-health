@@ -1247,39 +1247,38 @@ export function InitializationCard({ initialization, navigate, trainPath }: { in
 
 /* ------------------------------------------------------------- My Agent: Overview */
 
-const ANALYTICS_SEGMENT_LABELS: Record<string, string> = {
-  focus: 'Clinical focus', fit: 'Referral fit', workup: 'Workup & access', rules: 'Confirmed rules', interests: 'Interests',
-}
-
 /**
- * A quick "how active/useful is my agent" glance before the detailed rules below --
- * built only from counts already present in AgentOverview/PracticeRepresentation (no
- * fabricated metrics, no second data fetch). The distribution bar is a rough proportion
- * of the agent's current representation, not an audited statistic.
+ * What the agent is actually doing in the network, not an onboarding/completion
+ * metaphor -- built only from real consultation records (each physician-agent
+ * evaluation the network returned carries its own specialty), no fabricated
+ * metrics. Renders nothing when there's no consultation history yet rather than
+ * inventing placeholder activity.
  */
-function AgentAnalyticsOverview({ overview, representation }: { overview: AgentOverview; representation: PracticeRepresentation }) {
-  const sections = representation.sections
-  const segments = [
-    { key: 'focus', count: sections.clinical_focus.length },
-    { key: 'fit', count: sections.good_fit.length + sections.not_a_fit.length },
-    { key: 'workup', count: sections.referral_requirements.length + sections.preferred_workup.length + sections.access_facts.length },
-    { key: 'rules', count: sections.explicit_rules.length + sections.confirmed_learnings.length },
-    { key: 'interests', count: sections.interests.length },
-  ].filter((segment) => segment.count > 0)
-  const total = segments.reduce((sum, segment) => sum + segment.count, 0)
-  const stillOpen = representation.gaps.practice_areas_needing_input.length
-  return <section className="agent-analytics">
-    <h3 className="agent-analytics-heading">Agent activity at a glance</h3>
-    <div className="agent-analytics-stats">
-      <div><em>{overview.stats.questions_answered_total}</em><span>Questions answered</span></div>
-      <div><em>{overview.stats.confirmed_practice_learnings}</em><span>Rules confirmed</span></div>
-      <div><em>{overview.stats.training_sessions_completed}</em><span>Training sessions</span></div>
-      {stillOpen > 0 && <div><em>{stillOpen}</em><span>Still being clarified</span></div>}
+function AgentNetworkActivity({ records }: { records: ConsultationRecord[] }) {
+  if (records.length === 0) return null
+  const agentNames = new Set<string>()
+  const specialtyCounts = new Map<string, number>()
+  for (const record of records) {
+    for (const evaluation of record.result.consultation) {
+      agentNames.add(evaluation.physician_name)
+      specialtyCounts.set(evaluation.specialty, (specialtyCounts.get(evaluation.specialty) ?? 0) + 1)
+    }
+  }
+  const ranked = [...specialtyCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+  const maxCount = ranked[0]?.[1] ?? 1
+  return <section className="agent-network-activity">
+    <h3 className="agent-analytics-heading">How your agent is behaving in the network</h3>
+    <div className="agent-network-stats">
+      <div><em>{records.length}</em><span>Network consultation{records.length === 1 ? '' : 's'}</span></div>
+      <div><em>{agentNames.size}</em><span>Physician agent{agentNames.size === 1 ? '' : 's'} consulted</span></div>
     </div>
-    {total > 0 && <div className="agent-analytics-distribution">
-      <p className="practice-subheading">Representation coverage</p>
-      <div className="agent-analytics-bar">{segments.map((segment) => <span key={segment.key} className={`agent-analytics-segment segment-${segment.key}`} style={{ width: `${(segment.count / total) * 100}%` }} title={`${ANALYTICS_SEGMENT_LABELS[segment.key]}: ${segment.count}`} />)}</div>
-      <div className="agent-analytics-legend">{segments.map((segment) => <span key={segment.key}><i className={`agent-analytics-dot segment-${segment.key}`} aria-hidden="true" />{ANALYTICS_SEGMENT_LABELS[segment.key]} <b>{segment.count}</b></span>)}</div>
+    {ranked.length > 0 && <div className="agent-specialty-distribution">
+      <p className="practice-subheading">Specialties your agent reaches out to most</p>
+      <ul className="agent-specialty-ranked">{ranked.map(([specialty, count]) => <li key={specialty}>
+        <span className="agent-specialty-label">{specialty}</span>
+        <span className="agent-specialty-bar-track"><span className="agent-specialty-bar-fill" style={{ width: `${(count / maxCount) * 100}%` }} /></span>
+        <span className="agent-specialty-count">{count}</span>
+      </li>)}</ul>
     </div>}
   </section>
 }
@@ -1289,9 +1288,9 @@ function AgentAnalyticsOverview({ overview, representation }: { overview: AgentO
  * identity/summary, confirmed representation, and gaps all live in one place — "How does
  * my agent currently represent me?" is answered on one screen, not split across two.
  */
-export function AgentOverviewPanel({ overview, representation, navigate, trainPath, personaId, extra }: {
+export function AgentOverviewPanel({ overview, representation, navigate, trainPath, personaId, consultationRecords = [], extra }: {
   overview: AgentOverview | null; representation: PracticeRepresentation | null
-  navigate: Navigate; trainPath: string; personaId: PhysicianIdentity; extra?: ReactNode
+  navigate: Navigate; trainPath: string; personaId: PhysicianIdentity; consultationRecords?: ConsultationRecord[]; extra?: ReactNode
 }) {
   if (!overview) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
   const training = overview.training
@@ -1326,7 +1325,7 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
       {primary && training.action !== 'continue_setup' && <button className="button-primary" onClick={() => navigate(primary.href)}>{primary.label} <span>→</span></button>}
       {!primary && <p className="agent-empty-note">Your agent is up to date.</p>}
     </div>
-    {representation && <AgentAnalyticsOverview overview={overview} representation={representation} />}
+    <AgentNetworkActivity records={consultationRecords} />
     <div className="agent-detail-divider">
       <h2>How your agent currently represents your practice</h2>
       <p className="page-intro">A detailed, structured picture built from setup, training, and your confirmed preferences.</p>

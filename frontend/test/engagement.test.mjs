@@ -584,3 +584,35 @@ test('no likes, comments, follower, or engagement mechanics were added to the fe
   const feedArea = slice(engagement, 'function FeedCard', 'export function NetworkFeedTab')
   assert.doesNotMatch(feedArea, /like|comment|follower|repost|trending|engagement score/i)
 })
+
+/* ------------------------------------------------------- design-fidelity pass */
+
+test('the sticky rail uses a callback ref, not useRef+useLayoutEffect, so it still attaches after the loading placeholder resolves', () => {
+  const patientPage = slice(app, 'function PatientWorkspace', 'export default function App')
+  assert.match(patientPage, /const nextStepRef = useCallback\(\(node: HTMLElement \| null\) => \{/)
+  assert.doesNotMatch(patientPage, /useLayoutEffect\(/, 'a one-shot mount effect would observe a still-null ref while the loading branch is showing')
+  assert.match(patientPage, /setNextStepPinned\(node\.offsetHeight <= availableHeight\)/)
+})
+
+test('AgentAvatar has a dark outline, white upper-left eyes/smile, and a perfect 1:1 aspect ratio', () => {
+  const avatar = readFileSync(new URL('../src/AgentAvatar.tsx', import.meta.url), 'utf8')
+  assert.match(avatar, /stroke="var\(--text-primary\)"/, 'a dark/near-black outline, per design_references/agent_profile_picture_example.png')
+  assert.match(avatar, /viewBox="0 0 32 32" width="100%" height="100%"/, 'scales to any container while staying square')
+  assert.match(avatar, /fill="#fff"/)
+})
+
+test('My Agent sidebar active state glows the avatar/label only -- no outline or fill around the whole tile', () => {
+  assert.doesNotMatch(styles, /\.sidebar-clinician\.active \{[^}]*box-shadow/, 'the full row must not carry its own outline/glow')
+  assert.doesNotMatch(styles, /\.sidebar-clinician\.active \{[^}]*border(?!-top-color: transparent)/, 'no border drawn around the whole tile')
+  assert.match(styles, /\.sidebar-clinician\.active \.agent-avatar, \.sidebar-clinician\.active \.you-avatar \{ box-shadow:/, 'the glow lives on the avatar')
+  assert.match(styles, /\.sidebar-clinician\.active strong \{[^}]*text-shadow:/, 'and on the label text')
+})
+
+test('My Agent overview analytics reflect real network behavior (consultation records), not a representation-coverage bar', () => {
+  const activity = slice(engagement, 'function AgentNetworkActivity', 'export function AgentOverviewPanel')
+  assert.match(activity, /for \(const evaluation of record\.result\.consultation\)/, 'built from real per-consultation physician-agent evaluations')
+  assert.match(activity, /agentNames\.add\(evaluation\.physician_name\)/)
+  assert.match(activity, /specialtyCounts\.set\(evaluation\.specialty/)
+  assert.doesNotMatch(engagement, /Representation coverage/i, 'the completion/coverage framing is gone')
+  assert.doesNotMatch(styles, /agent-analytics-segment/, 'the stacked coverage bar CSS is gone, not just unused')
+})
