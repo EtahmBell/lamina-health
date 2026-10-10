@@ -498,9 +498,18 @@ test('Lucy and Iain Home share the same dashboard architecture: Your Agent card 
 /* ----------------------------------------------------------------- Pass 7C: Network */
 
 test('sidebar says Network, not Physician Network, for both personas', () => {
-  assert.match(app, /id: 'network', title: 'Network', icon: '⌁', path: '\/network'/)
-  assert.match(app, /id: 'specialist-network', title: 'Network', icon: '⌁', path: '\/specialist\/network'/)
+  assert.match(app, /id: 'network', title: 'Network', icon: <NetworkNavIcon \/>, path: '\/network'/)
+  assert.match(app, /id: 'specialist-network', title: 'Network', icon: <NetworkNavIcon \/>, path: '\/specialist\/network'/)
   assert.doesNotMatch(app, /title: 'Physician Network'/)
+})
+
+test('the Network sidebar icon is a simple thin-line people/group mark, not the old lightning bolt or a node/graph diagram', () => {
+  assert.doesNotMatch(app, /icon: '⌁'/, 'the lightning-bolt glyph is gone, not just unused')
+  const icon = slice(app, 'function NetworkNavIcon', 'const navItems')
+  assert.match(icon, /<circle cx="8" cy="7\.5" r="3" \/>/, 'a head')
+  assert.match(icon, /<circle cx="16\.5" cy="9" r="2\.3" \/>/, 'a second, smaller head -- a group, not a single person')
+  assert.match(icon, /stroke="currentColor"/, 'inherits .nav-icon\'s existing copper tint rather than a hardcoded color')
+  assert.match(icon, /fill="none"/, 'thin-line treatment, not a filled glyph')
 })
 
 test('Network defaults to Feed and routes ?tab=my-network to Colleagues, for both personas (post-8B: Feed is primary, not graph/directory-first)', () => {
@@ -656,9 +665,46 @@ test('the training reminder is a single copper mini-hero card with a radiating-r
   assert.match(reminder, /<TrainingReminderGlyph \/>/)
   assert.equal((reminder.match(/<section className="training-reminder">/g) ?? []).length, 2, 'one single surface per render path (up-to-date vs plan), never a split side box')
   assert.doesNotMatch(reminder, /className="training-reminder-action"/, 'no second bordered sub-panel like the Dashboard banner\'s .agent-banner-action')
-  assert.match(styles, /\.training-reminder \{[^}]*border: 1px solid rgb\(184 92 50/, 'copper-toned border, not the Dashboard banner\'s mineral/sage tones')
+  assert.match(styles, /\.training-reminder \{[^}]*border: 1px solid var\(--agent-copper-soft\)/, 'the semantic My Agent copper token, not a bespoke rgb() literal or the Dashboard banner\'s mineral/sage tones')
   assert.doesNotMatch(styles, /\.training-reminder \{[^}]*var\(--sage/, 'never the Dashboard banner\'s sage/mineral background')
-  assert.match(styles, /\.training-reminder-ring \{[^}]*border: 1px solid var\(--accent\)/, 'copper rings, adapted from .agent-banner-ring\'s mineral rings')
+  assert.match(styles, /\.training-reminder-ring \{[^}]*border: 1px solid var\(--agent-copper\)/, 'copper rings via the semantic token, adapted from .agent-banner-ring\'s mineral rings')
+})
+
+test('My Agent has its own semantic copper token system, separate from the global mineral/accent tokens', () => {
+  assert.match(styles, /--agent-copper: #b66a45; --agent-copper-deep: #765044; --agent-copper-deep-hover: #634238;/)
+  assert.match(styles, /--agent-copper-mid: #c58a6d; --agent-copper-soft: #e4c6b5; --agent-copper-surface: #f5ebe4; --agent-copper-ink: #714838;/)
+})
+
+test('My Agent primary buttons use the deep umber tone, not straight copper or the global mineral default -- scoped to .agent-page/.training-shell only', () => {
+  assert.match(styles, /\.agent-page \.button-primary, \.training-shell \.button-primary \{\s*background: var\(--agent-copper-deep\); border-color: var\(--agent-copper-deep\);\s*\}/)
+  assert.match(styles, /\.agent-page \.button-primary:hover, \.training-shell \.button-primary:hover \{\s*background: var\(--agent-copper-deep-hover\)/)
+  const base = styles.slice(styles.indexOf('.consult-button, .button-primary {'), styles.indexOf('.consult-button, .button-primary {') + 400)
+  assert.match(base, /var\(--mineral-deep\)/, 'the global default stays mineral for every other surface (Patient detail, Network, Dashboard quick-training modal)')
+})
+
+test('Overview specialty bars use the My Agent copper palette with tonal variation, not a single mineral fill', () => {
+  assert.match(styles, /\.agent-specialty-bar-track \{[^}]*background: var\(--agent-copper-surface\)/)
+  assert.match(styles, /\.agent-specialty-bar-fill \{[^}]*background: var\(--agent-copper-mid\)/)
+  assert.match(styles, /\.agent-specialty-bar-fill\.top-ranked \{ background: var\(--agent-copper-deep\); \}/, 'the top-ranked specialty gets a deeper tone, not every bar painted identically')
+  assert.match(engagement, /className=\{`agent-specialty-bar-fill \$\{index === 0 \? 'top-ranked' : ''\}`\}/)
+  assert.doesNotMatch(styles, /\.agent-specialty-label \{[^}]*var\(--agent-copper/, 'specialty name labels stay normal dark text, not copper')
+})
+
+test('the active My Agent tab uses copper, not the mineral/mineral-surface treatment used for the shared primary nav', () => {
+  assert.match(styles, /\.agent-tabs button\.active \{ border-color: var\(--agent-copper\); color: var\(--agent-copper-ink\); \}/)
+})
+
+test('the Train overlay (My Agent -> Train) uses copper accents for progress, selection, and labels, scoped to .training-shell so the Dashboard quick-training modal is untouched', () => {
+  assert.match(styles, /\.training-shell \.training-progress-bar > span \{ background: var\(--agent-copper\); \}/)
+  assert.match(styles, /\.training-shell \.training-choice-plain\.selected \{ border-color: var\(--agent-copper\); background: var\(--agent-copper-surface\); color: var\(--agent-copper-ink\); \}/)
+  assert.doesNotMatch(styles, /\.training-modal \.training-progress-bar/, 'the Dashboard quick-training modal (.training-modal, a different wrapper) is never retargeted')
+})
+
+test('the agent avatar stays blue even inside the copper-themed My Agent environment', () => {
+  assert.match(styles, /\.agent-avatar-blue \{ color: var\(--mineral\); \}/)
+  assert.doesNotMatch(styles, /\.agent-avatar-blue \{ color: var\(--agent-copper/, 'the avatar fill itself must never become copper')
+  const avatar = readFileSync(new URL('../src/AgentAvatar.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(avatar, /agent-copper/, 'the avatar component has no copper references at all')
 })
 
 test('the detailed practice-representation band still exists after the network band, with its own heading', () => {

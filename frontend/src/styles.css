@@ -16,6 +16,12 @@
   --slate: #6b7686; --slate-surface: #eef0f3;
   --icon-chip-bg: var(--sand); --icon-chip-fg: #8c8d70;
   --avatar-bg: var(--sand); --avatar-fg: #8a6a4a;
+  /* My Agent's own warmer copper-led identity, distinct from the general product's
+   * mineral-primary / sparing-copper-accent system above. Scoped to My Agent
+   * (Overview/Train/Test) surfaces only -- see .agent-page/.training-shell overrides
+   * below. Same clay -> deep-umber relationship as mineral's blue-grey -> deep-slate. */
+  --agent-copper: #b66a45; --agent-copper-deep: #765044; --agent-copper-deep-hover: #634238;
+  --agent-copper-mid: #c58a6d; --agent-copper-soft: #e4c6b5; --agent-copper-surface: #f5ebe4; --agent-copper-ink: #714838;
   font-family: var(--font-ui); color: var(--text-primary); background: var(--background); font-synthesis: none;
 }
 * { box-sizing: border-box; }
@@ -1191,19 +1197,19 @@ button.lam-row:hover { background: #fff9f1; }
    competing with the text: the glyph sits behind it at low opacity, clipped by
    overflow:hidden so it only reaches toward the copy, not across it. No separate
    eyebrow label -- the headline alone carries the "what's next" framing. */
-.training-reminder { position: relative; overflow: hidden; border: 1px solid rgb(184 92 50 / 24%); border-radius: 12px; background: linear-gradient(120deg, #faf0e6, var(--surface) 70%); padding: 26px 30px; }
+.training-reminder { position: relative; overflow: hidden; border: 1px solid var(--agent-copper-soft); border-radius: 12px; background: linear-gradient(120deg, var(--agent-copper-surface), var(--surface) 70%); padding: 26px 30px; }
 .training-reminder-copy { position: relative; z-index: 1; max-width: 500px; }
 .training-reminder-copy h2 { margin: 0 0 8px; font-size: 1.25rem; line-height: 1.4; }
 .training-reminder-support { margin: 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.5; }
 .training-reminder-meta { margin: 6px 0 0; color: var(--text-secondary); font-size: .64rem; }
 .training-reminder-actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 16px; }
 .training-reminder-glyph { position: absolute; top: 50%; right: -54px; z-index: 0; width: 180px; height: 180px; transform: translateY(-50%); opacity: .85; }
-.training-reminder-ring { position: absolute; top: 50%; left: 50%; border: 1px solid var(--accent); border-radius: 50%; transform: translate(-50%, -50%); }
+.training-reminder-ring { position: absolute; top: 50%; left: 50%; border: 1px solid var(--agent-copper); border-radius: 50%; transform: translate(-50%, -50%); }
 .training-reminder-ring.r1 { width: 180px; height: 180px; opacity: .08; }
 .training-reminder-ring.r2 { width: 140px; height: 140px; opacity: .14; }
 .training-reminder-ring.r3 { width: 100px; height: 100px; opacity: .2; }
 .training-reminder-ring.r4 { width: 62px; height: 62px; opacity: .28; }
-.training-reminder-spark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--accent-hover); font-size: 1.25rem; line-height: 1; }
+.training-reminder-spark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--agent-copper-deep); font-size: 1.25rem; line-height: 1; }
 @media (max-width: 760px) { .training-reminder-glyph { display: none; } .training-reminder-copy { max-width: none; } }
 
 .agent-portrait-card { border-left: 3px solid var(--accent); background: rgb(255 252 247 / 55%); padding: 26px 28px; }
@@ -1230,14 +1236,15 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-network-summary { display: flex; flex-wrap: wrap; gap: 8px 36px; }
 .agent-network-number { display: flex; flex-direction: column; gap: 3px; }
 .agent-network-number + .agent-network-number { padding-left: 36px; border-left: 1px solid var(--border); }
-.agent-network-number strong { color: var(--mineral-deep); font-family: var(--font-display); font-size: 2.1rem; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+.agent-network-number strong { color: var(--agent-copper-ink); font-family: var(--font-display); font-size: 2.1rem; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
 .agent-network-number span { color: var(--text-secondary); font-size: .66rem; }
 .agent-specialty-distribution { margin-top: 2px; }
 .agent-specialty-ranked { display: grid; gap: 9px; margin: 10px 0 0; padding: 0; list-style: none; }
 .agent-specialty-ranked li { display: grid; grid-template-columns: minmax(110px, 160px) 1fr 24px; align-items: center; gap: 12px; }
 .agent-specialty-label { color: var(--clinical); font-size: .7rem; font-weight: 600; line-height: 1.3; }
-.agent-specialty-bar-track { height: 8px; border-radius: 999px; background: var(--sand); overflow: hidden; }
-.agent-specialty-bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--mineral); }
+.agent-specialty-bar-track { height: 8px; border-radius: 999px; background: var(--agent-copper-surface); overflow: hidden; }
+.agent-specialty-bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--agent-copper-mid); }
+.agent-specialty-bar-fill.top-ranked { background: var(--agent-copper-deep); }
 .agent-specialty-count { color: var(--text-secondary); font-size: .64rem; font-variant-numeric: tabular-nums; text-align: right; }
 .agent-network-insights { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--border); }
 .agent-insight-label { display: block; color: var(--text-secondary); font-size: .58rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
@@ -1291,7 +1298,7 @@ button.lam-row:hover { background: #fff9f1; }
 .practice-rule-provenance { color: var(--text-secondary); font-size: .6rem; text-transform: uppercase; letter-spacing: .05em; }
 .practice-rule-row-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; padding-top: 2px; }
 .practice-rule-row-actions .text-button { padding: 2px; font-size: .62rem; font-weight: 600; }
-.practice-rule-agreed { color: var(--mineral-deep); font-size: .62rem; font-style: normal; font-weight: 600; }
+.practice-rule-agreed { color: var(--agent-copper-ink); font-size: .62rem; font-style: normal; font-weight: 600; }
 
 .practice-section-learnings .practice-section-heading { color: var(--text-secondary); }
 .practice-section-learnings .practice-rule-list li::before { background: #cfc8ba; }
@@ -1367,6 +1374,44 @@ button.lam-row:hover { background: #fff9f1; }
   .chat-message { max-width: 100%; }
   .chat-composer { flex-direction: column; }
 }
+
+/* ------------------------------------------------------- My Agent copper theme */
+/* My Agent gets its own warmer identity, scoped to .agent-page (Overview + Test,
+   both tabs render inside it) and .training-shell (the Train overlay reached from
+   My Agent -> Train) -- never the generic/global .button-primary and .text-button,
+   which stay mineral everywhere else (Patient detail, Network, Dashboard quick-
+   training modal, etc.). The agent avatar itself is deliberately excluded -- it
+   keeps its own blue identity regardless of surrounding chrome. */
+.agent-page .button-primary, .training-shell .button-primary {
+  background: var(--agent-copper-deep); border-color: var(--agent-copper-deep);
+}
+.agent-page .button-primary:hover, .training-shell .button-primary:hover {
+  background: var(--agent-copper-deep-hover); border-color: var(--agent-copper-deep-hover);
+}
+.agent-page .text-button, .training-shell .text-button { color: var(--agent-copper-ink); }
+.agent-page .text-button:hover, .training-shell .text-button:hover { color: var(--agent-copper-deep); }
+
+.agent-tabs button.active { border-color: var(--agent-copper); color: var(--agent-copper-ink); }
+
+/* Train overlay accents: progress fill, selected choice, source tag, depends
+   emphasis -- all copper instead of the generic product accent. */
+.training-shell .training-progress-bar > span { background: var(--agent-copper); }
+.training-shell .training-choice-plain.selected { border-color: var(--agent-copper); background: var(--agent-copper-surface); color: var(--agent-copper-ink); }
+.training-shell .training-source-tag { color: var(--agent-copper-ink); }
+.training-shell .training-choice.depends { color: var(--agent-copper-ink); }
+
+/* Test/chat accents: agent label, selected case, starter-prompt hover, typing dots. */
+.chat-tab-grid .chat-agent-label { color: var(--agent-copper-ink); }
+.chat-tab-grid .chat-case-panel-item:hover { border-color: var(--agent-copper); }
+.chat-tab-grid .chat-case-panel-item.active { border-color: var(--agent-copper); background: var(--agent-copper-surface); }
+.chat-tab-grid .chat-starter-prompt:hover:not(:disabled) { border-color: var(--agent-copper); }
+.chat-tab-grid .chat-typing-dots span { background: var(--agent-copper-mid); }
+
+/* Representation band: chips and rule bullets lean copper; most of the section
+   stays neutral text/surfaces. */
+.agent-page .practice-chip-group.prominent .practice-chip { border-color: var(--agent-copper-soft); background: var(--agent-copper-surface); color: var(--agent-copper-ink); }
+.agent-page .practice-rule-list li::before { background: var(--agent-copper); }
+.agent-page .practice-rule-provenance { color: var(--agent-copper-ink); }
 
 /* ------------------------------------------------------------- Pass 6C: Activity */
 .agent-activity-rows { display: flex; flex-direction: column; }
@@ -1513,7 +1558,10 @@ button.lam-row:hover { background: #fff9f1; }
    tile -- the button keeps its normal transparent background and border, with
    no outline/box drawn around the whole row. */
 .sidebar-clinician.active { background: transparent; }
-.sidebar-clinician.active strong { color: var(--mineral-deep); text-shadow: 0 0 12px rgb(83 110 125 / 40%); }
+/* The label glows copper (My Agent chrome); the avatar keeps its own blue halo
+   immediately around it (agent identity is deliberately excluded from the copper
+   theme) -- see design note on --agent-copper tokens in :root. */
+.sidebar-clinician.active strong { color: var(--agent-copper-ink); text-shadow: 0 0 12px rgb(182 106 69 / 35%); }
 .sidebar-clinician.active .agent-avatar, .sidebar-clinician.active .you-avatar { box-shadow: 0 0 0 3px rgb(83 110 125 / 16%), 0 0 12px rgb(83 110 125 / 45%); border-radius: 50%; }
 
 /* One solid-color orb per agent (AgentAvatar.tsx) -- a simplified identity mark,

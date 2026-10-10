@@ -1326,9 +1326,9 @@ function AgentNetworkActivity({ records }: { records: ConsultationRecord[] }) {
     </div>
     {ranked.length > 0 && <div className="agent-specialty-distribution">
       <p className="practice-subheading">Specialties your agent reaches out to most</p>
-      <ul className="agent-specialty-ranked">{ranked.map(([specialty, count]) => <li key={specialty}>
+      <ul className="agent-specialty-ranked">{ranked.map(([specialty, count], index) => <li key={specialty}>
         <span className="agent-specialty-label">{specialty}</span>
-        <span className="agent-specialty-bar-track"><span className="agent-specialty-bar-fill" style={{ width: `${(count / maxCount) * 100}%` }} /></span>
+        <span className="agent-specialty-bar-track"><span className={`agent-specialty-bar-fill ${index === 0 ? 'top-ranked' : ''}`} style={{ width: `${(count / maxCount) * 100}%` }} /></span>
         <span className="agent-specialty-count">{count}</span>
       </li>)}</ul>
     </div>}

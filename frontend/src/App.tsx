@@ -42,6 +42,19 @@ function YouAvatar() {
   </span>
 }
 
+/** A simple thin-line people/group mark for the Network sidebar item -- replaces
+ * the old lightning-bolt glyph, which read as "activity" rather than "the
+ * physician network." Two circular heads + shoulder arcs, not a node/graph
+ * diagram. Uses currentColor so it inherits .nav-icon's existing copper tint. */
+function NetworkNavIcon() {
+  return <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="8" cy="7.5" r="3" />
+    <path d="M2 19c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+    <circle cx="16.5" cy="9" r="2.3" />
+    <path d="M14.3 13.1c.7-.26 1.5-.4 2.2-.4 2.8 0 5 2.1 5 5.3" />
+  </svg>
+}
+
 function SyntheticStatus() {
   return <div className="synthetic-status"><span />Synthetic demo · no PHI</div>
 }
@@ -52,14 +65,14 @@ function SyntheticStatus() {
 const navItems = [
   { id: 'home', title: 'Dashboard', icon: '⌂', path: '/home' },
   { id: 'patients', title: 'Patients', icon: '✦', path: '/patients' },
-  { id: 'network', title: 'Network', icon: '⌁', path: '/network' },
-] as const
+  { id: 'network', title: 'Network', icon: <NetworkNavIcon />, path: '/network' },
+]
 
 const SPECIALIST_NAV_ITEMS = [
   { id: 'specialist-home', title: 'Dashboard', icon: '⌂', path: '/specialist/home' },
   { id: 'specialist-patients', title: 'Patients', icon: '✦', path: '/specialist/patients' },
-  { id: 'specialist-network', title: 'Network', icon: '⌁', path: '/specialist/network' },
-] as const
+  { id: 'specialist-network', title: 'Network', icon: <NetworkNavIcon />, path: '/specialist/network' },
+]
 
 function ProfileControl({ navigate }: { navigate: Navigate }) {
   return <button className="profile-control" onClick={() => navigate('/profile')} aria-label="Open clinician profile"><span>LS</span><strong>{PCP_NAME}</strong></button>
