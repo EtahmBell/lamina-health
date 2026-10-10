@@ -327,7 +327,7 @@ _BRANCH_SCHEMA = {
     "type": "object",
     "properties": {
         "question": {"type": "string"},
-        "question_type": {"type": "string", "enum": ["yes_no_depends", "yes_no"]},
+        "question_type": {"type": "string", "enum": ["yes_no_depends", "short_text"]},
         "answer_options": {"type": "array", "items": {"type": "string"}},
         "why_this_matters": {"type": "string"},
         "dimension_being_narrowed": {"type": "string"},
@@ -359,8 +359,8 @@ class TrainingBranchService:
     def valid(candidate: dict, context: dict) -> bool:
         depth = int(context["branch_depth"]) + 1
         expected = (
-            ["Yes", "No"]
-            if candidate.get("question_type") == "yes_no"
+            []
+            if candidate.get("question_type") == "short_text"
             else ["Yes", "Depends", "No"]
         )
         normalized = " ".join(str(candidate.get("question", "")).casefold().split())
@@ -416,7 +416,7 @@ class TrainingBranchService:
             and (
                 depth < MAX_BRANCH_DEPTH
                 or (
-                    candidate.get("question_type") == "yes_no"
+                    candidate.get("question_type") == "short_text"
                     and candidate.get("terminal_candidate") is True
                 )
             )
@@ -427,10 +427,12 @@ class TrainingBranchService:
             try:
                 candidate = self.client.structured(
                     """Generate exactly one narrower practice-calibration question after a
-                    physician answered Depends. Stay within the stated objective, dimension,
-                    practice representation, and supplied synthetic facts. Do not diagnose,
-                    recommend treatment, add patient facts, request identifiers, or reveal
-                    reasoning. Prefer yes_no_depends; use yes_no for a terminal boundary.""",
+                    physician indicated the answer depends on context. Stay within the stated
+                    objective, dimension, practice representation, and supplied synthetic facts.
+                    Do not diagnose, recommend treatment, add patient facts, request
+                    identifiers, or reveal reasoning. Prefer yes_no_depends; use short_text
+                    (with empty answer_options) only for a terminal boundary that should stop
+                    branching rather than ask another forced choice.""",
                     context,
                     _BRANCH_SCHEMA,
                     use_case="training_branch",

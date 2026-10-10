@@ -19,6 +19,7 @@ from backend.agent_experience import (
 )
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.engagement import (
+    DEPENDS_OPTION,
     EDITABLE_PERSONAS,
     INITIALIZATION_QUESTIONS,
     INTEREST_TYPES,
@@ -26,6 +27,7 @@ from backend.engagement import (
     PROFILE_CATEGORIES,
     SYNTHETIC_FEED_FIXTURES,
     generated_training_questions,
+    is_depends_answer,
     next_branch_question,
     normalize_question,
     physician_interests,
@@ -1019,15 +1021,20 @@ def answer_training_question(
     responses_so_far = workflow_store.training_responses(workspace_id, persona_id, session_id)
     progress_count = _progress_count(workspace_id, persona_id, session["mode"], responses_so_far)
     target_reached = progress_count >= session["answer_target"]
+    depends_triggered = not update.skipped and is_depends_answer(
+        question["question_type"], answer
+    )
     focused_resolved = bool(
-        session["mode"] == "focused"
-        and (update.skipped or answer != "Depends")
+        session["mode"] == "focused" and (update.skipped or not depends_triggered)
     )
     next_question = None
     deferred_question = None
-    if not update.skipped and isinstance(answer, str):
-        next_question = next_branch_question(persona_id, question_id, answer, assigned_ids)
-        if next_question is None and answer == "Depends":
+    if not update.skipped:
+        if isinstance(answer, str):
+            next_question = next_branch_question(persona_id, question_id, answer, assigned_ids)
+        if next_question is None and depends_triggered:
+            next_question = next_branch_question(persona_id, question_id, "Depends", assigned_ids)
+        if next_question is None and depends_triggered:
             source_reference = question.get("source_reference")
             answered_prompts = [
                 item["prompt"]
@@ -1035,12 +1042,21 @@ def answer_training_question(
                 if (item := _question(workspace_id, persona_id, assignment["question_id"]))
                 is not None
             ]
+            if isinstance(answer, list):
+                concrete = [item for item in answer if item != DEPENDS_OPTION]
+                physician_answer = (
+                    f"Depends on the context (also selected: {', '.join(concrete)})"
+                    if concrete
+                    else "Depends on the context"
+                )
+            else:
+                physician_answer = str(answer)
             context = {
                 "persona_id": persona_id,
                 "physician": PERSONAS[persona_id],
                 "parent": question,
                 "parent_question": question["prompt"],
-                "physician_answer": "Depends",
+                "physician_answer": physician_answer,
                 "branch_depth": question.get("branch_depth", 0),
                 "branch_path": question.get("branch_path", []),
                 "dimension": question.get("dimension_being_narrowed", "diagnosis_phenotype"),

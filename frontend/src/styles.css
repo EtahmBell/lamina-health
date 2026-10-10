@@ -521,8 +521,8 @@ button.lam-row:hover { background: #fff9f1; }
 .trend-chart-axis span { position: absolute; top: 0; color: var(--text-secondary); font-size: .58rem; transform: translateX(-50%); white-space: nowrap; }
 
 /* One quiet correction prompt on the final recommendation. */
-.recommendation-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 22px; border-top: 1px solid var(--border); padding-top: 19px; color: var(--text-secondary); font-size: .95rem; line-height: 1.5; }
-.recommendation-feedback .text-button { border-radius: 5px; padding: 4px 2px; color: var(--mineral-deep); font-size: .95rem; font-weight: 600; }
+.recommendation-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 18px; margin-top: 22px; border-top: 1px solid var(--border); padding-top: 16px; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.recommendation-feedback .text-button { border-radius: 5px; padding: 2px; color: var(--mineral-deep); font-size: .68rem; font-weight: 600; }
 .recommendation-feedback .text-button:hover { color: var(--clinical); }
 .recommendation-feedback em { color: var(--success); font-style: normal; }
 
@@ -1525,11 +1525,14 @@ button.lam-row:hover { background: #fff9f1; }
 .patient-top-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 25px; }
 .patient-top-card > h2 { margin: 0; font-size: 1.5rem; }
 .patient-top-card > p.page-intro { margin: 10px 0 0; }
-/* Sticky, but never its own scroll container -- the main page is the only
-   scroller. Paired with a same-height Patient history box, the sticky range
-   is naturally modest; that's fine (no sacrificing usability for perpetual
-   stickiness). */
-.patient-next-step { grid-column: 2; grid-row: 1; position: sticky; top: 76px; }
+/* Conditionally sticky, but never its own scroll container -- the main page
+   is the only scroller. Sticky only while the rail's own content fits the
+   viewport (see PatientWorkspace's ResizeObserver, which toggles .pinned);
+   once disclosures/a candidate swap make it taller than the viewport, it
+   drops to normal flow so every control stays reachable via the one page
+   scroll. */
+.patient-next-step { grid-column: 2; grid-row: 1; }
+.patient-next-step.pinned { position: sticky; top: 76px; }
 .patient-clinical-main { grid-column: 1; grid-row: 1; min-width: 0; }
 .bottom-note { margin: 18px 0 0; color: var(--text-secondary); font-size: .6rem; }
 .next-step-card { margin-top: 18px; border: 1px solid transparent; border-radius: 7px; background: #f3f4ed; padding: 19px; }
@@ -1552,10 +1555,14 @@ button.lam-row:hover { background: #fff9f1; }
    one, and never gives it a special accent color -- it just inherits whatever
    color the surrounding text/button already has. */
 .spark-icon { margin-left: 4px; }
+.spark-icon.lead { margin-left: 0; margin-right: 5px; }
 .status-label.pulse { background: var(--mineral-surface); color: var(--mineral-deep); animation: status-pulse 1s infinite; }
 /* Mineral, not the shared .status-label.success's green -- scoped here rather
    than changing that shared rule, which other pages still use unmodified. */
 .status-label.resolved { border: 1px solid var(--mineral-subtle); background: var(--mineral-surface); color: var(--mineral-deep); }
+/* Extra breathing room beneath the resolved badge specifically -- the generic
+   .next-step-card h3 rhythm (10px) reads as cramped right after a badge. */
+.next-step-card.ready h3 { margin-top: 18px; }
 @keyframes status-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .status-label.pulse { animation: none; } }
 .next-step-card details.network-optional { margin-top: 16px; }
@@ -1603,7 +1610,7 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 
 @media (max-width: 900px) {
   .patient-detail-grid { grid-template-columns: 1fr; }
-  .patient-next-step { grid-column: 1; grid-row: 1; position: static; }
+  .patient-next-step, .patient-next-step.pinned { grid-column: 1; grid-row: 1; position: static; }
   .patient-clinical-main { grid-column: 1; grid-row: 2; }
 }
 

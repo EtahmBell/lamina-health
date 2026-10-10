@@ -55,22 +55,35 @@ test('no optional interaction is required before consulting the network', () => 
   assert.match(card, /onClick=\{runConsult\}/)
 })
 
-test('the Next step panel is sticky and sits beside clinical context on desktop', () => {
-  assert.ok(someRule('.patient-next-step', /position: sticky/))
+test('the Next step panel is conditionally sticky (only while pinned) and sits beside clinical context on desktop', () => {
+  assert.ok(someRule('.patient-next-step', /grid-column: 2; grid-row: 1/))
+  assert.ok(!someRule('.patient-next-step', /position: sticky/), 'the base rule must not force sticky positioning unconditionally')
+  assert.ok(someRule('.patient-next-step.pinned', /position: sticky/))
   assert.ok(someRule('.patient-detail-grid', /grid-template-columns: 1\.25fr 1fr/))
+})
+
+test('a ResizeObserver toggles .pinned based on measured content height versus the available viewport, never by synchronizing scroll positions', () => {
+  const page = patientPage()
+  assert.match(page, /const \[nextStepPinned, setNextStepPinned\] = useState\(false\)/)
+  assert.match(page, /new ResizeObserver\(evaluate\)/)
+  assert.match(page, /window\.innerHeight - STICKY_TOP_OFFSET - BOTTOM_BREATHING_ROOM/)
+  assert.match(page, /setNextStepPinned\(node\.offsetHeight <= availableHeight\)/)
+  assert.match(page, /window\.innerWidth <= 900.*setNextStepPinned\(false\)/)
+  assert.doesNotMatch(app, /\.scrollTop\s*=/, 'conditional sticky, never an imperative scroll-position assignment between the two columns')
 })
 
 /* ----------------------------------------------------------------- mobile */
 
-test('mobile stacks the Next step panel above the clinical column, full width, un-stuck', () => {
+test('mobile stacks the Next step panel above the clinical column, full width, un-stuck -- even if .pinned were ever applied', () => {
   const mobileRule = [...styles.matchAll(/@media \(max-width: 900px\) \{([^]*?)\n\}/g)].map((m) => m[1]).join('\n')
-  assert.match(mobileRule, /\.patient-next-step \{ grid-column: 1; grid-row: 1; position: static; \}/)
+  assert.match(mobileRule, /\.patient-next-step, \.patient-next-step\.pinned \{ grid-column: 1; grid-row: 1; position: static; \}/)
   assert.match(mobileRule, /\.patient-clinical-main \{ grid-column: 1; grid-row: 2; \}/)
 })
 
-test('the sticky Next step rail has no nested/internal scroll container', () => {
-  assert.doesNotMatch(styles, /\.patient-next-step \{[^}]*overflow-y/, 'the rail must not create a second scrollbar')
-  assert.ok(someRule('.patient-next-step', /position: sticky/))
+test('the Next step rail has no nested/internal scroll container in any state', () => {
+  assert.doesNotMatch(styles, /\.patient-next-step(\.pinned)? \{[^}]*overflow-y/, 'the rail must not create a second scrollbar, pinned or not')
+  assert.doesNotMatch(styles, /\.patient-next-step(\.pinned)? \{[^}]*overflow: auto/)
+  assert.ok(someRule('.patient-next-step.pinned', /position: sticky/))
 })
 
 test('Patient history renders as a quiet narrative timeline, not a dense data card', () => {
@@ -82,9 +95,23 @@ test('Patient history renders as a quiet narrative timeline, not a dense data ca
   assert.doesNotMatch(page, /className="timeline-event card"|className="clinical-block patient-timeline"/)
 })
 
+test('Patient history has no subtitle -- the heading leads straight into the timeline', () => {
+  const page = patientPage()
+  assert.match(page, /<h2 id="patient-history-heading">Patient history<\/h2>\s*<div className="clinical-timeline">/)
+  assert.doesNotMatch(page, /The story so far/)
+})
+
+test('the resolved-state badge carries an outline sparkle (never the filled copper one) and the headline gets extra breathing room', () => {
+  const page = patientPage()
+  const ready = page.slice(page.indexOf("nextStepState === 'ready'"), page.indexOf('<RecommendationView'))
+  assert.match(ready, /<span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✧<\/span>Your agent got back to you<\/span>/)
+  assert.doesNotMatch(ready, /✦/, 'never the filled copper diamond/star')
+  assert.ok(someRule('.next-step-card.ready h3', /margin-top: 18px/))
+})
+
 test('Patient history and Next step are matching bordered boxes, top-aligned at the head of their respective columns', () => {
   const page = patientPage()
-  assert.match(page, /<aside className="patient-next-step patient-top-card">/)
+  assert.match(page, /<aside ref=\{nextStepRef\} className=\{`patient-next-step patient-top-card \$\{nextStepPinned \? 'pinned' : ''\}`\}>/)
   assert.match(page, /<section className="patient-history-section patient-top-card"/)
   assert.ok(someRule('.patient-top-card', /border: 1px solid var\(--border\)/), 'both boxes share one bordered-surface style')
   assert.ok(someRule('.patient-top-card', /padding: 25px/))
@@ -117,7 +144,7 @@ test('Clinical overview continues directly beneath Patient history in the left c
 
 test('Next step has its own h2 heading + supporting line, matching Patient history\'s header treatment', () => {
   const page = patientPage()
-  assert.match(page, /<aside className="patient-next-step patient-top-card">\s*<h2>Next step<\/h2>\s*<p className="page-intro">Your agent helps with the follow-through\.<\/p>/)
+  assert.match(page, /<aside ref=\{nextStepRef\} className=\{`patient-next-step patient-top-card[^`]*`\}>\s*<h2>Next step<\/h2>\s*<p className="page-intro">Your agent helps with the follow-through\.<\/p>/)
   assert.ok(someRule('.patient-top-card > h2', /font-size: 1\.5rem/))
 })
 

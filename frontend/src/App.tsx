@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
 import { consultNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, resetJordanDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type TrainProjection } from './api.ts'
@@ -632,6 +632,8 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const [error, setError] = useState<string | null>(null)
   const [activity, setActivity] = useState<PatientActivity | null>(null)
   const [reconsulting, setReconsulting] = useState(false)
+  const [nextStepPinned, setNextStepPinned] = useState(false)
+  const nextStepRef = useRef<HTMLElement>(null)
   const demoPatient = DEMO_PATIENTS.find((item) => item.id === patientId)
   const refreshActivity = () => getPatientActivity()
     .then((records) => setActivity(records.find((item) => item.patient_id === patientId) ?? null))
@@ -659,6 +661,32 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
     }).catch(() => { if (!cancelled) setActivity(null) })
     return () => { cancelled = true }
   }, [patientId])
+  /**
+   * The Next step rail stays sticky only while its own content (recommendation
+   * plus any expanded disclosures) still fits the viewport below the sticky
+   * header -- otherwise it would pin content the physician can never scroll
+   * to. Re-measures on mount, on window resize, and on every height change
+   * inside the rail itself (disclosures opening/closing, a candidate swap),
+   * via one ResizeObserver on the rail -- never by synchronizing scroll
+   * positions between the two columns, and never on mobile, where the rail
+   * already renders in normal flow.
+   */
+  useLayoutEffect(() => {
+    const node = nextStepRef.current
+    if (!node) return
+    const STICKY_TOP_OFFSET = 76
+    const BOTTOM_BREATHING_ROOM = 24
+    const evaluate = () => {
+      if (window.innerWidth <= 900) { setNextStepPinned(false); return }
+      const availableHeight = window.innerHeight - STICKY_TOP_OFFSET - BOTTOM_BREATHING_ROOM
+      setNextStepPinned(node.offsetHeight <= availableHeight)
+    }
+    evaluate()
+    const observer = new ResizeObserver(evaluate)
+    observer.observe(node)
+    window.addEventListener('resize', evaluate)
+    return () => { observer.disconnect(); window.removeEventListener('resize', evaluate) }
+  }, [])
   /**
    * The synthetic demo request is often faster than a physician can actually
    * read "Consulting the network" -- so the consulting state is held open for
@@ -731,7 +759,7 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
      * (single column) still surfaces it before the clinical record;
      * grid-column flips the visual order on desktop. */}
     <div className="patient-detail-grid">
-      <aside className="patient-next-step patient-top-card">
+      <aside ref={nextStepRef} className={`patient-next-step patient-top-card ${nextStepPinned ? 'pinned' : ''}`}>
         <h2>Next step</h2>
         <p className="page-intro">Your agent helps with the follow-through.</p>
         {nextStepState === 'consulting' && <div className="next-step-card consulting">
@@ -741,7 +769,7 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
         </div>}
         {nextStepState === 'ready' && consultation && <>
           <div className="next-step-card ready">
-            <span className="status-label resolved">Your agent got back to you</span>
+            <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✧</span>Your agent got back to you</span>
             <h3>A specialist is ready for your review.</h3>
             <p>Review the match below, then choose how to move care forward.</p>
           </div>
@@ -768,7 +796,6 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
       <div className="patient-clinical-main">
         {(consultation || currentIssue) && <section className="patient-history-section patient-top-card" aria-labelledby="patient-history-heading">
           <h2 id="patient-history-heading">Patient history</h2>
-          <p className="page-intro">The story so far, all in one place.</p>
           <div className="clinical-timeline">
             {consultation && <div className="timeline-event">
               {activity?.latest_consulted_at && <time>{formatTime(activity.latest_consulted_at)}</time>}

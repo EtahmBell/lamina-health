@@ -214,8 +214,10 @@ test('Not quite routes to the case-linked proposal without confirming anything',
     recommendation().indexOf('options-section'),
   )
   assert.doesNotMatch(feedback, /updateAgentLearning|act\(/)
-  assert.match(styles, /\.recommendation-feedback \{[^}]*font-size: \.95rem/s)
+  assert.match(styles, /\.recommendation-feedback \{[^}]*font-size: \.68rem/s, 'compact/quiet, matching surrounding metadata text scale, not an oversized paragraph')
   assert.match(styles, /\.recommendation-feedback \.text-button \{[^}]*font-weight: 600/s)
+  assert.match(styles, /\.recommendation-feedback \{[^}]*display: flex[^}]*flex-wrap: wrap/s, 'one line at desktop widths, wraps gracefully on narrow mobile widths')
+  assert.match(styles, /\.recommendation-feedback \{[^}]*gap: 6px 18px/s, 'enough separation that Yes and Not quite cannot be mis-clicked')
 })
 
 test('a proposed learning stays proposed until Confirm or Edit, and focus is visual only', () => {

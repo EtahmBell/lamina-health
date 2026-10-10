@@ -224,6 +224,7 @@ INITIALIZATION_SECTIONS = (
 TRAINING_DAILY_LIMIT = 5
 TRAINING_EXTENDED_LIMIT = 25
 MAX_BRANCH_DEPTH = 3
+DEPENDS_OPTION = "It depends on the context"
 QUESTION_BANK_AVAILABLE = 106
 _CALIBRATION_DIMENSIONS = {
     "diagnosis_phenotype": (
@@ -487,7 +488,7 @@ TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
             "source_reference": "physician-jung-required-workup",
             "prompt": "For progressive CKD referrals, is a current UPCR required?",
             "question_type": "single_choice",
-            "answer_options": ["Required", "Preferred", "Not required"],
+            "answer_options": ["Required", "Preferred", "Not required", DEPENDS_OPTION],
             "why_this_matters": "Clarifies whether missing protein quantification should delay a referral.",
             "asked_count": None,
             "synthetic": True,
@@ -513,7 +514,7 @@ TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
             "source_reference": "physician-jung-workup-options",
             "prompt": "Which information is most useful before referral?",
             "question_type": "multi_select",
-            "answer_options": ["BMP", "UPCR", "Urinalysis", "Home BP log"],
+            "answer_options": ["BMP", "UPCR", "Urinalysis", "Home BP log", DEPENDS_OPTION],
             "why_this_matters": "Makes pre-referral information needs explicit without blocking referral.",
             "asked_count": None,
             "synthetic": True,
@@ -540,8 +541,8 @@ TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
             "source_type": "existing_practice_rule",
             "source_reference": "anaemia-routing",
             "prompt": "For persistent iron deficiency without source evaluation, do you usually refer to gastroenterology first?",
-            "question_type": "yes_no",
-            "answer_options": ["Yes", "No"],
+            "question_type": "yes_no_depends",
+            "answer_options": ["Yes", "Depends", "No"],
             "why_this_matters": "Clarifies sequencing between gastroenterology and haematology.",
             "asked_count": None,
             "synthetic": True,
@@ -554,7 +555,13 @@ TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
             "source_reference": "referral-context-fields",
             "prompt": "Which context do you most want your agent to include in referral questions?",
             "question_type": "multi_select",
-            "answer_options": ["Clinical trajectory", "Prior workup", "Access needs", "Insurance"],
+            "answer_options": [
+                "Clinical trajectory",
+                "Prior workup",
+                "Access needs",
+                "Insurance",
+                DEPENDS_OPTION,
+            ],
             "why_this_matters": "Improves how the agent represents referral intent.",
             "asked_count": None,
             "synthetic": True,
@@ -571,6 +578,7 @@ TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
                 "Specialist expertise for the patient's needs",
                 "Earliest available appointment",
                 "Continuity with specialists I already know",
+                DEPENDS_OPTION,
             ],
             "why_this_matters": "Helps your agent weigh options the same way you would.",
             "asked_count": None,
@@ -584,7 +592,12 @@ TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
             "source_reference": "workup-priority",
             "prompt": "Which workup do you usually want completed first?",
             "question_type": "single_choice",
-            "answer_options": ["Core labs", "Imaging", "Whatever the specialist's office requests"],
+            "answer_options": [
+                "Core labs",
+                "Imaging",
+                "Whatever the specialist's office requests",
+                DEPENDS_OPTION,
+            ],
             "why_this_matters": "Shapes what your agent asks for before a referral is sent.",
             "asked_count": None,
             "synthetic": True,
@@ -705,6 +718,7 @@ _INITIALIZATION_PROMPTS = {
                 "Medication history",
                 "Prior specialist evaluation",
                 "Home measurements",
+                DEPENDS_OPTION,
             ],
             "required_labs",
         ),
@@ -725,6 +739,7 @@ _INITIALIZATION_PROMPTS = {
                 "Insurance",
                 "Scheduling urgency",
                 "Caregiver availability",
+                DEPENDS_OPTION,
             ],
             "geography_access",
         ),
@@ -732,7 +747,12 @@ _INITIALIZATION_PROMPTS = {
             "communication",
             "Which specialist communication style do you prefer?",
             "single_choice",
-            ["Concise recommendation", "Recommendation with rationale", "Shared-care plan"],
+            [
+                "Concise recommendation",
+                "Recommendation with rationale",
+                "Shared-care plan",
+                DEPENDS_OPTION,
+            ],
             "communication_preference",
         ),
         (
@@ -783,7 +803,7 @@ _INITIALIZATION_PROMPTS = {
             "workup",
             "Which studies are most useful before nephrology review?",
             "multi_select",
-            ["BMP", "UPCR", "Urinalysis", "Renal imaging", "Home BP log"],
+            ["BMP", "UPCR", "Urinalysis", "Renal imaging", "Home BP log", DEPENDS_OPTION],
             "required_labs",
         ),
         (
@@ -810,6 +830,7 @@ _INITIALIZATION_PROMPTS = {
                 "Insurance",
                 "Scheduling urgency",
                 "Local laboratory access",
+                DEPENDS_OPTION,
             ],
             "geography_access",
         ),
@@ -1121,6 +1142,18 @@ def project_training_questions(persona_id: str, responses: list[dict]) -> list[d
     ]
 
 
+def is_depends_answer(question_type: str, answer: Any) -> bool:
+    """True when `answer` is the contextual escape hatch for its question type --
+    the real branch trigger, not just a terminal "I'm unsure" preference."""
+    if question_type == "multi_select":
+        return isinstance(answer, list) and DEPENDS_OPTION in answer
+    if question_type == "single_choice":
+        return answer == DEPENDS_OPTION
+    if question_type == "yes_no_depends":
+        return answer == "Depends"
+    return False
+
+
 def next_branch_question(
     persona_id: str, question_id: str, answer: str, assigned_ids: set[str]
 ) -> dict | None:
@@ -1202,20 +1235,23 @@ _BRANCH_NARROWING = {
 def deterministic_branch_question(
     persona_id: str, parent: dict, assigned_ids: set[str]
 ) -> dict | None:
-    """Create one grounded child for a ternary Depends when no static child exists."""
+    """Create one grounded child for a contextual Depends-equivalent when no static
+    child exists. At the maximum branch depth, a forced multiple-choice/yes-no
+    question would just be another artificial binary -- so the fallback drops to a
+    short-text clarification instead of continuing the choice-branch chain."""
     depth = int(parent.get("branch_depth", 0)) + 1
-    if parent.get("question_type") != "yes_no_depends" or depth > MAX_BRANCH_DEPTH:
+    if (
+        parent.get("question_type") not in {"yes_no_depends", "single_choice", "multi_select"}
+        or depth > MAX_BRANCH_DEPTH
+    ):
         return None
     dimension = parent.get("dimension_being_narrowed") or "diagnosis_phenotype"
-    prompts = _BRANCH_NARROWING.get(dimension, _BRANCH_NARROWING["diagnosis_phenotype"])
-    prompt = (
-        prompts[depth - 1]
-        if depth <= len(prompts)
-        else (
-            f"If {dimension.replace('_', ' ')} were the only remaining uncertainty, "
-            "would you accept the case?"
-        )
-    )
+    at_cap = depth == MAX_BRANCH_DEPTH
+    if at_cap:
+        prompt = "Tell your agent what this usually depends on."
+    else:
+        prompts = _BRANCH_NARROWING.get(dimension, _BRANCH_NARROWING["diagnosis_phenotype"])
+        prompt = prompts[depth - 1] if depth <= len(prompts) else prompts[-1]
     digest = hashlib.sha256(f"{persona_id}:{parent['id']}:{depth}:{prompt}".encode()).hexdigest()[
         :12
     ]
@@ -1236,20 +1272,18 @@ def deterministic_branch_question(
             "source_type": "deterministic_branch",
             "source_reference": parent.get("source_reference"),
             "prompt": prompt,
-            "question_type": "yes_no" if depth == MAX_BRANCH_DEPTH else "yes_no_depends",
-            "answer_options": ["Yes", "No"]
-            if depth == MAX_BRANCH_DEPTH
-            else ["Yes", "Depends", "No"],
+            "question_type": "short_text" if at_cap else "yes_no_depends",
+            "answer_options": [] if at_cap else ["Yes", "Depends", "No"],
             "why_this_matters": f"Narrows the {dimension.replace('_', ' ')} boundary.",
             "dimension_being_narrowed": dimension,
-            "terminal_candidate": depth == MAX_BRANCH_DEPTH,
+            "terminal_candidate": at_cap,
             "proposed_boundary_rationale": (
                 f"This answer clarifies the physician's {dimension.replace('_', ' ')} boundary."
             ),
             "source_references": [parent.get("source_reference")]
             if parent.get("source_reference")
             else [],
-            "terminal": depth == MAX_BRANCH_DEPTH,
+            "terminal": at_cap,
             "synthetic": True,
             "created_at": BASE_TIMESTAMP,
         }
