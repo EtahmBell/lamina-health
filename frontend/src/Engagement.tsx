@@ -1255,25 +1255,41 @@ export function InitializationCard({ initialization, navigate, trainPath }: { in
  * agent-overview-actions pairing, which could render two differently-worded
  * "continue setup"-shaped CTAs on the same screen.
  */
+/** The copper radiating-rings glyph, same technique as the Dashboard hero banner's
+ * mineral version (concentric circles centered off the card's edge, clipped by
+ * overflow:hidden so only the portion reaching toward the text stays visible) --
+ * adapted, not copied: copper-toned, smaller, and anchored to one side of a single
+ * unified card surface rather than its own split-off panel. */
+function TrainingReminderGlyph() {
+  return <div className="training-reminder-glyph" aria-hidden="true">
+    <span className="training-reminder-ring r1" /><span className="training-reminder-ring r2" /><span className="training-reminder-ring r3" /><span className="training-reminder-ring r4" />
+    <span className="training-reminder-spark">✧</span>
+  </div>
+}
+
 function TrainingReminder({ overview, navigate, trainPath }: { overview: AgentOverview; navigate: Navigate; trainPath: string }) {
   const plan = agentBannerPlan(overview.training, trainPath)
   if (!plan) {
     return <section className="training-reminder">
-      <p className="eyebrow">Training</p>
-      <h2>Your agent is up to date.</h2>
-      <p className="training-reminder-support">No new questions are waiting right now.</p>
+      <TrainingReminderGlyph />
+      <div className="training-reminder-copy">
+        <h2>Your agent is up to date.</h2>
+        <p className="training-reminder-support">No new questions are waiting right now.</p>
+      </div>
     </section>
   }
   const initialized = overview.initialization.initialized
   const trainTabPath = `${trainPath.replace(/\/train$/, '')}?tab=train`
   return <section className="training-reminder">
-    <p className="eyebrow">{initialized ? 'Keep teaching your agent' : 'Next best step'}</p>
-    <h2>{initialized ? 'Your agent keeps learning how you make referral and care decisions.' : "Build your agent's starting picture of your practice."}</h2>
-    <p className="training-reminder-support">{plan.support}</p>
-    {overview.last_trained_at && <p className="training-reminder-meta">Last trained {relativeDayLabel(overview.last_trained_at)}</p>}
-    <div className="training-reminder-actions">
-      <button className="button-primary" onClick={() => navigate(plan.href)}>{plan.label} <span>→</span></button>
-      <button className="text-button" onClick={() => navigate(trainTabPath)}>View training history →</button>
+    <TrainingReminderGlyph />
+    <div className="training-reminder-copy">
+      <h2>{initialized ? 'Your agent keeps learning how you make referral and care decisions.' : "Build your agent's starting picture of your practice."}</h2>
+      <p className="training-reminder-support">{plan.support}</p>
+      {overview.last_trained_at && <p className="training-reminder-meta">Last trained {relativeDayLabel(overview.last_trained_at)}</p>}
+      <div className="training-reminder-actions">
+        <button className="button-primary" onClick={() => navigate(plan.href)}>{plan.label} <span>→</span></button>
+        <button className="text-button" onClick={() => navigate(trainTabPath)}>View training history →</button>
+      </div>
     </div>
   </section>
 }

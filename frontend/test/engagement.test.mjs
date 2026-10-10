@@ -641,13 +641,24 @@ test('Overview has exactly one training-reminder surface, with no separate dupli
   assert.doesNotMatch(panel, /<InitializationCard/, 'Overview no longer renders the separate setup card alongside the reminder')
 })
 
-test('the training reminder adapts its framing to real initialization state -- setup-oriented when incomplete, ongoing-teaching when initialized -- never fabricating counts', () => {
-  const reminder = slice(engagement, 'function TrainingReminder', 'function AgentNetworkActivity')
+test('the training reminder adapts its headline to real initialization state -- setup-oriented when incomplete, ongoing-teaching when initialized -- never fabricating counts, with no separate eyebrow label', () => {
+  const reminder = slice(engagement, 'function TrainingReminderGlyph', 'function AgentNetworkActivity')
   assert.match(reminder, /const plan = agentBannerPlan\(overview\.training, trainPath\)/, 'reuses the real, state-driven CTA logic rather than inventing new copy')
   assert.match(reminder, /overview\.initialization\.initialized/)
-  assert.match(reminder, /'Next best step'/)
-  assert.match(reminder, /'Keep teaching your agent'/)
+  assert.match(reminder, /Build your agent's starting picture of your practice\./)
+  assert.match(reminder, /Your agent keeps learning how you make referral and care decisions\./)
   assert.match(reminder, /\{plan\.support\}/, 'the supporting line is the real plan.support string, not a hardcoded fabricated count')
+  assert.doesNotMatch(reminder, /<p className="eyebrow">/, 'no separate eyebrow focal point -- the headline alone carries the framing')
+})
+
+test('the training reminder is a single copper mini-hero card with a radiating-rings glyph, adapted from (not copying) the Dashboard banner technique', () => {
+  const reminder = slice(engagement, 'function TrainingReminderGlyph', 'function AgentNetworkActivity')
+  assert.match(reminder, /<TrainingReminderGlyph \/>/)
+  assert.equal((reminder.match(/<section className="training-reminder">/g) ?? []).length, 2, 'one single surface per render path (up-to-date vs plan), never a split side box')
+  assert.doesNotMatch(reminder, /className="training-reminder-action"/, 'no second bordered sub-panel like the Dashboard banner\'s .agent-banner-action')
+  assert.match(styles, /\.training-reminder \{[^}]*border: 1px solid rgb\(184 92 50/, 'copper-toned border, not the Dashboard banner\'s mineral/sage tones')
+  assert.doesNotMatch(styles, /\.training-reminder \{[^}]*var\(--sage/, 'never the Dashboard banner\'s sage/mineral background')
+  assert.match(styles, /\.training-reminder-ring \{[^}]*border: 1px solid var\(--accent\)/, 'copper rings, adapted from .agent-banner-ring\'s mineral rings')
 })
 
 test('the detailed practice-representation band still exists after the network band, with its own heading', () => {
@@ -667,4 +678,10 @@ test('practice rules keep an editable action, and "Looks right" never renders wi
 test('Dashboard Recent activity / Recent network uses a 2fr/1fr split, consistent with the richer content in Recent activity', () => {
   assert.match(styles, /\.dashboard-bottom-row \{ display: grid; grid-template-columns: 2fr 1fr;/)
   assert.match(styles, /@media \(max-width: 900px\) \{ \.dashboard-bottom-row \{ grid-template-columns: 1fr; \} \}/, 'still stacks responsively below the breakpoint')
+})
+
+test('the sidebar My Agent avatar renders blue, not grey -- the generic text-label span rule must not override the avatar\'s own color', () => {
+  assert.doesNotMatch(styles, /\.sidebar-clinician span \{[^}]*color: var\(--text-secondary\)/, 'the old unscoped rule caught the avatar span too (0,1,1 beats .agent-avatar-blue\'s 0,1,0) and painted it grey')
+  assert.match(styles, /\.sidebar-clinician span:not\(\.agent-avatar\):not\(\.you-avatar\) \{ color: var\(--text-secondary\)/, 'the text-label color rule now explicitly excludes both avatar components')
+  assert.match(styles, /\.agent-avatar-blue \{ color: var\(--mineral\); \}/)
 })

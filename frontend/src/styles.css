@@ -43,7 +43,7 @@ strong, b { font-weight: 600; }
 .sidebar-clinician { display: flex; align-items: center; gap: 11px; border-top: 1px solid var(--border); padding: 18px 4px 0; }
 .clinician-avatar { width: 39px; height: 39px; display: grid; flex: 0 0 39px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--clinical); box-shadow: 0 0 0 1px var(--border); color: #fff; font-family: var(--font-display); font-size: .72rem; font-weight: 700; }
 .you-avatar { width: 39px; height: 39px; display: grid; flex: 0 0 39px; place-items: center; border-radius: 50%; background: var(--sand); color: var(--mineral-deep); }
-.sidebar-clinician span, .sidebar-clinician strong, .sidebar-clinician small { display: block; }.sidebar-clinician span { color: var(--text-secondary); font-size: .58rem; text-transform: uppercase; }.sidebar-clinician strong { margin-top: 2px; font-family: var(--font-display); font-size: .9rem; font-weight: 500; }.sidebar-clinician small { color: var(--text-secondary); font-size: .66rem; }
+.sidebar-clinician span:not(.agent-avatar):not(.you-avatar), .sidebar-clinician strong, .sidebar-clinician small { display: block; }.sidebar-clinician span:not(.agent-avatar):not(.you-avatar) { color: var(--text-secondary); font-size: .58rem; text-transform: uppercase; }.sidebar-clinician strong { margin-top: 2px; font-family: var(--font-display); font-size: .9rem; font-weight: 500; }.sidebar-clinician small { color: var(--text-secondary); font-size: .66rem; }
 
 .workspace { min-width: 0; flex: 1; }.workspace-bar { height: 76px; display: flex; align-items: center; justify-content: flex-end; padding: 0 32px; border-bottom: 1px solid var(--border); background: rgb(255 254 250 / 82%); }
 .synthetic-status { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: .65rem; }.synthetic-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
@@ -1183,14 +1183,28 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-overview-v2 { display: flex; flex-direction: column; gap: 22px; max-width: 760px; }
 .agent-overview-divider { margin: 6px 0; border: 0; border-top: 1px solid var(--border); }
 
-/* Band B: the single clearest CTA on the page -- an invitation, not a progress
-   widget, so it gets its own quiet bordered surface rather than competing with
-   KPI tiles. */
-.training-reminder { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 12px; background: var(--surface); padding: 24px 26px; }
-.training-reminder h2 { margin: 4px 0 8px; font-size: 1.25rem; line-height: 1.4; }
-.training-reminder-support { margin: 0; max-width: 540px; color: var(--text-secondary); font-size: .78rem; line-height: 1.5; }
+/* Band B: the single clearest CTA on the page -- a "mini hero" reminder, not a
+   progress widget, so it reads as one designed object rather than a plain bordered
+   box. Copper-toned background + a radiating-rings glyph off to one side, adapted
+   from the Dashboard hero banner's mineral/rings technique (see .agent-banner-glyph)
+   but smaller, single-surface, and warmer -- never a literal copy, and never
+   competing with the text: the glyph sits behind it at low opacity, clipped by
+   overflow:hidden so it only reaches toward the copy, not across it. No separate
+   eyebrow label -- the headline alone carries the "what's next" framing. */
+.training-reminder { position: relative; overflow: hidden; border: 1px solid rgb(184 92 50 / 24%); border-radius: 12px; background: linear-gradient(120deg, #faf0e6, var(--surface) 70%); padding: 26px 30px; }
+.training-reminder-copy { position: relative; z-index: 1; max-width: 500px; }
+.training-reminder-copy h2 { margin: 0 0 8px; font-size: 1.25rem; line-height: 1.4; }
+.training-reminder-support { margin: 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.5; }
 .training-reminder-meta { margin: 6px 0 0; color: var(--text-secondary); font-size: .64rem; }
 .training-reminder-actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 16px; }
+.training-reminder-glyph { position: absolute; top: 50%; right: -54px; z-index: 0; width: 180px; height: 180px; transform: translateY(-50%); opacity: .85; }
+.training-reminder-ring { position: absolute; top: 50%; left: 50%; border: 1px solid var(--accent); border-radius: 50%; transform: translate(-50%, -50%); }
+.training-reminder-ring.r1 { width: 180px; height: 180px; opacity: .08; }
+.training-reminder-ring.r2 { width: 140px; height: 140px; opacity: .14; }
+.training-reminder-ring.r3 { width: 100px; height: 100px; opacity: .2; }
+.training-reminder-ring.r4 { width: 62px; height: 62px; opacity: .28; }
+.training-reminder-spark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--accent-hover); font-size: 1.25rem; line-height: 1; }
+@media (max-width: 760px) { .training-reminder-glyph { display: none; } .training-reminder-copy { max-width: none; } }
 
 .agent-portrait-card { border-left: 3px solid var(--accent); background: rgb(255 252 247 / 55%); padding: 26px 28px; }
 .agent-portrait-card .eyebrow { margin: 0 0 8px; }
