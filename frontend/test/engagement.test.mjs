@@ -309,9 +309,10 @@ test('publishing is always an explicit physician action, never automatic', () =>
 
 /* ------------------------------------------------------------- network feed */
 
-test('the network feed renders chronologically and never computes its own popularity ordering', () => {
+test('the network feed interleaves the 1-2 agent-authored examples with the real backend feed purely by date, never a popularity/engagement ordering', () => {
   const section = slice(engagement, 'export function NetworkFeedTab', '/* --------------------------------------------------------------------- Train */')
-  assert.doesNotMatch(section, /\.sort\(/, 'ordering comes from the backend (chronological_only), not a client-side re-sort')
+  assert.match(section, /\[\.\.\.feed\.items, \.\.\.AGENT_FEED_POSTS\]\.sort\(\(a, b\) => \(b\.published_at \?\? b\.created_at\)\.localeCompare\(a\.published_at \?\? a\.created_at\)\)/, 'date is the only sort key')
+  assert.doesNotMatch(section, /likes|views|engagement_score|popularity|confidence/i)
 })
 
 test('feed cards offer professional actions only — no likes, comments, or follower counts', () => {
@@ -559,7 +560,7 @@ test('the Post composer opens directly to a blank writable body -- no up-front c
   assert.doesNotMatch(postButton, /post-intent-grid|post-intent-option|What would you like to share\?/, 'the old category-first screen is gone')
   assert.match(postButton, /setStage\('compose'\)/)
   assert.match(postButton, /<textarea id="post-note" className="post-composer-body"/)
-  assert.match(postButton, /useState<PostType>\('practice_update'\)/, 'a quiet default type is set so publishing never requires picking a category first')
+  assert.match(postButton, /useState<PostType>\(prefillIntent \?\? 'practice_update'\)/, 'a quiet default type is set so publishing never requires picking a category first (prefillIntent only applies when the agent-rail draft handoff supplies one)')
 })
 
 test('the composer has a lightweight Tag row (Practice/Research/Referral guidance/Teaching/More), plus optional Add image and Add paper/link controls', () => {
@@ -573,7 +574,7 @@ test('the composer has a lightweight Tag row (Practice/Research/Referral guidanc
 
 test('Feed header spacing is tightened with a divider, not a large floating gap, before the first post', () => {
   assert.match(styles, /\.network-feed-tab-header \{[^}]*border-bottom: 1px solid var\(--border\)/)
-  assert.match(styles, /\.network-feed-tab \.feed-stream \{ margin-top: 0; \}/)
+  assert.match(styles, /\.network-feed-tab \.feed-stream \{[^}]*margin-top: 0;/)
 })
 
 test('agent-drafted posts stay unpublished until explicit physician approval, never auto-published', () => {
@@ -730,4 +731,122 @@ test('the sidebar My Agent avatar renders blue, not grey -- the generic text-lab
   assert.doesNotMatch(styles, /\.sidebar-clinician span \{[^}]*color: var\(--text-secondary\)/, 'the old unscoped rule caught the avatar span too (0,1,1 beats .agent-avatar-blue\'s 0,1,0) and painted it grey')
   assert.match(styles, /\.sidebar-clinician span:not\(\.agent-avatar\):not\(\.you-avatar\) \{ color: var\(--text-secondary\)/, 'the text-label color rule now explicitly excludes both avatar components')
   assert.match(styles, /\.agent-avatar-blue \{ color: var\(--mineral\); \}/)
+})
+
+/* -------------------------------------------------------- Network growth + Feed */
+
+test('main sidebar icons (Dashboard/Patients/Network) are mineral-blue again, not copper -- copper stays primarily My Agent', () => {
+  assert.match(styles, /\.nav-icon \{ width: 24px; color: var\(--mineral\); font-size: 1\.05rem; text-align: center; \}/)
+  assert.doesNotMatch(styles, /\.nav-icon \{ width: 24px; color: var\(--accent\)/)
+})
+
+test('the Network sidebar icon is still the people/group mark, and inherits the restored mineral color via currentColor', () => {
+  assert.match(app, /icon: <NetworkNavIcon \/>/)
+  const icon = slice(app, 'function NetworkNavIcon', 'const navItems')
+  assert.match(icon, /stroke="currentColor"/)
+})
+
+test('My Agent\'s own copper theme is untouched by the sidebar icon color revert (scoped overrides, not the shared .nav-icon rule)', () => {
+  assert.match(styles, /\.agent-page \.button-primary, \.training-shell \.button-primary \{/)
+  assert.match(styles, /\.agent-tabs button\.active \{ border-color: var\(--agent-copper\)/)
+})
+
+test('the Network hero is restructured into copy + a white inset action card over a decorative pane, a Network-specific sibling of the Dashboard banner shape (not a literal copy)', () => {
+  const hero = slice(network, 'function NetworkHero', 'function SuggestedConnectionRow')
+  assert.match(hero, /<h2>Grow your Lamina network\.<\/h2>/)
+  assert.match(hero, /<h3>Search and add your colleagues\.<\/h3>/)
+  assert.match(hero, /Find physicians you already work with\./)
+  assert.match(hero, /<button className="button-primary" onClick=\{onAdd\}>Add a colleague/, 'the existing add-colleague modal CTA, unchanged behavior')
+  assert.doesNotMatch(hero, /<img\b/, 'no stock photography -- CSS/SVG only')
+})
+
+test('the network globe motif is an abstract CSS/SVG illustration -- tilted, several nodes, multiple arcs, mineral-toned with one copper "you" node, no literal map/airline-route imagery', () => {
+  const hero = slice(network, 'function NetworkHero', 'function SuggestedConnectionRow')
+  const nodeCount = (hero.match(/className="globe-node/g) ?? []).length
+  const arcCount = (hero.match(/className="globe-arc"/g) ?? []).length
+  assert.ok(nodeCount >= 5 && nodeCount <= 8, `expected 5-8 nodes, found ${nodeCount}`)
+  assert.ok(arcCount >= 3 && arcCount <= 5, `expected 3-5 arcs, found ${arcCount}`)
+  assert.match(styles, /\.network-hero-globe-art \{[^}]*transform: rotate\(-6deg\)/, 'the sphere is clearly tilted')
+  assert.match(styles, /\.globe-node\.hub \{ fill: var\(--accent\); opacity: 1; \}/, 'exactly one copper "you" node; the rest are mineral')
+  assert.doesNotMatch(hero, /usa|united-states|map|airline/i)
+})
+
+test('Suggested connections exists below the hero, shows ~3 by default with a local expand, and never fabricates a reason', () => {
+  assert.match(network, /function SuggestedConnections/)
+  assert.match(network, /const visible = expanded \? suggestions : suggestions\.slice\(0, 3\)/)
+  assert.match(network, /People your agent thinks you should know/)
+  const row = slice(network, 'function SuggestedConnectionRow', 'function SuggestedConnections')
+  assert.match(row, /<small>\{suggestion\.reason\}<\/small>/, 'every suggestion row renders its reason')
+  assert.match(row, /<button className="button-secondary suggestion-add" disabled=\{busy\} onClick=\{onAdd\}>Add/, 'a real Add action')
+})
+
+test('a consultation-driven suggestion reason is represented honestly -- real relationship data only, never a fabricated mutual-colleague count', () => {
+  const builder = slice(network, 'function buildSuggestions', 'const statusCopy')
+  assert.match(builder, /if \(node\.in_network \|\| seen\.has\(node\.npi\) \|\| !node\.relationship\) continue/, 'only physicians the agent actually has a relationship record for')
+  assert.match(builder, /Recently connected through \$\{last_recommendation_patient_name\}'s consultation\./)
+  assert.doesNotMatch(builder, /mutual|Math\.random|Math\.floor\(Math\.random/i, 'no fabricated mutual-colleague count or random number')
+})
+
+test('no generic Network KPI/analytics block was added -- My Agent already owns network-behavior analytics', () => {
+  const tab = slice(network, 'export function MyNetworkTab', 'export function PhysicianProfilePage')
+  assert.doesNotMatch(tab, /specialties ·|consultations ·|physicians ·/i)
+  assert.doesNotMatch(styles, /\.network-kpi/)
+})
+
+test('the existing "Most connected in your network" colleague list, View physician action, and See all colleagues are preserved unchanged', () => {
+  const tab = slice(network, 'export function MyNetworkTab', 'export function PhysicianProfilePage')
+  assert.match(tab, /Most connected in your network/)
+  assert.match(tab, /See all colleagues ↓/)
+  assert.match(network, /View physician <b>→<\/b>/)
+  assert.doesNotMatch(tab, /specialty group|groupBy.*specialty/i, 'never reverted to specialty grouping')
+})
+
+test('Feed evolves into a two-column desktop layout -- main feed (2fr) + a narrow agent-assist rail (~0.85fr) -- and the feed stays visually dominant', () => {
+  assert.match(styles, /\.feed-layout \{ display: grid; grid-template-columns: 2fr minmax\(240px, \.85fr\); align-items: start; gap: 32px; \}/)
+  assert.match(engagement, /<div className="feed-stream">\{items\.map/)
+  assert.match(engagement, /<AgentAssistRail personaId=\{personaId\} \/>/)
+})
+
+test('the agent-assist rail offers draft ideas (not KPIs), each opening a modal on Preview, plus lightweight local posting-preference chips -- no autonomous-post toggle anywhere', () => {
+  const rail = slice(engagement, 'function AgentAssistRail', 'export function NetworkFeedTab')
+  assert.match(rail, /Your agent can help you share/)
+  assert.match(rail, /onClick=\{\(\) => setPreviewId\(draft\.id\)\}>Preview →/)
+  assert.match(rail, /What should your agent watch for\?/)
+  assert.match(rail, /POSTING_WATCH_TOPICS\.map/)
+  assert.doesNotMatch(engagement, /Automatically post for me/i)
+  assert.doesNotMatch(rail, /type="checkbox"|<input/i, 'no toggle control of any kind in the rail')
+})
+
+test('posting-preference chips are frontend-local state only, never implying server persistence', () => {
+  const rail = slice(engagement, 'function AgentAssistRail', 'export function NetworkFeedTab')
+  assert.match(rail, /const \[watching, setWatching\] = useState<string\[\]>/)
+  assert.doesNotMatch(rail, /await (fetch|save|update|post)/i)
+})
+
+test('Draft preview opens a modal (reusing the existing post-flow-overlay/dialog language), shows the full draft + tag + provenance, and "Post" hands off into the real compose/draft/publish pipeline rather than a fake posting path', () => {
+  const modal = slice(engagement, 'function DraftIdeaPreviewModal', 'function AgentAssistRail')
+  assert.match(modal, /className="post-flow-overlay"/)
+  assert.match(modal, /className="post-flow-dialog draft-preview-dialog"/)
+  assert.match(modal, /Drafted by your agent/)
+  assert.match(modal, /Based on your confirmed practice representation and recent network activity\./)
+  assert.match(modal, /<PostButton personaId=\{personaId\} prefillNote=\{body\} prefillIntent=\{draft\.tagType\} triggerLabel="Post" buttonClassName="button-primary" onOpen=\{onClose\} \/>/, 'Post is literally the real PostButton trigger, prefilled')
+})
+
+test('agent-authored feed posts are clearly labeled AGENT and never presented as though the physician wrote them, while physician posts render exactly as before', () => {
+  assert.match(engagement, /AGENT_FEED_POSTS: FeedListItem\[\]/)
+  assert.match(engagement, /isAgentAuthored: true, representedPhysicianName: 'Dr\. Chris Mithel'/)
+  assert.match(engagement, /isAgentAuthored: true, representedPhysicianName: 'Dr\. Iain Jung'/)
+  const card = slice(engagement, 'function FeedCard', "/** Home's tiny network preview")
+  assert.match(card, /<span className="feed-post-agent-badge">Agent<\/span>/)
+  assert.match(card, /representing \$\{item\.representedPhysicianName\}/)
+  assert.match(card, /item\.isAgentAuthored\s*\n\s*\? <AgentAvatar/, 'the agent avatar renders instead of physician initials for agent posts')
+})
+
+test('agent-authored posts use a quiet mineral accent, never copper -- Feed stays in the Network/mineral palette even for agent content', () => {
+  assert.match(styles, /\.feed-post-agent-badge \{[^}]*color: var\(--mineral-deep\)/)
+  assert.doesNotMatch(styles, /\.feed-post-agent-badge \{[^}]*var\(--agent-copper/)
+})
+
+test('the agent rail stacks below the feed on tablet/mobile with no horizontal overflow', () => {
+  assert.match(styles, /@media \(max-width: 900px\) \{\s*\.feed-layout \{ grid-template-columns: 1fr; \}\s*\.agent-assist-rail \{ position: static; \}\s*\}/)
 })

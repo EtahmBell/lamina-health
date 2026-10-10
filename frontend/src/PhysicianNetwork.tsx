@@ -13,9 +13,63 @@ import {
 } from './api.ts'
 import { ENGAGEMENT_PERSONA_BY_NPI } from './demoIdentity.ts'
 import { networkProfilePath } from './Engagement.tsx'
-import { connectionLine, physicianDisplayName, rankedNetworkList, type NetworkRelationship } from './networkRoster.ts'
+import { connectionLine, physicianDisplayName, physicianInitials, rankedNetworkList, type NetworkRelationship } from './networkRoster.ts'
 
 type Navigate = (path: string) => void
+
+type SuggestedConnection = {
+  npi: string; name: string; specialty: string; location: string; reason: string
+}
+
+/**
+ * A small controlled synthetic fallback -- real, already-modeled demo physicians
+ * (see backend PERSONAS/EXPANDED_NETWORK_PHYSICIANS), each with an honest,
+ * non-fabricated reason. No invented mutual-colleague counts or interaction
+ * numbers; these are specialty/interest framing only. Used to fill out the
+ * Suggested connections section when real consultation-derived candidates (see
+ * buildSuggestions below) don't reach three on their own.
+ */
+const CURATED_SUGGESTIONS: SuggestedConnection[] = [
+  { npi: '9900000012', name: 'Dr. Tiffany Sanchez', specialty: 'Gastroenterology', location: 'Oakland, CA', reason: 'A specialty your agent’s referral patterns often route toward.' },
+  { npi: '9900000023', name: 'Dr. Maya Ramanathan', specialty: 'Endocrinology', location: 'Oakland, CA', reason: 'Works with complex diabetes referrals.' },
+  { npi: '9900000024', name: 'Dr. Nina Park', specialty: 'Obstetrics & Gynecology', location: 'Berkeley, CA', reason: 'Shares your interest in care coordination.' },
+  { npi: '9900000002', name: 'Dr. Matthew Onadeko', specialty: 'Cardiology', location: 'San Francisco, CA', reason: 'Relevant to resistant-hypertension referral patterns.' },
+]
+
+/** Real, consultation-derived suggestions first (a physician-agent your agent has
+ * actually interacted with, but isn't yet a confirmed colleague) -- this is the
+ * "case -> consultation -> relevant physician -> suggested -> added" loop.
+ * Never a fabricated count: the reason only ever states what's directly on the
+ * relationship record. Falls back to the curated list above to fill out to
+ * `limit`, skipping anyone already a colleague or already surfaced. */
+function buildSuggestions(network: AgentNetwork | null, memberNpis: Set<string>, limit: number): SuggestedConnection[] {
+  const seen = new Set(memberNpis)
+  const suggestions: SuggestedConnection[] = []
+  if (network) {
+    for (const node of network.nodes) {
+      if (node.in_network || seen.has(node.npi) || !node.relationship) continue
+      const { consultation_count, recommended_count, last_recommendation_patient_name } = node.relationship
+      if (consultation_count <= 0 && recommended_count <= 0) continue
+      seen.add(node.npi)
+      suggestions.push({
+        npi: node.npi,
+        name: physicianDisplayName(node.name),
+        specialty: node.specialty,
+        location: node.location,
+        reason: last_recommendation_patient_name
+          ? `Recently connected through ${last_recommendation_patient_name}'s consultation.`
+          : `Your agent recently consulted ${physicianDisplayName(node.name)}'s agent.`,
+      })
+    }
+  }
+  for (const candidate of CURATED_SUGGESTIONS) {
+    if (suggestions.length >= limit) break
+    if (seen.has(candidate.npi)) continue
+    seen.add(candidate.npi)
+    suggestions.push(candidate)
+  }
+  return suggestions
+}
 
 /** Physician-facing participation language — never internal lifecycle jargon like
  * "Reserved · not activated". */
@@ -77,24 +131,28 @@ function ConnectionRow({ member, navigate }: { member: NetworkRelationship; navi
   </button>
 }
 
-/** The Colleagues hero: analogous to the Dashboard agent banner in weight and
- * surface treatment, but its decorative motif is network geography, not agent
- * rings -- a lightly abstracted globe with nationwide connection arcs. */
+/** The Colleagues hero: a Network-specific sibling of the Dashboard agent banner
+ * (same "copy beside a decorative motif, with a white inset action card" shape --
+ * see .agent-banner-main/.agent-banner-action), adapted rather than copied: the
+ * motif is an abstract, tilted professional-network globe (CSS/SVG only, no stock
+ * imagery, no literal map), and the inset card carries the actual CTA instead of
+ * the main headline block. */
 function NetworkHero({ onAdd }: { onAdd: () => void }) {
   return <section className="network-hero">
     <div className="network-hero-copy">
       <p className="eyebrow">Physician network</p>
-      <h2>Grow your Lamina network</h2>
+      <h2>Grow your Lamina network.</h2>
       <p>Search any physician in the U.S. using NPPES and add them to your network.</p>
-      <button className="button-primary" onClick={onAdd}>Add a colleague <span>→</span></button>
     </div>
-    <div className="network-hero-globe" aria-hidden="true">
-      <svg viewBox="0 0 220 220" fill="none">
+    <div className="network-hero-globe">
+      <svg className="network-hero-globe-art" viewBox="0 0 220 220" fill="none" aria-hidden="true">
         <ellipse className="globe-ring" cx="110" cy="112" rx="84" ry="84" />
-        <ellipse className="globe-ring" cx="110" cy="112" rx="84" ry="28" />
-        <ellipse className="globe-ring" cx="110" cy="112" rx="84" ry="56" transform="rotate(-22 110 112)" />
-        <path className="globe-arc" d="M38,126 Q110,58 178,100" />
-        <path className="globe-arc" d="M50,150 Q118,168 172,128" />
+        <ellipse className="globe-ring" cx="110" cy="112" rx="84" ry="30" />
+        <ellipse className="globe-ring" cx="110" cy="112" rx="84" ry="58" transform="rotate(-24 110 112)" />
+        <ellipse className="globe-ring" cx="110" cy="112" rx="50" ry="84" transform="rotate(14 110 112)" />
+        <path className="globe-arc" d="M34,124 Q110,54 182,98" />
+        <path className="globe-arc" d="M46,150 Q116,170 176,126" />
+        <path className="globe-arc" d="M60,80 Q118,60 168,86" />
         <circle className="globe-node" cx="58" cy="122" r="3" />
         <circle className="globe-node" cx="92" cy="92" r="2.4" />
         <circle className="globe-node" cx="138" cy="96" r="3" />
@@ -103,7 +161,60 @@ function NetworkHero({ onAdd }: { onAdd: () => void }) {
         <circle className="globe-node" cx="150" cy="142" r="3" />
         <circle className="globe-node hub" cx="112" cy="120" r="4.5" />
       </svg>
+      <div className="network-hero-action">
+        <h3>Search and add your colleagues.</h3>
+        <p>Find physicians you already work with.</p>
+        <button className="button-primary" onClick={onAdd}>Add a colleague <span>→</span></button>
+      </div>
     </div>
+  </section>
+}
+
+/** A single compact row -- lighter than the main colleague list, never a full
+ * card. The reason line is the whole point: every suggestion explains itself. */
+function SuggestedConnectionRow({ suggestion, navigate, busy, onAdd }: {
+  suggestion: SuggestedConnection; navigate: Navigate; busy: boolean; onAdd: () => void
+}) {
+  const persona = ENGAGEMENT_PERSONA_BY_NPI[suggestion.npi]
+  return <div className="suggestion-row">
+    <span className="lam-row-mark directory-avatar">{physicianInitials(suggestion.name)}</span>
+    <div className="suggestion-row-main">
+      <strong>{suggestion.name}</strong>
+      <span>{suggestion.specialty} · {suggestion.location}</span>
+      <small>{suggestion.reason}</small>
+    </div>
+    <div className="suggestion-row-actions">
+      <button className="button-secondary suggestion-add" disabled={busy} onClick={onAdd}>Add <span>→</span></button>
+      {persona && <button className="text-button" onClick={() => navigate(networkProfilePath('lucy', persona))}>View profile →</button>}
+    </div>
+  </div>
+}
+
+/** "People your agent thinks you should know" -- discovery, not an address book.
+ * Every suggestion names a real reason (see buildSuggestions); none are ever
+ * fabricated interaction counts. Shows 3 by default with a local expand, never a
+ * second page. An honest quiet state when nothing is available -- never forced
+ * placeholders (see MyNetworkTab for the empty-pool case). */
+function SuggestedConnections({ suggestions, navigate, pendingNpi, onAdd }: {
+  suggestions: SuggestedConnection[]; navigate: Navigate; pendingNpi: string | null; onAdd: (npi: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  if (suggestions.length === 0) return <section className="suggested-connections">
+    <h2 className="network-section-title">People your agent thinks you should know</h2>
+    <p className="agent-empty-note">Your agent will suggest relevant physicians as your network and activity grow.</p>
+  </section>
+  const visible = expanded ? suggestions : suggestions.slice(0, 3)
+  const hidden = suggestions.length - visible.length
+  return <section className="suggested-connections">
+    <h2 className="network-section-title">People your agent thinks you should know</h2>
+    <div className="suggestion-list">{visible.map((suggestion) => <SuggestedConnectionRow
+      key={suggestion.npi}
+      suggestion={suggestion}
+      navigate={navigate}
+      busy={pendingNpi === suggestion.npi}
+      onAdd={() => onAdd(suggestion.npi)}
+    />)}</div>
+    {hidden > 0 && <button className="text-button suggestion-expand" onClick={() => setExpanded(true)}>See {hidden} more suggestion{hidden === 1 ? '' : 's'} →</button>}
   </section>
 }
 
@@ -181,6 +292,7 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
   const [networkError, setNetworkError] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [showAllColleagues, setShowAllColleagues] = useState(false)
+  const [pendingSuggestionNpi, setPendingSuggestionNpi] = useState<string | null>(null)
 
   const loadNetwork = () => getAgentNetwork().then(setNetwork).catch((loadError: Error) => setNetworkError(loadError.message))
   useEffect(() => { void loadNetwork() }, [])
@@ -192,9 +304,18 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
     ...(network?.nodes.filter((node) => node.in_network).map((node) => node.npi) || []),
     ...(network?.members.map((member) => member.npi) || []),
   ])
+  const suggestions = buildSuggestions(network, memberNpis, 6)
+
+  const addSuggestion = async (npi: string) => {
+    setPendingSuggestionNpi(npi)
+    try { await addNetworkMember(npi); loadNetwork() }
+    finally { setPendingSuggestionNpi(null) }
+  }
 
   return <div className="my-network-tab">
     <NetworkHero onAdd={() => setAddOpen(true)} />
+
+    {network && <SuggestedConnections suggestions={suggestions} navigate={navigate} pendingNpi={pendingSuggestionNpi} onAdd={addSuggestion} />}
 
     <section className="network-primary-section">
       {networkError && <div className="error-banner" role="alert">Network relationships unavailable: {networkError}</div>}

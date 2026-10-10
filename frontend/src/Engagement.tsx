@@ -377,17 +377,35 @@ function feedInitials(name: string) {
   return name.split(' ').filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase()
 }
 
-function FeedCard({ item, navigate, perspective }: { item: NetworkFeedItem; navigate: Navigate; perspective: DemoPhysicianPerspective }) {
+/** A small, frontend-only synthetic extension of NetworkFeedItem for the 1-2
+ * agent-authored example posts (see AGENT_FEED_POSTS) -- never persisted, never
+ * claiming a real model generated them. `physician.name` carries the AGENT's
+ * name (e.g. "Dr. Chris Mithel's Agent") since that's what the byline renders;
+ * `representedPhysicianName` powers the separate "representing Dr. X" line so
+ * the post never reads as though the physician authored it directly. */
+type FeedListItem = NetworkFeedItem & { isAgentAuthored?: true; representedPhysicianName?: string }
+
+function FeedCard({ item, navigate, perspective }: { item: FeedListItem; navigate: Navigate; perspective: DemoPhysicianPerspective }) {
   const when = item.published_at ?? item.created_at
   const [expanded, setExpanded] = useState(false)
   const isLong = item.body.length > 220
   const preview = isLong && !expanded ? `${item.body.slice(0, 220).trimEnd()}…` : item.body
-  return <article className="feed-post">
+  const linkable = Boolean(item.physician.id)
+  return <article className={`feed-post ${item.isAgentAuthored ? 'agent-authored' : ''}`}>
     <div className="feed-post-header">
-      <span className="feed-post-avatar" aria-hidden="true">{feedInitials(item.physician.name)}</span>
+      {item.isAgentAuthored
+        ? <AgentAvatar />
+        : <span className="feed-post-avatar" aria-hidden="true">{feedInitials(item.physician.name)}</span>}
       <div className="feed-post-byline">
-        <button className="feed-post-author" onClick={() => navigate(networkProfilePath(perspective, item.physician.id))}>{item.physician.name}</button>
-        <small>{item.physician.specialty} · {relativeDayLabel(when)}</small>
+        {linkable
+          ? <button className="feed-post-author" onClick={() => navigate(networkProfilePath(perspective, item.physician.id))}>{item.physician.name}</button>
+          : <span className="feed-post-author no-link">{item.physician.name}</span>}
+        {item.isAgentAuthored && <span className="feed-post-agent-badge">Agent</span>}
+        <small>
+          {item.isAgentAuthored
+            ? `${item.physician.specialty} · representing ${item.representedPhysicianName}`
+            : item.physician.specialty} · {relativeDayLabel(when)}
+        </small>
       </div>
       <span className="feed-post-tag">{FEED_TYPE_LABELS[item.type] ?? 'Update'}</span>
     </div>
@@ -421,11 +439,130 @@ export function NetworkTabs({ tab, onSelect }: { tab: NetworkTab; onSelect: (nex
 }
 
 /** Network → Feed: the canonical professional-update destination. Published items only, chronological, backend-decided eligibility. */
+/** Two example agent-authored posts, frontend-only and clearly labeled (see
+ * FeedCard's isAgentAuthored branch) -- never claiming a real model wrote them,
+ * never presented as though the physician authored them directly. Both
+ * physicians are real, already-modeled controlled demo identities (PERSONAS
+ * "chris"/"iain" on the backend), so their bylines link to a real professional
+ * profile. Dates are relative to page load so they always interleave near the
+ * top of the chronological feed rather than risking a stale hardcoded date. */
+const AGENT_FEED_POSTS: FeedListItem[] = [
+  {
+    id: 'agent-post-mithel-dermatitis', type: 'referral_guidance', status: 'published', synthetic: true,
+    title: 'When recurrent dermatitis referrals benefit from clearer treatment history',
+    body: "A pattern Dr. Mithel frequently emphasizes is documenting prior topical response before escalation -- it shapes whether a referral needs an urgent slot or can wait for a routine one.",
+    provenance: 'synthetic_demo', created_at: new Date(Date.now() - 86400000).toISOString(),
+    published_at: new Date(Date.now() - 86400000).toISOString(),
+    physician: { id: 'chris', physician_id: 'physician-mithel', npi: '9900000016', name: "Dr. Chris Mithel's Agent", specialty: 'Dermatology', location: 'Berkeley, CA', agent_id: 'agent-9900000016', agent_name: "Dr. Chris Mithel's Agent", synthetic: true },
+    relationship_basis: ['canonical_agent_interaction'],
+    isAgentAuthored: true, representedPhysicianName: 'Dr. Chris Mithel',
+  },
+  {
+    id: 'agent-post-jung-ckd-workup', type: 'referral_guidance', status: 'published', synthetic: true,
+    title: 'Getting a CKD referral workup right the first time',
+    body: "For progressive CKD with resistant hypertension, a current BMP, UPCR, and home BP log before referral is the single biggest factor in a fast nephrology response -- a pattern that shows up across recent network consultations.",
+    provenance: 'synthetic_demo', created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+    published_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+    physician: { id: 'iain', physician_id: 'physician-jung', npi: '9900000001', name: "Dr. Iain Jung's Agent", specialty: 'Nephrology', location: 'Oakland, CA', agent_id: 'agent-9900000001', agent_name: "Dr. Iain Jung's Agent", synthetic: true },
+    relationship_basis: ['canonical_agent_interaction'],
+    isAgentAuthored: true, representedPhysicianName: 'Dr. Iain Jung',
+  },
+]
+
+type DraftIdea = { id: string; title: string; body: string; basis: string; tagType: PostType; tagLabel: string }
+
+/** Two controlled synthetic draft ideas -- clearly demo content, grounded in
+ * context that already exists elsewhere in the app (recent network
+ * consultations, confirmed practice representation), never claiming a real
+ * model generated them. */
+const AGENT_DRAFT_IDEAS: DraftIdea[] = [
+  {
+    id: 'draft-resistant-htn-workup',
+    title: 'Referral workup patterns in resistant hypertension',
+    body: 'Progressive CKD with resistant hypertension most often routes to nephrology first, especially once eGFR is declining. A current BMP, UPCR, and home BP log before referral keeps the handoff clean and avoids a round trip for missing labs.',
+    basis: 'Based on your recent network consultations.',
+    tagType: 'referral_guidance', tagLabel: 'Referral guidance',
+  },
+  {
+    id: 'draft-ckd-coordination',
+    title: 'What I’ve learned about coordinating CKD referrals',
+    body: 'Clear referral questions and documented trajectory make the biggest difference for specialists reviewing a CKD case -- especially when the primary concern is resistant hypertension rather than an isolated lab abnormality.',
+    basis: 'Based on your confirmed practice representation.',
+    tagType: 'practice_update', tagLabel: 'Practice update',
+  },
+]
+
+const POSTING_WATCH_TOPICS = ['Research', 'Referral guidance', 'Teaching', 'Practice updates', 'Interesting findings']
+
+/** A real preview of a synthetic draft idea -- same "Drafted by your agent"
+ * framing and dialog shell as PostButton's own preview stage. "Edit draft" is a
+ * local textarea, never a backend call. "Post" is literally PostButton's own
+ * trigger, prefilled with this draft's (possibly edited) text -- clicking it
+ * hands off into the real compose -> draft-with-agent -> preview -> publish
+ * pipeline, so nothing here pretends to post on the physician's behalf. */
+function DraftIdeaPreviewModal({ personaId, draft, onClose }: { personaId: DemoPhysicianPerspective; draft: DraftIdea; onClose: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [body, setBody] = useState(draft.body)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="post-flow-dialog draft-preview-dialog" role="dialog" aria-modal="true" aria-label="Draft idea preview">
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
+      <p className="post-drafted-label">Drafted by your agent</p>
+      <h2 className="draft-preview-title">{draft.title}</h2>
+      {editing
+        ? <textarea className="post-composer-body" value={body} onChange={(event) => setBody(event.target.value)} maxLength={2000} autoFocus />
+        : <p className="practice-update-body draft-preview-body">{body}</p>}
+      <span className="post-tag-chip active draft-preview-tag">{draft.tagLabel}</span>
+      <p className="draft-preview-provenance">Based on your confirmed practice representation and recent network activity.</p>
+      <div className="post-flow-actions">
+        <button className="button-secondary" onClick={() => setEditing((value) => !value)}>{editing ? 'Done editing' : 'Edit draft'}</button>
+        <PostButton personaId={personaId} prefillNote={body} prefillIntent={draft.tagType} triggerLabel="Post" buttonClassName="button-primary" onOpen={onClose} />
+      </div>
+    </div>
+  </div>
+}
+
+/** "Your agent quietly helping you participate," not an ad rail -- draft ideas
+ * the physician can preview before anything is posted, plus a lightweight,
+ * frontend-local "what to watch for" preference (no settings persistence
+ * implied, no autonomous-posting toggle). */
+function AgentAssistRail({ personaId }: { personaId: DemoPhysicianPerspective }) {
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const [watching, setWatching] = useState<string[]>(['Referral guidance', 'Practice updates'])
+  const toggleWatch = (topic: string) => setWatching((prev) => prev.includes(topic) ? prev.filter((item) => item !== topic) : [...prev, topic])
+  const activeDraft = AGENT_DRAFT_IDEAS.find((item) => item.id === previewId) ?? null
+  return <aside className="agent-assist-rail">
+    <section className="agent-assist-card">
+      <h3>Your agent can help you share</h3>
+      <p>Your agent can surface ideas from your work and turn them into drafts for you to review.</p>
+      <div className="draft-idea-list">{AGENT_DRAFT_IDEAS.map((draft) => <div className="draft-idea-card" key={draft.id}>
+        <span className="draft-idea-label">Draft idea</span>
+        <strong>{draft.title}</strong>
+        <small>{draft.basis}</small>
+        <button className="text-button" onClick={() => setPreviewId(draft.id)}>Preview →</button>
+      </div>)}</div>
+    </section>
+    <section className="agent-assist-card">
+      <h3>What should your agent watch for?</h3>
+      <div className="watch-topic-chips">{POSTING_WATCH_TOPICS.map((topic) => <button key={topic} type="button" className={`post-tag-chip ${watching.includes(topic) ? 'active' : ''}`} aria-pressed={watching.includes(topic)} onClick={() => toggleWatch(topic)}>{topic}</button>)}</div>
+      <button className="text-button agent-assist-prefs-link" disabled title="Coming soon">Posting preferences →</button>
+    </section>
+    {activeDraft && <DraftIdeaPreviewModal personaId={personaId} draft={activeDraft} onClose={() => setPreviewId(null)} />}
+  </aside>
+}
+
 export function NetworkFeedTab({ personaId, navigate, onPublished }: { personaId: DemoPhysicianPerspective; navigate: Navigate; onPublished?: (post: ProfessionalPost) => void }) {
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
   const [error, setError] = useState('')
   const load = () => { getNetworkFeed(personaId).then(setFeed).catch((err: Error) => setError(err.message)) }
   useEffect(load, [personaId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const items: FeedListItem[] = feed
+    ? [...feed.items, ...AGENT_FEED_POSTS].sort((a, b) => (b.published_at ?? b.created_at).localeCompare(a.published_at ?? a.created_at))
+    : []
   return <div className="network-feed-tab">
     <div className="network-feed-tab-header">
       <div><h2>Feed</h2><p className="page-intro">Professional updates from physicians and practices your network interacts with.</p></div>
@@ -438,7 +575,10 @@ export function NetworkFeedTab({ personaId, navigate, onPublished }: { personaId
       <h2>No updates from your network yet.</h2>
       <p>Updates will appear as physicians and agents in your network share professional changes.</p>
     </div>}
-    {feed && feed.items.length > 0 && <div className="feed-stream">{feed.items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} />)}</div>}
+    {feed && feed.items.length > 0 && <div className="feed-layout">
+      <div className="feed-stream">{items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} />)}</div>
+      <AgentAssistRail personaId={personaId} />
+    </div>}
   </div>
 }
 
@@ -979,13 +1119,18 @@ const MORE_POST_TAGS: Array<{ type: PostType; label: string }> = [
 
 type PostFlowStage = 'closed' | 'compose' | 'preview'
 
-export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 'Share update', compact = false }: { personaId: DemoPhysicianPerspective; onPublished?: (post: ProfessionalPost) => void; paperTitle?: string; triggerLabel?: string; compact?: boolean }) {
+/** `prefillNote`/`prefillIntent` let an external surface (the Feed agent-assist
+ * rail's draft ideas) hand off into this same real compose -> draft-with-agent ->
+ * preview -> publish pipeline, pre-filled with that draft's text -- never a
+ * separate posting path. The physician still reviews/edits and explicitly
+ * drafts/publishes; nothing is posted on their behalf. */
+export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 'Share update', compact = false, prefillNote, prefillIntent, buttonClassName, onOpen }: { personaId: DemoPhysicianPerspective; onPublished?: (post: ProfessionalPost) => void; paperTitle?: string; triggerLabel?: string; compact?: boolean; prefillNote?: string; prefillIntent?: PostType; buttonClassName?: string; onOpen?: () => void }) {
   const [stage, setStage] = useState<PostFlowStage>('closed')
-  const [intent, setIntent] = useState<PostType>('practice_update')
+  const [intent, setIntent] = useState<PostType>(prefillIntent ?? 'practice_update')
   const [title, setTitle] = useState(paperTitle ?? '')
   const [showLink, setShowLink] = useState(Boolean(paperTitle))
   const [moreTagsOpen, setMoreTagsOpen] = useState(false)
-  const [note, setNote] = useState('')
+  const [note, setNote] = useState(prefillNote ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [draftPost, setDraftPost] = useState<ProfessionalPost | null>(null)
@@ -994,8 +1139,8 @@ export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 
   const [previewBody, setPreviewBody] = useState('')
 
   const reset = () => {
-    setStage('closed'); setIntent('practice_update'); setTitle(paperTitle ?? ''); setShowLink(Boolean(paperTitle))
-    setMoreTagsOpen(false); setNote(''); setError(''); setDraftPost(null); setEditingPreview(false)
+    setStage('closed'); setIntent(prefillIntent ?? 'practice_update'); setTitle(paperTitle ?? ''); setShowLink(Boolean(paperTitle))
+    setMoreTagsOpen(false); setNote(prefillNote ?? ''); setError(''); setDraftPost(null); setEditingPreview(false)
   }
 
   useEffect(() => {
@@ -1039,7 +1184,7 @@ export function PostButton({ personaId, onPublished, paperTitle, triggerLabel = 
   }
 
   return <>
-    <button className={compact ? 'text-button' : 'button-secondary post-trigger'} onClick={() => { if (paperTitle) setIntent('share_paper'); setStage('compose') }}>{triggerLabel} <span>{compact ? '→' : '+'}</span></button>
+    <button className={buttonClassName ?? (compact ? 'text-button' : 'button-secondary post-trigger')} onClick={() => { if (paperTitle) setIntent('share_paper'); setStage('compose'); onOpen?.() }}>{triggerLabel} <span>{compact ? '→' : '+'}</span></button>
     {stage !== 'closed' && <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) reset() }}>
       <div className="post-flow-dialog" role="dialog" aria-modal="true" aria-label="Share an update">
         <button className="text-button post-flow-close" onClick={reset} aria-label="Close">×</button>

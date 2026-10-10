@@ -44,7 +44,7 @@ strong, b { font-weight: 600; }
 .sidebar nav { margin-top: 48px; display: flex; flex-direction: column; gap: 6px; }
 .nav-item { width: 100%; display: flex; align-items: center; gap: 11px; border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 11px; color: var(--text-secondary); text-align: left; }
 .nav-item.active { border-color: rgb(83 110 125 / 22%); background: var(--mineral-surface); color: var(--text-primary); }
-.nav-item:disabled { opacity: .58; }.nav-icon { width: 24px; color: var(--accent); font-size: 1.05rem; text-align: center; }
+.nav-item:disabled { opacity: .58; }.nav-icon { width: 24px; color: var(--mineral); font-size: 1.05rem; text-align: center; }
 .nav-item-label, .nav-item small { display: block; }.nav-item-label { font-size: .82rem; font-weight: 400; }.nav-item.active .nav-item-label { font-weight: 600; }.nav-item small { margin-top: 2px; font-size: .64rem; }
 .sidebar-clinician { display: flex; align-items: center; gap: 11px; border-top: 1px solid var(--border); padding: 18px 4px 0; }
 .clinician-avatar { width: 39px; height: 39px; display: grid; flex: 0 0 39px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--clinical); box-shadow: 0 0 0 1px var(--border); color: #fff; font-family: var(--font-display); font-size: .72rem; font-weight: 700; }
@@ -1464,20 +1464,45 @@ button.lam-row:hover { background: #fff9f1; }
 
 /* Colleagues hero -- analogous to the Dashboard agent banner (2-column surface,
  * copper primary CTA) but its decorative motif is network geography, not rings. */
-.network-hero { display: grid; grid-template-columns: 1.15fr 1fr; align-items: center; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
-.network-hero-copy { padding: 35px; }
+.network-hero { display: grid; grid-template-columns: 1.1fr 1fr; align-items: stretch; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.network-hero-copy { padding: 35px; align-self: center; }
 .network-hero-copy .eyebrow { margin: 0 0 7px; }
 .network-hero-copy h2 { max-width: 16ch; font-size: 1.7rem; line-height: 1.2; }
-.network-hero-copy p:not(.eyebrow) { max-width: 38ch; margin: 10px 0 20px; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
-.network-hero-globe { position: relative; height: 100%; min-height: 220px; display: grid; place-items: center; background: var(--mineral-surface); }
-.network-hero-globe svg { width: 210px; height: 210px; }
+.network-hero-copy p:not(.eyebrow) { max-width: 38ch; margin: 10px 0 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
+/* The decorative globe fills the pane as a background layer; the white action
+   card sits on top of it, same "inset card over a colored pane" shape as the
+   Dashboard banner's .agent-banner-action. */
+.network-hero-globe { position: relative; min-height: 260px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--mineral-surface); }
+.network-hero-globe-art { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; opacity: .9; transform: rotate(-6deg) scale(1.05); }
 .globe-ring { stroke: var(--mineral-subtle); stroke-width: 1; opacity: .4; }
 .globe-arc { stroke: var(--mineral); stroke-width: 1.1; opacity: .55; stroke-dasharray: 2 4; stroke-linecap: round; }
 .globe-node { fill: var(--mineral-deep); opacity: .7; }
 .globe-node.hub { fill: var(--accent); opacity: 1; }
-@media (max-width: 860px) { .network-hero { grid-template-columns: 1fr; } .network-hero-globe { min-height: 180px; } }
+.network-hero-action { position: relative; z-index: 1; margin: 19px; max-width: 230px; border: 1px solid var(--border); border-radius: 9px; background: rgb(255 254 251 / 92%); padding: 22px; }
+.network-hero-action h3 { margin: 0; font-size: 1.05rem; line-height: 1.35; }
+.network-hero-action p { margin: 8px 0 16px; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
+.network-hero-action .button-primary { width: 100%; }
+@media (max-width: 860px) { .network-hero { grid-template-columns: 1fr; } .network-hero-globe { min-height: 200px; } }
 
 .network-section-title { margin: 32px 0 14px; font-size: 1.1rem; }
+
+/* Suggested connections: lighter than the main colleague list (.lam-list/.lam-row)
+   -- small individual rows, not one connected bordered block. */
+.suggested-connections { margin-top: 30px; }
+.suggestion-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.suggestion-row { display: flex; align-items: center; gap: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 13px 16px; }
+.suggestion-row .directory-avatar { flex: 0 0 auto; }
+.suggestion-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.suggestion-row-main strong { font-size: .8rem; }
+.suggestion-row-main span { color: var(--text-secondary); font-size: .66rem; }
+.suggestion-row-main small { margin-top: 2px; color: var(--clinical); font-size: .68rem; line-height: 1.4; }
+.suggestion-row-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; }
+.suggestion-add { min-height: 32px; padding: 0 12px; font-size: .68rem; }
+.suggestion-expand { display: inline-block; margin-top: 12px; }
+@media (max-width: 620px) {
+  .suggestion-row { flex-wrap: wrap; }
+  .suggestion-row-actions { flex-basis: 100%; justify-content: space-between; margin-top: 8px; padding-left: 50px; }
+}
 .network-see-all { display: inline-block; margin-top: 14px; }
 /* Variable-height disclosure via grid-template-rows, not max-height -- a long
  * colleague list never clips or needs a magic-number ceiling. */
@@ -1511,9 +1536,41 @@ button.lam-row:hover { background: #fff9f1; }
 .network-feed-tab-header h2 { margin: 3px 0 6px; font-size: 1.5rem; }
 .network-feed-tab-header .page-intro { max-width: 520px; margin: 0; }
 .network-feed-tab-header .post-trigger { flex: 0 0 auto; white-space: nowrap; }
-.network-feed-tab .feed-stream { margin-top: 0; }
+/* Main feed + a narrow sticky agent rail -- the feed stays visually dominant
+   (2fr vs ~0.8fr); the rail should read as quiet help, never an ad unit. */
+.feed-layout { display: grid; grid-template-columns: 2fr minmax(240px, .85fr); align-items: start; gap: 32px; }
+.network-feed-tab .feed-stream { max-width: none; margin-top: 0; }
 
+.agent-authored.feed-post { border-color: rgb(83 110 125 / 28%); }
+.feed-post-agent-badge { flex: 0 0 auto; border-radius: 999px; background: var(--mineral-surface); padding: 2px 7px; color: var(--mineral-deep); font-size: .5rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.feed-post-author.no-link { font-family: var(--font-display); font-size: .86rem; color: var(--text-primary); cursor: default; }
+.feed-post-byline { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
+.feed-post-byline small { flex-basis: 100%; }
 
+.agent-assist-rail { position: sticky; top: 76px; display: flex; flex-direction: column; gap: 18px; }
+.agent-assist-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 20px; }
+.agent-assist-card h3 { margin: 0; font-size: .88rem; }
+.agent-assist-card > p { margin: 7px 0 0; color: var(--text-secondary); font-size: .67rem; line-height: 1.5; }
+.draft-idea-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.draft-idea-card { border: 1px solid var(--border); border-radius: 9px; background: var(--mineral-surface); padding: 12px 14px; }
+.draft-idea-label { display: block; margin-bottom: 4px; color: var(--mineral-deep); font-size: .52rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.draft-idea-card strong { display: block; color: var(--clinical); font-family: var(--font-display); font-size: .78rem; line-height: 1.35; }
+.draft-idea-card small { display: block; margin-top: 5px; color: var(--text-secondary); font-size: .62rem; }
+.draft-idea-card .text-button { margin-top: 8px; font-size: .64rem; }
+.watch-topic-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.agent-assist-prefs-link { display: inline-block; margin-top: 12px; font-size: .64rem; }
+.agent-assist-prefs-link:disabled { opacity: .55; cursor: default; }
+
+.draft-preview-dialog { width: min(100%, 560px); }
+.draft-preview-title { margin: 10px 0 14px; font-size: 1.25rem; }
+.draft-preview-body { color: var(--clinical); }
+.draft-preview-tag { display: inline-block; margin-top: 14px; cursor: default; }
+.draft-preview-provenance { margin: 12px 0 0; color: var(--text-secondary); font-size: .62rem; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .feed-layout { grid-template-columns: 1fr; }
+  .agent-assist-rail { position: static; }
+}
 @media (max-width: 700px) {
   .network-feed-tab-header { flex-direction: column; align-items: stretch; }
   .network-feed-tab-header .post-trigger { align-self: flex-start; }
