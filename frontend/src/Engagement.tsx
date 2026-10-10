@@ -67,6 +67,7 @@ import {
 } from './api.ts'
 import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
+import { AgentAvatar } from './AgentAvatar.tsx'
 
 type Navigate = (path: string) => void
 
@@ -1246,14 +1247,51 @@ export function InitializationCard({ initialization, navigate, trainPath }: { in
 
 /* ------------------------------------------------------------- My Agent: Overview */
 
+const ANALYTICS_SEGMENT_LABELS: Record<string, string> = {
+  focus: 'Clinical focus', fit: 'Referral fit', workup: 'Workup & access', rules: 'Confirmed rules', interests: 'Interests',
+}
+
+/**
+ * A quick "how active/useful is my agent" glance before the detailed rules below --
+ * built only from counts already present in AgentOverview/PracticeRepresentation (no
+ * fabricated metrics, no second data fetch). The distribution bar is a rough proportion
+ * of the agent's current representation, not an audited statistic.
+ */
+function AgentAnalyticsOverview({ overview, representation }: { overview: AgentOverview; representation: PracticeRepresentation }) {
+  const sections = representation.sections
+  const segments = [
+    { key: 'focus', count: sections.clinical_focus.length },
+    { key: 'fit', count: sections.good_fit.length + sections.not_a_fit.length },
+    { key: 'workup', count: sections.referral_requirements.length + sections.preferred_workup.length + sections.access_facts.length },
+    { key: 'rules', count: sections.explicit_rules.length + sections.confirmed_learnings.length },
+    { key: 'interests', count: sections.interests.length },
+  ].filter((segment) => segment.count > 0)
+  const total = segments.reduce((sum, segment) => sum + segment.count, 0)
+  const stillOpen = representation.gaps.practice_areas_needing_input.length
+  return <section className="agent-analytics">
+    <h3 className="agent-analytics-heading">Agent activity at a glance</h3>
+    <div className="agent-analytics-stats">
+      <div><em>{overview.stats.questions_answered_total}</em><span>Questions answered</span></div>
+      <div><em>{overview.stats.confirmed_practice_learnings}</em><span>Rules confirmed</span></div>
+      <div><em>{overview.stats.training_sessions_completed}</em><span>Training sessions</span></div>
+      {stillOpen > 0 && <div><em>{stillOpen}</em><span>Still being clarified</span></div>}
+    </div>
+    {total > 0 && <div className="agent-analytics-distribution">
+      <p className="practice-subheading">Representation coverage</p>
+      <div className="agent-analytics-bar">{segments.map((segment) => <span key={segment.key} className={`agent-analytics-segment segment-${segment.key}`} style={{ width: `${(segment.count / total) * 100}%` }} title={`${ANALYTICS_SEGMENT_LABELS[segment.key]}: ${segment.count}`} />)}</div>
+      <div className="agent-analytics-legend">{segments.map((segment) => <span key={segment.key}><i className={`agent-analytics-dot segment-${segment.key}`} aria-hidden="true" />{ANALYTICS_SEGMENT_LABELS[segment.key]} <b>{segment.count}</b></span>)}</div>
+    </div>}
+  </section>
+}
+
 /**
  * Overview now absorbs what used to be a separate Practice tab (post-8B consolidation):
  * identity/summary, confirmed representation, and gaps all live in one place — "How does
  * my agent currently represent me?" is answered on one screen, not split across two.
  */
-export function AgentOverviewPanel({ overview, representation, navigate, trainPath, extra }: {
+export function AgentOverviewPanel({ overview, representation, navigate, trainPath, personaId, extra }: {
   overview: AgentOverview | null; representation: PracticeRepresentation | null
-  navigate: Navigate; trainPath: string; extra?: ReactNode
+  navigate: Navigate; trainPath: string; personaId: PhysicianIdentity; extra?: ReactNode
 }) {
   if (!overview) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
   const training = overview.training
@@ -1282,12 +1320,19 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
     </div>
     {overview.last_trained_at && <p className="agent-last-trained">Last trained {relativeDayLabel(overview.last_trained_at)}</p>}
     <InitializationCard initialization={overview.initialization} navigate={navigate} trainPath={trainPath} />
+    {/* InitializationCard already carries the Continue-setup CTA while setup is
+     * incomplete -- a second identical button here would be a visible duplicate. */}
     <div className="agent-overview-actions">
-      {primary && <button className="button-primary" onClick={() => navigate(primary.href)}>{primary.label} <span>→</span></button>}
+      {primary && training.action !== 'continue_setup' && <button className="button-primary" onClick={() => navigate(primary.href)}>{primary.label} <span>→</span></button>}
       {!primary && <p className="agent-empty-note">Your agent is up to date.</p>}
     </div>
+    {representation && <AgentAnalyticsOverview overview={overview} representation={representation} />}
+    <div className="agent-detail-divider">
+      <h2>How your agent currently represents your practice</h2>
+      <p className="page-intro">A detailed, structured picture built from setup, training, and your confirmed preferences.</p>
+    </div>
     {representation
-      ? <PracticeTab representation={representation} portrait={null} reviewHref={reviewHref} navigate={navigate} heading={false} extra={extra} />
+      ? <PracticeTab representation={representation} personaId={personaId} portrait={null} reviewHref={reviewHref} navigate={navigate} heading={false} extra={extra} />
       : <div className="page-state embedded"><div className="loading-line" /><p>Opening your confirmed representation…</p></div>}
   </div>
 }
@@ -1368,12 +1413,41 @@ function ExpandableList({ items, initialCount = 5 }: { items: ReactNode[]; initi
   </>
 }
 
-export function PracticeTab({ representation, portrait, reviewHref, navigate, extra, heading = true }: {
-  representation: PracticeRepresentation; portrait?: string | null; reviewHref?: string | null; navigate: Navigate; extra?: ReactNode; heading?: boolean
+/** A rule/learning row with a lightweight, always-available revision affordance --
+ * these are the physician's CURRENT confirmed representation, not a one-time review
+ * queue, so "Looks right" / "Adjust" stays available indefinitely, not just right
+ * after training. "Looks right" best-effort reaffirms a real training-derived
+ * learning (ids from confirmed_learnings with source_type training_response map to
+ * a real proposed-learning record); it is a quiet no-op for plain profile facts,
+ * which have no individual backing record to confirm. "Adjust" always just opens
+ * Train, where the existing branching/focused-training flow already lives. */
+function RuleRow({ text, onAgree, agreed, trainPath, navigate }: {
+  text: ReactNode; onAgree?: () => void; agreed?: boolean; trainPath: string; navigate: Navigate
+}) {
+  return <li className="practice-rule-row">
+    <span>{text}</span>
+    <span className="practice-rule-row-actions">
+      {onAgree && (agreed
+        ? <em className="practice-rule-agreed">✓ Looks right</em>
+        : <button type="button" className="text-button" onClick={onAgree}>Looks right</button>)}
+      <button type="button" className="text-button" onClick={() => navigate(trainPath)}>Adjust</button>
+    </span>
+  </li>
+}
+
+export function PracticeTab({ representation, personaId, portrait, reviewHref, navigate, extra, heading = true }: {
+  representation: PracticeRepresentation; personaId: PhysicianIdentity; portrait?: string | null; reviewHref?: string | null; navigate: Navigate; extra?: ReactNode; heading?: boolean
 }) {
   const sections = representation.sections
-  const gaps = representation.gaps
   const summary = practiceSummarySentence(portrait)
+  const practiceTrainPath = trainingPath(personaId)
+  const [agreedIds, setAgreedIds] = useState<Set<string>>(new Set())
+  const agree = (id: number | string, sourceType: string) => {
+    setAgreedIds((prev) => new Set(prev).add(String(id)))
+    if (sourceType === 'training_response') {
+      updateProposedLearning(personaId, Number(id), 'confirm').catch(() => { /* reaffirming is best-effort in this demo */ })
+    }
+  }
   const clinicalFocus = sections.clinical_focus
 
   const interestsByCategory = categorizeInterests(sections.interests, clinicalFocus)
@@ -1431,19 +1505,13 @@ export function PracticeTab({ representation, portrait, reviewHref, navigate, ex
 
     {sections.explicit_rules.length > 0 && <section className="practice-section practice-section-rules">
       <h3 className="practice-section-heading">Practice rules</h3>
-      <p className="practice-subcopy">Confirmed guidance your agent uses when representing how you practice.</p>
-      <ExpandableList items={sections.explicit_rules.map((item) => <li key={item}>{item}</li>)} />
+      <p className="practice-subcopy">Confirmed guidance your agent uses when representing how you practice. Not set in stone -- revise anytime.</p>
+      <ExpandableList items={sections.explicit_rules.map((item) => <RuleRow key={item} text={item} trainPath={practiceTrainPath} navigate={navigate} />)} />
     </section>}
 
     {extraLearnings.length > 0 && <section className="practice-section practice-section-learnings">
       <h3 className="practice-section-heading">Confirmed from your training</h3>
-      <ExpandableList items={extraLearnings.map((item) => <li key={item.id}>{item.statement}</li>)} />
-    </section>}
-
-    {gaps.practice_areas_needing_input.length > 0 && <section className="practice-section practice-section-gaps">
-      <h3 className="practice-section-heading">Still needs input</h3>
-      <p className="practice-subcopy">Your agent does not yet have a confirmed answer for these practice areas. Training fills these in.</p>
-      <ExpandableList items={gaps.practice_areas_needing_input.map((item) => <li key={item}>{item}</li>)} initialCount={3} />
+      <ExpandableList items={extraLearnings.map((item) => <RuleRow key={item.id} text={item.statement} trainPath={practiceTrainPath} navigate={navigate} agreed={agreedIds.has(String(item.id))} onAgree={() => agree(item.id, item.source_type)} />)} />
     </section>}
 
     {extra}
@@ -1473,7 +1541,6 @@ export function TrainTab({ trainProjection, navigate, trainPath }: {
   const activeId = trainProjection.active_session_id
   const reviewId = trainProjection.review_session_id
   return <div className="train-tab-v2">
-    <p className="eyebrow">Train your agent</p>
     <h2>Train your agent</h2>
     <p className="panel-intro">Answer a few quick questions about how you practice. Your answers help Lamina represent your preferences more accurately.</p>
     {trainProjection.state === 'initialization_needed'
@@ -1548,7 +1615,7 @@ function ChatMessageBubble({ message, agentName, onFeedback, onStartFocused, bus
   if (message.role === 'physician') return <p className="chat-message physician">{message.text}</p>
   const response = message.response
   return <div className="chat-message agent">
-    <span className="chat-agent-label"><LaminaMark active /> {agentName}</span>
+    <span className="chat-agent-label"><AgentAvatar /> {agentName}</span>
     <p>{message.text}</p>
     {response?.uncertainty && <p className="chat-uncertainty">{response.uncertainty}</p>}
     {response && (response.based_on.length > 0 || response.evidence_summary.length > 0) && <p className="chat-grounding">Based on: {response.based_on.length > 0 ? `${response.based_on.length} confirmed practice rule${response.based_on.length === 1 ? '' : 's'}` : response.evidence_summary.join(', ')}</p>}
@@ -1562,16 +1629,29 @@ function ChatMessageBubble({ message, agentName, onFeedback, onStartFocused, bus
   </div>
 }
 
+const VISIBLE_STARTER_PROMPT_COUNT = 3
+
 export function ChatTab({ personaId, agentName, navigate, trainPath }: {
   personaId: PhysicianIdentity; agentName: string; navigate: Navigate; trainPath: string
 }) {
   const [cases, setCases] = useState<AgentTestCase[]>([])
+  const [casesOpen, setCasesOpen] = useState(true)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [activeCase, setActiveCase] = useState<AgentTestCase | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [promptRotation, setPromptRotation] = useState(0)
   useEffect(() => { getAgentTestCases(personaId).then(setCases).catch(() => {}) }, [personaId])
+  const visiblePrompts = Array.from(
+    { length: Math.min(VISIBLE_STARTER_PROMPT_COUNT, CHAT_STARTER_PROMPTS.length) },
+    (_, i) => CHAT_STARTER_PROMPTS[(promptRotation + i) % CHAT_STARTER_PROMPTS.length],
+  )
+
+  const sendStarterPrompt = (prompt: string) => {
+    setPromptRotation((value) => value + 1)
+    void send(prompt, 'practice_question')
+  }
 
   const send = async (text: string, mode: 'practice_question' | 'synthetic_case', testCaseId?: string) => {
     const trimmed = text.trim()
@@ -1607,28 +1687,33 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
     } finally { setBusy(false) }
   }
 
-  return <div className="chat-tab">
-    <p className="eyebrow">Test</p>
-    <h2>Test how your agent currently represents you.</h2>
-    <p className="panel-intro">Ask how your agent represents your practice, or try it on a synthetic case.</p>
-    <p className="chat-boundary-note">Synthetic · no PHI. Use synthetic or hypothetical cases in this demo.</p>
-    {messages.length === 0 && cases.length > 0 && <section className="chat-case-cards">
-      <p className="section-label">Try your agent on a case</p>
-      <div className="chat-case-grid">{cases.map((item) => <button key={item.id} className="chat-case-card" onClick={() => tryCase(item)}>
-        <strong>{item.title}</strong><span>{item.summary}</span><b>Try this case →</b>
-      </button>)}</div>
-    </section>}
-    {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
-      {activeCase && <div className="chat-case-context"><span className="section-label">Synthetic case</span><strong>{activeCase.title}</strong><ul className="clinical-list">{activeCase.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
-      {messages.map((message) => <ChatMessageBubble key={message.id} message={message} agentName={agentName} onFeedback={feedback} onStartFocused={startFocused} busy={busy} />)}
-    </div>}
-    {error && <p className="demo-reset-error" role="alert">{error}</p>}
-    <div className="chat-starter-prompts">{CHAT_STARTER_PROMPTS.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" disabled={busy} onClick={() => send(prompt, 'practice_question')}>{prompt}</button>)}</div>
-    <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input, 'practice_question') }}>
-      <label htmlFor="chat-input" className="sr-only">Ask your agent about your practice</label>
-      <input id="chat-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask your agent about your practice…" disabled={busy} />
-      <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
-    </form>
+  return <div className="chat-tab-grid">
+    <div className="chat-tab-main">
+      <p className="eyebrow">Test</p>
+      <h2>Test how your agent currently represents you.</h2>
+      <p className="panel-intro">Ask how your agent represents your practice, or try it on a synthetic case.</p>
+      <p className="chat-boundary-note">Synthetic · no PHI. Use synthetic or hypothetical cases in this demo.</p>
+      {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
+        {activeCase && <div className="chat-case-context"><span className="section-label">Synthetic case</span><strong>{activeCase.title}</strong><ul className="clinical-list">{activeCase.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
+        {messages.map((message) => <ChatMessageBubble key={message.id} message={message} agentName={agentName} onFeedback={feedback} onStartFocused={startFocused} busy={busy} />)}
+        {busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar /> {agentName}</span><p className="chat-typing-dots" aria-label={`${agentName} is answering`}><span /><span /><span /></p></div>}
+      </div>}
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      <div className="chat-starter-prompts">{visiblePrompts.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" disabled={busy} onClick={() => sendStarterPrompt(prompt)}>{prompt}</button>)}</div>
+      <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input, 'practice_question') }}>
+        <label htmlFor="chat-input" className="sr-only">Ask your agent about your practice</label>
+        <input id="chat-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask your agent about your practice…" disabled={busy} />
+        <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
+      </form>
+    </div>
+    {cases.length > 0 && <aside className="chat-case-panel patient-top-card">
+      <button type="button" className="chat-case-panel-toggle" aria-expanded={casesOpen} onClick={() => setCasesOpen((value) => !value)}>
+        <span>Try a synthetic case</span><span aria-hidden="true">{casesOpen ? '−' : '+'}</span>
+      </button>
+      {casesOpen && <div className="chat-case-panel-list">{cases.map((item) => <button key={item.id} type="button" className={`chat-case-panel-item ${activeCase?.id === item.id ? 'active' : ''}`} onClick={() => tryCase(item)}>
+        <strong>{item.title}</strong><span>{item.summary}</span>
+      </button>)}</div>}
+    </aside>}
   </div>
 }
 

@@ -357,7 +357,7 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
 
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
 
-      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('iain')} />}
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('iain')} personaId="iain" />}
       {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} />}
       {tab === 'test' && <ChatTab personaId="iain" agentName={workspace.physician.agent_name} navigate={navigate} trainPath={trainingPath('iain')} />}
     </>}

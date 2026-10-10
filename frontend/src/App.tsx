@@ -5,6 +5,7 @@ import { consultNetwork, getAgentOverview, getConsultationHistory, getConsultati
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
+import { AgentAvatar } from './AgentAvatar.tsx'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
@@ -127,7 +128,7 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
       </div>
       {perspective === 'specialist'
         ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><YouAvatar /><div><strong>{SPECIALIST_AGENT_NAME}</strong></div></button>
-        : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><YouAvatar /><div><strong>{PCP_AGENT_NAME}</strong></div></button>}
+        : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><AgentAvatar /><div><strong>{PCP_AGENT_NAME}</strong></div></button>}
     </aside>
     <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><PerspectiveSwitch navigate={navigate} perspective={perspective} /></div></header>{children}</div>
   </div>
@@ -412,9 +413,9 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   const selectTab = (next: AgentTab) => { setTab(next); setFocusedLearning(null); window.history.replaceState({}, '', `/agent?tab=${next}`) }
   return <ProductShell navigate={navigate} section="agent"><main className="page-shell agent-page">
     {error && <div className="error-banner" role="alert">{error}</div>}{!agent && !error && <p className="muted-note">Opening your agent…</p>}
-    {agent && <><section className="agent-hero"><div className="agent-hero-mark"><NetworkMark active /></div><div><p className="eyebrow">Your physician agent</p><h1>{PCP_AGENT_NAME}</h1><p>Primary Care · Represents how you practise across the Lamina network.</p><span className="agent-state"><i /> ACTIVE</span></div></section>
+    {agent && <><section className="agent-hero"><div className="agent-hero-mark"><AgentAvatar /></div><div><p className="eyebrow">Your physician agent</p><h1>{PCP_AGENT_NAME}</h1><p>Primary Care · Represents how you practise across the Lamina network.</p><span className="agent-state"><i /> ACTIVE</span></div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('lucy')} extra={
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('lucy')} personaId="lucy" extra={
         tabParam === 'calibration' && pending > 0 && <section className="agent-panel learning-panel practice-legacy-review"><div className="panel-header"><div><p className="eyebrow">Needs your review</p><h2>Case-raised preferences</h2><p className="panel-intro">Suggestions raised from a completed consultation are not silently treated as your preferences. A proposal stays proposed until you confirm or edit it.</p></div></div>
           <div className="learning-grid">{(agent?.learnings ?? []).filter((learning) => learning.status === 'suggested').map((learning) => <article className={`learning-card ${focusedLearning === learning.key ? 'focused' : ''}`} id={`learning-${learning.key}`} key={learning.key}><span className={`learning-status ${learning.status}`}>Proposed · needs confirmation</span><p>{learning.statement}</p><small>Source: {learning.provenance}</small>{focusedLearning === learning.key && caseParam && <p className="learning-case-source">Raised from the {patientName(caseParam)} consultation.{recordParam && <button className="text-button" onClick={() => navigate(consultationPath(Number(recordParam)))}>View consultation →</button>}</p>}{editing === learning.key ? <div className="learning-edit"><label htmlFor={`edit-${learning.key}`}>Correct this preference</label><textarea id={`edit-${learning.key}`} maxLength={240} value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="button-primary" disabled={!draft.trim()} onClick={() => act(learning, 'edit', draft)}>Save draft</button><button className="text-button" onClick={() => setEditing(null)}>Cancel</button></div></div> : <div className="learning-actions"><button onClick={() => act(learning, 'confirm')}>Confirm</button><button onClick={() => { setEditing(learning.key); setDraft(learning.statement) }}>Edit</button><button onClick={() => act(learning, 'reject')}>Reject</button></div>}</article>)}</div>
         </section>
