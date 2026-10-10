@@ -109,14 +109,33 @@ test('alternatives and the technical transparency section are both collapsed by 
   assert.match(view, /networkOpen && <div className="network-record">/)
 })
 
-test('the recommendation-ready default card is compact -- one fit indicator, one metadata line, one rationale sentence', () => {
+test('the recommendation-ready default card is compact -- one fit indicator, one metadata line, one rationale sentence, driven by the currently selected candidate', () => {
   const view = recommendation()
-  assert.match(view, /<article className="best-fit-card compact">/)
-  assert.match(view, /<p className="fit-indicator">Strong clinical fit<\/p>/)
-  assert.match(view, /<p className="fit-meta">\{insuranceLabel\(primary\.insurance_status\)\} · \{primary\.availability\}<\/p>/)
-  assert.match(view, /leadReason && <p className="fit-rationale">\{leadReason\}<\/p>/)
+  assert.match(view, /<article className=\{`best-fit-card compact \$\{swapping \? 'swapping' : ''\}`\}>/)
+  assert.match(view, /<p className="fit-indicator">\{selected\.clinical_fit === 'strong' \? 'Strong clinical fit'/)
+  assert.match(view, /<p className="fit-meta">\{insuranceLabel\(selected\.insurance_status\)\} · \{selected\.availability\}<\/p>/)
+  assert.match(view, /<p className="fit-rationale">\{selected\.reason\}<\/p>/)
   assert.doesNotMatch(view, /Network resolved · \{consultation\.consultation\.length\} agents consulted/, 'the consult count is demoted out of the header')
   assert.match(view, /\{consultation\.consultation\.length\} physician agent\{consultation\.consultation\.length === 1 \? '' : 's'\} consulted/, 'the count still exists, inside How your agent handled this')
+})
+
+test('selecting an alternative crossfades the primary card, relabels provenance, and never leaves one physician\'s reasoning under another', () => {
+  const view = recommendation()
+  assert.match(view, /const \[selectedId, setSelectedId\] = useState\(consultation\.recommended_physician\.physician_id\)/)
+  assert.match(view, /const candidates = \[primary, \.\.\.consultation\.alternatives\]/)
+  assert.match(view, /const selected = candidates\.find\(\(item\) => item\.physician_id === selectedId\) \?\? primary/)
+  assert.match(view, /const isAgentPick = selected\.physician_id === primary\.physician_id/)
+  assert.match(view, /\{isAgentPick \? 'Recommended physician' : 'Selected specialist'\}/)
+  assert.match(view, /!isAgentPick && <p className="selection-provenance">Selected by you<\/p>/)
+  assert.match(view, /option\.physician_id === primary\.physician_id && <span className="agent-pick-tag">Agent's top recommendation<\/span>/)
+  assert.match(view, /onClick=\{\(\) => selectCandidate\(option\.physician_id\)\}>Select this specialist/)
+  assert.doesNotMatch(view, /patientFact\(|anemiaCase/, 'the Jordan/Maria-specific hardcoded reasoning lookup is gone -- every candidate uses its own real evidence/reason fields')
+})
+
+test('Start referral and the "prepared for demo" confirmation act on the currently selected candidate, not always the agent\'s original pick', () => {
+  const view = recommendation()
+  assert.match(view, /Destination: \{cleanName\(selected\.physician_name\)\} · \{selected\.specialty\}/)
+  assert.match(view, /Workup: \{selected\.required_workup\.join\(' · '\) \|\| 'None specified'\}/)
 })
 
 test('Review match details is a collapsed-by-default disclosure holding the richer reasoning', () => {

@@ -533,6 +533,8 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   const [alternativesOpen, setAlternativesOpen] = useState(false)
   const [referralStarted, setReferralStarted] = useState(false)
   const [affirmed, setAffirmed] = useState(false)
+  const [selectedId, setSelectedId] = useState(consultation.recommended_physician.physician_id)
+  const [swapping, setSwapping] = useState(false)
   useEffect(() => {
     if (!focusEventId) return
     setNetworkOpen(true); setHighlight(true)
@@ -546,40 +548,65 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   }, [focusEventId, networkOpen])
   const primary = consultation.recommended_physician
   const historical = evidenceFor(primary, 'historical_practice_similarity')
-  const explicitRule = evidenceFor(primary, 'explicit_physician_rule')
   const operational = evidenceFor(primary, 'operational')
-  const anemiaCase = primary.specialty === 'Gastroenterology'
-  const patientFact = (term: string) => consultation.patient_facts_used.find((fact) => fact.toLowerCase().includes(term))
-  const reasons = (anemiaCase ? [patientFact('hemoglobin declined'), patientFact('no documented prior'), explicitRule] : [patientFact('creatinine'), patientFact('egfr'), explicitRule]).filter(Boolean) as string[]
-  const leadReason = reasons[0]
-  const shortName = cleanName(primary.physician_name).split(' ').at(-1)
+  // Agent recommendation vs. physician selection are deliberately never
+  // conflated: `selected` drives every visible field, but `primary` (the
+  // agent's own top pick) is always known separately -- see isAgentPick.
+  const candidates = [primary, ...consultation.alternatives]
+  const selected = candidates.find((item) => item.physician_id === selectedId) ?? primary
+  const isAgentPick = selected.physician_id === primary.physician_id
+  const explicitRule = evidenceFor(selected, 'explicit_physician_rule')
+  const supportingFacts = selected.evidence.filter((item) => item.kind === 'patient_fact').map((item) => item.detail).slice(0, 2)
+  const reasons = [explicitRule, ...supportingFacts].filter(Boolean) as string[]
+  const shortName = cleanName(selected.physician_name).split(' ').at(-1)
   const selectedClarificationIndex = consultation.messages.findIndex((message) => message.message_type === 'follow_up_question' && message.sender_name.includes(shortName || ''))
   const selectedClarificationAnswer = selectedClarificationIndex >= 0 ? consultation.messages.slice(selectedClarificationIndex + 1).find((message) => message.message_type === 'follow_up_answer') : undefined
+  /**
+   * ~150ms fade-out, swap the underlying candidate, ~200ms fade-in -- no
+   * navigation, no page jump. Selection is presentation state for this
+   * session only (see PatientWorkspace/runConsult's docs): there is no
+   * backend concept of a "selected candidate" to persist it against.
+   */
+  const selectCandidate = (physicianId: string) => {
+    if (physicianId === selectedId || swapping) return
+    if (prefersReducedMotion()) { setSelectedId(physicianId); setReferralStarted(false); return }
+    setSwapping(true)
+    window.setTimeout(() => {
+      setSelectedId(physicianId); setReferralStarted(false)
+      requestAnimationFrame(() => requestAnimationFrame(() => setSwapping(false)))
+    }, 150)
+  }
   return <section className="recommendations" aria-label="Specialist recommendations" tabIndex={-1}>
     {/* Compact by default (see design_references/) -- only name, specialty, one fit
      * indicator, one metadata line, one rationale sentence, and the primary action.
      * Everything denser lives behind "Review match details" below. */}
-    <article className="best-fit-card compact">
-      <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(primary.physician_name)}</span><div><h2>{cleanName(primary.physician_name)}</h2><p>{primary.specialty}</p></div></div>
-      <p className="fit-indicator">Strong clinical fit</p>
-      <p className="fit-meta">{insuranceLabel(primary.insurance_status)} · {primary.availability}</p>
-      {leadReason && <p className="fit-rationale">{leadReason}</p>}
-      <div className="best-fit-actions"><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(primary.physician_name)} · {primary.specialty}</span><span>Workup: {consultation.before_referral.join(' · ')}</span><span>No referral was transmitted.</span></div>}</div>
+    <article className={`best-fit-card compact ${swapping ? 'swapping' : ''}`}>
+      <p className="best-fit-kicker">{isAgentPick ? 'Recommended physician' : 'Selected specialist'}</p>
+      <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(selected.physician_name)}</span><div><h2>{cleanName(selected.physician_name)}</h2><p>{selected.specialty}</p></div></div>
+      {!isAgentPick && <p className="selection-provenance">Selected by you</p>}
+      <p className="fit-indicator">{selected.clinical_fit === 'strong' ? 'Strong clinical fit' : selected.clinical_fit === 'moderate' ? 'Moderate clinical fit' : 'Limited clinical fit'}</p>
+      <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selected.availability}</p>
+      <p className="fit-rationale">{selected.reason}</p>
+      <div className="best-fit-actions"><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(selected.physician_name)} · {selected.specialty}</span><span>Workup: {selected.required_workup.join(' · ') || 'None specified'}</span><span>No referral was transmitted.</span></div>}</div>
     </article>
 
     <div className="recommendation-feedback"><span>Does this reflect how you would practice?</span>{affirmed ? <em role="status">Noted. Nothing was changed on your agent.</em> : <><button className="text-button" onClick={() => setAffirmed(true)}>Yes</button><button className="text-button" onClick={() => navigate(calibrationPath(learningKeyForPatient(consultation.patient_id), consultation.patient_id, recordId))}>Not quite <b>→</b></button></>}</div>
 
+    {/* One open surface -- whitespace and hairline rules separate groups,
+     * never a bordered/shaded box nested inside the already-boxed card. */}
     <section className="options-section"><button className="options-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Review match details <span>{detailsOpen ? '−' : '+'}</span></button>
       {detailsOpen && <div className="match-details">
-        <div className="best-fit-body"><section><p className="section-label">Why this match</p><ul className="reason-list">{reasons.map((reason) => <li key={reason}><span>✓</span>{reason}</li>)}</ul>{selectedClarificationAnswer && <p className="clarification-note">Clarified before referral: {selectedClarificationAnswer.summary}</p>}</section><section className="before-visit"><p className="section-label">Before referral</p>{consultation.before_referral.map((item) => <span key={item}>{item.includes('(') ? item.match(/\(([^)]+)\)/)?.[1] : item}<small>{item}</small></span>)}</section></div>
-        <div className="recommendation-access"><div><span>Access</span><strong>{primary.availability}</strong></div><div><span>Insurance</span><strong>{primary.insurance_status}</strong></div></div>
+        {reasons.length > 0 && <div className="match-details-group"><p className="section-label">Why this match</p><ul className="reason-list">{reasons.map((reason) => <li key={reason}><span>✓</span>{reason}</li>)}</ul>{selectedClarificationAnswer && <p className="clarification-note">Clarified before referral: {selectedClarificationAnswer.summary}</p>}</div>}
+        <div className="match-details-group"><p className="section-label">Before referral</p><p className="before-visit-plain">{selected.required_workup.length > 0 ? selected.required_workup.map((item) => item.includes('(') ? item.match(/\(([^)]+)\)/)?.[1] : item).join('   ') : 'None specified'}</p></div>
+        <div className="match-details-group"><p className="section-label">Access &amp; coverage</p><p className="access-coverage-line">{insuranceLabel(selected.insurance_status)} · {selected.availability}</p></div>
       </div>}
     </section>
 
     <section className="options-section"><button className="options-toggle" aria-expanded={alternativesOpen} onClick={() => setAlternativesOpen(!alternativesOpen)}>Other referral options <span>{alternativesOpen ? '−' : '+'}</span></button>
-      {alternativesOpen && <div className="alternatives-list">{consultation.alternatives.map((option) => <div className="alternative-row" key={option.physician_id}>
-        <div><strong>{cleanName(option.physician_name)}</strong><span>{option.specialty}</span></div>
-        <p>{option.reason}{option.availability ? ` · ${option.availability.replace('Approximately ', '')}` : ''}</p>
+      {alternativesOpen && <div className="alternatives-list">{candidates.filter((item) => item.physician_id !== selectedId).map((option) => <div className="alternative-row" key={option.physician_id}>
+        <div><strong>{cleanName(option.physician_name)}</strong><span>{option.specialty}</span>{option.physician_id === primary.physician_id && <span className="agent-pick-tag">Agent's top recommendation</span>}</div>
+        <p>{option.reason}{option.availability ? ` · ${option.availability.replace('Approximately ', '~')}` : ''}</p>
+        <button type="button" className="text-button" onClick={() => selectCandidate(option.physician_id)}>Select this specialist <span>→</span></button>
       </div>)}</div>}
     </section>
 
@@ -632,18 +659,20 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
     }).catch(() => { if (!cancelled) setActivity(null) })
     return () => { cancelled = true }
   }, [patientId])
-  const scrollToRecommendation = (behavior: ScrollBehavior) => {
-    const target = document.querySelector<HTMLElement>('.recommendations')
-    target?.scrollIntoView({ behavior, block: 'start' })
-    target?.focus({ preventScroll: true })
-  }
+  /**
+   * The synthetic demo request is often faster than a physician can actually
+   * read "Consulting the network" -- so the consulting state is held open for
+   * a minimum presentation floor, never added on top of a slower real
+   * response. This is demo pacing only; a real owner clinical workflow must
+   * never get artificial latency injected into it.
+   */
   const runConsult = async () => {
     setConsulting(true); setConsultation(null); setRecordId(undefined); setError(null)
+    const minimumConsultingDisplay = new Promise<void>((resolve) => window.setTimeout(resolve, 2000))
     try {
-      const result = await consultNetwork(patientId, context)
+      const [result] = await Promise.all([consultNetwork(patientId, context), minimumConsultingDisplay])
       setConsultation(result)
       void refreshActivity()
-      requestAnimationFrame(() => scrollToRecommendation(prefersReducedMotion() ? 'auto' : 'smooth'))
     } catch (consultError) {
       setError(consultError instanceof Error ? consultError.message : 'Consultation failed')
     } finally {
@@ -694,12 +723,13 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
     {currentIssue && <p className="patient-current-issue"><span className="section-label">Current issue</span>{currentIssue}</p>}
     <hr className="patient-header-divider" />
     {error && <div className="error-banner" role="alert"><strong>Unable to complete this action.</strong> {error}</div>}
-    {/* design_references/index_lamina.html's detail-grid, copied literally: two
-     * matching bordered .patient-top-card boxes in one row -- the history
-     * timeline (left) and next-step action (right). DOM order keeps the
-     * action box first so mobile (single column) still surfaces it before
-     * the timeline; grid-column flips the visual order on desktop to match
-     * the reference exactly. */}
+    {/* Two-column body: the left column is Lamina's own continuous clinical
+     * record -- a boxed demo-style history timeline leads it, then the
+     * overview and everything else continue directly beneath in the same
+     * column. The right column is the sticky action box, top-aligned with
+     * that leading box. DOM order keeps the action box first so mobile
+     * (single column) still surfaces it before the clinical record;
+     * grid-column flips the visual order on desktop. */}
     <div className="patient-detail-grid">
       <aside className="patient-next-step patient-top-card">
         <h2>Next step</h2>
@@ -711,7 +741,7 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
         </div>}
         {nextStepState === 'ready' && consultation && <>
           <div className="next-step-card ready">
-            <span className="status-label success">Your agent got back to you</span>
+            <span className="status-label resolved">Your agent got back to you</span>
             <h3>A specialist is ready for your review.</h3>
             <p>Review the match below, then choose how to move care forward.</p>
           </div>
@@ -735,23 +765,22 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
         </div>}
         <p className="bottom-note">Simulated workflow · No referral is sent</p>
       </aside>
-      {(consultation || currentIssue) && <section className="patient-history-section patient-top-card" aria-labelledby="patient-history-heading">
-        <h2 id="patient-history-heading">Patient history</h2>
-        <p className="page-intro">The story so far, all in one place.</p>
-        <div className="clinical-timeline">
-          {consultation && <div className="timeline-event">
-            {activity?.latest_consulted_at && <time>{formatTime(activity.latest_consulted_at)}</time>}
-            <h4>Agent returned a specialist recommendation</h4>
-            <p>{cleanName(consultation.recommended_physician.physician_name)} · {consultation.recommended_physician.specialty}</p>
-          </div>}
-          {currentIssue && <div className="timeline-event">
-            <h4>{currentIssue}</h4>
-            <p>Reason for this referral workflow, as recorded in the patient's chart.</p>
-          </div>}
-        </div>
-      </section>}
-    </div>
-    <div className="patient-clinical-main">
+      <div className="patient-clinical-main">
+        {(consultation || currentIssue) && <section className="patient-history-section patient-top-card" aria-labelledby="patient-history-heading">
+          <h2 id="patient-history-heading">Patient history</h2>
+          <p className="page-intro">The story so far, all in one place.</p>
+          <div className="clinical-timeline">
+            {consultation && <div className="timeline-event">
+              {activity?.latest_consulted_at && <time>{formatTime(activity.latest_consulted_at)}</time>}
+              <h4>Agent returned a specialist recommendation</h4>
+              <p>{cleanName(consultation.recommended_physician.physician_name)} · {consultation.recommended_physician.specialty}</p>
+            </div>}
+            {currentIssue && <div className="timeline-event">
+              <h4>{currentIssue}</h4>
+              <p>Reason for this referral workflow, as recorded in the patient's chart.</p>
+            </div>}
+          </div>
+        </section>}
         <section className="clinical-overview" aria-labelledby="clinical-overview-heading">
           <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
           <div className="clinical-columns">
@@ -798,6 +827,7 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
             </section>
           </div>
         </details>
+      </div>
     </div>
   </main></ProductShell>
 }

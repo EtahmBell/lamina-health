@@ -123,7 +123,7 @@ test('reset calls the canonical endpoint and confirms quietly', () => {
 test('consulting shows a single calm loading card in the rail -- no graph, no multi-step animation, no completion overlay', () => {
   const run = slice(app, 'const runConsult = async', 'if (loading) return')
   assert.match(run, /setConsulting\(true\); setConsultation\(null\); setRecordId\(undefined\); setError\(null\)/)
-  assert.match(run, /await consultNetwork\(patientId, context\)/)
+  assert.match(run, /consultNetwork\(patientId, context\)/)
   assert.doesNotMatch(run, /setVisibleMessageCount|setCompletion|setNetworkCollapsed/, 'no per-message replay or completion state machine remains')
   assert.doesNotMatch(app, /function ConsultationNetwork|function NetworkConsultationSummary/, 'the old graph/compact-summary components are removed, not just unused')
   assert.match(patientPage(), /Consulting the network/)
@@ -131,11 +131,17 @@ test('consulting shows a single calm loading card in the rail -- no graph, no mu
   assert.match(patientPage(), /Comparing clinical fit, referral requirements, access, and your practice preferences…/)
 })
 
-test('a completed live run scrolls to the recommendation once, with no artificial delay loop', () => {
+test('the synthetic demo holds a minimum ~2s consulting floor, never added on top of a slower real response', () => {
+  const run = slice(app, 'const runConsult = async', 'if (loading) return')
+  assert.match(run, /const minimumConsultingDisplay = new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, 2000\)\)/)
+  assert.match(run, /await Promise\.all\(\[consultNetwork\(patientId, context\), minimumConsultingDisplay\]\)/, 'the real request and the presentation floor race together, not stack')
+})
+
+test('a completed live run never scrolls or jumps the page -- the right rail fades in place', () => {
   const run = slice(app, 'const runConsult = async', 'if (loading) return')
   assert.match(run, /void refreshActivity\(\)/, 'canonical patient state refreshes after a run')
-  assert.match(run, /requestAnimationFrame\(\(\) => scrollToRecommendation\(prefersReducedMotion\(\) \? 'auto' : 'smooth'\)\)/)
+  assert.doesNotMatch(run, /scrollIntoView|scrollToRecommendation/, 'no automatic page movement on completion')
+  assert.doesNotMatch(app, /function scrollToRecommendation/, 'the helper is gone, not merely unused')
   assert.doesNotMatch(run, /await delay\(/, 'no setTimeout-based animation sequencing')
-  assert.match(app, /className="recommendations" aria-label="Specialist recommendations" tabIndex=\{-1\}/)
-  assert.ok(someRule('.recommendations', /scroll-margin-top: 92px/), 'the scroll target clears the top chrome')
+  assert.match(styles, /\.next-step-card\.consulting, \.next-step-card\.ready, \.recommendations \{ animation: next-step-fade-in/, 'the result fades in rather than appearing abruptly')
 })

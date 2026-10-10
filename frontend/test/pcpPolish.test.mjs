@@ -62,10 +62,10 @@ test('the Next step panel is sticky and sits beside clinical context on desktop'
 
 /* ----------------------------------------------------------------- mobile */
 
-test('mobile stacks the Next step panel above Patient history, full width, un-stuck', () => {
+test('mobile stacks the Next step panel above the clinical column, full width, un-stuck', () => {
   const mobileRule = [...styles.matchAll(/@media \(max-width: 900px\) \{([^]*?)\n\}/g)].map((m) => m[1]).join('\n')
   assert.match(mobileRule, /\.patient-next-step \{ grid-column: 1; grid-row: 1; position: static; \}/)
-  assert.match(mobileRule, /\.patient-history-section \{ grid-column: 1; grid-row: 2;/)
+  assert.match(mobileRule, /\.patient-clinical-main \{ grid-column: 1; grid-row: 2; \}/)
 })
 
 test('the sticky Next step rail has no nested/internal scroll container', () => {
@@ -82,14 +82,37 @@ test('Patient history renders as a quiet narrative timeline, not a dense data ca
   assert.doesNotMatch(page, /className="timeline-event card"|className="clinical-block patient-timeline"/)
 })
 
-test('Patient history and Next step are matching bordered boxes, aligned in the same grid row (design_references/\'s detail-grid)', () => {
+test('Patient history and Next step are matching bordered boxes, top-aligned at the head of their respective columns', () => {
   const page = patientPage()
   assert.match(page, /<aside className="patient-next-step patient-top-card">/)
   assert.match(page, /<section className="patient-history-section patient-top-card"/)
   assert.ok(someRule('.patient-top-card', /border: 1px solid var\(--border\)/), 'both boxes share one bordered-surface style')
   assert.ok(someRule('.patient-top-card', /padding: 25px/))
   assert.ok(someRule('.patient-next-step', /grid-column: 2; grid-row: 1/))
-  assert.ok(someRule('.patient-history-section', /grid-column: 1; grid-row: 1/), 'same row, opposite column -- not uneven stacked sections')
+  assert.ok(someRule('.patient-clinical-main', /grid-column: 1; grid-row: 1/), 'same row as Next step, so Patient history (its first child) starts top-aligned with it')
+})
+
+test('no green appears anywhere in the patient-detail recommendation workflow -- reference green is replaced with Lamina mineral tones', () => {
+  assert.doesNotMatch(styles, /\.best-fit-card \{[^}]*var\(--success\)/)
+  assert.doesNotMatch(styles, /\.fit-indicator \{[^}]*var\(--success\)/)
+  assert.doesNotMatch(styles, /\.decision-badge\.strong \{[^}]*var\(--success\)|\.decision-badge\.strong \{[^}]*#edf3ee/)
+  assert.doesNotMatch(styles, /\.reason-list li > span \{[^}]*var\(--success\)/)
+  assert.doesNotMatch(styles, /\.referral-prepared \{[^}]*var\(--success\)/)
+  assert.doesNotMatch(app, /className="status-label success"/, 'the ready-state badge uses the mineral .resolved variant, not the shared green .success one')
+  assert.ok(someRule('.status-label.resolved', /var\(--mineral-deep\)/))
+  assert.ok(someRule('.best-fit-card', /var\(--mineral-deep\)/))
+})
+
+test('honest omission: if a selected candidate has no required workup, the UI says so rather than inheriting another physician\'s', () => {
+  assert.match(app, /selected\.required_workup\.length > 0 \? selected\.required_workup/)
+  assert.match(app, /: 'None specified'/)
+})
+
+test('Clinical overview continues directly beneath Patient history in the left column -- never pushed full-width below both columns', () => {
+  const page = patientPage()
+  const leftColumn = page.slice(page.indexOf('<div className="patient-clinical-main">'))
+  assert.match(leftColumn, /patient-history-section[\s\S]*clinical-overview/, 'history leads, overview follows, same column')
+  assert.ok(someRule('.patient-clinical-main', /grid-column: 1/), 'the left column is a grid child beside Next step, not a full-width row underneath it')
 })
 
 test('Next step has its own h2 heading + supporting line, matching Patient history\'s header treatment', () => {
