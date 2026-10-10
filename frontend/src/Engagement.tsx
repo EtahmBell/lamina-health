@@ -1248,17 +1248,53 @@ export function InitializationCard({ initialization, navigate, trainPath }: { in
 /* ------------------------------------------------------------- My Agent: Overview */
 
 /**
+ * The single, clearest CTA on Overview -- "what should I teach my agent next?"
+ * Reuses agentBannerPlan's real, state-driven label/href/support (the same logic
+ * the Dashboard banner uses) so the copy never drifts, just presented as its own
+ * band instead of a card beside KPI tiles. Replaces the old InitializationCard +
+ * agent-overview-actions pairing, which could render two differently-worded
+ * "continue setup"-shaped CTAs on the same screen.
+ */
+function TrainingReminder({ overview, navigate, trainPath }: { overview: AgentOverview; navigate: Navigate; trainPath: string }) {
+  const plan = agentBannerPlan(overview.training, trainPath)
+  if (!plan) {
+    return <section className="training-reminder">
+      <p className="eyebrow">Training</p>
+      <h2>Your agent is up to date.</h2>
+      <p className="training-reminder-support">No new questions are waiting right now.</p>
+    </section>
+  }
+  const initialized = overview.initialization.initialized
+  const trainTabPath = `${trainPath.replace(/\/train$/, '')}?tab=train`
+  return <section className="training-reminder">
+    <p className="eyebrow">{initialized ? 'Keep teaching your agent' : 'Next best step'}</p>
+    <h2>{initialized ? 'Your agent keeps learning how you make referral and care decisions.' : "Build your agent's starting picture of your practice."}</h2>
+    <p className="training-reminder-support">{plan.support}</p>
+    {overview.last_trained_at && <p className="training-reminder-meta">Last trained {relativeDayLabel(overview.last_trained_at)}</p>}
+    <div className="training-reminder-actions">
+      <button className="button-primary" onClick={() => navigate(plan.href)}>{plan.label} <span>→</span></button>
+      <button className="text-button" onClick={() => navigate(trainTabPath)}>View training history →</button>
+    </div>
+  </section>
+}
+
+/**
  * What the agent is actually doing in the network, not an onboarding/completion
  * metaphor -- built only from real consultation records (each physician-agent
  * evaluation the network returned carries its own specialty), no fabricated
- * metrics. Renders nothing when there's no consultation history yet rather than
- * inventing placeholder activity.
+ * metrics. Renders an honest empty state rather than inventing placeholder
+ * activity when there's no consultation history yet.
  */
 function AgentNetworkActivity({ records }: { records: ConsultationRecord[] }) {
-  if (records.length === 0) return null
+  if (records.length === 0) return <section className="agent-network-activity">
+    <h2 className="band-heading">Your agent in the network</h2>
+    <p className="agent-empty-note">No network consultations yet. This section fills in once your agent consults the network for a patient.</p>
+  </section>
   const agentNames = new Set<string>()
   const specialtyCounts = new Map<string, number>()
+  let mostRecent = records[0]
   for (const record of records) {
+    if (record.completed_at > mostRecent.completed_at) mostRecent = record
     for (const evaluation of record.result.consultation) {
       agentNames.add(evaluation.physician_name)
       specialtyCounts.set(evaluation.specialty, (specialtyCounts.get(evaluation.specialty) ?? 0) + 1)
@@ -1267,10 +1303,10 @@ function AgentNetworkActivity({ records }: { records: ConsultationRecord[] }) {
   const ranked = [...specialtyCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
   const maxCount = ranked[0]?.[1] ?? 1
   return <section className="agent-network-activity">
-    <h3 className="agent-analytics-heading">How your agent is behaving in the network</h3>
-    <div className="agent-network-stats">
-      <div><em>{records.length}</em><span>Network consultation{records.length === 1 ? '' : 's'}</span></div>
-      <div><em>{agentNames.size}</em><span>Physician agent{agentNames.size === 1 ? '' : 's'} consulted</span></div>
+    <h2 className="band-heading">Your agent in the network</h2>
+    <div className="agent-network-summary">
+      <div className="agent-network-number"><strong>{records.length}</strong><span>Network consultation{records.length === 1 ? '' : 's'}</span></div>
+      <div className="agent-network-number"><strong>{agentNames.size}</strong><span>Physician agent{agentNames.size === 1 ? '' : 's'} consulted</span></div>
     </div>
     {ranked.length > 0 && <div className="agent-specialty-distribution">
       <p className="practice-subheading">Specialties your agent reaches out to most</p>
@@ -1280,13 +1316,19 @@ function AgentNetworkActivity({ records }: { records: ConsultationRecord[] }) {
         <span className="agent-specialty-count">{count}</span>
       </li>)}</ul>
     </div>}
+    {ranked.length > 0 && <div className="agent-network-insights">
+      <div><span className="agent-insight-label">Most consulted specialty</span><strong>{ranked[0][0]}</strong></div>
+      <div><span className="agent-insight-label">Last network activity</span><strong>{relativeDayLabel(mostRecent.completed_at)}</strong></div>
+    </div>}
   </section>
 }
 
 /**
- * Overview now absorbs what used to be a separate Practice tab (post-8B consolidation):
- * identity/summary, confirmed representation, and gaps all live in one place — "How does
- * my agent currently represent me?" is answered on one screen, not split across two.
+ * Overview now absorbs what used to be a separate Practice tab (post-8B consolidation).
+ * Four bands, top to bottom: identity lives in the page header above this component;
+ * then training reminder + representation summary; then real network behavior; then
+ * the detailed representation (clinical focus, practice rules). Scrolling the page
+ * should read as one coherent picture of the agent, not a stack of unrelated cards.
  */
 export function AgentOverviewPanel({ overview, representation, navigate, trainPath, personaId, consultationRecords = [], extra }: {
   overview: AgentOverview | null; representation: PracticeRepresentation | null
@@ -1294,38 +1336,16 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
 }) {
   if (!overview) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
   const training = overview.training
-  const primary = training.action === 'continue_setup'
-    ? { label: 'Continue setup', href: `${trainPath}?mode=initialization` }
-    : training.action === 'resume_training' && training.active_session_id
-      ? { label: 'Resume training', href: `${trainPath}?resume=${training.active_session_id}` }
-      : training.action === 'start_training' && training.active_session_id
-        ? { label: 'Start training', href: `${trainPath}?resume=${training.active_session_id}` }
-        : training.action === 'start_training'
-        ? { label: 'Train my agent', href: `${trainPath}?mode=daily` }
-        : training.action === 'review_training' && training.review_session_id
-          ? { label: 'Review training', href: `${trainPath}?review=${training.review_session_id}` }
-        : null
   const reviewHref = training.state === 'review_pending' && training.review_session_id ? `${trainPath}?review=${training.review_session_id}` : null
   return <div className="agent-overview-v2">
+    <TrainingReminder overview={overview} navigate={navigate} trainPath={trainPath} />
     <section className="agent-portrait-card">
       <p className="eyebrow">Your agent currently represents you as</p>
       <p className="agent-portrait-text">{overview.portrait}</p>
     </section>
-    <div className="agent-stats-row">
-      <div><em>{overview.stats.questions_answered_total}</em><span>Questions answered</span></div>
-      <div><em>{overview.stats.confirmed_practice_learnings}</em><span>Practice rules confirmed</span></div>
-      {overview.stats.case_interests_count > 0 && <div><em>{overview.stats.case_interests_count}</em><span>Case interests</span></div>}
-      {overview.stats.network_cases_count > 0 && <div><em>{overview.stats.network_cases_count}</em><span>Network cases</span></div>}
-    </div>
-    {overview.last_trained_at && <p className="agent-last-trained">Last trained {relativeDayLabel(overview.last_trained_at)}</p>}
-    <InitializationCard initialization={overview.initialization} navigate={navigate} trainPath={trainPath} />
-    {/* InitializationCard already carries the Continue-setup CTA while setup is
-     * incomplete -- a second identical button here would be a visible duplicate. */}
-    <div className="agent-overview-actions">
-      {primary && training.action !== 'continue_setup' && <button className="button-primary" onClick={() => navigate(primary.href)}>{primary.label} <span>→</span></button>}
-      {!primary && <p className="agent-empty-note">Your agent is up to date.</p>}
-    </div>
+    <hr className="agent-overview-divider" />
     <AgentNetworkActivity records={consultationRecords} />
+    <hr className="agent-overview-divider" />
     <div className="agent-detail-divider">
       <h2>How your agent currently represents your practice</h2>
       <p className="page-intro">A detailed, structured picture built from setup, training, and your confirmed preferences.</p>
@@ -1414,22 +1434,25 @@ function ExpandableList({ items, initialCount = 5 }: { items: ReactNode[]; initi
 
 /** A rule/learning row with a lightweight, always-available revision affordance --
  * these are the physician's CURRENT confirmed representation, not a one-time review
- * queue, so "Looks right" / "Adjust" stays available indefinitely, not just right
- * after training. "Looks right" best-effort reaffirms a real training-derived
- * learning (ids from confirmed_learnings with source_type training_response map to
- * a real proposed-learning record); it is a quiet no-op for plain profile facts,
- * which have no individual backing record to confirm. "Adjust" always just opens
- * Train, where the existing branching/focused-training flow already lives. */
-function RuleRow({ text, onAgree, agreed, trainPath, navigate }: {
-  text: ReactNode; onAgree?: () => void; agreed?: boolean; trainPath: string; navigate: Navigate
+ * queue, so "Adjust" stays available indefinitely, not just right after training.
+ * "Looks right" only renders when there's a real backing action: a training-derived
+ * learning (source_type training_response) has a real proposed-learning id it can
+ * best-effort reaffirm. Plain profile facts and existing-calibration learnings have
+ * no individual record to confirm, so they get no decorative "Looks right" button --
+ * only "Adjust", which always just opens Train. */
+function RuleRow({ text, provenance, onAgree, agreed, trainPath, navigate }: {
+  text: ReactNode; provenance?: string; onAgree?: () => void; agreed?: boolean; trainPath: string; navigate: Navigate
 }) {
   return <li className="practice-rule-row">
-    <span>{text}</span>
+    <div className="practice-rule-row-main">
+      <span>{text}</span>
+      {provenance && <small className="practice-rule-provenance">{provenance}</small>}
+    </div>
     <span className="practice-rule-row-actions">
       {onAgree && (agreed
         ? <em className="practice-rule-agreed">✓ Looks right</em>
         : <button type="button" className="text-button" onClick={onAgree}>Looks right</button>)}
-      <button type="button" className="text-button" onClick={() => navigate(trainPath)}>Adjust</button>
+      <button type="button" className="text-button" onClick={() => navigate(trainPath)}>Adjust{onAgree ? '' : ' →'}</button>
     </span>
   </li>
 }
@@ -1441,11 +1464,11 @@ export function PracticeTab({ representation, personaId, portrait, reviewHref, n
   const summary = practiceSummarySentence(portrait)
   const practiceTrainPath = trainingPath(personaId)
   const [agreedIds, setAgreedIds] = useState<Set<string>>(new Set())
-  const agree = (id: number | string, sourceType: string) => {
+  /** Only called for training_response learnings, which carry a real proposed-learning
+   * id -- reaffirming is best-effort, matching the existing chat-feedback pattern. */
+  const agree = (id: number | string) => {
     setAgreedIds((prev) => new Set(prev).add(String(id)))
-    if (sourceType === 'training_response') {
-      updateProposedLearning(personaId, Number(id), 'confirm').catch(() => { /* reaffirming is best-effort in this demo */ })
-    }
+    updateProposedLearning(personaId, Number(id), 'confirm').catch(() => {})
   }
   const clinicalFocus = sections.clinical_focus
 
@@ -1510,7 +1533,15 @@ export function PracticeTab({ representation, personaId, portrait, reviewHref, n
 
     {extraLearnings.length > 0 && <section className="practice-section practice-section-learnings">
       <h3 className="practice-section-heading">Confirmed from your training</h3>
-      <ExpandableList items={extraLearnings.map((item) => <RuleRow key={item.id} text={item.statement} trainPath={practiceTrainPath} navigate={navigate} agreed={agreedIds.has(String(item.id))} onAgree={() => agree(item.id, item.source_type)} />)} />
+      <ExpandableList items={extraLearnings.map((item) => <RuleRow
+        key={item.id}
+        text={item.statement}
+        provenance="Learned from training"
+        trainPath={practiceTrainPath}
+        navigate={navigate}
+        agreed={agreedIds.has(String(item.id))}
+        onAgree={item.source_type === 'training_response' ? () => agree(item.id) : undefined}
+      />)} />
     </section>}
 
     {extra}

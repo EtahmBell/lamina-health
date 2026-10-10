@@ -616,3 +616,55 @@ test('My Agent overview analytics reflect real network behavior (consultation re
   assert.doesNotMatch(engagement, /Representation coverage/i, 'the completion/coverage framing is gone')
   assert.doesNotMatch(styles, /agent-analytics-segment/, 'the stacked coverage bar CSS is gone, not just unused')
 })
+
+/* ----------------------------------------------------- Overview IA reorganization */
+
+test('AgentAvatar\'s eyes sit on the same horizontal line -- no slant/rotation', () => {
+  const avatar = readFileSync(new URL('../src/AgentAvatar.tsx', import.meta.url), 'utf8')
+  const eyeYs = [...avatar.matchAll(/<circle cx="[\d.]+" cy="([\d.]+)" r="1\.9" fill="#fff"/g)].map((m) => m[1])
+  assert.equal(eyeYs.length, 2, 'exactly two white eye dots')
+  assert.equal(eyeYs[0], eyeYs[1], 'both eyes must share the same cy -- a slanted face is the exact bug being fixed')
+  assert.doesNotMatch(avatar, /transform=/, 'no rotation transform anywhere in the mark')
+})
+
+test('the old top KPI-card row (Questions answered / Rules confirmed / Case interests / Network cases) is gone from Overview, not just restyled', () => {
+  const panel = slice(engagement, 'export function AgentOverviewPanel', 'export type AgentActivityRow')
+  assert.doesNotMatch(panel, /agent-stats-row/)
+  assert.doesNotMatch(panel, /Questions answered/)
+  assert.doesNotMatch(panel, /Case interests/)
+  assert.doesNotMatch(styles, /\.agent-stats-row/, 'the KPI-card CSS is gone, not just unused')
+})
+
+test('Overview has exactly one training-reminder surface, with no separate duplicate setup CTA', () => {
+  const panel = slice(engagement, 'export function AgentOverviewPanel', 'export type AgentActivityRow')
+  assert.equal((panel.match(/<TrainingReminder/g) ?? []).length, 1)
+  assert.doesNotMatch(panel, /<InitializationCard/, 'Overview no longer renders the separate setup card alongside the reminder')
+})
+
+test('the training reminder adapts its framing to real initialization state -- setup-oriented when incomplete, ongoing-teaching when initialized -- never fabricating counts', () => {
+  const reminder = slice(engagement, 'function TrainingReminder', 'function AgentNetworkActivity')
+  assert.match(reminder, /const plan = agentBannerPlan\(overview\.training, trainPath\)/, 'reuses the real, state-driven CTA logic rather than inventing new copy')
+  assert.match(reminder, /overview\.initialization\.initialized/)
+  assert.match(reminder, /'Next best step'/)
+  assert.match(reminder, /'Keep teaching your agent'/)
+  assert.match(reminder, /\{plan\.support\}/, 'the supporting line is the real plan.support string, not a hardcoded fabricated count')
+})
+
+test('the detailed practice-representation band still exists after the network band, with its own heading', () => {
+  const panel = slice(engagement, 'export function AgentOverviewPanel', 'export type AgentActivityRow')
+  assert.match(panel, /How your agent currently represents your practice/)
+  assert.match(panel, /<PracticeTab representation=\{representation\}/)
+})
+
+test('practice rules keep an editable action, and "Looks right" never renders without a real backing confirm action', () => {
+  const ruleRow = slice(engagement, 'function RuleRow', 'export function PracticeTab')
+  assert.match(ruleRow, /onClick=\{\(\) => navigate\(trainPath\)\}>Adjust/, 'Adjust is always available')
+  assert.match(ruleRow, /\{onAgree &&/, '"Looks right" only renders when a real onAgree handler was supplied')
+  const practiceTab = slice(engagement, 'export function PracticeTab', 'function trainHistorySummaryLine')
+  assert.match(practiceTab, /onAgree=\{item\.source_type === 'training_response' \? \(\) => agree\(item\.id\) : undefined\}/, 'only training-derived learnings (a real proposed-learning id) get the confirm action')
+})
+
+test('Dashboard Recent activity / Recent network uses a 2fr/1fr split, consistent with the richer content in Recent activity', () => {
+  assert.match(styles, /\.dashboard-bottom-row \{ display: grid; grid-template-columns: 2fr 1fr;/)
+  assert.match(styles, /@media \(max-width: 900px\) \{ \.dashboard-bottom-row \{ grid-template-columns: 1fr; \} \}/, 'still stacks responsively below the breakpoint')
+})
