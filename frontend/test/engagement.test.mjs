@@ -294,17 +294,18 @@ test('the claimed member profile shares the NPPES directory profile\'s top-level
   assert.match(publicPage, /className="provider-profile-hero"/, 'same hero wrapper as PhysicianProfilePage (NPPES)')
   assert.match(publicPage, /className="profile-identity"/)
   assert.match(publicPage, /className="directory-avatar large"/, 'same avatar scale as the NPPES hero')
-  assert.match(publicPage, /className="profile-facts"/, 'same fact-strip geometry as the NPPES profile')
+  assert.match(publicPage, /className="profile-facts three-up"/, 'same fact-strip geometry as the NPPES profile, 3-column variant')
   assert.match(publicPage, /className="profile-provenance"/, 'same quiet public-record strip language as "Public directory record"')
   assert.match(publicPage, /Public Lamina profile/)
 })
 
-test('the claimed-member fact strip uses Lamina-member fields (location, specialty, network relationship, public agent), never consultation counts', () => {
+test('the claimed-member fact strip prioritizes physician fields (location, specialty, network relationship), never a redundant "Public agent -- Available" column or fabricated organisation, and never consultation counts', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  const facts = slice(publicPage, 'className="profile-facts"', 'className="profile-provenance"')
+  const facts = slice(publicPage, 'className="profile-facts three-up"', 'className="profile-provenance"')
   assert.match(facts, /Network relationship/)
   assert.match(facts, /networkRelationshipLabel/)
-  assert.match(facts, /Public agent/)
+  assert.doesNotMatch(facts, /Public agent/, 'the chat rail already communicates public-agent availability -- no redundant fact-strip field for it')
+  assert.doesNotMatch(facts, /Organisation/, 'no fabricated organisation field -- claimed physicians have no real org/practice-name data today')
   assert.doesNotMatch(facts, /consultation|Consultations/i)
 })
 
@@ -312,6 +313,13 @@ test('a physician profile offers a real add/remove-network action, never implies
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.match(publicPage, /<NetworkRelationshipAction npi=\{data\.physician\.npi\} relationship=\{relationship\} \/>/)
   assert.doesNotMatch(publicPage, /Consult Network/)
+})
+
+test('"Add to network" is a real filled primary button when disconnected, using the same button family as other Network actions, and transitions to a quiet "In your network" state with a subtle Remove after adding -- state is read from the real API, never fabricated', () => {
+  const action = slice(engagement, 'export function NetworkRelationshipAction', '/* ------------------------------------------------------------- Home: engagement */')
+  assert.match(action, /if \(!npi \|\| !relationship\.loaded\) return null/, 'never renders a connection state before the real network has loaded')
+  assert.match(action, /relationship\.inNetwork\s*\n\s*\? <span className="network-relationship-control"><span className="network-relationship-chip in-network">✓ In your network<\/span><button type="button" className="text-button quiet-remove"/, 'connected: a quiet chip plus a subtle text-button Remove, not another primary button')
+  assert.match(action, /: <button type="button" className="button-primary network-relationship-action" disabled=\{relationship\.busy\} onClick=\{\(\) => void relationship\.add\(\)\}>Add to network <span>→<\/span><\/button>/, 'disconnected: a real filled .button-primary, the same family as other major Network CTAs, not a weak text/secondary link')
 })
 
 test('the joined-Lamina member profile is a two-column layout with a sticky agent-chat rail, not the old single-column shell', () => {
@@ -334,12 +342,32 @@ test('mobile collapses the member-profile layout to a single column with the rai
   assert.match(styles, /@media \(max-width: 900px\) \{\s*\.member-profile-layout \{ grid-template-columns: 1fr; \}\s*\.member-chat-rail, \.member-chat-rail\.pinned \{ position: static; \}/)
 })
 
-test('"How this practice works with referrals" is ONE coherent section with internal columns (clinical focus / good-fit / helpful before referral), not three separate equal SaaS tiles', () => {
+test('"How this practice works with referrals" is ONE coherent bordered card with internal hairline-divided blocks (clinical focus / good-fit / helpful before referral), not three separate equal SaaS tiles', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.match(publicPage, /How this practice works with referrals/)
-  assert.match(publicPage, /className="referral-rep-grid"/)
-  assert.doesNotMatch(publicPage, /practice-rep-cards|practice-representation-panel/, 'the old three-equal-tiles and flat-panel layouts are both gone')
+  assert.match(publicPage, /className="referral-rep-block"/)
+  assert.doesNotMatch(publicPage, /referral-rep-grid|referral-rep-column|practice-rep-cards|practice-representation-panel/, 'the old 3-equal-column grid and flat-panel layouts are both gone')
   assert.match(styles, /\.referral-representation-section \{ border: 1px solid var\(--border\)/, 'one bordered object, not three')
+})
+
+test('clinical focus renders as quiet chips, good-fit referrals as generous rows, and helpful-before-referral as a distinct checklist -- three different treatments, not three identical tiles', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /className="referral-focus-chips"/)
+  assert.match(publicPage, /className="referral-fit-rows"/)
+  assert.match(publicPage, /className="referral-checklist"/)
+  assert.match(publicPage, /<span aria-hidden="true">✓<\/span>/, 'the pre-referral checklist uses a real checkmark, visually distinct from the chips/rows above it')
+})
+
+test('raw snake_case backend tokens are humanized before reaching the referral card, via one reusable formatter rather than one-off string replacements', () => {
+  assert.match(engagement, /function humanizeClinicalTerm\(raw: string\): string/)
+  const formatter = slice(engagement, 'function humanizeClinicalTerm', 'const FEED_TYPE_LABELS')
+  assert.doesNotMatch(formatter, /resistant_hypertension|ckd_stage|progressive_renal/i, 'a reusable word-by-word formatter, never a hardcoded replacement for one specific string')
+  assert.match(formatter, /raw\.split\('_'\)/)
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  const referralSection = slice(publicPage, 'referral-representation-section', 'about-physician-section')
+  assert.match(referralSection, /<span className="referral-chip" key=\{item\}>\{humanizeClinicalTerm\(item\)\}<\/span>/, 'clinical focus is humanized')
+  assert.match(referralSection, /<li key=\{item\}>\{humanizeClinicalTerm\(item\)\}<\/li>/, 'good-fit referrals are humanized')
+  assert.match(referralSection, /<span aria-hidden="true">✓<\/span>\{humanizeClinicalTerm\(item\)\}/, 'pre-referral workup is humanized')
 })
 
 test('case-interest "especially interested in seeing" items are folded into Good-fit referrals only when not already duplicating rep.good_fit, never shown as a separate giant list', () => {
@@ -348,25 +376,43 @@ test('case-interest "especially interested in seeing" items are folded into Good
   assert.doesNotMatch(publicPage, /especially interested in seeing/, 'no separate duplicate "areas especially interested in seeing" block')
 })
 
-test('research and teaching interests render only inside About -> Research/Teaching, not duplicated again inside the referral section', () => {
+test('good-fit referrals that exactly restate a clinical-focus entry are deduped, never shown twice', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.doesNotMatch(publicPage, /Research &amp; teaching interests|otherInterests/, 'the old duplicate research/teaching block inside the rep panel is gone')
-  assert.match(publicPage, /hasResearchSection && <div className="profile-block">/)
+  assert.match(publicPage, /clinicalFocusSeen\.has\(item\.toLowerCase\(\)\)/)
+  assert.match(publicPage, /dedupedGoodFit/)
 })
 
-test('About this physician gathers bio/background/interests/research/teaching/practice-details under one eyebrow-led section, with a restrained two-column grid for the lighter practice-detail fields', () => {
+test('research and teaching interests render only inside About -> Research & teaching, not duplicated again inside the referral section', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.doesNotMatch(publicPage, /Research &amp; teaching interests|otherInterests/, 'the old duplicate research/teaching block inside the rep panel is gone')
+  assert.match(publicPage, /\(hasResearchSection \|\| hasTeachingSection\) && <div className="profile-block">/)
+})
+
+test('About this physician has exactly ONE heading -- no separate inner "About" heading, and no doubled divider above the bio', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.match(publicPage, /className="member-profile-section about-physician-section"/)
+  const aboutBlock = slice(publicPage, 'className="member-profile-section about-physician-section"', 'Recent network updates')
+  const headingCount = (aboutBlock.match(/About this physician|>About</g) ?? []).length
+  assert.equal(headingCount, 1, `expected exactly one "About" heading inside the section, found ${headingCount}`)
+  assert.match(publicPage, /<AboutSection items=\{sections\.about\} readOnly showHeading=\{false\}\s*\/>/, 'AboutSection renders without its own heading/divider when nested here')
+  assert.match(engagement, /className=\{showHeading \? 'profile-block profile-about' : 'profile-about'\}/, 'the .profile-block divider class itself is dropped when the heading is suppressed, not just the heading text')
+})
+
+test('About this physician gathers background/interests/practice-details/research-teaching under subsections of one heading, with a restrained two-column grid for the lighter practice-detail fields', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.match(publicPage, /About this physician/)
-  assert.match(publicPage, /className="profile-block about-practice-grid"/)
+  assert.match(publicPage, /className="about-practice-grid"/)
   assert.match(styles, /\.about-practice-grid \{ display: grid; grid-template-columns: repeat\(auto-fit/)
 })
 
-test('recent network updates render as cards via MemberUpdateCard with a date when available, reusing the feed post truncation convention', () => {
+test('recent network updates reuse FeedCard (the real Network Feed post component) directly, never a second simplified post renderer', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /<MemberUpdateCard update=\{update\}/)
+  assert.doesNotMatch(engagement, /function MemberUpdateCard/, 'the old simplified duplicate post card is gone entirely')
+  assert.match(publicPage, /<FeedCard key=\{item\.id\} item=\{item\} navigate=\{navigate\} perspective=\{perspective\} \/>/)
   assert.match(publicPage, /Recent network updates/)
-  assert.match(publicPage, /relativeDayLabel\(when\)/)
+  assert.match(publicPage, /recentPosts\.length > 0/, 'an honest empty state renders when the physician has no published updates')
+  assert.match(publicPage, /View network posts →/)
+  assert.match(publicPage, /navigate\(networkUpdatesPath\(perspective\)\)/, 'routes to the real Feed tab -- no invented physician-filtered route')
 })
 
 test('"Practice representation at a glance" is visually the quietest, lowest-priority section -- an eyebrow label after every other profile section, not another h2 feature', () => {

@@ -132,7 +132,7 @@ export function NetworkRelationshipAction({ npi, relationship }: { npi: string |
   if (!npi || !relationship.loaded) return null
   return relationship.inNetwork
     ? <span className="network-relationship-control"><span className="network-relationship-chip in-network">✓ In your network</span><button type="button" className="text-button quiet-remove" disabled={relationship.busy} onClick={() => void relationship.remove()}>Remove</button></span>
-    : <button type="button" className="button-secondary network-relationship-action" disabled={relationship.busy} onClick={() => void relationship.add()}>Add to network</button>
+    : <button type="button" className="button-primary network-relationship-action" disabled={relationship.busy} onClick={() => void relationship.add()}>Add to network <span>→</span></button>
 }
 
 /* ------------------------------------------------------------- Home: engagement */
@@ -391,6 +391,24 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
       </>}
     </div>
   </div>
+}
+
+// Confirmed practice-representation values sometimes arrive as raw snake_case
+// tokens (e.g. "resistant_hypertension") rather than the human phrases most
+// entries already use (e.g. "CKD stage 3–4"). A reusable formatter, not
+// one-off string replacements: only touches tokens with a literal `_`
+// character (already-human text passes through untouched), joins the parts
+// with spaces, capitalizes the first word, and restores a small set of
+// clinical acronyms that would otherwise be mangled by that capitalization
+// (CKD, not "Ckd").
+const CLINICAL_ACRONYMS = new Set(['ckd', 'bmp', 'upcr', 'ecg', 'ekg', 'bp', 'htn', 'gfr', 'uti', 'copd', 'chf', 'dm', 'hba1c', 'ldl', 'hdl', 'tsh', 'cbc', 'bun', 'egfr', 'pcr', 'acr', 'ua'])
+function humanizeClinicalTerm(raw: string): string {
+  if (!raw.includes('_')) return raw
+  return raw.split('_').filter(Boolean).map((word, index) => {
+    const lower = word.toLowerCase()
+    if (CLINICAL_ACRONYMS.has(lower)) return lower.toUpperCase()
+    return index === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower
+  }).join(' ')
 }
 
 const FEED_TYPE_LABELS: Record<string, string> = {
@@ -1097,7 +1115,7 @@ function ProfileTimelineGroup({ category, items, personaId, onSaved, readOnly }:
 }
 
 /** About reads as a biography paragraph, not a metadata row — but reuses the same canonical save path as every other profile item. */
-function AboutSection({ items, personaId, onSaved, readOnly }: { items: ProfileItem[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean }) {
+function AboutSection({ items, personaId, onSaved, readOnly, showHeading = true }: { items: ProfileItem[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean; showHeading?: boolean }) {
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const existing = items[0] ?? null
@@ -1110,8 +1128,12 @@ function AboutSection({ items, personaId, onSaved, readOnly }: { items: ProfileI
     } finally { setBusy(false) }
   }
   if (readOnly && !existing) return null
-  return <section id="profile-section-about" className="profile-block profile-about">
-    <h2 className="profile-block-heading">About</h2>
+  // showHeading=false drops both the "About" heading AND the .profile-block
+  // divider/spacing treatment -- used when an outer section already supplies
+  // a single "About this physician" heading, so the bio never sits under two
+  // headings or two stacked divider lines (see NetworkPhysicianProfilePage).
+  return <section id="profile-section-about" className={showHeading ? 'profile-block profile-about' : 'profile-about'}>
+    {showHeading && <h2 className="profile-block-heading">About</h2>}
     {editing
       ? <ProfileItemForm category="about" initial={existing ?? undefined} busy={busy} onCancel={() => setEditing(false)} onSave={save} />
       : existing
@@ -2059,7 +2081,7 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
   </main>
 }
 
-export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }: { controlledId: string; navigate: Navigate; backPath: string }) {
+export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, perspective = 'lucy' }: { controlledId: string; navigate: Navigate; backPath: string; perspective?: DemoPhysicianPerspective }) {
   const [data, setData] = useState<import('./api.ts').NetworkPhysicianProfile | null>(null)
   const [error, setError] = useState('')
   useEffect(() => { setData(null); setError(''); getNetworkPhysicianProfile(controlledId).then(setData).catch((err: Error) => setError(err.message)) }, [controlledId])
@@ -2088,6 +2110,23 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }
     || clinicalInterests.length > 0 || hasResearchSection || hasTeachingSection || hasPracticeExtras
   const networkRelationshipLabel = !relationship.loaded ? 'Checking…' : relationship.inNetwork ? 'In your network' : 'Not yet connected'
 
+  // Good-fit referrals that merely restate a clinical-focus entry verbatim add
+  // nothing -- dedupe by exact text, never a fuzzy/invented rewrite.
+  const clinicalFocusSeen = new Set(rep.clinical_focus.map((item) => item.toLowerCase()))
+  const dedupedGoodFit = rep.good_fit.filter((item) => !clinicalFocusSeen.has(item.toLowerCase()))
+
+  // A miniature slice of the real Network Feed, not a second post renderer:
+  // reuses FeedCard directly by shaping this physician's own published
+  // updates into the same FeedListItem shape the Feed uses. Every one of
+  // these updates was authored and published by this physician themselves
+  // (practice updates are never republished under an invented agent byline),
+  // so isAgentAuthored is always false here -- unlike the Feed's own 1-2
+  // hardcoded agent-authored demo examples, which are a separate concept.
+  const recentPosts: FeedListItem[] = [...data.published_updates]
+    .sort((a, b) => new Date(b.published_at ?? b.created_at).getTime() - new Date(a.published_at ?? a.created_at).getTime())
+    .slice(0, 3)
+    .map((update) => ({ ...update, physician: data.physician, relationship_basis: [] }))
+
   return <main className="page-shell profile-page member-profile-page">
     <button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button>
     <section className="provider-profile-hero">
@@ -2105,11 +2144,10 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }
       </div>
     </section>
 
-    <div className="profile-facts">
+    <div className="profile-facts three-up">
       <div><span>Practice location</span><strong>{data.physician.location}</strong></div>
       <div><span>Specialty</span><strong>{data.physician.specialty}</strong></div>
       <div><span>Network relationship</span><strong>{networkRelationshipLabel}</strong></div>
-      <div><span>Public agent</span><strong>Available</strong></div>
     </div>
     <div className="profile-provenance">
       <strong>Public Lamina profile</strong>
@@ -2120,32 +2158,30 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }
       <div className="member-profile-main">
         {hasReferralSection && <section className="member-profile-section referral-representation-section">
           <h2>How this practice works with referrals</h2>
-          <div className="referral-rep-grid">
-            {rep.clinical_focus.length > 0 && <div className="referral-rep-column">
-              <h3>Clinical focus</h3>
-              <ul className="clinical-list">{rep.clinical_focus.map((item) => <li key={item}>{item}</li>)}</ul>
-            </div>}
-            {(rep.good_fit.length > 0 || caseInterests.length > 0) && <div className="referral-rep-column">
-              <h3>Good-fit referrals</h3>
-              <ul className="clinical-list">
-                {rep.good_fit.map((item) => <li key={item}>{item}</li>)}
-                {caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}
-              </ul>
-            </div>}
-            {rep.preferred_workup.length > 0 && <div className="referral-rep-column">
-              <h3>Helpful before referral</h3>
-              <ul className="clinical-list">{rep.preferred_workup.map((item) => <li key={item}>{item}</li>)}</ul>
-            </div>}
-          </div>
+          {rep.clinical_focus.length > 0 && <div className="referral-rep-block">
+            <h3>Clinical focus</h3>
+            <div className="referral-focus-chips">{rep.clinical_focus.map((item) => <span className="referral-chip" key={item}>{humanizeClinicalTerm(item)}</span>)}</div>
+          </div>}
+          {(dedupedGoodFit.length > 0 || caseInterests.length > 0) && <div className="referral-rep-block">
+            <h3>Good-fit referrals</h3>
+            <ul className="referral-fit-rows">
+              {dedupedGoodFit.map((item) => <li key={item}>{humanizeClinicalTerm(item)}</li>)}
+              {caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}
+            </ul>
+          </div>}
+          {rep.preferred_workup.length > 0 && <div className="referral-rep-block">
+            <h3>Helpful before referral</h3>
+            <ul className="referral-checklist">{rep.preferred_workup.map((item) => <li key={item}><span aria-hidden="true">✓</span>{humanizeClinicalTerm(item)}</li>)}</ul>
+          </div>}
           {caseInterests.length > 0 && <small className="profile-interest-disclaimer">Interests reflect what {name} wants referring physicians to know. They do not guarantee referral eligibility or override clinical fit.</small>}
         </section>}
 
         {hasAboutSection && <section className="member-profile-section about-physician-section">
-          <p className="eyebrow">About this physician</p>
-          <AboutSection items={sections.about} readOnly />
+          <h2 className="profile-block-heading">About this physician</h2>
+          <AboutSection items={sections.about} readOnly showHeading={false} />
 
           {(sections.training.length > 0 || sections.experience.length > 0 || sections.affiliations.length > 0) && <div className="profile-block">
-            <h2 className="profile-block-heading">Background</h2>
+            <h3 className="profile-block-subheading">Background</h3>
             <ProfileTimelineGroup category="training" items={sections.training} readOnly />
             <ProfileTimelineGroup category="experience" items={sections.experience} readOnly />
             <ProfileTimelineGroup category="affiliations" items={sections.affiliations} readOnly />
@@ -2153,31 +2189,37 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }
 
           {clinicalInterests.length > 0 && <InterestsPanel interests={data.professional_profile.interests} types={['clinical_interest']} readOnly />}
 
-          {hasResearchSection && <div className="profile-block">
-            <h2 className="profile-block-heading">Research &amp; publications</h2>
-            {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} readOnly />}
-            <ProfileSection category="research" items={sections.research} quiet readOnly />
-            <ProfileSection category="publications" items={sections.publications} quiet readOnly />
+          {hasPracticeExtras && <div className="profile-block">
+            <h3 className="profile-block-subheading">Practice &amp; locations</h3>
+            <div className="about-practice-grid">
+              {sections.skills_or_procedures.length > 0 && <ProfileChipSection category="skills_or_procedures" items={sections.skills_or_procedures} readOnly heading="Skills &amp; procedures" />}
+              {sections.languages.length > 0 && <ProfileChipSection category="languages" items={sections.languages} readOnly />}
+              {sections.locations.length > 0 && <ProfileSection category="locations" items={sections.locations} readOnly />}
+              {sections.professional_links.length > 0 && <ProfileSection category="professional_links" items={sections.professional_links} readOnly heading="Professional links" />}
+            </div>
           </div>}
 
-          {hasTeachingSection && <div className="profile-block">
-            <h2 className="profile-block-heading">Teaching</h2>
-            {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} readOnly />}
-            <ProfileSection category="teaching" items={sections.teaching} quiet readOnly />
-          </div>}
-
-          {hasPracticeExtras && <div className="profile-block about-practice-grid">
-            {sections.skills_or_procedures.length > 0 && <ProfileChipSection category="skills_or_procedures" items={sections.skills_or_procedures} readOnly heading="Skills &amp; procedures" />}
-            {sections.languages.length > 0 && <ProfileChipSection category="languages" items={sections.languages} readOnly />}
-            {sections.locations.length > 0 && <ProfileSection category="locations" items={sections.locations} readOnly heading="Practice &amp; locations" />}
-            {sections.professional_links.length > 0 && <ProfileSection category="professional_links" items={sections.professional_links} readOnly heading="Professional links" />}
+          {(hasResearchSection || hasTeachingSection) && <div className="profile-block">
+            <h3 className="profile-block-subheading">Research &amp; teaching</h3>
+            {hasResearchSection && <>
+              {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} readOnly />}
+              <ProfileSection category="research" items={sections.research} quiet readOnly />
+              <ProfileSection category="publications" items={sections.publications} quiet readOnly />
+            </>}
+            {hasTeachingSection && <>
+              {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} readOnly />}
+              <ProfileSection category="teaching" items={sections.teaching} quiet readOnly />
+            </>}
           </div>}
         </section>}
 
-        {data.published_updates.length > 0 && <section className="member-profile-section">
+        <section className="member-profile-section">
           <h2>Recent network updates</h2>
-          <div className="member-update-cards">{data.published_updates.map((update) => <MemberUpdateCard update={update} key={update.id} />)}</div>
-        </section>}
+          {recentPosts.length > 0
+            ? <div className="profile-feed-slice">{recentPosts.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={perspective} />)}</div>
+            : <p className="agent-empty-note">{name} hasn’t published any network updates yet.</p>}
+          <button type="button" className="text-button" onClick={() => navigate(networkUpdatesPath(perspective))}>View network posts →</button>
+        </section>
 
         <MemberProfileAnalytics rep={rep} />
 
@@ -2211,25 +2253,6 @@ function MemberProfileAnalytics({ rep }: { rep: PracticeRepresentation['sections
       <span className="agent-specialty-count">{segment.count}</span>
     </li>)}</ul>
   </section>
-}
-
-/** A lighter, card-styled echo of the Feed's post treatment -- purpose-built for
- * PracticeUpdate (this endpoint doesn't return full NetworkFeedItem/physician
- * objects), so it reuses the same truncation behavior and date convention
- * without pulling in FeedCard's unrelated byline/agent-badge machinery. */
-function MemberUpdateCard({ update }: { update: PracticeUpdate }) {
-  const [expanded, setExpanded] = useState(false)
-  const isLong = update.body.length > 220
-  const preview = isLong && !expanded ? `${update.body.slice(0, 220).trimEnd()}…` : update.body
-  const when = update.published_at ?? update.created_at
-  return <article className="member-update-card">
-    <div className="member-update-card-header">
-      <span className="feed-post-tag">{FEED_TYPE_LABELS[update.type] ?? 'Update'}</span>
-      {when && <small className="member-update-date">{relativeDayLabel(when)}</small>}
-    </div>
-    <p className="feed-post-title">{update.title}</p>
-    <p className="feed-post-body">{preview}{isLong && <button type="button" className="text-button feed-post-more" onClick={() => setExpanded((value) => !value)}>{expanded ? 'See less' : 'See more'}</button>}</p>
-  </article>
 }
 
 const AGENT_PREVIEW_STARTERS = [

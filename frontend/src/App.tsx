@@ -74,10 +74,6 @@ const SPECIALIST_NAV_ITEMS = [
   { id: 'specialist-network', title: 'Network', icon: <NetworkNavIcon />, path: '/specialist/network' },
 ]
 
-function ProfileControl({ navigate }: { navigate: Navigate }) {
-  return <button className="profile-control" onClick={() => navigate('/profile')} aria-label="Open clinician profile"><span>LS</span><strong>{PCP_NAME}</strong></button>
-}
-
 const DEMO_PERSPECTIVES = [
   { id: 'pcp' as const, name: PCP_NAME, role: 'Referring physician', initials: 'LS', path: '/home', profilePath: '/profile' },
   { id: 'specialist' as const, name: SPECIALIST_NAME, role: 'Specialist', initials: 'IJ', path: '/specialist/home', profilePath: '/specialist/profile' },
@@ -114,17 +110,6 @@ function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; pers
   </div>
 }
 
-/** A quiet utility for returning physician-account holders — distinct from
- * Dr. Lucy Saruhashi's demo-workspace identity, and never competing with Enter
- * workspace. Renders nothing while auth is unconfigured or still loading. */
-function PortalAccountControl({ navigate }: { navigate: Navigate }) {
-  const { configured, loading, user } = useAuth()
-  if (!configured || loading) return null
-  return user
-    ? <button className="text-button portal-account-link" onClick={() => navigate('/claim/my-identities')}>My physician identities</button>
-    : <button className="text-button portal-account-link" onClick={() => navigate(signInPath('/claim/my-identities'))}>Sign in</button>
-}
-
 /** My Agent is a persistent object pinned to the bottom of the sidebar — not a
  * top-level nav item — so the agent stays visible from every workspace screen. It
  * is a real nav target (keyboard-reachable button) and picks up an active state
@@ -147,23 +132,41 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
   </div>
 }
 
+/**
+ * The entry gateway (replaces the old spinning-orbit "Enter workspace" portal):
+ * a quiet role picker, not a marketing site. Physician uses the existing
+ * claim/sign-in flow; Explore the demo drops straight into the existing
+ * synthetic Dr. Lucy Saruhashi workspace at /home (the same destination the
+ * old orbit button used); Patient is a real, visibly disabled future state,
+ * never fake functionality.
+ */
 function LandingPage({ navigate }: { navigate: Navigate }) {
+  const { configured, loading, user } = useAuth()
+  const physicianAuthed = configured && !loading && !!user
+  const physicianPath = physicianAuthed ? '/claim/my-identities' : signInPath('/claim/my-identities')
   return <main className="landing-page">
-    <header className="landing-header"><Brand /><div className="landing-header-actions"><PortalAccountControl navigate={navigate} /><SyntheticStatus /><ProfileControl navigate={navigate} /></div></header>
-    <section className="landing-content">
-      <p className="eyebrow">Primary care workspace</p>
-      <h1>{timeAwareGreeting(PCP_NAME)}</h1>
-      <p className="landing-question">Your agent is ready.</p>
-      <button className="landing-network-control" onClick={() => navigate('/home')} aria-label="Enter workspace">
-        <span className="ambient-ring one" /><span className="ambient-ring two" /><span className="ambient-line line-one" /><span className="ambient-line line-two" />
-        <NetworkMark active />
-        <span className="landing-agent-label">YOUR AGENT · ACTIVE</span>
-        <strong>Enter workspace</strong><small>Current work and recent agent activity</small>
-      </button>
-      <button className="physician-identity-entry" onClick={() => navigate('/claim')}>
-        <span>Are you a physician?</span>
-        <strong>Find your Lamina identity <b>→</b></strong>
-      </button>
+    <header className="landing-header"><Brand /><div className="landing-header-actions"><SyntheticStatus /></div></header>
+    <section className="gateway-content">
+      <p className="eyebrow">Specialty care, connected.</p>
+      <h1>Lamina</h1>
+      <p className="gateway-statement">A specialty-care network for physicians and their agents.</p>
+      <div className="gateway-roles">
+        <button className="gateway-role-card primary" onClick={() => navigate(physicianPath)}>
+          <span className="gateway-role-label">Physician</span>
+          <p>{physicianAuthed ? 'Open your physician workspace.' : 'Sign in to your physician workspace.'}</p>
+          <strong>{physicianAuthed ? 'Continue' : 'Sign in'} <b>→</b></strong>
+        </button>
+        <button className="gateway-role-card" onClick={() => navigate('/home')}>
+          <span className="gateway-role-label">Explore the demo</span>
+          <p>Explore Lamina using synthetic clinical data.</p>
+          <strong>Enter demo <b>→</b></strong>
+        </button>
+        <button className="gateway-role-card disabled" disabled aria-label="Patient -- a patient experience is coming later">
+          <span className="gateway-role-label">Patient</span>
+          <p>A patient experience is coming later.</p>
+          <strong>Coming later</strong>
+        </button>
+      </div>
     </section>
     <p className="landing-footnote">Lamina helps primary care teams find the right specialist, required workup, and appropriate access.</p>
   </main>
@@ -915,7 +918,7 @@ export default function App() {
   if (path === '/settings') return <SettingsPage navigate={navigate} />
   if (path === '/network/updates') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
   const networkProfileControlledId = path.match(/^\/network\/profile\/([^/]+)$/)?.[1]
-  if (networkProfileControlledId) return <ProductShell navigate={navigate} section="network"><NetworkPhysicianProfilePage controlledId={networkProfileControlledId} navigate={navigate} backPath="/home" /></ProductShell>
+  if (networkProfileControlledId) return <ProductShell navigate={navigate} section="network"><NetworkPhysicianProfilePage controlledId={networkProfileControlledId} navigate={navigate} backPath="/home" perspective="lucy" /></ProductShell>
   const historyPatientId = path.match(/^\/consultations\/patient\/([^/]+)$/)?.[1]
   if (historyPatientId) return <PatientConsultationsPage patientId={historyPatientId} navigate={navigate} />
   const recordId = path.match(/^\/consultations\/(\d+)$/)?.[1]
@@ -937,7 +940,7 @@ export default function App() {
   if (path === '/specialist/network') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={params} /></ProductShell>
   if (path === '/specialist/network/updates') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
   const specialistNetworkProfileId = path.match(/^\/specialist\/network\/profile\/([^/]+)$/)?.[1]
-  if (specialistNetworkProfileId) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkPhysicianProfilePage controlledId={specialistNetworkProfileId} navigate={navigate} backPath="/specialist/home" /></ProductShell>
+  if (specialistNetworkProfileId) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkPhysicianProfilePage controlledId={specialistNetworkProfileId} navigate={navigate} backPath="/specialist/home" perspective="iain" /></ProductShell>
   if (path === '/network') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={params} /></ProductShell>
   const networkNpi = path.match(/^\/network\/([^/]+)$/)?.[1]
   if (networkNpi) return <ProductShell navigate={navigate} section="network"><PhysicianProfilePage npi={networkNpi} navigate={navigate} /></ProductShell>

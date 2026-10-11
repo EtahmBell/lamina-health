@@ -19,34 +19,32 @@ const providerProfile = () => slice(network, 'export function PhysicianProfilePa
 
 /* -------------------------------------------------------------- entry */
 
-test('the Portal keeps Enter workspace primary and adds a secondary physician entry', () => {
-  assert.match(portal(), /onClick=\{\(\) => navigate\('\/home'\)\}/, 'Lucy demo entry unchanged')
-  assert.match(portal(), /aria-label="Enter workspace"/)
-  assert.match(portal(), /onClick=\{\(\) => navigate\('\/claim'\)\}/)
-  assert.match(portal(), /Are you a physician\?/)
-  assert.match(portal(), /Find your Lamina identity/)
-  assert.doesNotMatch(portal(), /Find your AI agent/i)
+test('the entry gateway offers three role cards: Physician (primary), Explore the demo, and a visibly disabled future Patient card', () => {
+  assert.match(portal(), /className="gateway-role-card primary"/)
+  assert.match(portal(), /onClick=\{\(\) => navigate\('\/home'\)\}/, 'Explore the demo still drops straight into the existing Lucy demo workspace, unchanged destination')
+  assert.match(portal(), /Explore the demo/)
+  assert.match(portal(), /Enter demo/)
+  assert.match(portal(), /className="gateway-role-card disabled" disabled/, 'Patient is a real disabled control, not styling alone')
+  assert.match(portal(), /A patient experience is coming later\./)
+  assert.doesNotMatch(portal(), /aria-label="Enter workspace"|ambient-ring|landing-network-control/, 'the old spinning-orbit entry control is gone entirely')
 })
 
-test('the Portal offers a quiet top-right Sign in for returning account holders', () => {
-  assert.match(app, /function PortalAccountControl/)
-  assert.match(app, /<PortalAccountControl navigate=\{navigate\} \/><SyntheticStatus \/><ProfileControl navigate=\{navigate\} \/>/, 'it sits in the existing top-right utility row, not competing with Enter workspace')
-  const control = slice(app, 'function PortalAccountControl', 'function ProductShell')
-  assert.match(control, /if \(!configured \|\| loading\) return null/, 'nothing renders while auth is unconfigured or still resolving')
-  assert.match(control, />Sign in</)
+test('the Physician gateway card reuses the existing sign-in/claim flow -- no invented auth system', () => {
+  assert.match(portal(), /const \{ configured, loading, user \} = useAuth\(\)/)
+  assert.match(portal(), /navigate\(physicianPath\)/)
+  assert.match(portal(), /signInPath\('\/claim\/my-identities'\)/)
 })
 
 test('general sign-in (not from a specific claim) defaults to My physician identities', () => {
-  const control = slice(app, 'function PortalAccountControl', 'function ProductShell')
-  assert.match(control, /navigate\(signInPath\('\/claim\/my-identities'\)\)/)
+  assert.match(portal(), /physicianPath = physicianAuthed \? '\/claim\/my-identities' : signInPath\('\/claim\/my-identities'\)/)
   const shellSignIn = slice(claim, 'function ClaimShell', 'function LifecycleStepper')
   assert.match(shellSignIn, /navigate\(signInPath\('\/claim\/my-identities'\)\)/)
 })
 
-test('an authenticated visitor sees account access instead of Sign in, on the Portal and in the claim shell alike', () => {
-  const control = slice(app, 'function PortalAccountControl', 'function ProductShell')
-  assert.match(control, /user\s*\n?\s*\? <button className="text-button portal-account-link" onClick=\{\(\) => navigate\('\/claim\/my-identities'\)\}>My physician identities</)
-  assert.doesNotMatch(control, /PCP_NAME|Dr\. Lucy Saruhashi/, 'the physician account is never rendered as Dr. Lucy Saruhashi')
+test('an authenticated visitor sees continue-to-workspace copy instead of Sign in, on the gateway and in the claim shell alike', () => {
+  assert.match(portal(), /physicianAuthed \? 'Open your physician workspace\.' : 'Sign in to your physician workspace\.'/)
+  assert.match(portal(), /physicianAuthed \? 'Continue' : 'Sign in'/)
+  assert.doesNotMatch(portal(), /PCP_NAME|Dr\. Lucy Saruhashi/, 'the physician gateway card is never rendered as Dr. Lucy Saruhashi -- that is the separate Explore-the-demo path')
 })
 
 test('the Lucy demo route table is untouched', () => {

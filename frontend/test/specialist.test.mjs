@@ -9,7 +9,7 @@ const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to))
 
 const shell = () => slice(app, 'function ProductShell', 'function LandingPage')
-const perspectiveSwitch = () => slice(app, 'function PerspectiveSwitch', 'function PortalAccountControl')
+const perspectiveSwitch = () => slice(app, 'function PerspectiveSwitch', 'function ProductShell')
 const routing = () => slice(app, 'export default function App', app.length)
 const home = () => slice(specialist, 'export function SpecialistHomePage', 'function SpecialistCaseListRow')
 const cases = () => slice(specialist, 'function SpecialistCaseListRow', 'export function SpecialistCaseDetailPage')

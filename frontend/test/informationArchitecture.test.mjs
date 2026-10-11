@@ -18,18 +18,18 @@ const patientPage = () => slice('function PatientWorkspace', 'export default fun
 
 /* ------------------------------------------------------------------ portal */
 
-test('root remains the portal and the portal circle enters Home', () => {
+test('root remains the entry gateway, and Explore the demo still enters Home', () => {
   assert.match(source, /if \(path === '\/'\) return <LandingPage navigate=\{navigate\} \/>/)
   assert.match(portal(), /navigate\('\/home'\)/)
-  assert.match(portal(), /Enter workspace/)
+  assert.match(portal(), /Enter demo/)
   assert.doesNotMatch(portal(), /getConsultationHistory/)
 })
 
-test('the portal greeting is time-aware and the stale question is gone', () => {
-  assert.match(portal(), /timeAwareGreeting\(PCP_NAME\)/)
+test('the gateway is a neutral role picker, not a personalized Dr. Lucy Saruhashi greeting -- that identity only appears once a role is chosen', () => {
+  assert.doesNotMatch(portal(), /timeAwareGreeting/, 'the time-aware greeting belongs to the Dashboard, reached after choosing a role, not the neutral pre-entry gateway')
   assert.doesNotMatch(source, /Who are we helping today\?/)
   assert.doesNotMatch(portal(), /Good (morning|afternoon|evening)/)
-  assert.match(portal(), /Your agent is ready\./)
+  assert.match(portal(), /A specialty-care network for physicians and their agents\./)
 })
 
 /* ------------------------------------------------------------------- shell */
@@ -62,7 +62,7 @@ test('the sidebar physician-agent block is one clickable control into My Agent, 
 
 test('the Dashboard (post-8B rename of Home) greets the physician and leads with the agent banner, then the patient watchlist, then activity (Dashboard+Network polish pass: the standalone Needs You hero and the KPI row are both gone — no boxed metric-card row replaces them)', () => {
   assert.match(home(), /<p className="eyebrow">Dashboard<\/p><h1>\{timeAwareGreeting\(greetingName\)\}<\/h1>/)
-  assert.doesNotMatch(source, /physician workspace/i)
+  assert.doesNotMatch(home(), /physician workspace/i)
   assert.doesNotMatch(home(), /Recent patients|home-patients|getPatientActivity/)
   assert.doesNotMatch(home(), /dashboard-needs-you/, 'the large standalone Needs You section is gone from the Dashboard')
   assert.doesNotMatch(home(), /dashboard-stats|DashboardMetricCard/, 'no KPI/stat-card row replaces Needs You either')

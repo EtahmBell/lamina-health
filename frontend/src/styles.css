@@ -118,7 +118,7 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 .profile-hero-status { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: 0 0 auto; }
 .network-relationship-control { display: flex; align-items: center; gap: 8px; }
 .network-relationship-chip { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: .62rem; font-weight: 600; white-space: nowrap; }
-.network-relationship-action { padding: 7px 13px; font-size: .64rem; white-space: nowrap; }
+.network-relationship-action { min-height: 32px; gap: 8px; padding: 0 13px; font-size: .64rem; white-space: nowrap; }
 .network-relationship-control .quiet-remove { font-size: .62rem; }
 /* The claimed member hero adds a 3rd identity line (location) the NPPES hero
  * doesn't have, which would otherwise make .profile-location inherit the
@@ -157,17 +157,29 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 .brand-button { border: 0; background: transparent; padding: 0; color: inherit; cursor: pointer; }
 .text-button { border: 0; background: transparent; color: var(--mineral-deep); padding: 0; cursor: pointer; font-size: .72rem; font-weight: 600; }
 .back-link { display: inline-block; margin-bottom: 24px; }
-.landing-page { min-height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: radial-gradient(circle at 50% 48%, rgb(184 92 50 / 7%), transparent 25%), var(--background); }
+/* Entry gateway (replaces the old spinning-orbit portal): a quiet, editorial
+ * role picker -- brand, one product statement, three role cards. No motion
+ * beyond ordinary hover states. */
+.landing-page { min-height: 100vh; display: flex; flex-direction: column; background: var(--background); }
 .landing-header { height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 42px; border-bottom: 1px solid rgb(216 210 199 / 70%); }
-.landing-content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 50px 24px 30px; text-align: center; }
-.landing-content h1 { font-size: clamp(2.4rem, 5vw, 4.2rem); }.landing-question { margin: 10px 0 32px; color: var(--clinical); font-family: var(--font-display); font-size: clamp(1.35rem, 2.5vw, 2rem); }
-.landing-network-control { position: relative; width: 244px; height: 244px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 50%; background: rgb(255 254 250 / 88%); color: var(--text-primary); cursor: pointer; }
-.landing-network-control::after { position: absolute; inset: 12px; border: 1px solid rgb(184 92 50 / 20%); border-radius: 50%; content: ""; }.landing-network-control:hover { border-color: rgb(184 92 50 / 48%); }.landing-network-control:hover .network-motif { transform: scale(1.06); }
-.landing-network-control strong, .landing-network-control small { position: relative; z-index: 2; display: block; }.landing-network-control strong { margin-top: 15px; font-family: var(--font-display); font-size: 1.05rem; }.landing-network-control small { margin-top: 5px; color: var(--text-secondary); font-size: .62rem; }
-.ambient-ring { position: absolute; border: 1px solid rgb(36 52 71 / 12%); border-radius: 50%; animation: ambient-pulse 4s ease-in-out infinite; }.ambient-ring.one { inset: -18px; }.ambient-ring.two { inset: -36px; animation-delay: 1s; }.ambient-line { position: absolute; width: 1px; height: 42px; background: linear-gradient(transparent, rgb(184 92 50 / 36%), transparent); transform-origin: 50% 164px; animation: orbit-line 9s linear infinite; }.line-one { top: -42px; }.line-two { bottom: -42px; transform-origin: 50% -80px; animation-duration: 12s; animation-direction: reverse; }
-@keyframes ambient-pulse { 50% { opacity: .35; transform: scale(1.025); } } @keyframes orbit-line { to { transform: rotate(360deg); } }
-.landing-secondary { display: flex; gap: 26px; margin-top: 45px; }.landing-secondary button { border: 0; border-bottom: 1px solid transparent; background: transparent; padding: 5px 0; color: var(--text-secondary); cursor: pointer; font-size: .7rem; }.landing-secondary button:hover { border-color: var(--accent); color: var(--accent-hover); }.landing-secondary span { margin-left: 6px; color: var(--accent); }
+.gateway-content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 24px 40px; text-align: center; }
+.gateway-content h1 { margin: 10px 0 0; font-size: clamp(3rem, 7vw, 5.2rem); }
+.gateway-statement { max-width: 46ch; margin: 16px 0 52px; color: var(--text-secondary); font-family: var(--font-display); font-size: clamp(1.05rem, 2vw, 1.3rem); line-height: 1.55; }
+.gateway-roles { display: grid; grid-template-columns: repeat(3, minmax(210px, 260px)); gap: 20px; width: 100%; max-width: 880px; }
+.gateway-role-card { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-height: 168px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 26px 24px; color: inherit; text-align: left; cursor: pointer; box-shadow: var(--shadow-soft); transition: border-color 150ms; }
+.gateway-role-card:hover { border-color: var(--mineral-subtle); }
+.gateway-role-card.primary { border-color: var(--mineral-deep); background: var(--mineral-surface); }
+.gateway-role-card.primary:hover { border-color: var(--mineral-deep-hover); }
+.gateway-role-card.disabled { cursor: default; opacity: .6; }
+.gateway-role-card.disabled:hover { border-color: var(--border); }
+.gateway-role-label { color: var(--text-secondary); font-family: var(--font-ui); font-size: .6rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.gateway-role-card.primary .gateway-role-label { color: var(--mineral-deep); }
+.gateway-role-card p { flex: 1; margin: 0; color: var(--clinical); font-family: var(--font-display); font-size: 1rem; line-height: 1.45; }
+.gateway-role-card strong { display: inline-flex; align-items: center; gap: 7px; margin-top: 2px; color: var(--mineral-deep-hover); font-size: .76rem; font-weight: 600; }
+.gateway-role-card.disabled strong { color: var(--text-secondary); font-weight: 500; }
+.gateway-role-card strong b { font-weight: 700; }
 .landing-footnote { margin: 0; padding: 20px 24px 26px; color: var(--text-secondary); text-align: center; font-size: .62rem; }
+@media (max-width: 760px) { .gateway-roles { grid-template-columns: 1fr; max-width: 380px; } }
 .network-motif { position: relative; width: 58px; height: 58px; display: inline-block; flex: 0 0 58px; border-radius: 50%; background: #f3e7db; transition: transform 180ms ease; }.network-motif svg { position: absolute; inset: 7px; width: 44px; height: 44px; fill: none; stroke: var(--clinical); stroke-width: 1.5; }.network-motif i, .network-motif b { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }.network-motif i:nth-of-type(1) { top: 5px; left: 25px; }.network-motif i:nth-of-type(2) { top: 25px; right: 5px; }.network-motif i:nth-of-type(3) { bottom: 5px; left: 25px; background: var(--clinical); }.network-motif i:nth-of-type(4) { top: 25px; left: 5px; background: #73849a; }.network-motif b { top: 25px; left: 25px; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }.network-motif.active i { animation: node-breathe 1.4s ease-in-out infinite alternate; }.network-motif.active i:nth-of-type(2) { animation-delay: .2s; }.network-motif.active i:nth-of-type(3) { animation-delay: .4s; }.network-motif.active i:nth-of-type(4) { animation-delay: .6s; }.network-motif.resolved { background: #edf3ee; }.network-motif.resolved b { box-shadow: 0 0 0 2px var(--success); } @keyframes node-breathe { to { transform: scale(1.35); opacity: .55; } }
 .selector-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }.selector-header h1 { font-size: clamp(1.85rem, 2.4vw, 2.5rem); }.selector-header p:last-child { margin: 10px 0 0; color: var(--text-secondary); font-size: .8rem; }.selector-header > span { border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 7px 10px; color: var(--text-secondary); font-size: .61rem; }
 .patient-worklist-section + .patient-worklist-section { margin-top: 31px; }
@@ -200,16 +212,14 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 @media (max-width: 1040px) {
   .network-action { align-items: stretch; flex-direction: column; }.network-controls { width: 100%; }.agent-network-map { height: 330px; }.agent-3 { left: 2%; }.agent-5 { right: 2%; }.best-fit-physician { align-items: flex-start; flex-wrap: wrap; }.fit-summary { width: 100%; }.evidence-grid { grid-template-columns: 1fr 1fr; }.evidence-grid .wide { grid-column: 1 / -1; }.evidence-grid > div:nth-child(3) { border-top: 1px solid var(--border); border-left: 0; }.evidence-grid > div:nth-child(4) { border-top: 1px solid var(--border); }}
 @media (max-width: 760px) {
-  .landing-header { height: 66px; padding: 0 20px; }.landing-header .synthetic-status { display: none; }.landing-content { justify-content: flex-start; padding-top: 72px; }.landing-network-control { width: 210px; height: 210px; }.landing-secondary { flex-direction: column; gap: 8px; }.selector-header { align-items: flex-start; flex-direction: column; }.network-controls { grid-template-columns: 1fr; }.network-controls .consult-button { width: 100%; }.agent-network-map { height: auto; display: grid; grid-template-columns: 1fr; gap: 7px; margin-top: 18px; }.agent-network-map > svg, .network-core { display: none; }.consult-agent { position: static; min-width: 0; transform: none; }.evidence-grid { grid-template-columns: 1fr; }.evidence-grid > div + div { border-top: 1px solid var(--border); border-left: 0; }.evidence-grid .wide { grid-column: auto; }.best-fit-actions { align-items: stretch; flex-direction: column; }.anemia-summary, .anemia-context { grid-template-columns: 1fr; }}
+  .landing-header { height: 66px; padding: 0 20px; }.landing-header .synthetic-status { display: none; }.gateway-content { padding-top: 48px; }.selector-header { align-items: flex-start; flex-direction: column; }.network-controls { grid-template-columns: 1fr; }.network-controls .consult-button { width: 100%; }.agent-network-map { height: auto; display: grid; grid-template-columns: 1fr; gap: 7px; margin-top: 18px; }.agent-network-map > svg, .network-core { display: none; }.consult-agent { position: static; min-width: 0; transform: none; }.evidence-grid { grid-template-columns: 1fr; }.evidence-grid > div + div { border-top: 1px solid var(--border); border-left: 0; }.evidence-grid .wide { grid-column: auto; }.best-fit-actions { align-items: stretch; flex-direction: column; }.anemia-summary, .anemia-context { grid-template-columns: 1fr; }}
 
 /* Physician-agent workspace additions, using the existing cream/navy/rust palette. */
 .workspace-bar-actions, .landing-header-actions { display: flex; align-items: center; gap: 22px; }
 .profile-control { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 4px 10px 4px 4px; color: var(--clinical); cursor: pointer; }
 .profile-control span { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 50%; background: var(--clinical); color: var(--surface); font-family: var(--font-display); font-size: .55rem; }.profile-control strong { font-size: .65rem; font-weight: 600; }.profile-control:hover { border-color: var(--accent); }
-.landing-question { margin-bottom: 98px; }.landing-network-control .network-motif { width: 73px; height: 73px; flex-basis: 73px; }
-.network-motif { display: inline-grid; place-items: center; background: #f3e7db; }.network-motif .motif-logo { position: relative; width: 36px; height: 36px; overflow: hidden; }.network-motif .motif-logo img { position: absolute; top: 0; left: 0; width: 137px; max-width: none; transform: translate(-12.8px, -32.5px); mix-blend-mode: multiply; }.landing-network-control .motif-logo { width: 44px; height: 44px; }.landing-network-control .motif-logo img { width: 168px; transform: translate(-15.7px, -39.9px); }
+.network-motif { display: inline-grid; place-items: center; background: #f3e7db; }.network-motif .motif-logo { position: relative; width: 36px; height: 36px; overflow: hidden; }.network-motif .motif-logo img { position: absolute; top: 0; left: 0; width: 137px; max-width: none; transform: translate(-12.8px, -32.5px); mix-blend-mode: multiply; }
 .directory-network-glyph { display: inline-grid; place-items: center; }.directory-network-glyph::before, .directory-network-glyph::after { display: none; }.directory-network-glyph .motif-logo { position: relative; width: 46px; height: 46px; overflow: hidden; }.directory-network-glyph .motif-logo img { position: absolute; top: 0; left: 0; width: 175px; max-width: none; transform: translate(-16.4px, -41.6px); mix-blend-mode: multiply; }.agent-activation-card header .directory-network-glyph .motif-logo { width: 31px; height: 31px; }.agent-activation-card header .directory-network-glyph img { width: 118px; transform: translate(-11px, -28px); }
-.landing-agent-label { z-index: 2; margin-top: 11px; color: var(--accent-hover); font-size: .55rem; font-weight: 700; letter-spacing: .12em; }.landing-network-control strong { margin-top: 9px; }.agent-ready { margin: 36px 0 0; color: var(--clinical); font-size: .72rem; }.landing-secondary { margin-top: 17px; gap: 12px; }.landing-secondary button { border: 1px solid var(--border); border-radius: 9px; background: var(--surface); padding: 13px 17px; color: var(--clinical); font-size: .72rem; box-shadow: var(--shadow-soft); }.landing-secondary button:hover { border-color: var(--accent); background: #fff9f1; }
 .page-intro, .panel-intro { color: var(--text-secondary); font-size: .73rem; line-height: 1.55; }.muted-note { color: var(--text-secondary); font-size: .72rem; }
 .patient-group { margin-top: 28px; }.patient-group-heading, .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 15px; }.patient-group-heading { margin-bottom: 10px; }.patient-group-heading h2 { margin: 0; font-size: 1.02rem; }.patient-group-heading span { color: var(--text-secondary); font-size: .65rem; }
 .history-page h1, .agent-page h1 { font-size: clamp(1.85rem, 2.4vw, 2.5rem); }.history-detail .recommendations { margin-top: 25px; }.history-empty { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); margin-top: 26px; }
@@ -219,7 +229,7 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 .calibration-layout { display: grid; grid-template-columns: .8fr 1.2fr; gap: 17px; margin-top: 20px; }.calibration-questions { display: grid; align-content: start; gap: 9px; }.calibration-questions button { display: flex; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 9px; background: #f8f3eb; padding: 14px; color: var(--clinical); text-align: left; cursor: pointer; font-size: .72rem; line-height: 1.45; }.calibration-questions button.active { border-color: var(--accent); background: #fff8ed; }.calibration-answer { border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 10px; padding: 22px; }.calibration-answer > span { color: var(--accent-hover); font-size: .57rem; text-transform: uppercase; }.calibration-answer h3 { margin: 11px 0; font-size: 1.05rem; }.calibration-answer p { color: var(--clinical); font-size: .8rem; line-height: 1.55; }.calibration-answer small { display: block; color: var(--text-secondary); font-size: .62rem; line-height: 1.5; }.calibration-answer > div { display: flex; gap: 9px; margin-top: 19px; }.calibration-answer button:disabled { opacity: .55; }
 .agent-activity-row { width: 100%; display: flex; align-items: center; gap: 15px; border: 0; border-top: 1px solid var(--border); background: transparent; padding: 17px 2px; text-align: left; cursor: pointer; }.agent-activity-row:hover { background: #fff9f1; }.agent-activity-row > span:nth-child(2) { flex: 1; }.agent-activity-row strong, .agent-activity-row small, .agent-activity-row em { display: block; }.agent-activity-row strong { color: var(--clinical); font-size: .72rem; }.agent-activity-row small, .agent-activity-row em { margin-top: 5px; color: var(--text-secondary); font-size: .62rem; font-style: normal; }.agent-activity-row > b { color: var(--accent); }.profile-page { max-width: 660px; }.profile-page .agent-panel { margin-top: 20px; }.profile-page .agent-panel > p { color: var(--text-secondary); font-size: .75rem; }
 @media (max-width: 900px) { .agent-section-grid, .calibration-layout { grid-template-columns: 1fr; }}
-@media (max-width: 760px) { .sidebar nav { display: flex; flex-direction: row; gap: 4px; margin-top: 16px; overflow-x: auto; }.sidebar .nav-item { flex: 0 0 auto; width: auto; padding: 8px 10px; }.sidebar .nav-icon { display: none; }.workspace-bar-actions .synthetic-status { display: none; }.workspace-bar { gap: 7px; }.workspace-bar strong { font-size: .62rem; }.profile-control strong { display: none; }.profile-control { padding: 3px; }.landing-question { margin-bottom: 81px; }.landing-secondary { flex-direction: row; flex-wrap: wrap; justify-content: center; }.landing-secondary button { padding: 11px; }.landing-content { padding-bottom: 70px; }.agent-hero { padding: 22px; gap: 15px; }.agent-hero-mark { width: 66px; height: 66px; flex-basis: 66px; }.agent-hero-mark .network-motif { transform: scale(.65); }.learning-grid { grid-template-columns: 1fr; }.agent-panel { padding: 21px; }}
+@media (max-width: 760px) { .sidebar nav { display: flex; flex-direction: row; gap: 4px; margin-top: 16px; overflow-x: auto; }.sidebar .nav-item { flex: 0 0 auto; width: auto; padding: 8px 10px; }.sidebar .nav-icon { display: none; }.workspace-bar-actions .synthetic-status { display: none; }.workspace-bar { gap: 7px; }.workspace-bar strong { font-size: .62rem; }.profile-control strong { display: none; }.profile-control { padding: 3px; }.gateway-content { padding-bottom: 50px; }.agent-hero { padding: 22px; gap: 15px; }.agent-hero-mark { width: 66px; height: 66px; flex-basis: 66px; }.agent-hero-mark .network-motif { transform: scale(.65); }.learning-grid { grid-template-columns: 1fr; }.agent-panel { padding: 21px; }}
 
 /* Physician-agent network projection. Lines exist only for completed consult records. */
 .physician-directory-page .directory-hero { padding-bottom: 14px; }
@@ -252,16 +262,14 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 @media (max-width: 600px) { .consult-record-stages > header { flex-direction: column; }.consult-record-event summary { flex-wrap: wrap; }.consult-record-event summary em { margin-left: 25px; }}
 
 /* Information architecture and referral-brief hierarchy. */
-.landing-network-control { margin-bottom: 12px; }.ambient-ring.one { inset: -13px; }.ambient-ring.two { inset: -25px; }.ambient-line { height: 30px; transform-origin: 50% 148px; }.line-one { top: -31px; }.line-two { bottom: -31px; transform-origin: 50% -68px; }.agent-ready { margin-top: 46px; }
-.landing-state { display: flex; gap: 10px; margin-top: 19px; }.landing-state button { min-width: 230px; display: grid; grid-template-columns: 1fr auto; gap: 3px 14px; border: 1px solid var(--border); border-radius: 10px; background: rgb(255 252 247 / 78%); padding: 12px 14px; color: var(--clinical); cursor: pointer; text-align: left; box-shadow: var(--shadow-soft); }.landing-state button:hover { border-color: var(--accent); }.landing-state span, .landing-state small { display: block; }.landing-state span { font-family: var(--font-display); font-size: .76rem; font-weight: 700; }.landing-state small { color: var(--text-secondary); font-size: .55rem; }.landing-state b { grid-column: 2; grid-row: 1 / 3; align-self: center; color: var(--accent); }
 .referral-brief { max-width: 1080px; }.brief-identity { display: flex; align-items: center; justify-content: space-between; gap: 20px; }.brief-identity h1 { margin-bottom: 6px; font-size: clamp(2.5rem, 5vw, 4rem); }.brief-identity p:last-child { margin: 0; color: var(--text-secondary); font-size: .8rem; }.brief-synthesis { max-width: 820px; margin: 25px 0 17px; color: var(--clinical); font-family: var(--font-display); font-size: clamp(1.15rem, 2vw, 1.5rem); line-height: 1.55; }
 .decision-signals { display: flex; flex-wrap: wrap; gap: 8px; }.decision-signals span { display: flex; align-items: baseline; gap: 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 8px 11px; color: var(--clinical); font-size: .64rem; }.decision-signals b { color: var(--accent-hover); font-size: .55rem; text-transform: uppercase; }
 .clinical-question { max-width: 850px; margin-top: 30px; border-left: 3px solid var(--clinical); padding: 5px 0 5px 22px; }.clinical-question h2 { margin: 5px 0 7px; font-size: clamp(1.35rem, 2.5vw, 1.85rem); line-height: 1.35; }.clinical-question p:last-child { margin: 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }.brief-action { align-items: flex-end; margin-top: 24px; }.brief-action .network-copy { align-items: center; }.brief-action .network-copy h2 { font-size: 1.25rem; }.brief-action .network-controls { width: min(100%, 510px); grid-template-columns: minmax(245px, 1fr) auto; }.brief-action .network-controls input { height: 46px; }.brief-action .network-controls .consult-button { height: 46px; min-width: 175px; }
 .source-record { margin-top: 22px; border-top: 1px solid var(--border); }.source-record > summary { display: flex; justify-content: space-between; gap: 16px; padding: 18px 3px; color: var(--accent-hover); cursor: pointer; font-size: .67rem; font-weight: 700; }.source-record > summary span { color: var(--text-secondary); font-size: .56rem; font-weight: 400; }.source-record-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding-bottom: 12px; }.source-record-grid > section { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 17px; }.source-record-grid h3 { margin: 0 0 11px; font-size: .9rem; }.source-record-grid ul { margin: 0; padding-left: 18px; color: var(--clinical); font-size: .63rem; line-height: 1.7; }.source-record-grid p { margin: 8px 0; color: var(--clinical); font-size: .62rem; line-height: 1.5; }.source-record-grid p b { display: block; color: var(--text-secondary); font-size: .51rem; text-transform: uppercase; }.source-labs { grid-column: 1 / -1; }.source-labs > div { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }.source-labs span { display: grid; gap: 2px; border: 1px solid var(--border); border-radius: 7px; padding: 8px; color: var(--clinical); font-size: .59rem; }.source-labs b { color: var(--text-secondary); font-size: .5rem; text-transform: uppercase; }.source-labs small { color: var(--text-secondary); font-size: .48rem; }.source-notes { grid-column: 1 / -1; }
 .agent-tabs { display: flex; gap: 5px; margin: 18px 0; border-bottom: 1px solid var(--border); }.agent-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 12px 17px; color: var(--text-secondary); cursor: pointer; font-size: .68rem; font-weight: 700; }.agent-tabs button.active { border-color: var(--accent); color: var(--accent-hover); }.agent-overview { display: grid; grid-template-columns: 1.05fr .95fr; gap: 18px; }.agent-overview-intro { border-left: 3px solid var(--accent); background: rgb(255 252 247 / 55%); padding: 28px; }.agent-overview-intro h2 { max-width: 600px; margin: 7px 0 12px; font-size: 1.65rem; }.agent-overview-intro > p:last-of-type { max-width: 600px; color: var(--text-secondary); font-size: .7rem; line-height: 1.6; }.agent-overview-intro .button-primary { margin-top: 15px; }.agent-empty-note { border-left: 3px solid var(--success); background: #edf3ee; padding: 13px; color: var(--clinical); font-size: .65rem; }
 .agent-activity-row .network-motif { width: 40px; height: 40px; flex-basis: 40px; }.agent-activity-row .network-motif .motif-logo { transform: scale(.65); }
-@media (max-width: 850px) { .landing-state { flex-direction: column; }.agent-overview, .source-record-grid { grid-template-columns: 1fr; }.source-labs, .source-notes { grid-column: auto; }.source-labs > div { grid-template-columns: repeat(2, 1fr); }.brief-action .network-controls { grid-template-columns: 1fr; }}
-@media (max-width: 600px) { .agent-tabs { overflow-x: auto; }.agent-tabs button { flex: 0 0 auto; padding-inline: 12px; }.source-record > summary { flex-direction: column; }.source-labs > div { grid-template-columns: 1fr; }.brief-synthesis { font-size: 1.08rem; }.landing-network-control { margin-bottom: 5px; }.agent-ready { margin-top: 38px; }}
+@media (max-width: 850px) { .agent-overview, .source-record-grid { grid-template-columns: 1fr; }.source-labs, .source-notes { grid-column: auto; }.source-labs > div { grid-template-columns: repeat(2, 1fr); }.brief-action .network-controls { grid-template-columns: 1fr; }}
+@media (max-width: 600px) { .agent-tabs { overflow-x: auto; }.agent-tabs button { flex: 0 0 auto; padding-inline: 12px; }.source-record > summary { flex-direction: column; }.source-labs > div { grid-template-columns: 1fr; }.brief-synthesis { font-size: 1.08rem; }}
 
 /* Workflow home: current work first, supporting state second. */
 .home-page { max-width: 1180px; animation: workspace-enter .22s ease-out both; }.home-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 25px; padding: 8px 0 27px; border-bottom: 1px solid var(--border); }.home-hero h1 { margin: 5px 0 8px; font-size: clamp(2.5rem, 5vw, 4rem); }.home-hero p:last-child { margin: 0; color: var(--text-secondary); font-size: .75rem; }.home-start { min-width: 165px; justify-content: space-between; }.home-loading { padding: 42px 0; color: var(--text-secondary); font-size: .7rem; }.home-loading .loading-line { max-width: 260px; }
@@ -673,6 +681,13 @@ button.lam-row:hover { background: #fff9f1; }
  * design system, not two products. Only below that shared shell does the page
  * expand into the richer two-column member layout with a sticky agent-chat rail. */
 .member-profile-page .profile-facts { margin-top: 20px; }
+/* Claimed members prioritize physician-facing fields over the NPPES directory
+ * fields -- Practice location / Specialty / Network relationship, no
+ * "Public agent -- Available" column (the visible chat rail already says
+ * that), and no invented Organisation value when the data doesn't exist. */
+.profile-facts.three-up { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 900px) { .profile-facts.three-up { grid-template-columns: 1fr 1fr; } .profile-facts.three-up > div:nth-child(3) { border-top: 1px solid var(--border); border-left: 0; } }
+@media (max-width: 680px) { .profile-facts.three-up { grid-template-columns: 1fr; } .profile-facts.three-up > div:nth-child(3) { border-left: 0; } }
 .member-profile-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; align-items: start; margin-top: 28px; }
 .member-profile-main { max-width: 720px; min-width: 0; }
 .member-profile-section { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 20px; }
@@ -681,39 +696,43 @@ button.lam-row:hover { background: #fff9f1; }
 .member-profile-section .page-intro { margin: 0 0 14px; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
 .member-profile-section .eyebrow { margin: 0 0 10px; }
 
-/* ONE conceptual object -- "How this practice works with referrals" -- with
- * internal columns separated by hairlines, not three unrelated equal SaaS
- * tiles. Columns on wide screens, stacked with a top hairline on narrow ones. */
-.referral-representation-section { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 22px 24px; box-shadow: var(--shadow-soft); }
-.referral-representation-section > h2 { margin-bottom: 16px; }
-.referral-rep-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
-.referral-rep-column { padding: 0 20px; }
-.referral-rep-column:first-child { padding-left: 0; }
-.referral-rep-column:last-child { padding-right: 0; }
-.referral-rep-column + .referral-rep-column { border-left: 1px solid var(--border); }
-.referral-rep-column h3 { margin: 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.referral-rep-column .clinical-list { margin-top: 10px; }
-.referral-representation-section .profile-interest-disclaimer { display: block; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
-@media (max-width: 720px) {
-  .referral-rep-grid { grid-template-columns: 1fr; }
-  .referral-rep-column { padding: 16px 0 0; }
-  .referral-rep-column:first-child { padding-top: 0; }
-  .referral-rep-column + .referral-rep-column { border-left: 0; border-top: 1px solid var(--border); }
-}
+/* ONE conceptual object -- "How this practice works with referrals" -- never
+ * three disconnected equal SaaS tiles. One bordered card, internal blocks
+ * separated by hairlines with 20-24px breathing room, each given a treatment
+ * that matches what it actually is: quiet chips for clinical focus (short
+ * tags), generous rows for good-fit referrals (physician-facing statements,
+ * not labels), a compact checklist for pre-referral workup (materially
+ * different -- an action list, not a tag cloud). Raw backend tokens are
+ * humanized (see humanizeClinicalTerm) before they ever reach this markup. */
+.referral-representation-section { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 24px; box-shadow: var(--shadow-soft); }
+.referral-representation-section > h2 { margin: 0; }
+.referral-rep-block { padding: 22px 0; border-top: 1px solid var(--border); }
+.referral-rep-block:first-of-type { padding-top: 20px; border-top: 0; }
+.referral-rep-block h3 { margin: 0 0 12px; color: var(--text-secondary); font-family: var(--font-ui); font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.referral-focus-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.referral-chip { border: 1px solid var(--border); border-radius: 999px; background: var(--background); padding: 6px 13px; color: var(--clinical); font-size: .68rem; line-height: 1.3; }
+.referral-fit-rows { display: grid; gap: 11px; margin: 0; padding: 0; list-style: none; }
+.referral-fit-rows li { position: relative; padding-left: 15px; color: var(--clinical); font-size: .76rem; line-height: 1.5; }
+.referral-fit-rows li::before { content: ""; position: absolute; top: .6em; left: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--mineral-subtle); }
+.referral-checklist { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.referral-checklist li { display: flex; align-items: flex-start; gap: 9px; color: var(--clinical); font-size: .76rem; line-height: 1.5; }
+.referral-checklist li > span { flex: 0 0 auto; color: var(--success); font-weight: 700; }
+.referral-representation-section .profile-interest-disclaimer { display: block; margin-top: 4px; padding-top: 18px; border-top: 1px solid var(--border); }
 
-/* A proper "About this physician" section, not six same-weight sections in a
- * row: one eyebrow label gathers About/Background/Interests/Research/Teaching/
- * Practice details, each still using its own established component heading. */
-.about-physician-section > .eyebrow { margin-bottom: 14px; }
+/* A proper "About this physician" section: one h2, no inner "About" heading
+ * (AboutSection renders showHeading={false} here), no doubled divider (see
+ * AboutSection's own conditional .profile-block class) -- just the bio
+ * directly under the one heading, then Background / Practice & locations /
+ * Research & teaching as same-weight subsections with their own h3. */
 .about-physician-section .profile-block:first-of-type { margin-top: 24px; }
+.profile-block-subheading { margin: 0 0 14px; color: var(--clinical); font-family: var(--font-ui); font-size: .64rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 .about-practice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
 .about-practice-grid > .profile-section-v2 { margin-top: 0; }
 
-.member-update-cards { display: grid; gap: 12px; margin-top: 12px; }
-.member-update-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 15px 17px; box-shadow: var(--shadow-soft); }
-.member-update-card-header { display: flex; align-items: center; justify-content: space-between; }
-.member-update-date { color: var(--text-secondary); font-size: .6rem; }
-.member-update-card .feed-post-title { margin-top: 2px; }
+/* "Recent network updates" reuses FeedCard verbatim (see
+ * NetworkPhysicianProfilePage) -- this is only spacing between the reused
+ * feed-post cards, not a second post visual language. */
+.profile-feed-slice { display: grid; gap: 16px; margin: 12px 0 14px; }
 
 /* Honest "profile intelligence," deliberately the quietest section on the page:
  * an eyebrow label rather than an h2, placed after every other profile section.
@@ -849,12 +868,6 @@ button.lam-row:hover { background: #fff9f1; }
 /* Pass 2.2B: physician identity discovery, claim, verification and activation.
    A separate product pathway from the public unauthenticated Lucy demo — its
    own lightweight shell, never the clinical-workspace sidebar. */
-
-.physician-identity-entry { margin-top: 22px; border: 1px solid var(--border); border-radius: 12px; background: rgb(255 252 247 / 82%); padding: 13px 22px; color: var(--clinical); cursor: pointer; text-align: center; box-shadow: var(--shadow-soft); }
-.physician-identity-entry:hover { border-color: rgb(184 92 50 / 45%); background: #fff9f1; }
-.physician-identity-entry span { display: block; color: var(--text-secondary); font-size: .62rem; }
-.physician-identity-entry strong { display: block; margin-top: 4px; font-family: var(--font-display); font-weight: 600; font-size: .82rem; }
-.physician-identity-entry strong b { margin-left: 5px; color: var(--accent); font-weight: 700; }
 
 .claim-shell { min-height: 100vh; background: var(--background); }
 .claim-header { display: flex; align-items: center; justify-content: space-between; height: 72px; padding: 0 38px; border-bottom: 1px solid rgb(216 210 199 / 70%); background: var(--surface); }
