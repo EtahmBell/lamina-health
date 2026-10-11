@@ -111,6 +111,24 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 .directory-results-heading { display: flex; align-items: flex-end; justify-content: space-between; margin: 32px 2px 11px; }.directory-results-heading h2 { margin: 0; font-size: 1.2rem; }.directory-results-heading > span { color: var(--text-secondary); font-size: .58rem; text-transform: uppercase; }.directory-avatar { width: 46px; height: 46px; display: grid; flex: 0 0 46px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--clinical); box-shadow: 0 0 0 1px var(--border); color: white; font-family: var(--font-display); font-size: .67rem; font-weight: 700; }.directory-avatar.large { width: 72px; height: 72px; flex-basis: 72px; font-size: .95rem; }
 .agent-status-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; background: #f2f0eb; padding: 6px 8px; color: var(--text-secondary); font-size: .55rem; font-weight: 600; white-space: nowrap; }.agent-status-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); }.agent-status-badge.verification_pending { background: #f8eddf; color: #8a571f; }.agent-status-badge.claimed { border-color: rgb(184 92 50 / 25%); background: #fdf3e8; color: var(--accent-hover); }.agent-status-badge.claimed i { background: var(--accent); }.agent-status-badge.verification_pending i { background: var(--warning); }.agent-status-badge.verified, .agent-status-badge.active { border-color: rgb(63 107 85 / 25%); background: #edf3ee; color: var(--success); }.agent-status-badge.verified i, .agent-status-badge.active i { background: var(--success); }.agent-status-badge.disabled { background: #f4e8e5; color: var(--danger); }.directory-loading { min-height: 240px; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--text-secondary); font-size: .68rem; }
 .provider-profile-hero { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 22px; }.profile-identity { display: flex; align-items: center; gap: 17px; }.profile-identity h1 { font-size: clamp(2rem, 4vw, 3.1rem); }.profile-identity p:last-child { margin: 7px 0 0; color: var(--clinical); font-size: .75rem; font-weight: 600; }
+/* The small, honest "is this physician on Lamina / are they in my network"
+ * status column -- shared geometry (hero, right-aligned, stacked) across the
+ * NPPES directory profile and the claimed member profile, so switching
+ * between the two page types reads as one design system. */
+.profile-hero-status { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: 0 0 auto; }
+.network-relationship-control { display: flex; align-items: center; gap: 8px; }
+.network-relationship-chip { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: .62rem; font-weight: 600; white-space: nowrap; }
+.network-relationship-action { padding: 7px 13px; font-size: .64rem; white-space: nowrap; }
+.network-relationship-control .quiet-remove { font-size: .62rem; }
+/* The claimed member hero adds a 3rd identity line (location) the NPPES hero
+ * doesn't have, which would otherwise make .profile-location inherit the
+ * NPPES ".profile-identity p:last-child" credential-line treatment (bold,
+ * navy) meant for a single trailing specialty line. Restate both lines
+ * explicitly so they keep their own quiet, muted styling regardless of which
+ * one ends up last. */
+.profile-identity p.profile-role, .profile-identity p.profile-location { color: var(--text-secondary); font-weight: 400; }
+.profile-identity p.profile-role { margin: 6px 0 0; font-size: .8rem; }
+.profile-identity p.profile-location { margin: 2px 0 0; font-size: .76rem; }
 .profile-facts { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 25px; border: 1px solid var(--border); border-top: 3px solid var(--clinical); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-soft); }.profile-facts > div { padding: 15px; }.profile-facts > div + div { border-left: 1px solid var(--border); }.profile-facts span, .profile-facts strong { display: block; }.profile-facts span { color: var(--text-secondary); font-size: .53rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }.profile-facts strong { margin-top: 5px; color: var(--clinical); font-family: var(--font-display); font-size: .76rem; line-height: 1.4; }.profile-provenance { margin-top: 11px; border-left: 3px solid var(--clinical); background: #f2f0eb; padding: 11px 14px; }.profile-provenance.synthetic { border-left-color: var(--success); background: #edf3ee; }.profile-provenance strong { color: var(--clinical); font-size: .63rem; }.profile-provenance p { margin: 3px 0 0; color: var(--text-secondary); font-size: .59rem; line-height: 1.4; }
 .agent-activation-card { margin-top: 20px; border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 15px; background: var(--surface); padding: 23px; box-shadow: var(--shadow-soft); }.agent-activation-card > header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }.agent-activation-card header h2, .agent-activation-card header p { margin: 0; }.agent-activation-card header h2 { font-size: 1.5rem; }.agent-activation-card header p:last-child { margin-top: 5px; color: var(--text-secondary); font-size: .67rem; }.agent-activation-card > .button-primary, .agent-activation-card > .button-secondary { margin-top: 22px; }.agent-activation-card header .directory-network-glyph { width: 58px; height: 58px; flex-basis: 58px; }.agent-activation-card header .directory-network-glyph::before { inset: 15px; }.agent-activation-card header .directory-network-glyph::after { inset: 22px; }.agent-activation-card header .directory-network-glyph i:nth-child(1) { top: 9px; left: 25px; }.agent-activation-card header .directory-network-glyph i:nth-child(2) { top: 25px; right: 9px; }.agent-activation-card header .directory-network-glyph i:nth-child(3) { bottom: 9px; left: 25px; }.agent-activation-card header .directory-network-glyph i:nth-child(4) { top: 25px; left: 9px; }.agent-activation-card header .directory-network-glyph b { top: 25px; left: 25px; }
 .activation-steps { display: grid; grid-template-columns: repeat(4, 1fr); margin: 22px 0; padding: 0; list-style: none; }.activation-steps li { position: relative; display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }.activation-steps li:not(:last-child)::after { position: absolute; top: 15px; right: 8px; left: 39px; height: 1px; background: var(--border); content: ""; }.activation-steps li > span { position: relative; z-index: 1; width: 30px; height: 30px; display: grid; flex: 0 0 30px; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); font-size: .58rem; }.activation-steps li div { position: relative; z-index: 1; background: var(--surface); padding-right: 8px; }.activation-steps strong, .activation-steps small { display: block; }.activation-steps strong { color: var(--clinical); font-size: .61rem; }.activation-steps small { margin-top: 2px; font-size: .49rem; }.activation-steps li.complete > span { border-color: var(--success); background: var(--success); color: white; }.activation-steps li.current > span { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px rgb(184 92 50 / 10%); }
@@ -120,7 +138,7 @@ details { border: 1px solid var(--border); border-radius: 10px; background: #fff
 @media (max-width: 900px) {
   .directory-search-panel { grid-template-columns: 1fr 1fr; }.directory-search-main { grid-column: 1 / -1; }.profile-facts { grid-template-columns: 1fr 1fr; }.profile-facts > div:nth-child(3) { border-top: 1px solid var(--border); border-left: 0; }.profile-facts > div:nth-child(4) { border-top: 1px solid var(--border); }.activation-steps { grid-template-columns: 1fr 1fr; gap: 14px; }.activation-steps li::after { display: none; }}
 @media (max-width: 680px) {
-  .directory-hero .directory-network-glyph { display: none; }.directory-boundary-note, .activation-demo-banner, .provider-profile-hero, .consult-boundary-card { align-items: flex-start; flex-direction: column; }.directory-boundary-note em { white-space: normal; }.directory-search-panel, .preferences-form { grid-template-columns: 1fr; }.directory-search-main, .preferences-form > * { grid-column: auto; }.activation-demo-banner .button-secondary, .consult-boundary-card .button-secondary { width: 100%; }.profile-identity { align-items: flex-start; }.provider-profile-hero > .agent-status-badge { margin-left: 89px; }.activation-steps { grid-template-columns: 1fr; }.demo-verification, .activate-ready { align-items: stretch; flex-direction: column; }.profile-facts, .preference-summary { grid-template-columns: 1fr; }.profile-facts > div + div, .preference-summary > div:nth-child(even) { border-top: 1px solid var(--border); border-left: 0; }.preference-summary .wide { grid-column: auto; }}
+  .directory-hero .directory-network-glyph { display: none; }.directory-boundary-note, .activation-demo-banner, .provider-profile-hero, .consult-boundary-card { align-items: flex-start; flex-direction: column; }.directory-boundary-note em { white-space: normal; }.directory-search-panel, .preferences-form { grid-template-columns: 1fr; }.directory-search-main, .preferences-form > * { grid-column: auto; }.activation-demo-banner .button-secondary { width: 100%; }.profile-identity { align-items: flex-start; }.provider-profile-hero > .profile-hero-status { margin-left: 89px; align-items: flex-start; }.activation-steps { grid-template-columns: 1fr; }.demo-verification, .activate-ready { align-items: stretch; flex-direction: column; }.profile-facts, .preference-summary { grid-template-columns: 1fr; }.profile-facts > div + div, .preference-summary > div:nth-child(even) { border-top: 1px solid var(--border); border-left: 0; }.preference-summary .wide { grid-column: auto; }}
 
 /* Structured consultation events */
 .patient-demographics .clinical-source { border-left: 1px solid var(--border); padding-left: 24px; color: var(--success); font-weight: 600; }.patient-demographics .clinical-source b { color: var(--text-secondary); }
@@ -647,14 +665,15 @@ button.lam-row:hover { background: #fff9f1; }
 .profile-section dd { margin: 0; color: var(--clinical); font-size: var(--type-body); line-height: 1.5; }
 .profile-page .muted-note { margin-top: 26px; }
 
-/* Joined-Lamina member profile: a two-column evolution of the directory profile
- * language above (same hero, same card/eyebrow/clinical-list vocabulary), not a
- * different product -- main column gets boxed sections instead of the old flat
- * practice-representation-panel, plus a sticky right-rail agent-chat preview. */
-.member-profile-hero { max-width: none; }
-.member-profile-hero > div { display: flex; flex-direction: column; gap: 2px; }
-.agent-status-badge.active { display: inline-flex; align-self: flex-start; margin-top: 8px; }
-.member-profile-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 32px; align-items: start; margin-top: 8px; }
+/* Joined-Lamina member profile: the claimed/public-agent evolution of the same
+ * directory-profile shell above -- identical hero (.provider-profile-hero /
+ * .profile-identity / .directory-avatar.large), identical fact-strip geometry
+ * (.profile-facts) and public-record strip (.profile-provenance), so switching
+ * between an unclaimed NPPES profile and a claimed member profile reads as one
+ * design system, not two products. Only below that shared shell does the page
+ * expand into the richer two-column member layout with a sticky agent-chat rail. */
+.member-profile-page .profile-facts { margin-top: 20px; }
+.member-profile-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; align-items: start; margin-top: 28px; }
 .member-profile-main { max-width: 720px; min-width: 0; }
 .member-profile-section { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 20px; }
 .member-profile-section:first-child { margin-top: 0; border-top: none; padding-top: 0; }
@@ -662,43 +681,90 @@ button.lam-row:hover { background: #fff9f1; }
 .member-profile-section .page-intro { margin: 0 0 14px; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
 .member-profile-section .eyebrow { margin: 0 0 10px; }
 
-.practice-rep-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-top: 12px; }
-.practice-rep-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 15px 17px; box-shadow: var(--shadow-soft); }
-.practice-rep-card .section-label { display: block; margin-bottom: 2px; }
-.practice-rep-card .clinical-list { margin-top: 8px; }
-.practice-rep-card-wide { grid-column: 1 / -1; margin-top: 14px; }
+/* ONE conceptual object -- "How this practice works with referrals" -- with
+ * internal columns separated by hairlines, not three unrelated equal SaaS
+ * tiles. Columns on wide screens, stacked with a top hairline on narrow ones. */
+.referral-representation-section { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 22px 24px; box-shadow: var(--shadow-soft); }
+.referral-representation-section > h2 { margin-bottom: 16px; }
+.referral-rep-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.referral-rep-column { padding: 0 20px; }
+.referral-rep-column:first-child { padding-left: 0; }
+.referral-rep-column:last-child { padding-right: 0; }
+.referral-rep-column + .referral-rep-column { border-left: 1px solid var(--border); }
+.referral-rep-column h3 { margin: 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.referral-rep-column .clinical-list { margin-top: 10px; }
+.referral-representation-section .profile-interest-disclaimer { display: block; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+@media (max-width: 720px) {
+  .referral-rep-grid { grid-template-columns: 1fr; }
+  .referral-rep-column { padding: 16px 0 0; }
+  .referral-rep-column:first-child { padding-top: 0; }
+  .referral-rep-column + .referral-rep-column { border-left: 0; border-top: 1px solid var(--border); }
+}
+
+/* A proper "About this physician" section, not six same-weight sections in a
+ * row: one eyebrow label gathers About/Background/Interests/Research/Teaching/
+ * Practice details, each still using its own established component heading. */
+.about-physician-section > .eyebrow { margin-bottom: 14px; }
+.about-physician-section .profile-block:first-of-type { margin-top: 24px; }
+.about-practice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+.about-practice-grid > .profile-section-v2 { margin-top: 0; }
 
 .member-update-cards { display: grid; gap: 12px; margin-top: 12px; }
 .member-update-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 15px 17px; box-shadow: var(--shadow-soft); }
-.member-update-card .feed-post-tag { float: right; }
+.member-update-card-header { display: flex; align-items: center; justify-content: space-between; }
+.member-update-date { color: var(--text-secondary); font-size: .6rem; }
 .member-update-card .feed-post-title { margin-top: 2px; }
 
-/* Honest "profile intelligence," not a dashboard: reuses the ranked-bar visual
- * from My Agent but in mineral, since this page lives in the Network/directory
- * language, not the copper-scoped My Agent surface. */
+/* Honest "profile intelligence," deliberately the quietest section on the page:
+ * an eyebrow label rather than an h2, placed after every other profile section.
+ * Reuses the ranked-bar visual from My Agent but in mineral, since this page
+ * lives in the Network/directory language, not the copper-scoped My Agent
+ * surface. Real counts only -- never an interaction/consultation/popularity
+ * metric this endpoint has no data for. */
+.member-analytics { opacity: .92; }
 .member-analytics .agent-specialty-bar-track { background: var(--mineral-surface); }
 .member-analytics .agent-specialty-bar-fill { background: var(--mineral-subtle); }
 .member-analytics .agent-specialty-bar-fill.top-ranked { background: var(--mineral); }
 
-.member-chat-rail { position: sticky; top: 76px; align-self: start; }
+/* The agent-chat rail: a compact messenger, not four giant FAQ buttons sitting
+ * above an input. Sticky only while its own content fits the viewport (.pinned,
+ * set by PhysicianAgentChatRail's ResizeObserver -- same philosophy as the
+ * Patient Detail next-step rail), never a hard sticky that could pin content
+ * out of reach, and never a second internal scrollbar beyond the conversation
+ * history itself. */
+.member-chat-rail { position: static; align-self: start; }
+.member-chat-rail.pinned { position: sticky; top: 76px; bottom: 24px; }
 .member-chat-card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 18px; box-shadow: var(--shadow-soft); }
-.member-chat-card h3 { margin: 0 0 6px; font-family: var(--font-display); font-size: .95rem; }
-.member-chat-card > p { margin: 0 0 14px; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
-.member-chat-starters { display: grid; gap: 8px; }
-.chat-starter-prompt { border: 1px solid var(--border); border-radius: 10px; background: var(--background); padding: 9px 11px; color: var(--clinical); font-size: .68rem; line-height: 1.4; text-align: left; cursor: pointer; }
-.chat-starter-prompt:hover { border-color: var(--mineral-subtle); background: var(--mineral-surface); }
-.member-chat-thread { display: grid; gap: 10px; max-height: 320px; overflow-y: auto; }
-.member-chat-message { margin: 0; padding: 9px 11px; border-radius: 10px; font-size: .68rem; line-height: 1.5; }
-.member-chat-message.user { background: var(--mineral-surface); color: var(--clinical); justify-self: end; }
-.member-chat-message.agent { background: var(--background); color: var(--clinical); border: 1px solid var(--border); }
-.member-chat-message.agent strong { color: var(--mineral-deep); }
+.member-chat-header { display: flex; align-items: center; gap: 10px; }
+.member-chat-avatar { display: block; width: 30px; height: 30px; flex: 0 0 30px; }
+.member-chat-avatar .agent-avatar { width: 100%; height: 100%; }
+.member-chat-header h3 { margin: 0; font-family: var(--font-display); font-size: .92rem; }
+.member-chat-subtitle { color: var(--text-secondary); font-size: .58rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.member-chat-helper { margin: 10px 0 0; color: var(--text-secondary); font-size: .67rem; line-height: 1.5; }
+
+.member-chat-conversation { display: grid; gap: 10px; min-height: 96px; max-height: 320px; margin-top: 14px; overflow-y: auto; }
+.member-chat-empty { align-self: center; margin: auto 0; color: var(--text-secondary); font-size: .64rem; text-align: center; }
+.member-chat-message { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 9px 11px; border-radius: 10px; font-size: .68rem; line-height: 1.5; }
+.member-chat-message.user { background: var(--mineral-surface); color: var(--clinical); justify-self: end; max-width: 88%; }
+.member-chat-message.agent { background: var(--background); color: var(--clinical); border: 1px solid var(--border); max-width: 92%; }
+.member-chat-message-avatar { display: block; width: 18px; height: 18px; flex: 0 0 18px; margin-top: 1px; }
+.member-chat-message-avatar .agent-avatar { width: 100%; height: 100%; }
+.member-chat-message.typing { align-items: center; padding: 8px 11px; }
+
+.member-chat-suggestions { margin-top: 12px; }
+.member-chat-suggestions-toggle { font-size: .66rem; }
+.member-chat-suggestions-panel { display: grid; gap: 1px; margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--border); overflow: hidden; }
+.suggested-question-item { border: 0; background: var(--surface); padding: 9px 11px; color: var(--clinical); font-size: .66rem; line-height: 1.4; text-align: left; cursor: pointer; }
+.suggested-question-item:hover { background: var(--mineral-surface); }
+
 .member-chat-composer { display: flex; gap: 8px; margin-top: 14px; }
 .member-chat-composer input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--background); padding: 8px 10px; font-size: .7rem; }
 .member-chat-composer .button-secondary { flex: 0 0 auto; padding: 8px 14px; }
+.member-chat-disclaimer { margin: 10px 0 0; color: var(--text-secondary); font-size: .56rem; line-height: 1.4; }
 
 @media (max-width: 900px) {
   .member-profile-layout { grid-template-columns: 1fr; }
-  .member-chat-rail { position: static; }
+  .member-chat-rail, .member-chat-rail.pinned { position: static; }
 }
 
 @media (max-width: 760px) {
@@ -1016,12 +1082,6 @@ button.lam-row:hover { background: #fff9f1; }
 .fit-contain .feed-post-image { object-fit: contain; }
 @media (max-width: 600px) { .feed-post-image-frame.fit-cover, .feed-post-image-frame.fit-contain { height: 190px; } }
 @media (max-width: 850px) { .feed-stream { max-width: none; } }
-
-/* How your agent represents you / how the network sees a practice. */
-.practice-representation-panel { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 20px; }
-.practice-representation-panel h2 { margin: 4px 0 14px; font-size: 1.1rem; }
-.practice-representation-panel > div { margin-top: 14px; }
-.practice-representation-note { margin: 16px 0 0; color: var(--text-secondary); font-size: .62rem; font-style: italic; }
 
 
 /* ================================================= Immersive training workspace */

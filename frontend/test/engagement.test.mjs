@@ -289,48 +289,153 @@ test('public and private profile reuse the same section-rendering components (ti
   assert.match(publicPage, /<InterestsPanel interests=\{data\.professional_profile\.interests\}/)
 })
 
+test('the claimed member profile shares the NPPES directory profile\'s top-level identity/fact-strip shell, not a separate visual system', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /className="provider-profile-hero"/, 'same hero wrapper as PhysicianProfilePage (NPPES)')
+  assert.match(publicPage, /className="profile-identity"/)
+  assert.match(publicPage, /className="directory-avatar large"/, 'same avatar scale as the NPPES hero')
+  assert.match(publicPage, /className="profile-facts"/, 'same fact-strip geometry as the NPPES profile')
+  assert.match(publicPage, /className="profile-provenance"/, 'same quiet public-record strip language as "Public directory record"')
+  assert.match(publicPage, /Public Lamina profile/)
+})
+
+test('the claimed-member fact strip uses Lamina-member fields (location, specialty, network relationship, public agent), never consultation counts', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  const facts = slice(publicPage, 'className="profile-facts"', 'className="profile-provenance"')
+  assert.match(facts, /Network relationship/)
+  assert.match(facts, /networkRelationshipLabel/)
+  assert.match(facts, /Public agent/)
+  assert.doesNotMatch(facts, /consultation|Consultations/i)
+})
+
+test('a physician profile offers a real add/remove-network action, never implies the physician can be consulted directly from their profile', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /<NetworkRelationshipAction npi=\{data\.physician\.npi\} relationship=\{relationship\} \/>/)
+  assert.doesNotMatch(publicPage, /Consult Network/)
+})
+
 test('the joined-Lamina member profile is a two-column layout with a sticky agent-chat rail, not the old single-column shell', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.match(publicPage, /className="member-profile-layout"/)
   assert.match(publicPage, /<PhysicianAgentChatRail /)
-  assert.match(styles, /\.member-chat-rail \{[^}]*position: sticky/)
+  assert.match(styles, /\.member-chat-rail\.pinned \{ position: sticky/)
 })
 
-test('"How the network sees this practice" renders as grouped boxed cards, not one flat multi-list panel', () => {
+test('the chat rail pins sticky only while its own content fits the viewport, reusing the Patient Detail next-step rail\'s ResizeObserver "pin while it fits" pattern -- never a hard sticky that could pin content out of reach', () => {
+  const rail = slice(engagement, 'function PhysicianAgentChatRail', engagement.length)
+  assert.match(rail, /\[pinned, setPinned\] = useState\(false\)/)
+  assert.match(rail, /new ResizeObserver\(evaluate\)/)
+  assert.match(rail, /window\.innerWidth <= 900.*setPinned\(false\)/)
+  assert.match(rail, /className=\{`member-chat-rail \$\{pinned \? 'pinned' : ''\}`\}/)
+  assert.match(styles, /\.member-chat-rail \{ position: static;/, 'unpinned by default, not hard-sticky')
+})
+
+test('mobile collapses the member-profile layout to a single column with the rail no longer sticky', () => {
+  assert.match(styles, /@media \(max-width: 900px\) \{\s*\.member-profile-layout \{ grid-template-columns: 1fr; \}\s*\.member-chat-rail, \.member-chat-rail\.pinned \{ position: static; \}/)
+})
+
+test('"How this practice works with referrals" is ONE coherent section with internal columns (clinical focus / good-fit / helpful before referral), not three separate equal SaaS tiles', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /className="practice-rep-cards"/)
-  assert.doesNotMatch(publicPage, /practice-representation-panel/)
+  assert.match(publicPage, /How this practice works with referrals/)
+  assert.match(publicPage, /className="referral-rep-grid"/)
+  assert.doesNotMatch(publicPage, /practice-rep-cards|practice-representation-panel/, 'the old three-equal-tiles and flat-panel layouts are both gone')
+  assert.match(styles, /\.referral-representation-section \{ border: 1px solid var\(--border\)/, 'one bordered object, not three')
 })
 
-test('recent network updates render as cards via MemberUpdateCard, reusing the feed post truncation convention', () => {
+test('case-interest "especially interested in seeing" items are folded into Good-fit referrals only when not already duplicating rep.good_fit, never shown as a separate giant list', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /goodFitSeen\.has\(item\.title\.toLowerCase\(\)\)/, 'exact-match dedupe against good-fit before folding case interests in')
+  assert.doesNotMatch(publicPage, /especially interested in seeing/, 'no separate duplicate "areas especially interested in seeing" block')
+})
+
+test('research and teaching interests render only inside About -> Research/Teaching, not duplicated again inside the referral section', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.doesNotMatch(publicPage, /Research &amp; teaching interests|otherInterests/, 'the old duplicate research/teaching block inside the rep panel is gone')
+  assert.match(publicPage, /hasResearchSection && <div className="profile-block">/)
+})
+
+test('About this physician gathers bio/background/interests/research/teaching/practice-details under one eyebrow-led section, with a restrained two-column grid for the lighter practice-detail fields', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /className="member-profile-section about-physician-section"/)
+  assert.match(publicPage, /About this physician/)
+  assert.match(publicPage, /className="profile-block about-practice-grid"/)
+  assert.match(styles, /\.about-practice-grid \{ display: grid; grid-template-columns: repeat\(auto-fit/)
+})
+
+test('recent network updates render as cards via MemberUpdateCard with a date when available, reusing the feed post truncation convention', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.match(publicPage, /<MemberUpdateCard update=\{update\}/)
   assert.match(publicPage, /Recent network updates/)
+  assert.match(publicPage, /relativeDayLabel\(when\)/)
 })
 
-test('the agent-chat rail is an honest grounded preview, not a live model call, and starter prompts match the requested set', () => {
+test('"Practice representation at a glance" is visually the quietest, lowest-priority section -- an eyebrow label after every other profile section, not another h2 feature', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /grounded preview/)
-  assert.doesNotMatch(publicPage, /await chatWithAgent|= chatWithAgent\(/)
+  const mainOrder = publicPage.indexOf('referral-representation-section')
+  const analyticsOrder = publicPage.indexOf('<MemberProfileAnalytics')
+  const updatesOrder = publicPage.indexOf('Recent network updates')
+  assert.ok(mainOrder < analyticsOrder && updatesOrder < analyticsOrder, 'analytics render after the referral section and the updates section')
+  const analyticsFn = slice(engagement, 'function MemberProfileAnalytics', 'function MemberUpdateCard')
+  assert.doesNotMatch(analyticsFn, /<h2>/, 'no h2-weight heading -- an eyebrow label only')
+  assert.doesNotMatch(analyticsFn, /consultation_count|interaction|popularity/i, 'never a fabricated interaction/popularity metric')
+  assert.match(analyticsFn, /rep\.clinical_focus\.length/)
+})
+
+test('the agent-chat rail reads as a real compact messenger, not four giant FAQ buttons: starter prompts live behind a collapsible "Suggested questions" control', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  const rail = slice(publicPage, 'function PhysicianAgentChatRail', engagement.length)
+  assert.match(rail, /\[suggestionsOpen, setSuggestionsOpen\] = useState\(false\)/, 'collapsed by default')
+  assert.match(rail, /Suggested questions/)
+  assert.match(rail, /aria-expanded=\{suggestionsOpen\}/)
+  assert.match(rail, /className="suggested-question-item"/)
   assert.match(publicPage, /What cases are a good fit for this practice\?/)
   assert.match(publicPage, /What workup is usually helpful before referral\?/)
   assert.match(publicPage, /When would this physician want co-management\?/)
   assert.match(publicPage, /What does this practice prioritize most\?/)
 })
 
-test('agent-chat preview answers are built only from this physician\'s own on-page representation fields, never invented facts', () => {
+test('the suggested-questions control is never gated on message count -- it stays available after messages are sent, and selecting a prompt sends it and collapses the panel', () => {
+  const rail = slice(engagement, 'function PhysicianAgentChatRail', engagement.length)
+  assert.doesNotMatch(rail, /messages\.length === 0[\s\S]{0,40}suggestionsOpen/, 'the suggestions toggle is not conditioned on an empty thread')
+  assert.match(rail, /onClick=\{\(\) => ask\(prompt\)\}/)
+  assert.match(rail, /setSuggestionsOpen\(false\)/, 'selecting a prompt (via ask()) collapses the panel again')
+})
+
+test('the conversation area starts with meaningful empty space, not pre-filled starter bubbles', () => {
+  const rail = slice(engagement, 'function PhysicianAgentChatRail', engagement.length)
+  assert.match(rail, /messages\.length === 0 && !typing && <p className="member-chat-empty">/)
+  assert.match(styles, /\.member-chat-conversation \{[^}]*min-height: 96px/)
+})
+
+test('sending a message shows a lightweight typing state (reusing the My Agent Test tab\'s .chat-typing-dots) before the answer appears, and it respects reduced motion', () => {
+  const rail = slice(engagement, 'function PhysicianAgentChatRail', engagement.length)
+  assert.match(rail, /window\.setTimeout\(\(\) => \{/)
+  assert.match(rail, /className="chat-typing-dots"/)
+  assert.doesNotMatch(rail, /<div className="spinner"|loading-spinner/i)
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.chat-typing-dots span \{ animation: none/)
+})
+
+test('the chat avatar is small (matching the Feed\'s compact agent-avatar scale), never the giant stretched regression, and physician identity initials stay separate from agent identity', () => {
+  assert.match(styles, /\.member-chat-avatar \{ display: block; width: 30px; height: 30px;/)
+  assert.match(styles, /\.member-chat-message-avatar \{ display: block; width: 18px; height: 18px;/)
+})
+
+test('the chat disclaimer is honest but quiet -- a short caption, not a dominant opening paragraph -- and the greeting response uses natural public-agent language, never implementation-facing text', () => {
+  const rail = slice(engagement, 'function PhysicianAgentChatRail', engagement.length)
+  assert.match(rail, /className="member-chat-disclaimer"/)
+  assert.doesNotMatch(rail, /<p>A grounded preview of how/, 'the old dominant top-of-rail disclaimer paragraph is gone')
+  const builder = slice(engagement, 'function buildAgentPreviewAnswer', 'function PhysicianAgentChatRail')
+  assert.match(builder, /Hi — I can help you understand \$\{name\}'s referral preferences/)
+  assert.doesNotMatch(builder, /can speak to clinical focus, good-fit cases, and pre-referral guidance -- try one of the starter prompts/, 'the old implementation-facing fallback copy is gone')
+})
+
+test('agent-chat preview answers are built only from this physician\'s own on-page representation fields, never invented facts, and chatWithAgent (the editable-persona-only endpoint) is never called here', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  const builder = slice(publicPage, 'function buildAgentPreviewAnswer', 'function PhysicianAgentChatRail')
+  assert.doesNotMatch(publicPage, /await chatWithAgent|= chatWithAgent\(/)
+  const builder = slice(publicPage, 'function buildAgentPreviewAnswer', 'function toneForAgent')
   assert.match(builder, /rep\.good_fit/)
   assert.match(builder, /rep\.preferred_workup/)
   assert.match(builder, /rep\.clinical_focus/)
-})
-
-test('the member-profile analytics section frames itself as profile intelligence, never a completion score or fabricated interaction count', () => {
-  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  const analytics = slice(publicPage, 'function MemberProfileAnalytics', 'function MemberUpdateCard')
-  assert.doesNotMatch(analytics, /consultation_count|interaction/i)
-  assert.match(analytics, /rep\.clinical_focus\.length/)
 })
 
 test('Profile structural parity: Lucy and Iain render the same ProfessionalProfilePage shell', () => {
@@ -857,10 +962,18 @@ test('every suggested connection resolves to a real profile -- the directory pag
   assert.match(card, /navigate\(persona \? networkProfilePath\('lucy', persona\) : `\/network\/\$\{suggestion\.npi\}`\)/)
 })
 
-test('the "not yet on Lamina" directory page never implies an agent exists before the physician has joined', () => {
+test('the "not yet on Lamina" directory page never implies an agent exists before the physician has joined, and the card has no grey eyebrow label at all', () => {
   const page = slice(network, 'export function PhysicianProfilePage', network.length)
   assert.doesNotMatch(page, /Lamina Agent/)
-  assert.match(page, /Lamina status/)
+  assert.doesNotMatch(page, /Lamina status/)
+  const card = slice(page, 'className="agent-activation-card"', '</section>')
+  assert.doesNotMatch(card, /className="eyebrow"/, 'no eyebrow above "Not yet on Lamina" -- the card reads as just the headline, detail, and CTA')
+})
+
+test('a physician profile offers a real add/remove-network action, never a "Consult Network" CTA -- consultation stays patient-context-driven', () => {
+  const page = slice(network, 'export function PhysicianProfilePage', network.length)
+  assert.match(page, /<NetworkRelationshipAction npi=\{profile\.npi\} relationship=\{relationship\} \/>/)
+  assert.doesNotMatch(page, /Return to Consult Network|Consult Network<\/button>/)
 })
 
 test('the "not yet on Lamina" card and the clinical-boundary card both give their copy room to breathe', () => {

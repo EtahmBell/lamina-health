@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ApiError,
+  addNetworkMember,
   answerTrainingQuestion,
   chatWithAgent,
   completeTrainingReview,
@@ -14,6 +15,7 @@ import {
   enrichPhysicianProfile,
   finishTrainingSession,
   getAgentInitialization,
+  getAgentNetwork,
   getAgentOverview,
   getAgentTestCases,
   getNetworkFeed,
@@ -27,6 +29,7 @@ import {
   getTrainingHistory,
   publishPracticeUpdate,
   publishProfessionalPost,
+  removeNetworkMember,
   resumeTrainingSession,
   reviewProfileCandidate,
   savePhysicianInterest,
@@ -37,6 +40,7 @@ import {
   updateProposedLearning,
   type AgentChatResponse,
   type AgentInitialization,
+  type AgentNetwork,
   type AgentOverview,
   type AgentTestCase,
   type ConsultationRecord,
@@ -96,6 +100,40 @@ export const networkProfilePath = (perspective: DemoPhysicianPerspective, contro
 export const networkUpdatesPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network?tab=feed' : '/network?tab=feed')
 export const networkPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network' : '/network')
 export const settingsPath = '/settings'
+
+/** Shared by both physician-profile shells (the NPPES directory page and the
+ * claimed/member page) so "add/remove colleague" behaves identically wherever
+ * it appears -- one real relationship (see MyNetworkTab/AddColleagueModal in
+ * PhysicianNetwork.tsx, which this mirrors), never a second local membership
+ * model. Lives here (not PhysicianNetwork.tsx) because that file already
+ * imports from this one; importing back would cycle. */
+export function useNetworkRelationship(npi: string | null) {
+  const [network, setNetwork] = useState<AgentNetwork | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { getAgentNetwork().then(setNetwork).catch(() => {}) }, [])
+  const memberNpis = useMemo(() => new Set([
+    ...(network?.nodes.filter((node) => node.in_network).map((node) => node.npi) ?? []),
+    ...(network?.members.map((member) => member.npi) ?? []),
+  ]), [network])
+  const loaded = network !== null
+  const inNetwork = npi != null && memberNpis.has(npi)
+  const refresh = () => getAgentNetwork().then(setNetwork).catch(() => {})
+  const add = async () => { if (!npi) return; setBusy(true); try { await addNetworkMember(npi); await refresh() } finally { setBusy(false) } }
+  const remove = async () => { if (!npi) return; setBusy(true); try { await removeNetworkMember(npi); await refresh() } finally { setBusy(false) } }
+  return { loaded, inNetwork, busy, add, remove }
+}
+
+/** A compact, real action -- never a decorative badge: "Add to network" when not
+ * connected, or the connected state plus a Remove affordance when already a
+ * colleague. Lives in the profile hero on both physician-profile shells, next
+ * to the Lamina-participation status, so the two page types read as one
+ * design system (see NetworkPhysicianProfilePage / PhysicianProfilePage). */
+export function NetworkRelationshipAction({ npi, relationship }: { npi: string | null; relationship: ReturnType<typeof useNetworkRelationship> }) {
+  if (!npi || !relationship.loaded) return null
+  return relationship.inNetwork
+    ? <span className="network-relationship-control"><span className="network-relationship-chip in-network">✓ In your network</span><button type="button" className="text-button quiet-remove" disabled={relationship.busy} onClick={() => void relationship.remove()}>Remove</button></span>
+    : <button type="button" className="button-secondary network-relationship-action" disabled={relationship.busy} onClick={() => void relationship.add()}>Add to network</button>
+}
 
 /* ------------------------------------------------------------- Home: engagement */
 
@@ -2025,84 +2063,115 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }
   const [data, setData] = useState<import('./api.ts').NetworkPhysicianProfile | null>(null)
   const [error, setError] = useState('')
   useEffect(() => { setData(null); setError(''); getNetworkPhysicianProfile(controlledId).then(setData).catch((err: Error) => setError(err.message)) }, [controlledId])
+  const relationship = useNetworkRelationship(data?.physician.npi ?? null)
   if (error) return <main className="page-shell profile-page"><button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button><div className="error-banner" role="alert">{error}</div></main>
   if (!data) return <main className="page-shell profile-page"><button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button><p className="muted-note">Opening profile…</p></main>
   const rep = data.practice_representation
-  const caseInterests = rep.interests.filter((item) => item.interest_type === 'case_interest')
-  const otherInterests = rep.interests.filter((item) => item.interest_type !== 'case_interest')
-  const initials = data.physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
   const sections = data.professional_profile.sections
+  const name = data.physician.name
+  const initials = name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
+
+  // "Good-fit referrals" absorbs case_interest items the physician already
+  // listed as especially-wanted cases, but only the ones NOT already covered
+  // by rep.good_fit -- a plain-text dedupe, never a giant third duplicate
+  // list sitting next to two near-identical ones (see design pass notes).
+  const goodFitSeen = new Set(rep.good_fit.map((item) => item.toLowerCase()))
+  const caseInterests = rep.interests.filter((item) => item.interest_type === 'case_interest' && !goodFitSeen.has(item.title.toLowerCase()))
+  const clinicalInterests = data.professional_profile.interests.filter((item) => item.interest_type === 'clinical_interest')
   const researchInterests = data.professional_profile.interests.filter((item) => item.interest_type === 'research_interest')
   const teachingInterests = data.professional_profile.interests.filter((item) => item.interest_type === 'teaching_interest')
   const hasResearchSection = sections.research.length > 0 || sections.publications.length > 0 || researchInterests.length > 0
   const hasTeachingSection = sections.teaching.length > 0 || teachingInterests.length > 0
-  const repCards = [
-    { key: 'focus', label: 'Clinical focus', items: rep.clinical_focus },
-    { key: 'good-fit', label: 'Good-fit cases', items: rep.good_fit },
-    { key: 'workup', label: 'Referral guidance', items: rep.preferred_workup },
-  ].filter((card) => card.items.length > 0)
+  const hasPracticeExtras = sections.skills_or_procedures.length > 0 || sections.languages.length > 0 || sections.locations.length > 0 || sections.professional_links.length > 0
+  const hasReferralSection = rep.clinical_focus.length > 0 || rep.good_fit.length > 0 || rep.preferred_workup.length > 0 || caseInterests.length > 0
+  const hasAboutSection = sections.about.length > 0 || sections.training.length > 0 || sections.experience.length > 0 || sections.affiliations.length > 0
+    || clinicalInterests.length > 0 || hasResearchSection || hasTeachingSection || hasPracticeExtras
+  const networkRelationshipLabel = !relationship.loaded ? 'Checking…' : relationship.inNetwork ? 'In your network' : 'Not yet connected'
+
   return <main className="page-shell profile-page member-profile-page">
     <button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button>
-    <header className="profile-hero member-profile-hero">
-      <span className="clinician-avatar large">{initials}</span>
-      <div>
-        <h1>{data.physician.name}</h1>
-        <p className="profile-role">{data.physician.specialty}</p>
-        <p className="profile-location">{data.physician.location}</p>
-        <span className="agent-status-badge active"><i />Public Lamina agent</span>
+    <section className="provider-profile-hero">
+      <div className="profile-identity">
+        <span className="directory-avatar large">{initials}</span>
+        <div>
+          <h1>{name}</h1>
+          <p className="profile-role">{data.physician.specialty}</p>
+          <p className="profile-location">{data.physician.location}</p>
+        </div>
       </div>
-    </header>
+      <div className="profile-hero-status">
+        <span className="agent-status-badge active"><i />Public Lamina agent</span>
+        <NetworkRelationshipAction npi={data.physician.npi} relationship={relationship} />
+      </div>
+    </section>
+
+    <div className="profile-facts">
+      <div><span>Practice location</span><strong>{data.physician.location}</strong></div>
+      <div><span>Specialty</span><strong>{data.physician.specialty}</strong></div>
+      <div><span>Network relationship</span><strong>{networkRelationshipLabel}</strong></div>
+      <div><span>Public agent</span><strong>Available</strong></div>
+    </div>
+    <div className="profile-provenance">
+      <strong>Public Lamina profile</strong>
+      <p>This profile reflects information {name} makes available to the Lamina network.</p>
+    </div>
 
     <div className="member-profile-layout">
       <div className="member-profile-main">
-        {repCards.length > 0 && <section className="member-profile-section">
-          <h2>How the network sees this practice</h2>
-          <div className="practice-rep-cards">{repCards.map((card) => <div className="practice-rep-card" key={card.key}>
-            <span className="section-label">{card.label}</span>
-            <ul className="clinical-list">{card.items.map((item) => <li key={item}>{item}</li>)}</ul>
-          </div>)}</div>
-          {caseInterests.length > 0 && <div className="practice-rep-card practice-rep-card-wide">
-            <span className="section-label">Areas {data.physician.name} is especially interested in seeing</span>
-            <ul className="clinical-list">{caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul>
-            <small className="profile-interest-disclaimer">Interests reflect what {data.physician.name} wants referring physicians to know. They do not guarantee referral eligibility or override clinical fit.</small>
+        {hasReferralSection && <section className="member-profile-section referral-representation-section">
+          <h2>How this practice works with referrals</h2>
+          <div className="referral-rep-grid">
+            {rep.clinical_focus.length > 0 && <div className="referral-rep-column">
+              <h3>Clinical focus</h3>
+              <ul className="clinical-list">{rep.clinical_focus.map((item) => <li key={item}>{item}</li>)}</ul>
+            </div>}
+            {(rep.good_fit.length > 0 || caseInterests.length > 0) && <div className="referral-rep-column">
+              <h3>Good-fit referrals</h3>
+              <ul className="clinical-list">
+                {rep.good_fit.map((item) => <li key={item}>{item}</li>)}
+                {caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}
+              </ul>
+            </div>}
+            {rep.preferred_workup.length > 0 && <div className="referral-rep-column">
+              <h3>Helpful before referral</h3>
+              <ul className="clinical-list">{rep.preferred_workup.map((item) => <li key={item}>{item}</li>)}</ul>
+            </div>}
+          </div>
+          {caseInterests.length > 0 && <small className="profile-interest-disclaimer">Interests reflect what {name} wants referring physicians to know. They do not guarantee referral eligibility or override clinical fit.</small>}
+        </section>}
+
+        {hasAboutSection && <section className="member-profile-section about-physician-section">
+          <p className="eyebrow">About this physician</p>
+          <AboutSection items={sections.about} readOnly />
+
+          {(sections.training.length > 0 || sections.experience.length > 0 || sections.affiliations.length > 0) && <div className="profile-block">
+            <h2 className="profile-block-heading">Background</h2>
+            <ProfileTimelineGroup category="training" items={sections.training} readOnly />
+            <ProfileTimelineGroup category="experience" items={sections.experience} readOnly />
+            <ProfileTimelineGroup category="affiliations" items={sections.affiliations} readOnly />
           </div>}
-          {otherInterests.length > 0 && <div className="practice-rep-card practice-rep-card-wide">
-            <span className="section-label">Research &amp; teaching interests</span>
-            <ul className="clinical-list">{otherInterests.map((item) => <li key={item.id}>{item.title}</li>)}</ul>
+
+          {clinicalInterests.length > 0 && <InterestsPanel interests={data.professional_profile.interests} types={['clinical_interest']} readOnly />}
+
+          {hasResearchSection && <div className="profile-block">
+            <h2 className="profile-block-heading">Research &amp; publications</h2>
+            {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} readOnly />}
+            <ProfileSection category="research" items={sections.research} quiet readOnly />
+            <ProfileSection category="publications" items={sections.publications} quiet readOnly />
           </div>}
-        </section>}
 
-        <section className="member-profile-section"><AboutSection items={sections.about} readOnly /></section>
+          {hasTeachingSection && <div className="profile-block">
+            <h2 className="profile-block-heading">Teaching</h2>
+            {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} readOnly />}
+            <ProfileSection category="teaching" items={sections.teaching} quiet readOnly />
+          </div>}
 
-        {(sections.training.length > 0 || sections.experience.length > 0 || sections.affiliations.length > 0) && <section className="member-profile-section profile-block">
-          <h2 className="profile-block-heading">Background</h2>
-          <ProfileTimelineGroup category="training" items={sections.training} readOnly />
-          <ProfileTimelineGroup category="experience" items={sections.experience} readOnly />
-          <ProfileTimelineGroup category="affiliations" items={sections.affiliations} readOnly />
-        </section>}
-
-        {(sections.clinical_interests.length > 0 || data.professional_profile.interests.some((item) => item.interest_type === 'case_interest' || item.interest_type === 'clinical_interest')) &&
-          <section className="member-profile-section"><InterestsPanel interests={data.professional_profile.interests} types={['case_interest', 'clinical_interest']} readOnly /></section>}
-
-        {hasResearchSection && <section className="member-profile-section profile-block">
-          <h2 className="profile-block-heading">Research &amp; publications</h2>
-          {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} readOnly />}
-          <ProfileSection category="research" items={sections.research} quiet readOnly />
-          <ProfileSection category="publications" items={sections.publications} quiet readOnly />
-        </section>}
-
-        {hasTeachingSection && <section className="member-profile-section profile-block">
-          <h2 className="profile-block-heading">Teaching</h2>
-          {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} readOnly />}
-          <ProfileSection category="teaching" items={sections.teaching} quiet readOnly />
-        </section>}
-
-        {(sections.skills_or_procedures.length > 0 || sections.languages.length > 0 || sections.locations.length > 0 || sections.professional_links.length > 0) && <section className="member-profile-section profile-block">
-          <h2 className="profile-block-heading">Practice &amp; locations</h2>
-          {sections.skills_or_procedures.length > 0 && <ProfileChipSection category="skills_or_procedures" items={sections.skills_or_procedures} readOnly heading="Skills &amp; procedures" />}
-          {sections.languages.length > 0 && <ProfileChipSection category="languages" items={sections.languages} readOnly />}
-          {sections.locations.length > 0 && <ProfileSection category="locations" items={sections.locations} readOnly />}
-          {sections.professional_links.length > 0 && <ProfileSection category="professional_links" items={sections.professional_links} readOnly heading="Professional links" />}
+          {hasPracticeExtras && <div className="profile-block about-practice-grid">
+            {sections.skills_or_procedures.length > 0 && <ProfileChipSection category="skills_or_procedures" items={sections.skills_or_procedures} readOnly heading="Skills &amp; procedures" />}
+            {sections.languages.length > 0 && <ProfileChipSection category="languages" items={sections.languages} readOnly />}
+            {sections.locations.length > 0 && <ProfileSection category="locations" items={sections.locations} readOnly heading="Practice &amp; locations" />}
+            {sections.professional_links.length > 0 && <ProfileSection category="professional_links" items={sections.professional_links} readOnly heading="Professional links" />}
+          </div>}
         </section>}
 
         {data.published_updates.length > 0 && <section className="member-profile-section">
@@ -2115,16 +2184,15 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath }
         <p className="disclaimer">{data.disclaimer}</p>
       </div>
 
-      <PhysicianAgentChatRail physicianName={data.physician.name} agentName={data.physician.agent_name} rep={rep} />
+      <PhysicianAgentChatRail physicianId={data.physician.id} physicianName={name} agentName={data.physician.agent_name} rep={rep} />
     </div>
   </main>
 }
 
-/** A compact, honest read of how populated this physician's representation is --
- * real counts from fields already on the page, framed as "profile intelligence"
- * rather than an interaction/consultation metric this page has no real data
- * for. Same restrained ranked-bar language as My Agent's network-behavior
- * section, never a completion percentage. */
+/** Honest "profile intelligence," clearly secondary -- placed after every other
+ * profile section and styled as a quiet eyebrow-led strip, not another h2-level
+ * feature. Real counts from fields already on the page, never an interaction,
+ * consultation, or popularity metric this endpoint has no data for. */
 function MemberProfileAnalytics({ rep }: { rep: PracticeRepresentation['sections'] }) {
   const segments = [
     { key: 'focus', label: 'Clinical focus', count: rep.clinical_focus.length },
@@ -2135,7 +2203,7 @@ function MemberProfileAnalytics({ rep }: { rep: PracticeRepresentation['sections
   if (segments.length === 0) return null
   const maxCount = segments[0].count
   return <section className="member-profile-section member-analytics">
-    <h2>Practice representation at a glance</h2>
+    <p className="eyebrow">Practice representation at a glance</p>
     <p className="page-intro">What this profile is most built out around, from the physician's own confirmed representation.</p>
     <ul className="agent-specialty-ranked">{segments.map((segment) => <li key={segment.key}>
       <span className="agent-specialty-label">{segment.label}</span>
@@ -2147,14 +2215,18 @@ function MemberProfileAnalytics({ rep }: { rep: PracticeRepresentation['sections
 
 /** A lighter, card-styled echo of the Feed's post treatment -- purpose-built for
  * PracticeUpdate (this endpoint doesn't return full NetworkFeedItem/physician
- * objects), so it reuses the same truncation behavior without pulling in
- * FeedCard's unrelated byline/agent-badge machinery. */
+ * objects), so it reuses the same truncation behavior and date convention
+ * without pulling in FeedCard's unrelated byline/agent-badge machinery. */
 function MemberUpdateCard({ update }: { update: PracticeUpdate }) {
   const [expanded, setExpanded] = useState(false)
   const isLong = update.body.length > 220
   const preview = isLong && !expanded ? `${update.body.slice(0, 220).trimEnd()}…` : update.body
+  const when = update.published_at ?? update.created_at
   return <article className="member-update-card">
-    <span className="feed-post-tag">{FEED_TYPE_LABELS[update.type] ?? 'Update'}</span>
+    <div className="member-update-card-header">
+      <span className="feed-post-tag">{FEED_TYPE_LABELS[update.type] ?? 'Update'}</span>
+      {when && <small className="member-update-date">{relativeDayLabel(when)}</small>}
+    </div>
     <p className="feed-post-title">{update.title}</p>
     <p className="feed-post-body">{preview}{isLong && <button type="button" className="text-button feed-post-more" onClick={() => setExpanded((value) => !value)}>{expanded ? 'See less' : 'See more'}</button>}</p>
   </article>
@@ -2168,12 +2240,16 @@ const AGENT_PREVIEW_STARTERS = [
 ]
 
 /** A grounded template, not a live model call -- every answer is built only from
- * this physician's own confirmed representation already shown on the page (see
- * rep below), never invented. This is explicitly a preview, framed honestly as
- * one in the UI copy; chatWithAgent() only supports the viewing physician's own
- * (editable) agent today, not arbitrary network physicians. */
+ * this physician's own confirmed public representation (see rep below), never
+ * invented. chatWithAgent() only supports the viewing physician's own
+ * (editable) agent today, not arbitrary network physicians, so this stays an
+ * honest deterministic preview rather than a real conversation -- but it still
+ * opens with natural public-agent language, not implementation-facing text. */
 function buildAgentPreviewAnswer(question: string, name: string, rep: PracticeRepresentation['sections']): string {
-  const q = question.toLowerCase()
+  const q = question.toLowerCase().trim()
+  if (q.length === 0 || /^(hi|hello|hey|hiya|howdy)\b/.test(q)) {
+    return `Hi — I can help you understand ${name}'s referral preferences, clinical focus, and typical pre-referral workup. What would you like to know?`
+  }
   if (q.includes('fit') || q.includes('good')) {
     return rep.good_fit.length > 0
       ? `Cases ${name} usually finds a good fit: ${rep.good_fit.slice(0, 3).join('; ')}.`
@@ -2196,35 +2272,102 @@ function buildAgentPreviewAnswer(question: string, name: string, rep: PracticeRe
       ? `${name}'s practice is most built around: ${rep.clinical_focus.slice(0, 3).join(', ')}.`
       : `${name} hasn't confirmed a specific clinical focus yet.`
   }
-  return `${name}'s agent can speak to clinical focus, good-fit cases, and pre-referral guidance -- try one of the starter prompts above, or ask about any of those directly.`
+  return `I can help with ${name}'s clinical focus, good-fit cases, and what's usually helpful before a referral. What would you like to know?`
 }
 
-/** A compact, sticky "ask this physician's agent" panel -- a grounded preview
- * (see buildAgentPreviewAnswer), not a decorative box: starter prompts and the
- * free-text input both produce a real answer built from this physician's own
- * confirmed representation, honestly framed as a preview rather than a live
- * model call. */
-function PhysicianAgentChatRail({ physicianName, agentName, rep }: { physicianName: string; agentName: string; rep: PracticeRepresentation['sections'] }) {
+const CHAT_AVATAR_TONES: AgentAvatarTone[] = ['blue', 'copper-light', 'blue-light', 'copper']
+function toneForAgent(id: string): AgentAvatarTone {
+  let hash = 0
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) % CHAT_AVATAR_TONES.length
+  return CHAT_AVATAR_TONES[hash]
+}
+
+/** A compact messenger -- not four giant FAQ buttons sitting above an input.
+ * Conversation area starts empty (meaningful whitespace, not pre-filled
+ * prompts); the 4 starter prompts live behind a "Suggested questions"
+ * disclosure that stays available after messages are sent, never a one-time
+ * reveal. A short typing beat (see .chat-typing-dots, reused from the My Agent
+ * Test tab) stands in for a response before the grounded preview answer
+ * appears.
+ *
+ * Sticky only while its own content still fits the viewport -- same
+ * ResizeObserver-driven "pin while it fits" philosophy as the Patient Detail
+ * next-step rail (see App.tsx's nextStepRef), never a hard CSS sticky that
+ * could pin content the physician can't scroll to. Re-measures on attach,
+ * resize, and any height change inside the rail (suggestions opening,
+ * messages arriving). */
+function PhysicianAgentChatRail({ physicianId, physicianName, agentName, rep }: { physicianId: string; physicianName: string; agentName: string; rep: PracticeRepresentation['sections'] }) {
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'agent'; text: string }>>([])
   const [input, setInput] = useState('')
+  const [typing, setTyping] = useState(false)
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const tone = toneForAgent(physicianId)
+
+  const railRef = useCallback((node: HTMLElement | null) => {
+    if (!node) return
+    const STICKY_TOP_OFFSET = 76
+    const BOTTOM_BREATHING_ROOM = 24
+    const evaluate = () => {
+      if (window.innerWidth <= 900) { setPinned(false); return }
+      const availableHeight = window.innerHeight - STICKY_TOP_OFFSET - BOTTOM_BREATHING_ROOM
+      setPinned(node.offsetHeight <= availableHeight)
+    }
+    evaluate()
+    const observer = new ResizeObserver(evaluate)
+    observer.observe(node)
+    window.addEventListener('resize', evaluate)
+    return () => { observer.disconnect(); window.removeEventListener('resize', evaluate) }
+  }, [])
+
   const ask = (question: string) => {
     const trimmed = question.trim()
-    if (!trimmed) return
-    setMessages((prev) => [...prev, { role: 'user', text: trimmed }, { role: 'agent', text: buildAgentPreviewAnswer(trimmed, physicianName, rep) }])
+    if (!trimmed || typing) return
+    setMessages((prev) => [...prev, { role: 'user', text: trimmed }])
     setInput('')
+    setSuggestionsOpen(false)
+    setTyping(true)
+    window.setTimeout(() => {
+      setMessages((prev) => [...prev, { role: 'agent', text: buildAgentPreviewAnswer(trimmed, physicianName, rep) }])
+      setTyping(false)
+    }, 650)
   }
-  return <aside className="member-chat-rail">
+
+  return <aside ref={railRef} className={`member-chat-rail ${pinned ? 'pinned' : ''}`}>
     <section className="member-chat-card">
-      <h3>Ask {agentName}</h3>
-      <p>A grounded preview of how {physicianName}'s agent represents this practice -- not a live conversation.</p>
-      {messages.length === 0
-        ? <div className="member-chat-starters">{AGENT_PREVIEW_STARTERS.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" onClick={() => ask(prompt)}>{prompt}</button>)}</div>
-        : <div className="member-chat-thread" role="log" aria-live="polite">{messages.map((message, index) => <p key={index} className={`member-chat-message ${message.role}`}>{message.role === 'agent' && <strong>{agentName}: </strong>}{message.text}</p>)}</div>}
+      <div className="member-chat-header">
+        <span className="member-chat-avatar"><AgentAvatar tone={tone} /></span>
+        <div>
+          <h3>Ask {agentName}</h3>
+          <span className="member-chat-subtitle">Public agent</span>
+        </div>
+      </div>
+      <p className="member-chat-helper">Ask about referral fit, preferred workup, or how this practice approaches a case.</p>
+
+      <div className="member-chat-conversation" role="log" aria-live="polite">
+        {messages.length === 0 && !typing && <p className="member-chat-empty">Ask a question below to see how {agentName} responds.</p>}
+        {messages.map((message, index) => <p key={index} className={`member-chat-message ${message.role}`}>
+          {message.role === 'agent' && <span className="member-chat-message-avatar"><AgentAvatar tone={tone} /></span>}
+          <span>{message.text}</span>
+        </p>)}
+        {typing && <p className="member-chat-message agent typing">
+          <span className="member-chat-message-avatar"><AgentAvatar tone={tone} /></span>
+          <span className="chat-typing-dots" aria-label={`${agentName} is answering`}><span /><span /><span /></span>
+        </p>}
+      </div>
+
+      <div className="member-chat-suggestions">
+        <button type="button" className="text-button member-chat-suggestions-toggle" aria-expanded={suggestionsOpen} onClick={() => setSuggestionsOpen((value) => !value)}>Suggested questions {suggestionsOpen ? '▴' : '▾'}</button>
+        {suggestionsOpen && <div className="member-chat-suggestions-panel">{AGENT_PREVIEW_STARTERS.map((prompt) => <button key={prompt} type="button" className="suggested-question-item" onClick={() => ask(prompt)}>{prompt}</button>)}</div>}
+      </div>
+
       <form className="member-chat-composer" onSubmit={(event) => { event.preventDefault(); ask(input) }}>
         <label htmlFor="member-chat-input" className="sr-only">Ask {agentName}</label>
-        <input id="member-chat-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder={`Ask about ${physicianName.split(' ').at(-1)}'s practice…`} />
-        <button className="button-secondary" type="submit" disabled={!input.trim()}>Ask</button>
+        <input id="member-chat-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder={`Ask about ${physicianName.split(' ').at(-1)}'s practice…`} disabled={typing} />
+        <button className="button-secondary" type="submit" disabled={typing || !input.trim()}>Ask</button>
       </form>
+
+      <p className="member-chat-disclaimer">Grounded in {physicianName}'s public Lamina profile — not a live conversation.</p>
     </section>
   </aside>
 }

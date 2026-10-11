@@ -12,7 +12,7 @@ import {
   type ProviderSearchResponse,
 } from './api.ts'
 import { ENGAGEMENT_PERSONA_BY_NPI } from './demoIdentity.ts'
-import { networkProfilePath } from './Engagement.tsx'
+import { networkProfilePath, NetworkRelationshipAction, useNetworkRelationship } from './Engagement.tsx'
 import { connectionLine, physicianDisplayName, physicianInitials, rankedNetworkList, type NetworkRelationship } from './networkRoster.ts'
 
 type Navigate = (path: string) => void
@@ -378,6 +378,7 @@ export function PhysicianProfilePage({ npi, navigate }: { npi: string; navigate:
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { getProvider(npi).then(setProfile).catch((loadError: Error) => setError(loadError.message)) }, [npi])
+  const relationship = useNetworkRelationship(profile?.npi ?? null)
   if (!profile) return <main className="page-shell physician-profile-page"><button className="text-button back-link" onClick={() => navigate('/network')}>← Network</button>{error ? <div className="error-banner">{error}</div> : <div className="directory-loading"><NetworkGlyph active /><p>Opening physician profile…</p></div>}</main>
 
   const synthetic = profile.source === 'SYNTHETIC'
@@ -386,17 +387,17 @@ export function PhysicianProfilePage({ npi, navigate }: { npi: string; navigate:
   const claimPath = `/claim/provider/${encodeURIComponent(profile.npi)}`
   return <main className="page-shell physician-profile-page">
     <button className="text-button back-link" onClick={() => navigate('/network')}>← Network</button>
-    <section className="provider-profile-hero"><div className="profile-identity"><span className="directory-avatar large">{name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')}</span><div><p className="eyebrow">{synthetic ? 'Controlled synthetic physician' : 'NPPES physician profile'}</p><h1>{name}</h1><p>{profile.specialty}</p></div></div><StatusBadge status={profile.agent.status} /></section>
+    <section className="provider-profile-hero"><div className="profile-identity"><span className="directory-avatar large">{name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')}</span><div><p className="eyebrow">{synthetic ? 'Controlled synthetic physician' : 'NPPES physician profile'}</p><h1>{name}</h1><p>{profile.specialty}</p></div></div><div className="profile-hero-status"><StatusBadge status={profile.agent.status} /><NetworkRelationshipAction npi={profile.npi} relationship={relationship} /></div></section>
     <div className="profile-facts"><div><span>Practice location</span><strong>{profile.city || 'Not listed'}{profile.state ? `, ${profile.state}` : ''}</strong></div><div><span>Organisation</span><strong>{profile.organization || 'Not listed in directory'}</strong></div><div><span>NPI</span><strong>{profile.npi}</strong></div>{profile.phone && <div><span>Practice phone</span><strong>{profile.phone}</strong></div>}</div>
     <div className={`profile-provenance ${synthetic ? 'synthetic' : ''}`}><strong>{synthetic ? 'Synthetic demo profile' : 'Public directory record'}</strong><p>{profile.directory_disclaimer}</p></div>
     {error && <div className="error-banner" role="alert">{error}</div>}
     {ENGAGEMENT_PERSONA_BY_NPI[profile.npi] && <section className="professional-profile-link-card"><div><p className="eyebrow">Professional identity</p><h2>How their agent represents their practice</h2></div><button className="button-secondary" onClick={() => navigate(networkProfilePath('lucy', ENGAGEMENT_PERSONA_BY_NPI[profile.npi]))}>View professional profile →</button></section>}
 
-    <section className="agent-activation-card"><header><div><p className="eyebrow">Lamina status</p><h2>{copy.label}</h2><p>{copy.detail}</p></div><NetworkGlyph active={profile.agent.status === 'active'} /></header>
+    <section className="agent-activation-card"><header><div><h2>{copy.label}</h2><p>{copy.detail}</p></div><NetworkGlyph active={profile.agent.status === 'active'} /></header>
       {profile.agent.status === 'reserved' && profile.claimable
         ? <button className="button-primary" onClick={() => navigate(claimPath)}>Claim this identity <span>→</span></button>
         : <button className="button-secondary" onClick={() => navigate(claimPath)}>{profile.claimed_by_me ? 'Manage your claim' : 'View claim status'} <span>→</span></button>}
     </section>
-    <section className="consult-boundary-card"><div><p className="eyebrow">Clinical network boundary</p><h2>{profile.consult_eligible ? 'Controlled consult identity' : 'Not eligible for Consult Network'}</h2><p>{profile.consult_eligible ? 'This synthetic physician’s richer practice footprint is already used in the Jordan Lee demo.' : 'National NPPES records are directory identities only and are not candidates for clinical recommendation.'}</p></div><button className="button-secondary" onClick={() => navigate('/patients/patient-ckd-htn-001')}>Return to Consult Network</button></section>
+    <section className="consult-boundary-card"><div><p className="eyebrow">Clinical network boundary</p><h2>{profile.consult_eligible ? 'Controlled consult identity' : 'Not eligible for Consult Network'}</h2><p>{profile.consult_eligible ? 'This synthetic physician’s richer practice footprint is already used in the Jordan Lee demo.' : 'National NPPES records are directory identities only and are not candidates for clinical recommendation.'}</p></div></section>
   </main>
 }
