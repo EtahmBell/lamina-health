@@ -272,13 +272,22 @@ test('the stray "Lamina can ask follow-up questions based on these interests" in
   assert.match(page, /\{hasInterests && <TrainingFollowUpBanner trainPath=\{trainingPath\(personaId\)\} navigate=\{navigate\} \/>\}/, 'only shown when there is actually something to train on')
 })
 
-test('TrainingFollowUpBanner reuses the established copper mini-hero (.training-reminder / TrainingReminderGlyph from My Agent Overview) and routes into the real existing training flow -- no new training architecture', () => {
+test('TrainingFollowUpBanner has its own slate-blue palette and stacked-bar "progression" motif -- distinct from My Agent Overview\'s copper .training-reminder/TrainingReminderGlyph -- and still routes into the real existing training flow, no new training architecture', () => {
   const banner = slice(engagement, 'function TrainingFollowUpBanner', '/* ------------------------------------------------------------- My Agent: Overview */')
-  assert.match(banner, /className="training-reminder profile-training-followup"/)
-  assert.match(banner, /<TrainingReminderGlyph \/>/)
+  assert.match(banner, /className="training-followup-banner"/)
+  assert.match(banner, /<TrainingFollowUpGlyph \/>/)
+  assert.doesNotMatch(banner, /className="training-reminder|<TrainingReminderGlyph/, 'never reuses My Agent Overview\'s copper banner classes/glyph directly')
   assert.match(banner, /Help your agent understand these preferences better/)
   assert.match(banner, /Training can refine how your agent represents these interests and referral preferences\./)
   assert.match(banner, /onClick=\{\(\) => navigate\(trainPath\)\}>Continue training <span>→<\/span>/)
+  const glyph = slice(engagement, 'function TrainingFollowUpGlyph', 'function TrainingFollowUpBanner')
+  assert.match(glyph, /className="tf-bar b1"/)
+  assert.match(glyph, /className="tf-bar b2"/)
+  assert.match(glyph, /className="tf-bar b3"/)
+  assert.match(glyph, /className="tf-chevron"/)
+  assert.doesNotMatch(glyph, /training-reminder-ring|✧/, 'a stacked-bar + chevron motif, not the old concentric rings + sparkle')
+  assert.match(styles, /\.tf-bar \{ fill: var\(--slate\); \}/)
+  assert.match(styles, /\.training-followup-banner \{[^}]*background: linear-gradient\(120deg, var\(--slate-surface\), var\(--surface\) 70%\);/)
 })
 
 test('Background renders compact "label ... + Add" rows when empty, never three stacked "Nothing added yet." blocks', () => {
@@ -305,11 +314,22 @@ test('"View as others see it" enters preview mode via an explicit ?preview=1 rou
   assert.match(publicPage, /Previewing your public profile/)
 })
 
-test('preview-mode "Back to editing" always routes to the signed-in Profile page via professionalProfilePath -- never browser history, never Dashboard', () => {
+test('preview mode: both "Back to editing" in the preview bar AND the ordinary ← Back link route to the same canonical signed-in Profile route -- never browser history, never Dashboard', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /const backTarget = isPreview \? professionalProfilePath\(perspective\) : backPath/, 'one canonical target computed once, shared by every back control on the page')
   const previewBar = slice(publicPage, 'className="profile-preview-bar"', '</div>}')
-  assert.match(previewBar, /onClick=\{\(\) => navigate\(professionalProfilePath\(perspective\)\)\}>Back to editing →/)
-  assert.doesNotMatch(previewBar, /window\.history|navigate\(backPath\)|navigate\('\/home'\)|navigate\('\/specialist\/home'\)/, 'never falls back to browser history or the Dashboard')
+  assert.match(previewBar, /onClick=\{\(\) => navigate\(backTarget\)\}>Back to editing →/)
+  // Both the main back-link AND the two early-return (error/loading) back
+  // links use backTarget, not the raw backPath prop, so the bug can't
+  // resurface in any render path.
+  const backLinkCount = (publicPage.match(/className="text-button back-link" onClick=\{\(\) => navigate\(backTarget\)\}/g) ?? []).length
+  assert.equal(backLinkCount, 3, `expected all 3 back-link render paths (error, loading, main) to use backTarget, found ${backLinkCount}`)
+  assert.doesNotMatch(publicPage, /onClick=\{\(\) => navigate\(backPath\)\}/, 'the raw Dashboard backPath is never used directly anymore -- only via backTarget, which already accounts for preview mode')
+})
+
+test('outside preview mode, the normal back-link behavior is unchanged -- it still routes to backPath (the public-flow Dashboard destination)', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /const backTarget = isPreview \? professionalProfilePath\(perspective\) : backPath/)
 })
 
 test('an ordinary public visitor never sees the preview bar -- it only renders when the ?preview=1 flag is present', () => {
@@ -318,14 +338,24 @@ test('an ordinary public visitor never sees the preview bar -- it only renders w
   assert.doesNotMatch(publicPage, /^\s*<div className="profile-preview-bar">/m, 'never renders unconditionally outside the isPreview guard')
 })
 
-test('the Profile Assistant banner replaces the old InitializationCard ("Set up your agent") and ProfileSuggestionsEntry link with one banner, using the Dashboard-banner composition language', () => {
+test('the Profile Assistant banner replaces the old InitializationCard ("Set up your agent") and ProfileSuggestionsEntry link with one banner, related to the Dashboard-banner composition but with its own soft-neutral-grey palette and faceted-triangle motif, never the Dashboard\'s mineral rings + sparkle', () => {
   assert.doesNotMatch(engagement, /^function InitializationCard|^export function InitializationCard/m, 'the old "Set up your agent" card component is removed entirely, not hidden')
   assert.doesNotMatch(engagement, /function ProfileSuggestionsEntry/)
   const banner = slice(engagement, 'export function ProfileAssistantBanner', 'function TrainingFollowUpBanner')
   assert.doesNotMatch(banner, /Set up your agent|initialization-card|initialization-steps/, 'the banner itself never renders the old setup-card copy/classes')
-  assert.match(banner, /className="agent-banner profile-assistant-banner"/, 'reuses the .agent-banner shell (left copy + glyph, white inset action card)')
+  assert.match(banner, /className="profile-assistant-banner"/)
+  assert.match(banner, /<ProfileAssistantGlyph \/>/)
+  assert.doesNotMatch(banner, /className="agent-banner |agent-banner-ring|agent-banner-sparkle/, 'never reuses the Dashboard\'s .agent-banner shell/rings/sparkle directly')
   assert.match(banner, /Let your agent build out your profile\./)
   assert.match(banner, /Your agent can use what it has learned about your practice and public professional information to suggest additions for your review\./)
+  const glyph = slice(engagement, 'function ProfileAssistantGlyph', 'export function ProfileAssistantBanner')
+  assert.match(glyph, /className="pa-facet f1"/)
+  assert.match(glyph, /className="pa-facet f2"/)
+  assert.match(glyph, /className="pa-facet f3"/)
+  assert.match(glyph, /className="pa-facet f4"/)
+  assert.match(glyph, /className="pa-guide"/)
+  assert.match(styles, /\.pa-facet \{ fill: #5b615c; \}/)
+  assert.match(styles, /\.profile-assistant-banner \{ display: grid; grid-template-columns: 1\.1fr 1fr;[^}]*background: #eef0ee;/, 'a soft-neutral grey surface, not the Dashboard\'s mineral/sage-tinted one')
 })
 
 test('the Profile Assistant banner idle/loading/ready states use the same .status-label/.spark-icon pulse language as the Patient Detail next-step rail, and nothing is auto-applied', () => {

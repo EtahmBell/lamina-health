@@ -1839,16 +1839,51 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-banner-action .status-label + h3 { margin-top: 14px; }
 .agent-banner-action .muted-note { margin-top: 10px; font-size: .64rem; }
 
-/* Profile assistant banner: same .agent-banner shell as the Dashboard, just a
- * little tighter in a single-column profile page (no digest-tile row below
- * it to visually balance against). */
-.profile-assistant-banner { margin-top: 24px; }
-.profile-assistant-banner .agent-banner-main h2 { max-width: 340px; }
+/* Profile assistant banner: related to the Dashboard's .agent-banner
+ * composition (left copy + glyph, white inset action card) but with its own
+ * soft-neutral grey surface and a faceted-triangle motif -- never the
+ * Dashboard's mineral rings + sparkle, so it reads as part of the same
+ * system without being a copy of it. */
+.profile-assistant-banner { display: grid; grid-template-columns: 1.1fr 1fr; align-items: stretch; margin-top: 24px; border: 1px solid #dcdfda; border-radius: 12px; background: #eef0ee; overflow: hidden; }
+.profile-assistant-main { position: relative; overflow: hidden; padding: 35px; }
+.profile-assistant-main .eyebrow { position: relative; z-index: 1; display: flex; align-items: center; gap: 7px; color: #5b615c; }
+.profile-assistant-main .eyebrow::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #5b615c; }
+.profile-assistant-main h2 { position: relative; z-index: 1; margin: 6px 0 0; max-width: 340px; font-size: 1.8rem; line-height: 1.2; }
+.profile-assistant-support { position: relative; z-index: 1; margin: 10px 0 0; max-width: 42ch; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
+.profile-assistant-glyph { position: absolute; top: 50%; right: -58px; z-index: 0; width: 220px; height: 220px; opacity: .9; transform: translateY(-50%); }
+.pa-facet { fill: #5b615c; }
+.pa-facet.f1 { opacity: .05; }
+.pa-facet.f2 { opacity: .08; }
+.pa-facet.f3 { opacity: .12; }
+.pa-facet.f4 { opacity: .17; }
+.pa-guide { stroke: #5b615c; stroke-width: 1; opacity: .15; }
+.profile-assistant-action { position: relative; z-index: 1; margin: 19px; border: 1px solid var(--border); border-radius: 9px; background: rgb(255 254 251 / 91%); padding: 23px; }
+.profile-assistant-action h3 { margin: 0; font-size: 1.3rem; }
+.profile-assistant-action .profile-assistant-support { font-size: .76rem; }
+.profile-assistant-action .button-primary { margin-top: 16px; }
+.profile-assistant-action .status-label { display: inline-flex; align-items: center; }
+.profile-assistant-action .status-label + h3 { margin-top: 14px; }
+.profile-assistant-action .muted-note { margin-top: 10px; font-size: .64rem; }
+@media (max-width: 760px) { .profile-assistant-banner { grid-template-columns: 1fr; } .profile-assistant-glyph { display: none; } .profile-assistant-main h2 { max-width: none; } }
 
-/* The small follow-up-to-training banner reuses .training-reminder (My Agent
- * Overview's established copper mini-hero) verbatim -- this is only the
- * margin needed to sit correctly among the profile page's other sections. */
-.profile-training-followup { margin-top: 26px; }
+/* Continue-training follow-up: a single-surface slim banner (no white inset
+ * card -- a lighter-weight nudge than the assistant banner above it), in a
+ * muted slate-blue family (the existing --slate/--slate-surface tokens)
+ * distinct from both My Agent's copper and the assistant banner's neutral
+ * grey. A stacked-bar "progression" motif, not the old concentric rings +
+ * sparkle. */
+.training-followup-banner { position: relative; overflow: hidden; margin-top: 26px; border: 1px solid #c9d2da; border-radius: 12px; background: linear-gradient(120deg, var(--slate-surface), var(--surface) 70%); padding: 26px 30px; }
+.training-followup-copy { position: relative; z-index: 1; max-width: 500px; }
+.training-followup-copy h2 { margin: 0 0 8px; font-size: 1.25rem; line-height: 1.4; }
+.training-followup-support { margin: 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.5; }
+.training-followup-actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 16px; }
+.training-followup-glyph { position: absolute; top: 50%; right: -46px; z-index: 0; width: 200px; height: 200px; opacity: .9; transform: translateY(-50%); }
+.tf-bar { fill: var(--slate); }
+.tf-bar.b1 { opacity: .08; }
+.tf-bar.b2 { opacity: .14; }
+.tf-bar.b3 { opacity: .22; }
+.tf-chevron { stroke: var(--slate); stroke-width: 2; opacity: .3; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 760px) { .training-followup-glyph { display: none; } .training-followup-copy { max-width: none; } }
 
 /* Shown only when arriving via the physician's own "View as others see it"
  * link (?preview=1) -- ordinary public visitors never see this. */

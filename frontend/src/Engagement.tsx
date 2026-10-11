@@ -1500,17 +1500,31 @@ function ProfileSuggestionsModal({ personaId, candidates, onClose, onReviewed, t
  * Replaces the old InitializationCard ("Set up your agent", which duplicated
  * setup messaging the Dashboard banner and My Agent -> Train already own) and
  * ProfileSuggestionsEntry's small dismissible link with ONE polished banner --
- * same composition language as the Dashboard agent banner (.agent-banner:
- * left copy + decorative glyph, white inset action card on the right),
- * adapted rather than copied: different copy, and a three-state action card
- * (idle/loading/ready) using the same .status-label/.spark-icon pulse
- * language as the Patient Detail "Consulting the network" / "got back to
- * you" states, instead of Dashboard's digest-tile mechanism. Routes through
- * the real enrichPhysicianProfile/getProfileEnrichment/reviewProfileCandidate
- * API -- the same one "Find public information" always used -- never a new
+ * related to the Dashboard agent banner's composition (left copy + decorative
+ * glyph, white inset action card on the right) but with its own soft-neutral
+ * grey palette (.profile-assistant-* classes, not .agent-banner) and its own
+ * faceted-triangle background motif (ProfileAssistantGlyph), never the
+ * Dashboard's mineral rings + sparkle. The idle/loading/ready action card
+ * still uses the same .status-label/.spark-icon pulse language as the
+ * Patient Detail "Consulting the network" / "got back to you" states --
+ * that's a shared interaction convention, not the banner-chrome being
+ * differentiated here. Routes through the real
+ * enrichPhysicianProfile/getProfileEnrichment/reviewProfileCandidate API --
+ * the same one "Find public information" always used -- never a new
  * endpoint. Nothing is added to the profile until the physician explicitly
  * reviews and confirms a candidate in ProfileSuggestionsModal.
  */
+function ProfileAssistantGlyph() {
+  return <svg className="profile-assistant-glyph" viewBox="0 0 220 220" aria-hidden="true">
+    <polygon className="pa-facet f1" points="110,24 182,146 38,146" />
+    <polygon className="pa-facet f2" points="142,58 198,152 86,152" />
+    <polygon className="pa-facet f3" points="66,64 122,164 10,164" />
+    <polygon className="pa-facet f4" points="108,96 150,166 66,166" />
+    <line className="pa-guide" x1="26" y1="34" x2="194" y2="34" />
+    <line className="pa-guide" x1="46" y1="182" x2="174" y2="182" />
+  </svg>
+}
+
 export function ProfileAssistantBanner({ personaId, onConfirmed }: { personaId: PhysicianIdentity; onConfirmed: () => void }) {
   const [job, setJob] = useState<ProfileEnrichmentJob | null>(null)
   const [loading, setLoading] = useState(false)
@@ -1539,22 +1553,19 @@ export function ProfileAssistantBanner({ personaId, onConfirmed }: { personaId: 
   const pending = job?.candidates.filter((item) => item.review_status === 'suggested') ?? []
   const ready = pending.length > 0
 
-  return <section className="agent-banner profile-assistant-banner">
-    <div className="agent-banner-main">
-      <div className="agent-banner-glyph" aria-hidden="true">
-        <span className="agent-banner-ring r1" /><span className="agent-banner-ring r2" /><span className="agent-banner-ring r3" /><span className="agent-banner-ring r4" /><span className="agent-banner-ring r5" /><span className="agent-banner-ring r6" />
-        <span className="agent-banner-sparkle">✧</span>
-      </div>
+  return <section className="profile-assistant-banner">
+    <div className="profile-assistant-main">
+      <ProfileAssistantGlyph />
       <p className="eyebrow">Profile assistant</p>
       <h2>Let your agent build out your profile.</h2>
-      <p className="agent-banner-support">Your agent can use what it has learned about your practice and public professional information to suggest additions for your review.</p>
+      <p className="profile-assistant-support">Your agent can use what it has learned about your practice and public professional information to suggest additions for your review.</p>
     </div>
-    <div className="agent-banner-action">
+    <div className="profile-assistant-action">
       {loading
         ? <>
           <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Finding profile suggestions</span>
           <h3>Your agent is reviewing your profile.</h3>
-          <p className="agent-banner-support">Comparing your current profile with available professional information and what it has learned about your practice…</p>
+          <p className="profile-assistant-support">Comparing your current profile with available professional information and what it has learned about your practice…</p>
         </>
         : ready
           ? <>
@@ -1564,7 +1575,7 @@ export function ProfileAssistantBanner({ personaId, onConfirmed }: { personaId: 
           </>
           : <>
             <h3>Profile suggestions</h3>
-            <p className="agent-banner-support">Find missing details and review them before anything is added.</p>
+            <p className="profile-assistant-support">Find missing details and review them before anything is added.</p>
             <button ref={triggerRef} className="button-primary" onClick={runEnrichment}>Review suggestions <span>→</span></button>
             {message && <p className="muted-note" role="status">{message}</p>}
           </>}
@@ -1580,13 +1591,26 @@ export function ProfileAssistantBanner({ personaId, onConfirmed }: { personaId: 
  * one, so this visually reads as "connects to My Agent" without being a
  * second, competing hero. Links into the real training flow -- no new
  * training architecture. */
+/** Stacked, slanted bars narrowing toward one corner plus a small forward
+ * chevron -- a "progression/refinement" motif, deliberately distinct from
+ * both ProfileAssistantGlyph's clustered triangles above and
+ * TrainingReminderGlyph's concentric rings (My Agent Overview). */
+function TrainingFollowUpGlyph() {
+  return <svg className="training-followup-glyph" viewBox="0 0 200 200" aria-hidden="true">
+    <rect className="tf-bar b1" x="30" y="128" width="104" height="18" rx="3" transform="rotate(-16 30 128)" />
+    <rect className="tf-bar b2" x="54" y="92" width="104" height="18" rx="3" transform="rotate(-16 54 92)" />
+    <rect className="tf-bar b3" x="78" y="56" width="104" height="18" rx="3" transform="rotate(-16 78 56)" />
+    <path className="tf-chevron" d="M146,150 L172,124 L146,98" fill="none" />
+  </svg>
+}
+
 function TrainingFollowUpBanner({ trainPath, navigate }: { trainPath: string; navigate: Navigate }) {
-  return <section className="training-reminder profile-training-followup">
-    <TrainingReminderGlyph />
-    <div className="training-reminder-copy">
+  return <section className="training-followup-banner">
+    <TrainingFollowUpGlyph />
+    <div className="training-followup-copy">
       <h2>Help your agent understand these preferences better</h2>
-      <p className="training-reminder-support">Training can refine how your agent represents these interests and referral preferences.</p>
-      <div className="training-reminder-actions">
+      <p className="training-followup-support">Training can refine how your agent represents these interests and referral preferences.</p>
+      <div className="training-followup-actions">
         <button className="button-primary" onClick={() => navigate(trainPath)}>Continue training <span>→</span></button>
       </div>
     </div>
@@ -2178,8 +2202,14 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
   // Only the physician's own "View as others see it" link adds ?preview=1 --
   // an ordinary visitor reaching this exact same public URL never sees the bar.
   const isPreview = params?.get('preview') === '1'
-  if (error) return <main className="page-shell profile-page"><button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button><div className="error-banner" role="alert">{error}</div></main>
-  if (!data) return <main className="page-shell profile-page"><button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button><p className="muted-note">Opening profile…</p></main>
+  // In preview mode this page is a preview of the physician's OWN profile, not
+  // a separate public destination -- every "back" control (the ordinary ←
+  // Back link included, not just the preview bar's own "Back to editing")
+  // must return to the real signed-in Profile route, never backPath's
+  // Dashboard destination and never browser history.
+  const backTarget = isPreview ? professionalProfilePath(perspective) : backPath
+  if (error) return <main className="page-shell profile-page"><button className="text-button back-link" onClick={() => navigate(backTarget)}>← Back</button><div className="error-banner" role="alert">{error}</div></main>
+  if (!data) return <main className="page-shell profile-page"><button className="text-button back-link" onClick={() => navigate(backTarget)}>← Back</button><p className="muted-note">Opening profile…</p></main>
   const rep = data.practice_representation
   const sections = data.professional_profile.sections
   const interests = data.professional_profile.interests
@@ -2213,9 +2243,9 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
   return <main className="page-shell profile-page member-profile-page">
     {isPreview && <div className="profile-preview-bar">
       <span>Previewing your public profile</span>
-      <button type="button" className="text-button" onClick={() => navigate(professionalProfilePath(perspective))}>Back to editing →</button>
+      <button type="button" className="text-button" onClick={() => navigate(backTarget)}>Back to editing →</button>
     </div>}
-    <button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button>
+    <button className="text-button back-link" onClick={() => navigate(backTarget)}>← Back</button>
     <section className="provider-profile-hero">
       <div className="profile-identity">
         <span className="directory-avatar large">{initials}</span>
