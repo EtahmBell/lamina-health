@@ -289,6 +289,50 @@ test('public and private profile reuse the same section-rendering components (ti
   assert.match(publicPage, /<InterestsPanel interests=\{data\.professional_profile\.interests\}/)
 })
 
+test('the joined-Lamina member profile is a two-column layout with a sticky agent-chat rail, not the old single-column shell', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /className="member-profile-layout"/)
+  assert.match(publicPage, /<PhysicianAgentChatRail /)
+  assert.match(styles, /\.member-chat-rail \{[^}]*position: sticky/)
+})
+
+test('"How the network sees this practice" renders as grouped boxed cards, not one flat multi-list panel', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /className="practice-rep-cards"/)
+  assert.doesNotMatch(publicPage, /practice-representation-panel/)
+})
+
+test('recent network updates render as cards via MemberUpdateCard, reusing the feed post truncation convention', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /<MemberUpdateCard update=\{update\}/)
+  assert.match(publicPage, /Recent network updates/)
+})
+
+test('the agent-chat rail is an honest grounded preview, not a live model call, and starter prompts match the requested set', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /grounded preview/)
+  assert.doesNotMatch(publicPage, /await chatWithAgent|= chatWithAgent\(/)
+  assert.match(publicPage, /What cases are a good fit for this practice\?/)
+  assert.match(publicPage, /What workup is usually helpful before referral\?/)
+  assert.match(publicPage, /When would this physician want co-management\?/)
+  assert.match(publicPage, /What does this practice prioritize most\?/)
+})
+
+test('agent-chat preview answers are built only from this physician\'s own on-page representation fields, never invented facts', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  const builder = slice(publicPage, 'function buildAgentPreviewAnswer', 'function PhysicianAgentChatRail')
+  assert.match(builder, /rep\.good_fit/)
+  assert.match(builder, /rep\.preferred_workup/)
+  assert.match(builder, /rep\.clinical_focus/)
+})
+
+test('the member-profile analytics section frames itself as profile intelligence, never a completion score or fabricated interaction count', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  const analytics = slice(publicPage, 'function MemberProfileAnalytics', 'function MemberUpdateCard')
+  assert.doesNotMatch(analytics, /consultation_count|interaction/i)
+  assert.match(analytics, /rep\.clinical_focus\.length/)
+})
+
 test('Profile structural parity: Lucy and Iain render the same ProfessionalProfilePage shell', () => {
   const dispatch = routing()
   assert.match(dispatch, /ProfessionalProfilePage personaId="lucy" navigate=\{navigate\} params=\{params\}/)
@@ -777,6 +821,11 @@ test('the network globe motif is a composed wireframe globe (one sphere silhouet
   assert.doesNotMatch(hero, /usa|united-states|map|airline/i)
 })
 
+test('the globe motif is anchored near the hero\'s horizontal center, not hidden behind the white action card at the far right', () => {
+  assert.match(styles, /\.network-hero-globe-art \{ position: absolute; left: 47%;/)
+  assert.doesNotMatch(styles, /\.network-hero-globe-art \{ position: absolute; right:/)
+})
+
 test('Suggested connections exists below the hero as a 3-up card grid (not rows), shows ~3 by default with a local expand, a filled primary Add action, and never fabricates a reason', () => {
   assert.match(network, /function SuggestedConnections/)
   assert.match(network, /const visible = expanded \? suggestions : suggestions\.slice\(0, 3\)/)
@@ -800,6 +849,24 @@ test('no generic Network KPI/analytics block was added -- My Agent already owns 
   const tab = slice(network, 'export function MyNetworkTab', 'export function PhysicianProfilePage')
   assert.doesNotMatch(tab, /specialties ·|consultations ·|physicians ·/i)
   assert.doesNotMatch(styles, /\.network-kpi/)
+})
+
+test('every suggested connection resolves to a real profile -- the directory page, when there is no public-agent profile -- never a dead link', () => {
+  const card = slice(network, 'function SuggestedConnectionCard', 'function SuggestedConnections')
+  assert.doesNotMatch(card, /\{persona && <button/, 'the View profile link must not be conditionally omitted')
+  assert.match(card, /navigate\(persona \? networkProfilePath\('lucy', persona\) : `\/network\/\$\{suggestion\.npi\}`\)/)
+})
+
+test('the "not yet on Lamina" directory page never implies an agent exists before the physician has joined', () => {
+  const page = slice(network, 'export function PhysicianProfilePage', network.length)
+  assert.doesNotMatch(page, /Lamina Agent/)
+  assert.match(page, /Lamina status/)
+})
+
+test('the "not yet on Lamina" card and the clinical-boundary card both give their copy room to breathe', () => {
+  assert.match(styles, /\.agent-activation-card > \.button-primary, \.agent-activation-card > \.button-secondary \{ margin-top: 22px; \}/)
+  assert.match(styles, /\.consult-boundary-card \{[^}]*padding: 22px;/)
+  assert.match(styles, /\.consult-boundary-card p:last-child \{[^}]*margin-top: 10px/)
 })
 
 test('the existing "Most connected in your network" colleague list, View physician action, and See all colleagues are preserved unchanged', () => {

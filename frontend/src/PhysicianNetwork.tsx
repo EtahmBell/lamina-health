@@ -204,7 +204,13 @@ function SuggestedConnectionCard({ suggestion, navigate, busy, onAdd }: {
     {showReason && <p className="suggestion-reason">{suggestion.reason}</p>}
     <div className="suggestion-card-actions">
       <button className="button-primary suggestion-add" disabled={busy} onClick={onAdd}>Add <span>→</span></button>
-      {persona && <button className="text-button" onClick={() => navigate(networkProfilePath('lucy', persona))}>View profile →</button>}
+      {/* Every suggestion gets a real profile, never a dead link: physicians with
+       * a public Lamina agent (an ENGAGEMENT_PERSONA_BY_NPI entry) go to the
+       * richer member profile; anyone else -- including synthetic consult-graph
+       * physicians the agent has actually encountered but who have no public
+       * agent of their own -- still resolves via the directory/NPPES-style page,
+       * which works for any npi in the provider network. */}
+      <button className="text-button" onClick={() => navigate(persona ? networkProfilePath('lucy', persona) : `/network/${suggestion.npi}`)}>View profile →</button>
     </div>
   </div>
 }
@@ -386,7 +392,7 @@ export function PhysicianProfilePage({ npi, navigate }: { npi: string; navigate:
     {error && <div className="error-banner" role="alert">{error}</div>}
     {ENGAGEMENT_PERSONA_BY_NPI[profile.npi] && <section className="professional-profile-link-card"><div><p className="eyebrow">Professional identity</p><h2>How their agent represents their practice</h2></div><button className="button-secondary" onClick={() => navigate(networkProfilePath('lucy', ENGAGEMENT_PERSONA_BY_NPI[profile.npi]))}>View professional profile →</button></section>}
 
-    <section className="agent-activation-card"><header><div><p className="eyebrow">Lamina Agent</p><h2>{copy.label}</h2><p>{copy.detail}</p></div><NetworkGlyph active={profile.agent.status === 'active'} /></header>
+    <section className="agent-activation-card"><header><div><p className="eyebrow">Lamina status</p><h2>{copy.label}</h2><p>{copy.detail}</p></div><NetworkGlyph active={profile.agent.status === 'active'} /></header>
       {profile.agent.status === 'reserved' && profile.claimable
         ? <button className="button-primary" onClick={() => navigate(claimPath)}>Claim this identity <span>→</span></button>
         : <button className="button-secondary" onClick={() => navigate(claimPath)}>{profile.claimed_by_me ? 'Manage your claim' : 'View claim status'} <span>→</span></button>}
