@@ -14,7 +14,6 @@ import {
   editProfessionalPost,
   enrichPhysicianProfile,
   finishTrainingSession,
-  getAgentInitialization,
   getAgentNetwork,
   getAgentOverview,
   getAgentTestCases,
@@ -39,7 +38,6 @@ import {
   updateProfessionalProfileItem,
   updateProposedLearning,
   type AgentChatResponse,
-  type AgentInitialization,
   type AgentNetwork,
   type AgentOverview,
   type AgentTestCase,
@@ -97,6 +95,11 @@ function relativeDayLabel(value: string) {
 export const trainingPath = (perspective: PhysicianIdentity) => (perspective === 'iain' ? '/specialist/agent/train' : perspective === 'owner' ? '/me/agent/train' : '/agent/train')
 export const professionalProfilePath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/profile' : '/profile')
 export const networkProfilePath = (perspective: DemoPhysicianPerspective, controlledId: string) => (perspective === 'iain' ? `/specialist/network/profile/${controlledId}` : `/network/profile/${controlledId}`)
+/** "View as others see it" lands on the real public-profile page (never a
+ * separate preview implementation) with an explicit ?preview=1 flag, so the
+ * page can show a small "Previewing your public profile" bar -- ordinary
+ * visitors reaching the same URL without this flag never see it. */
+export const networkProfilePreviewPath = (perspective: DemoPhysicianPerspective, controlledId: string) => `${networkProfilePath(perspective, controlledId)}?preview=1`
 export const networkUpdatesPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network?tab=feed' : '/network?tab=feed')
 export const networkPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network' : '/network')
 export const settingsPath = '/settings'
@@ -1027,9 +1030,9 @@ function ProfileItemForm({ category, initial, onSave, onCancel, busy }: {
   </div>
 }
 
-function ProfileSection({ category, items, personaId, onSaved, itemActions, heading, id, quiet, readOnly }: {
+function ProfileSection({ category, items, personaId, onSaved, itemActions, heading, id, quiet, readOnly, showHeading = true }: {
   category: ProfileCategory; items: ProfileItem[]; personaId?: PhysicianIdentity
-  onSaved?: () => void; itemActions?: (item: ProfileItem) => ReactNode; heading?: string; id?: string; quiet?: boolean; readOnly?: boolean
+  onSaved?: () => void; itemActions?: (item: ProfileItem) => ReactNode; heading?: string; id?: string; quiet?: boolean; readOnly?: boolean; showHeading?: boolean
 }) {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -1043,8 +1046,11 @@ function ProfileSection({ category, items, personaId, onSaved, itemActions, head
       setAdding(false); setEditingId(null)
     } finally { setBusy(false) }
   }
+  const addButton = !readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>
   return <section id={id} className={`profile-section-v2 ${quiet ? 'quiet' : ''}`}>
-    <div className="profile-section-heading"><h2>{heading ?? CATEGORY_LABELS[category]}</h2>{!readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>}</div>
+    {showHeading
+      ? <div className="profile-section-heading"><h2>{heading ?? CATEGORY_LABELS[category]}</h2>{addButton}</div>
+      : addButton && <div className="profile-section-heading quiet-heading">{addButton}</div>}
     {items.length === 0 && !adding && <p className="profile-section-empty">Nothing added yet.</p>}
     <div className="profile-item-list">{items.map((item) => (editingId === item.id
       ? <ProfileItemForm key={item.id} category={category} initial={item} busy={busy} onCancel={() => setEditingId(null)} onSave={(fields) => save(item.id, fields)} />
@@ -1099,23 +1105,27 @@ function ProfileTimelineGroup({ category, items, personaId, onSaved, readOnly }:
     } finally { setBusy(false) }
   }
   if (readOnly && items.length === 0) return null
-  return <div className="profile-timeline-group">
+  // Empty + editable renders as one compact "label ... + Add" row -- no
+  // separate empty-state line underneath the heading. Three of those stacked
+  // (Training/Experience/Affiliations) was the repeated-empty-state problem
+  // this fixes; readOnly empty groups already return null above.
+  const isEmpty = items.length === 0 && !adding
+  return <div className={`profile-timeline-group ${isEmpty ? 'empty' : ''}`}>
     <div className="profile-timeline-heading"><h3>{CATEGORY_LABELS[category]}</h3>{!readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>}</div>
-    {items.length === 0 && !adding && <p className="profile-section-empty">Nothing added yet.</p>}
-    <div className="profile-timeline">{items.map((item) => (editingId === item.id
+    {!isEmpty && <div className="profile-timeline">{items.map((item) => (editingId === item.id
       ? <ProfileItemForm key={item.id} category={category} initial={item} busy={busy} onCancel={() => setEditingId(null)} onSave={(fields) => save(item.id, fields)} />
       : <div className="profile-timeline-item" key={item.id}>
         <span className="profile-timeline-dot" aria-hidden="true" />
         <div><strong>{item.title}</strong>{item.detail && <p>{item.detail}</p>}{!readOnly && <small>{provenanceLabel(item)}</small>}</div>
         {!readOnly && <button className="text-button" onClick={() => { setEditingId(item.id); setAdding(false) }}>Edit</button>}
       </div>))}
-    </div>
+    </div>}
     {adding && <ProfileItemForm category={category} busy={busy} onCancel={() => setAdding(false)} onSave={(fields) => save(`item-${crypto.randomUUID()}`, fields)} />}
   </div>
 }
 
 /** About reads as a biography paragraph, not a metadata row — but reuses the same canonical save path as every other profile item. */
-function AboutSection({ items, personaId, onSaved, readOnly, showHeading = true }: { items: ProfileItem[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean; showHeading?: boolean }) {
+function AboutSection({ items, personaId, onSaved, readOnly }: { items: ProfileItem[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean }) {
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const existing = items[0] ?? null
@@ -1128,12 +1138,8 @@ function AboutSection({ items, personaId, onSaved, readOnly, showHeading = true 
     } finally { setBusy(false) }
   }
   if (readOnly && !existing) return null
-  // showHeading=false drops both the "About" heading AND the .profile-block
-  // divider/spacing treatment -- used when an outer section already supplies
-  // a single "About this physician" heading, so the bio never sits under two
-  // headings or two stacked divider lines (see NetworkPhysicianProfilePage).
-  return <section id="profile-section-about" className={showHeading ? 'profile-block profile-about' : 'profile-about'}>
-    {showHeading && <h2 className="profile-block-heading">About</h2>}
+  return <section id="profile-section-about" className="profile-block profile-about">
+    <h2 className="profile-block-heading">About</h2>
     {editing
       ? <ProfileItemForm category="about" initial={existing ?? undefined} busy={busy} onCancel={() => setEditing(false)} onSave={save} />
       : existing
@@ -1319,7 +1325,7 @@ function InterestForm({ initial, onSave, onCancel, busy }: { initial?: Physician
   </div>
 }
 
-export function InterestGroup({ interestType, items, personaId, onSaved, readOnly }: { interestType: PhysicianInterestType; items: PhysicianInterest[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean }) {
+export function InterestGroup({ interestType, items, personaId, onSaved, readOnly, showHeading = true }: { interestType: PhysicianInterestType; items: PhysicianInterest[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean; showHeading?: boolean }) {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1332,8 +1338,11 @@ export function InterestGroup({ interestType, items, personaId, onSaved, readOnl
     } finally { setBusy(false) }
   }
   if (readOnly && items.length === 0) return null
-  return <div className={`interest-group ${interestType === 'case_interest' ? 'primary' : ''}`}>
-    <div className="profile-section-heading"><h3>{INTEREST_TYPE_LABELS[interestType]}</h3>{!readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>}</div>
+  const addButton = !readOnly && <button className="text-button" onClick={() => { setAdding(true); setEditingId(null) }}>+ Add</button>
+  return <div className="interest-group">
+    {showHeading
+      ? <div className="profile-section-heading"><h3>{INTEREST_TYPE_LABELS[interestType]}</h3>{addButton}</div>
+      : addButton && <div className="profile-section-heading quiet-heading">{addButton}</div>}
     {items.length === 0 && !adding && <p className="profile-section-empty">Nothing added yet.</p>}
     <div className="interest-item-list">{items.map((item) => (editingId === item.id
       ? <InterestForm key={item.id} initial={item} busy={busy} onCancel={() => setEditingId(null)} onSave={(fields) => save(item.id, fields)} />
@@ -1346,14 +1355,94 @@ export function InterestGroup({ interestType, items, personaId, onSaved, readOnl
   </div>
 }
 
-export function InterestsPanel({ interests, personaId, onSaved, navigate, trainPath, types = INTEREST_TYPES, id, explainer, readOnly }: {
-  interests: PhysicianInterest[]; personaId?: PhysicianIdentity; onSaved?: () => void
-  navigate?: Navigate; trainPath?: string; types?: PhysicianInterestType[]; id?: string; explainer?: string; readOnly?: boolean
+/**
+ * Shared, presentational profile section assemblers -- the architectural core
+ * of the own/public profile synchronization pass: ProfessionalProfilePage
+ * (editable, readOnly undefined) and NetworkPhysicianProfilePage (public,
+ * readOnly) call the SAME functions with the SAME ProfessionalProfile shape
+ * (sections + interests -- identical type on both pages, see
+ * NetworkPhysicianProfile['professional_profile']), so there is one profile
+ * schema and one presentation, not two independently-styled copies. Each
+ * returns null when there's nothing to show in read-only context, so an
+ * empty section never appears on a public profile.
+ */
+const BACKGROUND_CATEGORIES: ProfileCategory[] = ['training', 'experience', 'affiliations']
+
+function ProfileBackgroundSection({ sections, personaId, onSaved, readOnly }: {
+  sections: Record<ProfileCategory, ProfileItem[]>; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean
 }) {
-  return <section id={id} className="profile-section-v2 interests-panel">
-    {!readOnly && <p className="profile-section-explainer">{explainer ?? 'Tell Lamina what areas of medicine and kinds of cases you are particularly interested in. Interests help your agent understand the work you are especially interested in — they do not guarantee referral eligibility or override clinical fit.'}</p>}
-    {types.map((type) => <InterestGroup key={type} interestType={type} items={interests.filter((item) => item.interest_type === type)} personaId={personaId} onSaved={onSaved} readOnly={readOnly} />)}
-    {navigate && trainPath && interests.length > 0 && <p className="profile-section-explainer interest-training-hint">Lamina can ask follow-up questions based on these interests. <button className="text-button" onClick={() => navigate(trainPath)}>Continue training →</button></p>}
+  if (readOnly && BACKGROUND_CATEGORIES.every((category) => sections[category].length === 0)) return null
+  return <section id="profile-section-training" className="profile-block">
+    <h2 className="profile-block-heading">Background</h2>
+    {BACKGROUND_CATEGORIES.map((category) => <ProfileTimelineGroup key={category} category={category} items={sections[category]} personaId={personaId} onSaved={onSaved} readOnly={readOnly} />)}
+  </section>
+}
+
+/** Case interests and Clinical interests are each their own top-level section
+ * now (Part D), not two sub-blocks folded into one shared "Interests" panel --
+ * each gets the same serif .profile-block-heading as About/Background, and
+ * InterestGroup renders without its own (now-redundant) h3 label. The
+ * referring-physician disclaimer only makes sense to a colleague reading
+ * someone else's public profile, so it's shown for case interests in
+ * read-only context only -- never on the physician's own editable profile. */
+function ProfileInterestSection({ id, heading, interestType, interests, physicianName, personaId, onSaved, readOnly }: {
+  id?: string; heading: string; interestType: PhysicianInterestType; interests: PhysicianInterest[]
+  physicianName?: string; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean
+}) {
+  const items = interests.filter((item) => item.interest_type === interestType)
+  if (readOnly && items.length === 0) return null
+  return <section id={id} className="profile-block">
+    <h2 className="profile-block-heading">{heading}</h2>
+    <InterestGroup interestType={interestType} items={items} personaId={personaId} onSaved={onSaved} readOnly={readOnly} showHeading={false} />
+    {readOnly && interestType === 'case_interest' && items.length > 0 && physicianName && <small className="profile-interest-disclaimer">Interests reflect what {physicianName} wants referring physicians to know. They do not guarantee referral eligibility or override clinical fit.</small>}
+  </section>
+}
+
+/** The location value renders directly under the heading -- no redundant
+ * inner "Locations" sub-heading (same relationship as the About/"About this
+ * physician" fix). Editable context still gets real add/edit affordances via
+ * ProfileSection's showHeading={false}; read-only context is a plain value. */
+function ProfilePracticeLocationsSection({ sections, personaId, onSaved, readOnly }: {
+  sections: Record<ProfileCategory, ProfileItem[]>; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean
+}) {
+  const hasLocations = sections.locations.length > 0
+  const hasSkills = sections.skills_or_procedures.length > 0
+  const hasLanguages = sections.languages.length > 0
+  const hasLinks = sections.professional_links.length > 0
+  if (readOnly && !hasLocations && !hasSkills && !hasLanguages && !hasLinks) return null
+  return <section className="profile-block">
+    <h2 className="profile-block-heading">Practice &amp; locations</h2>
+    {readOnly
+      ? hasLocations && <p className="profile-location-value">{sections.locations.map((item) => item.title).join(' · ')}</p>
+      : <ProfileSection category="locations" items={sections.locations} personaId={personaId} onSaved={onSaved} showHeading={false} />}
+    {(hasSkills || hasLanguages || hasLinks) && <div className="about-practice-grid">
+      {hasSkills && <ProfileChipSection category="skills_or_procedures" items={sections.skills_or_procedures} personaId={personaId} onSaved={onSaved} readOnly={readOnly} heading="Skills &amp; procedures" />}
+      {hasLanguages && <ProfileChipSection category="languages" items={sections.languages} personaId={personaId} onSaved={onSaved} readOnly={readOnly} />}
+      {hasLinks && <ProfileSection category="professional_links" items={sections.professional_links} personaId={personaId} onSaved={onSaved} readOnly={readOnly} heading="Professional links" />}
+    </div>}
+  </section>
+}
+
+function ProfileResearchTeachingSection({ sections, interests, personaId, onSaved, readOnly }: {
+  sections: Record<ProfileCategory, ProfileItem[]>; interests: PhysicianInterest[]; personaId?: PhysicianIdentity; onSaved?: () => void; readOnly?: boolean
+}) {
+  const researchInterests = interests.filter((item) => item.interest_type === 'research_interest')
+  const teachingInterests = interests.filter((item) => item.interest_type === 'teaching_interest')
+  const hasResearch = sections.research.length > 0 || sections.publications.length > 0 || researchInterests.length > 0
+  const hasTeaching = sections.teaching.length > 0 || teachingInterests.length > 0
+  if (!hasResearch && !hasTeaching) return null
+  return <section id="profile-section-research" className="profile-block">
+    <h2 className="profile-block-heading">Research &amp; teaching</h2>
+    {hasResearch && <>
+      {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} personaId={personaId} onSaved={onSaved} readOnly={readOnly} />}
+      <ProfileSection category="research" items={sections.research} personaId={personaId} onSaved={onSaved} readOnly={readOnly} quiet />
+      <ProfileSection category="publications" items={sections.publications} personaId={personaId} onSaved={onSaved} readOnly={readOnly} quiet
+        itemActions={!readOnly && personaId && personaId !== 'owner' ? (item) => <PostButton personaId={personaId as DemoPhysicianPerspective} paperTitle={item.title} triggerLabel="Share this paper" compact /> : undefined} />
+    </>}
+    {hasTeaching && <>
+      {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} personaId={personaId} onSaved={onSaved} readOnly={readOnly} />}
+      <ProfileSection category="teaching" items={sections.teaching} personaId={personaId} onSaved={onSaved} readOnly={readOnly} quiet />
+    </>}
   </section>
 }
 
@@ -1407,8 +1496,22 @@ function ProfileSuggestionsModal({ personaId, candidates, onClose, onReviewed, t
   </div>
 }
 
-/** Replaces the old inline "Suggested additions" block: a small, dismissible entry point, never the dominant Profile content. */
-export function ProfileSuggestionsEntry({ personaId, onConfirmed }: { personaId: PhysicianIdentity; onConfirmed: () => void }) {
+/**
+ * Replaces the old InitializationCard ("Set up your agent", which duplicated
+ * setup messaging the Dashboard banner and My Agent -> Train already own) and
+ * ProfileSuggestionsEntry's small dismissible link with ONE polished banner --
+ * same composition language as the Dashboard agent banner (.agent-banner:
+ * left copy + decorative glyph, white inset action card on the right),
+ * adapted rather than copied: different copy, and a three-state action card
+ * (idle/loading/ready) using the same .status-label/.spark-icon pulse
+ * language as the Patient Detail "Consulting the network" / "got back to
+ * you" states, instead of Dashboard's digest-tile mechanism. Routes through
+ * the real enrichPhysicianProfile/getProfileEnrichment/reviewProfileCandidate
+ * API -- the same one "Find public information" always used -- never a new
+ * endpoint. Nothing is added to the profile until the physician explicitly
+ * reviews and confirms a candidate in ProfileSuggestionsModal.
+ */
+export function ProfileAssistantBanner({ personaId, onConfirmed }: { personaId: PhysicianIdentity; onConfirmed: () => void }) {
   const [job, setJob] = useState<ProfileEnrichmentJob | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -1434,31 +1537,59 @@ export function ProfileSuggestionsEntry({ personaId, onConfirmed }: { personaId:
     if (candidate.review_status === 'confirmed' || candidate.review_status === 'edited') onConfirmed()
   }
   const pending = job?.candidates.filter((item) => item.review_status === 'suggested') ?? []
+  const ready = pending.length > 0
 
-  return <div className="profile-suggestions-row">
-    {pending.length > 0
-      ? <button ref={triggerRef} className="profile-suggestions-indicator" onClick={() => setOpen(true)}>
-        <strong>{pending.length} profile suggestion{pending.length === 1 ? '' : 's'}</strong>
-        <span>Lamina found public information that may help complete your profile.</span>
-        <b>Review suggestions →</b>
-      </button>
-      : <button ref={triggerRef} className="text-button" disabled={loading} onClick={runEnrichment}>{loading ? 'Looking for public professional information…' : 'Find public information →'}</button>}
-    {message && <p className="muted-note" role="status">{message}</p>}
-    {error && <p className="demo-reset-error" role="alert">{error}</p>}
+  return <section className="agent-banner profile-assistant-banner">
+    <div className="agent-banner-main">
+      <div className="agent-banner-glyph" aria-hidden="true">
+        <span className="agent-banner-ring r1" /><span className="agent-banner-ring r2" /><span className="agent-banner-ring r3" /><span className="agent-banner-ring r4" /><span className="agent-banner-ring r5" /><span className="agent-banner-ring r6" />
+        <span className="agent-banner-sparkle">✧</span>
+      </div>
+      <p className="eyebrow">Profile assistant</p>
+      <h2>Let your agent build out your profile.</h2>
+      <p className="agent-banner-support">Your agent can use what it has learned about your practice and public professional information to suggest additions for your review.</p>
+    </div>
+    <div className="agent-banner-action">
+      {loading
+        ? <>
+          <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Finding profile suggestions</span>
+          <h3>Your agent is reviewing your profile.</h3>
+          <p className="agent-banner-support">Comparing your current profile with available professional information and what it has learned about your practice…</p>
+        </>
+        : ready
+          ? <>
+            <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Suggestions ready</span>
+            <h3>Your agent found profile updates for you to review.</h3>
+            <button ref={triggerRef} className="button-primary" onClick={() => setOpen(true)}>Review suggestions <span>→</span></button>
+          </>
+          : <>
+            <h3>Profile suggestions</h3>
+            <p className="agent-banner-support">Find missing details and review them before anything is added.</p>
+            <button ref={triggerRef} className="button-primary" onClick={runEnrichment}>Review suggestions <span>→</span></button>
+            {message && <p className="muted-note" role="status">{message}</p>}
+          </>}
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+    </div>
     {open && <ProfileSuggestionsModal personaId={personaId} candidates={pending} onClose={() => setOpen(false)} onReviewed={onReviewed} triggerRef={triggerRef} />}
-  </div>
+  </section>
 }
 
-/* -------------------------------------------------------------- Initialization */
-
-export function InitializationCard({ initialization, navigate, trainPath }: { initialization: AgentInitialization | null; navigate: Navigate; trainPath: string }) {
-  if (!initialization || initialization.initialized) return null
-  const remaining = initialization.required_steps.filter((step) => !initialization.completed_steps.some((item) => item.id === step.id))
-  return <section className="improve-agent-card initialization-card">
-    <p className="eyebrow">Set up your agent</p>
-    <h2>Build your agent's starting picture of your practice.</h2>
-    {remaining.length > 0 && <ul className="initialization-steps">{remaining.map((step) => <li key={step.id}>{step.label}</li>)}</ul>}
-    <button className="button-primary" onClick={() => navigate(`${trainPath}?mode=initialization`)}>Continue setup <span>→</span></button>
+/** A deliberate small action banner, not stray inline copy -- placed after the
+ * interest sections. Reuses TrainingReminderGlyph's established copper
+ * radiating-rings technique (My Agent Overview) rather than inventing a new
+ * one, so this visually reads as "connects to My Agent" without being a
+ * second, competing hero. Links into the real training flow -- no new
+ * training architecture. */
+function TrainingFollowUpBanner({ trainPath, navigate }: { trainPath: string; navigate: Navigate }) {
+  return <section className="training-reminder profile-training-followup">
+    <TrainingReminderGlyph />
+    <div className="training-reminder-copy">
+      <h2>Help your agent understand these preferences better</h2>
+      <p className="training-reminder-support">Training can refine how your agent represents these interests and referral preferences.</p>
+      <div className="training-reminder-actions">
+        <button className="button-primary" onClick={() => navigate(trainPath)}>Continue training <span>→</span></button>
+      </div>
+    </div>
   </section>
 }
 
@@ -1980,7 +2111,6 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
   </div>
 }
 
-const BACKGROUND_CATEGORIES: ProfileCategory[] = ['training', 'experience', 'affiliations']
 const agentPracticePath = (perspective: PhysicianIdentity) => (perspective === 'iain' ? '/specialist/agent' : perspective === 'owner' ? '/me/agent?tab=practice' : '/agent?tab=knowledge')
 /** Legacy ?tab= deep links degrade to a scroll target on the one continuous page, or a redirect for the retired Updates tab. */
 const LEGACY_PROFILE_TAB_SECTION: Record<string, string | null> = {
@@ -1989,13 +2119,9 @@ const LEGACY_PROFILE_TAB_SECTION: Record<string, string | null> = {
 
 export function ProfessionalProfilePage({ personaId, navigate, params }: { personaId: PhysicianIdentity; navigate: Navigate; params?: URLSearchParams }) {
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
-  const [initialization, setInitialization] = useState<AgentInitialization | null>(null)
   const [error, setError] = useState('')
   const [savedNote, setSavedNote] = useState('')
-  const load = () => {
-    getProfessionalProfile(personaId).then(setProfile).catch((err: Error) => setError(err.message))
-    getAgentInitialization(personaId).then(setInitialization).catch(() => {})
-  }
+  const load = () => { getProfessionalProfile(personaId).then(setProfile).catch((err: Error) => setError(err.message)) }
   useEffect(load, [personaId]) // eslint-disable-line react-hooks/exhaustive-deps
   const tabParam = params?.get('tab') ?? null
   useEffect(() => {
@@ -2014,15 +2140,7 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
 
   const initials = profile.physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
   const scrollToAbout = () => document.getElementById('profile-section-about')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-
-  const researchInterests = profile.interests.filter((item) => item.interest_type === 'research_interest')
-  const teachingInterests = profile.interests.filter((item) => item.interest_type === 'teaching_interest')
-  const hasResearchSection = profile.sections.research.length > 0 || profile.sections.publications.length > 0 || researchInterests.length > 0
-  const hasTeachingSection = profile.sections.teaching.length > 0 || teachingInterests.length > 0
-  const hasSkills = profile.sections.skills_or_procedures.length > 0
-  const hasLanguages = profile.sections.languages.length > 0
-  const hasLocations = profile.sections.locations.length > 0
-  const hasLinks = profile.sections.professional_links.length > 0
+  const hasInterests = profile.interests.some((item) => item.interest_type === 'case_interest' || item.interest_type === 'clinical_interest')
 
   return <main className="page-shell profile-page professional-profile-page">
     <header className="profile-hero">
@@ -2034,84 +2152,49 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
       </div>
     </header>
     <div className="profile-header-actions">
-      <button className="button-secondary" onClick={scrollToAbout}>Edit profile</button>
-      {personaId !== 'owner' && <button className="text-button" onClick={() => navigate(networkProfilePath(personaId, profile.physician.id))}>View as others see it →</button>}
+      <button className="button-primary" onClick={scrollToAbout}>Edit profile</button>
+      {personaId !== 'owner' && <button className="text-button" onClick={() => navigate(networkProfilePreviewPath(personaId, profile.physician.id))}>View as others see it →</button>}
       <button className="text-button" onClick={() => navigate(agentPracticePath(personaId))}>View how my agent represents me →</button>
     </div>
     {savedNote && <p className="profile-save-note" role="status">{savedNote}</p>}
-    <InitializationCard initialization={initialization} navigate={navigate} trainPath={trainingPath(personaId)} />
-    <ProfileSuggestionsEntry personaId={personaId} onConfirmed={load} />
+
+    <ProfileAssistantBanner personaId={personaId} onConfirmed={load} />
 
     <AboutSection items={profile.sections.about} personaId={personaId} onSaved={onItemSaved} />
-
-    <section id="profile-section-training" className="profile-block">
-      <h2 className="profile-block-heading">Background</h2>
-      {BACKGROUND_CATEGORIES.map((category) => <ProfileTimelineGroup key={category} category={category} items={profile.sections[category]} personaId={personaId} onSaved={onItemSaved} />)}
-    </section>
-
-    <InterestsPanel
-      id="profile-section-interests"
-      interests={profile.interests}
-      personaId={personaId}
-      onSaved={onItemSaved}
-      navigate={navigate}
-      trainPath={trainingPath(personaId)}
-      types={['case_interest', 'clinical_interest']}
-      explainer="Case interests describe areas of professional interest. Clinical appropriateness still determines referral fit."
-    />
-
-    {hasResearchSection && <section id="profile-section-research" className="profile-block">
-      <h2 className="profile-block-heading">Research &amp; publications</h2>
-      {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} personaId={personaId} onSaved={onItemSaved} />}
-      <ProfileSection category="research" items={profile.sections.research} personaId={personaId} onSaved={onItemSaved} quiet />
-      <ProfileSection category="publications" items={profile.sections.publications} personaId={personaId} onSaved={onItemSaved} quiet
-        itemActions={personaId === 'owner' ? undefined : (item) => <PostButton personaId={personaId} paperTitle={item.title} triggerLabel="Share this paper" compact />} />
-    </section>}
-
-    {hasTeachingSection && <section id="profile-section-teaching" className="profile-block">
-      <h2 className="profile-block-heading">Teaching</h2>
-      {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} personaId={personaId} onSaved={onItemSaved} />}
-      <ProfileSection category="teaching" items={profile.sections.teaching} personaId={personaId} onSaved={onItemSaved} quiet />
-    </section>}
-
-    {hasSkills && <ProfileChipSection category="skills_or_procedures" items={profile.sections.skills_or_procedures} personaId={personaId} onSaved={onItemSaved} heading="Skills &amp; procedures" />}
-    {hasLanguages && <ProfileChipSection category="languages" items={profile.sections.languages} personaId={personaId} onSaved={onItemSaved} />}
-    {hasLocations && <ProfileSection category="locations" items={profile.sections.locations} personaId={personaId} onSaved={onItemSaved} heading="Practice &amp; locations" />}
-    {hasLinks && <ProfileSection category="professional_links" items={profile.sections.professional_links} personaId={personaId} onSaved={onItemSaved} heading="Professional links" />}
+    <ProfileBackgroundSection sections={profile.sections} personaId={personaId} onSaved={onItemSaved} />
+    <ProfileInterestSection id="profile-section-interests" heading="Case interests" interestType="case_interest" interests={profile.interests} personaId={personaId} onSaved={onItemSaved} />
+    <ProfileInterestSection heading="Clinical interests" interestType="clinical_interest" interests={profile.interests} personaId={personaId} onSaved={onItemSaved} />
+    {hasInterests && <TrainingFollowUpBanner trainPath={trainingPath(personaId)} navigate={navigate} />}
+    <ProfilePracticeLocationsSection sections={profile.sections} personaId={personaId} onSaved={onItemSaved} />
+    <ProfileResearchTeachingSection sections={profile.sections} interests={profile.interests} personaId={personaId} onSaved={onItemSaved} />
   </main>
 }
 
-export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, perspective = 'lucy' }: { controlledId: string; navigate: Navigate; backPath: string; perspective?: DemoPhysicianPerspective }) {
+export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, perspective = 'lucy', params }: { controlledId: string; navigate: Navigate; backPath: string; perspective?: DemoPhysicianPerspective; params?: URLSearchParams }) {
   const [data, setData] = useState<import('./api.ts').NetworkPhysicianProfile | null>(null)
   const [error, setError] = useState('')
   useEffect(() => { setData(null); setError(''); getNetworkPhysicianProfile(controlledId).then(setData).catch((err: Error) => setError(err.message)) }, [controlledId])
   const relationship = useNetworkRelationship(data?.physician.npi ?? null)
+  // Only the physician's own "View as others see it" link adds ?preview=1 --
+  // an ordinary visitor reaching this exact same public URL never sees the bar.
+  const isPreview = params?.get('preview') === '1'
   if (error) return <main className="page-shell profile-page"><button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button><div className="error-banner" role="alert">{error}</div></main>
   if (!data) return <main className="page-shell profile-page"><button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button><p className="muted-note">Opening profile…</p></main>
   const rep = data.practice_representation
   const sections = data.professional_profile.sections
+  const interests = data.professional_profile.interests
   const name = data.physician.name
   const initials = name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
 
-  // "Good-fit referrals" absorbs case_interest items the physician already
-  // listed as especially-wanted cases, but only the ones NOT already covered
-  // by rep.good_fit -- a plain-text dedupe, never a giant third duplicate
-  // list sitting next to two near-identical ones (see design pass notes).
-  const goodFitSeen = new Set(rep.good_fit.map((item) => item.toLowerCase()))
-  const caseInterests = rep.interests.filter((item) => item.interest_type === 'case_interest' && !goodFitSeen.has(item.title.toLowerCase()))
-  const clinicalInterests = data.professional_profile.interests.filter((item) => item.interest_type === 'clinical_interest')
-  const researchInterests = data.professional_profile.interests.filter((item) => item.interest_type === 'research_interest')
-  const teachingInterests = data.professional_profile.interests.filter((item) => item.interest_type === 'teaching_interest')
-  const hasResearchSection = sections.research.length > 0 || sections.publications.length > 0 || researchInterests.length > 0
-  const hasTeachingSection = sections.teaching.length > 0 || teachingInterests.length > 0
-  const hasPracticeExtras = sections.skills_or_procedures.length > 0 || sections.languages.length > 0 || sections.locations.length > 0 || sections.professional_links.length > 0
-  const hasReferralSection = rep.clinical_focus.length > 0 || rep.good_fit.length > 0 || rep.preferred_workup.length > 0 || caseInterests.length > 0
-  const hasAboutSection = sections.about.length > 0 || sections.training.length > 0 || sections.experience.length > 0 || sections.affiliations.length > 0
-    || clinicalInterests.length > 0 || hasResearchSection || hasTeachingSection || hasPracticeExtras
+  const hasReferralSection = rep.clinical_focus.length > 0 || rep.good_fit.length > 0 || rep.preferred_workup.length > 0
   const networkRelationshipLabel = !relationship.loaded ? 'Checking…' : relationship.inNetwork ? 'In your network' : 'Not yet connected'
 
   // Good-fit referrals that merely restate a clinical-focus entry verbatim add
-  // nothing -- dedupe by exact text, never a fuzzy/invented rewrite.
+  // nothing -- dedupe by exact text, never a fuzzy/invented rewrite. Case
+  // interests get their own dedicated section below (ProfileInterestSection,
+  // same as the owner's own profile) rather than being folded in here --
+  // synchronizing own/public structure means the referral card only carries
+  // the physician's confirmed practice-representation fields.
   const clinicalFocusSeen = new Set(rep.clinical_focus.map((item) => item.toLowerCase()))
   const dedupedGoodFit = rep.good_fit.filter((item) => !clinicalFocusSeen.has(item.toLowerCase()))
 
@@ -2128,6 +2211,10 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
     .map((update) => ({ ...update, physician: data.physician, relationship_basis: [] }))
 
   return <main className="page-shell profile-page member-profile-page">
+    {isPreview && <div className="profile-preview-bar">
+      <span>Previewing your public profile</span>
+      <button type="button" className="text-button" onClick={() => navigate(professionalProfilePath(perspective))}>Back to editing →</button>
+    </div>}
     <button className="text-button back-link" onClick={() => navigate(backPath)}>← Back</button>
     <section className="provider-profile-hero">
       <div className="profile-identity">
@@ -2162,62 +2249,22 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
             <h3>Clinical focus</h3>
             <div className="referral-focus-chips">{rep.clinical_focus.map((item) => <span className="referral-chip" key={item}>{humanizeClinicalTerm(item)}</span>)}</div>
           </div>}
-          {(dedupedGoodFit.length > 0 || caseInterests.length > 0) && <div className="referral-rep-block">
+          {dedupedGoodFit.length > 0 && <div className="referral-rep-block">
             <h3>Good-fit referrals</h3>
-            <ul className="referral-fit-rows">
-              {dedupedGoodFit.map((item) => <li key={item}>{humanizeClinicalTerm(item)}</li>)}
-              {caseInterests.map((item) => <li key={item.id}>{item.title}</li>)}
-            </ul>
+            <ul className="referral-fit-rows">{dedupedGoodFit.map((item) => <li key={item}>{humanizeClinicalTerm(item)}</li>)}</ul>
           </div>}
           {rep.preferred_workup.length > 0 && <div className="referral-rep-block">
             <h3>Helpful before referral</h3>
             <ul className="referral-checklist">{rep.preferred_workup.map((item) => <li key={item}><span aria-hidden="true">✓</span>{humanizeClinicalTerm(item)}</li>)}</ul>
           </div>}
-          {caseInterests.length > 0 && <small className="profile-interest-disclaimer">Interests reflect what {name} wants referring physicians to know. They do not guarantee referral eligibility or override clinical fit.</small>}
         </section>}
 
-        {hasAboutSection && <section className="member-profile-section about-physician-section">
-          <h2 className="profile-block-heading">About</h2>
-          <AboutSection items={sections.about} readOnly showHeading={false} />
-
-          {(sections.training.length > 0 || sections.experience.length > 0 || sections.affiliations.length > 0) && <div className="profile-block">
-            <h3 className="profile-block-subheading">Background</h3>
-            <ProfileTimelineGroup category="training" items={sections.training} readOnly />
-            <ProfileTimelineGroup category="experience" items={sections.experience} readOnly />
-            <ProfileTimelineGroup category="affiliations" items={sections.affiliations} readOnly />
-          </div>}
-
-          {clinicalInterests.length > 0 && <InterestsPanel interests={data.professional_profile.interests} types={['clinical_interest']} readOnly />}
-
-          {hasPracticeExtras && <div className="profile-block">
-            <h3 className="profile-block-heading">Practice &amp; locations</h3>
-            {/* The location value renders directly under the "Practice &
-             * locations" heading -- no redundant inner "Locations" subheading
-             * (that was the same relationship as the fixed About/About
-             * duplication above). Skills/Languages/Links keep their own
-             * headings below since those labels aren't redundant with
-             * "Practice & locations". */}
-            {sections.locations.length > 0 && <p className="profile-location-value">{sections.locations.map((item) => item.title).join(' · ')}</p>}
-            {(sections.skills_or_procedures.length > 0 || sections.languages.length > 0 || sections.professional_links.length > 0) && <div className="about-practice-grid">
-              {sections.skills_or_procedures.length > 0 && <ProfileChipSection category="skills_or_procedures" items={sections.skills_or_procedures} readOnly heading="Skills &amp; procedures" />}
-              {sections.languages.length > 0 && <ProfileChipSection category="languages" items={sections.languages} readOnly />}
-              {sections.professional_links.length > 0 && <ProfileSection category="professional_links" items={sections.professional_links} readOnly heading="Professional links" />}
-            </div>}
-          </div>}
-
-          {(hasResearchSection || hasTeachingSection) && <div className="profile-block">
-            <h3 className="profile-block-subheading">Research &amp; teaching</h3>
-            {hasResearchSection && <>
-              {researchInterests.length > 0 && <InterestGroup interestType="research_interest" items={researchInterests} readOnly />}
-              <ProfileSection category="research" items={sections.research} quiet readOnly />
-              <ProfileSection category="publications" items={sections.publications} quiet readOnly />
-            </>}
-            {hasTeachingSection && <>
-              {teachingInterests.length > 0 && <InterestGroup interestType="teaching_interest" items={teachingInterests} readOnly />}
-              <ProfileSection category="teaching" items={sections.teaching} quiet readOnly />
-            </>}
-          </div>}
-        </section>}
+        <AboutSection items={sections.about} readOnly />
+        <ProfileBackgroundSection sections={sections} readOnly />
+        <ProfileInterestSection heading="Case interests" interestType="case_interest" interests={interests} physicianName={name} readOnly />
+        <ProfileInterestSection heading="Clinical interests" interestType="clinical_interest" interests={interests} readOnly />
+        <ProfilePracticeLocationsSection sections={sections} readOnly />
+        <ProfileResearchTeachingSection sections={sections} interests={interests} readOnly />
 
         <section className="member-profile-section">
           <h2>Recent network updates</h2>

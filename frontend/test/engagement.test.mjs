@@ -206,7 +206,8 @@ test('profile items are saved through the canonical upsert endpoint with a clien
 test('profile distinguishes itself from My Agent referral preferences', () => {
   const page = profilePageFn()
   assert.match(page, /View how my agent represents me/)
-  assert.match(engagement, /they do not guarantee referral eligibility or override clinical fit/)
+  const disclaimer = slice(engagement, 'function ProfileInterestSection', 'function ProfilePracticeLocationsSection')
+  assert.match(disclaimer, /They do not guarantee referral eligibility or override clinical fit\./)
 })
 
 test('profile never shows a completeness score, percentage, or ranking', () => {
@@ -249,12 +250,100 @@ test('Updates is retired from Profile IA entirely: no drafts/published-posts lis
   assert.doesNotMatch(page, /suggestedDrafts|yourDrafts|getProfessionalPosts/)
 })
 
-test('enrichment suggestions render as a compact dismissible indicator, never a dominant inline block, and are omitted entirely when there are zero pending suggestions', () => {
-  const entry = slice(engagement, 'export function ProfileSuggestionsEntry', 'export function NetworkPhysicianProfilePage')
-  assert.match(entry, /pending\.length > 0/)
-  assert.match(entry, /className="profile-suggestions-indicator"/)
-  assert.match(entry, /\{pending\.length\} profile suggestion/)
-  assert.match(entry, /Find public information/)
+test('"Edit profile" is the dominant primary action in the profile header; "View as others see it" and "View how my agent represents me" are quiet supporting text links', () => {
+  const page = profilePageFn()
+  assert.match(page, /<button className="button-primary" onClick=\{scrollToAbout\}>Edit profile<\/button>/)
+  assert.match(page, /<button className="text-button" onClick=\{\(\) => navigate\(networkProfilePreviewPath\(personaId, profile\.physician\.id\)\)\}>View as others see it →<\/button>/)
+  assert.match(page, /<button className="text-button" onClick=\{\(\) => navigate\(agentPracticePath\(personaId\)\)\}>View how my agent represents me →<\/button>/)
+})
+
+test('the Case interests explanatory sentence ("Case interests describe areas of professional interest...") is removed -- it is unnecessary on the physician\'s own profile', () => {
+  assert.doesNotMatch(engagement, /Case interests describe areas of professional interest/)
+})
+
+test('Case interests heading has no accidental copper typography -- InterestGroup no longer applies the old .primary/accent-hover modifier to any interest type', () => {
+  assert.doesNotMatch(engagement, /interest-group\.primary|interestType === 'case_interest' \? 'primary'/, 'the copper-tinted "primary" case-interest modifier is gone from both the component and its CSS')
+  assert.match(engagement, /return <div className="interest-group">/, 'always the same plain class regardless of interest type')
+})
+
+test('the stray "Lamina can ask follow-up questions based on these interests" inline hint is gone, replaced by a deliberate TrainingFollowUpBanner after the interest sections', () => {
+  assert.doesNotMatch(engagement, /Lamina can ask follow-up questions based on these interests|interest-training-hint/)
+  const page = profilePageFn()
+  assert.match(page, /\{hasInterests && <TrainingFollowUpBanner trainPath=\{trainingPath\(personaId\)\} navigate=\{navigate\} \/>\}/, 'only shown when there is actually something to train on')
+})
+
+test('TrainingFollowUpBanner reuses the established copper mini-hero (.training-reminder / TrainingReminderGlyph from My Agent Overview) and routes into the real existing training flow -- no new training architecture', () => {
+  const banner = slice(engagement, 'function TrainingFollowUpBanner', '/* ------------------------------------------------------------- My Agent: Overview */')
+  assert.match(banner, /className="training-reminder profile-training-followup"/)
+  assert.match(banner, /<TrainingReminderGlyph \/>/)
+  assert.match(banner, /Help your agent understand these preferences better/)
+  assert.match(banner, /Training can refine how your agent represents these interests and referral preferences\./)
+  assert.match(banner, /onClick=\{\(\) => navigate\(trainPath\)\}>Continue training <span>→<\/span>/)
+})
+
+test('Background renders compact "label ... + Add" rows when empty, never three stacked "Nothing added yet." blocks', () => {
+  const group = slice(engagement, 'function ProfileTimelineGroup', 'function AboutSection')
+  assert.doesNotMatch(group, /Nothing added yet/, 'the empty-state paragraph is gone from the editable timeline group entirely')
+  assert.match(group, /const isEmpty = items\.length === 0 && !adding/)
+  assert.match(group, /className=\{`profile-timeline-group \$\{isEmpty \? 'empty' : ''\}`\}/)
+  assert.match(styles, /\.profile-timeline-group\.empty \{ margin-top: 10px; \}/)
+})
+
+test('the public physician profile never surfaces private/internal data (calibration, agent training, patient data) -- only the same ProfessionalProfile fields the physician controls on their own profile', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.doesNotMatch(publicPage, /calibration|proposed_learning|training_question|patient_id|patientName/i)
+  assert.match(publicPage, /data\.professional_profile\.sections|sections\.about|sections\.locations/)
+})
+
+test('"View as others see it" enters preview mode via an explicit ?preview=1 route state, never a second parallel preview implementation', () => {
+  const page = profilePageFn()
+  assert.match(page, /networkProfilePreviewPath\(personaId, profile\.physician\.id\)/, 'routes to the real public-profile page, just with the preview flag appended')
+  assert.match(engagement, /export const networkProfilePreviewPath = \(perspective: DemoPhysicianPerspective, controlledId: string\) => `\$\{networkProfilePath\(perspective, controlledId\)\}\?preview=1`/)
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /const isPreview = params\?\.get\('preview'\) === '1'/)
+  assert.match(publicPage, /\{isPreview && <div className="profile-preview-bar">/)
+  assert.match(publicPage, /Previewing your public profile/)
+})
+
+test('preview-mode "Back to editing" always routes to the signed-in Profile page via professionalProfilePath -- never browser history, never Dashboard', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  const previewBar = slice(publicPage, 'className="profile-preview-bar"', '</div>}')
+  assert.match(previewBar, /onClick=\{\(\) => navigate\(professionalProfilePath\(perspective\)\)\}>Back to editing →/)
+  assert.doesNotMatch(previewBar, /window\.history|navigate\(backPath\)|navigate\('\/home'\)|navigate\('\/specialist\/home'\)/, 'never falls back to browser history or the Dashboard')
+})
+
+test('an ordinary public visitor never sees the preview bar -- it only renders when the ?preview=1 flag is present', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /isPreview &&/, 'the preview bar is conditionally rendered, not always-on')
+  assert.doesNotMatch(publicPage, /^\s*<div className="profile-preview-bar">/m, 'never renders unconditionally outside the isPreview guard')
+})
+
+test('the Profile Assistant banner replaces the old InitializationCard ("Set up your agent") and ProfileSuggestionsEntry link with one banner, using the Dashboard-banner composition language', () => {
+  assert.doesNotMatch(engagement, /^function InitializationCard|^export function InitializationCard/m, 'the old "Set up your agent" card component is removed entirely, not hidden')
+  assert.doesNotMatch(engagement, /function ProfileSuggestionsEntry/)
+  const banner = slice(engagement, 'export function ProfileAssistantBanner', 'function TrainingFollowUpBanner')
+  assert.doesNotMatch(banner, /Set up your agent|initialization-card|initialization-steps/, 'the banner itself never renders the old setup-card copy/classes')
+  assert.match(banner, /className="agent-banner profile-assistant-banner"/, 'reuses the .agent-banner shell (left copy + glyph, white inset action card)')
+  assert.match(banner, /Let your agent build out your profile\./)
+  assert.match(banner, /Your agent can use what it has learned about your practice and public professional information to suggest additions for your review\./)
+})
+
+test('the Profile Assistant banner idle/loading/ready states use the same .status-label/.spark-icon pulse language as the Patient Detail next-step rail, and nothing is auto-applied', () => {
+  const banner = slice(engagement, 'export function ProfileAssistantBanner', 'function TrainingFollowUpBanner')
+  assert.match(banner, /Profile suggestions/, 'idle heading')
+  assert.match(banner, /Find missing details and review them before anything is added\./, 'idle support copy')
+  assert.match(banner, /<span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧<\/span>Finding profile suggestions<\/span>/, 'loading pill')
+  assert.match(banner, /Your agent is reviewing your profile\./)
+  assert.match(banner, /Comparing your current profile with available professional information and what it has learned about your practice…/)
+  assert.match(banner, /<span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓<\/span>Suggestions ready<\/span>/, 'ready pill')
+  assert.match(banner, /Your agent found profile updates for you to review\./)
+  const ctaCount = (banner.match(/Review suggestions <span>→<\/span>/g) ?? []).length
+  assert.equal(ctaCount, 2, 'the same "Review suggestions" CTA label appears in both the idle and ready states')
+  assert.doesNotMatch(banner, /useEffect\(\(\) => \{ runEnrichment/, 'never auto-runs the search on page open')
+  assert.match(banner, /onClick=\{runEnrichment\}/, 'the idle CTA is what triggers the real search')
+  assert.match(banner, /onClick=\{\(\) => setOpen\(true\)\}/, 'the ready CTA opens the real review modal -- nothing applies without it')
+  assert.match(banner, /No new profile information found\./)
+  assert.match(banner, /Public profile enrichment is temporarily unavailable\./)
 })
 
 test('suggestion review reuses the existing backend review-state semantics, never a parallel frontend approval state', () => {
@@ -266,14 +355,6 @@ test('suggestion review reuses the existing backend review-state semantics, neve
   assert.match(candidateCard, /candidate\.source_url && <>.*View source/)
 })
 
-test('"Find public information" never auto-runs on page open; it is a user-triggered action with the documented loading/empty/failure copy', () => {
-  const entry = slice(engagement, 'export function ProfileSuggestionsEntry', 'export function NetworkPhysicianProfilePage')
-  assert.doesNotMatch(entry, /useEffect\(\(\) => \{ runEnrichment/)
-  assert.match(entry, /Looking for public professional information…/)
-  assert.match(entry, /No new profile information found\./)
-  assert.match(entry, /Public profile enrichment is temporarily unavailable\./)
-})
-
 test('own-profile editing controls (Edit, +Add, suggestions, Find public information) never render on another physician\'s public profile', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.doesNotMatch(publicPage, /ProfileSuggestionsEntry/)
@@ -282,11 +363,26 @@ test('own-profile editing controls (Edit, +Add, suggestions, Find public informa
   assert.match(publicPage, /readOnly/)
 })
 
-test('public and private profile reuse the same section-rendering components (timeline, chips, interests) for presentational consistency', () => {
+test('public and private profile call the exact same shared section components (not two independently-styled copies) -- the architectural core of the synchronization pass', () => {
+  const ownPage = profilePageFn()
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /<ProfileTimelineGroup category="training"/)
-  assert.match(publicPage, /<ProfileChipSection category="skills_or_procedures"/)
-  assert.match(publicPage, /<InterestsPanel interests=\{data\.professional_profile\.interests\}/)
+  for (const call of [
+    /<ProfileBackgroundSection sections=\{/,
+    /<ProfileInterestSection .*heading="Case interests" interestType="case_interest"/,
+    /<ProfileInterestSection heading="Clinical interests" interestType="clinical_interest"/,
+    /<ProfilePracticeLocationsSection sections=\{/,
+    /<ProfileResearchTeachingSection sections=\{/,
+  ]) {
+    assert.match(ownPage, call, `own profile calls ${call}`)
+    assert.match(publicPage, call, `public profile calls the same ${call}`)
+  }
+  // And the shared components themselves are built from the same lower-level
+  // presentational pieces (timeline, chips, interest groups), each already
+  // readOnly-aware -- one component with two modes, not two components.
+  const background = slice(engagement, 'function ProfileBackgroundSection', 'function ProfileInterestSection')
+  assert.match(background, /<ProfileTimelineGroup key=\{category\}/)
+  const practiceLocations = slice(engagement, 'function ProfilePracticeLocationsSection', 'function ProfileResearchTeachingSection')
+  assert.match(practiceLocations, /<ProfileChipSection category="skills_or_procedures"/)
 })
 
 test('the claimed member profile shares the NPPES directory profile\'s top-level identity/fact-strip shell, not a separate visual system', () => {
@@ -333,17 +429,24 @@ test('the referral card gives its title and internal subsections real breathing 
   assert.match(styles, /\.referral-rep-block:first-of-type \{ padding-top: 24px;/)
 })
 
-test('the referral card\'s own top padding always wins over the shared .member-profile-section:first-child reset, which was silently zeroing padding-top via a specificity collision', () => {
+test('the referral card\'s own top padding AND top border always win over the shared .member-profile-section:first-child reset, which was silently zeroing padding-top and nulling border-top via a specificity collision', () => {
   assert.match(styles, /\.member-profile-section:first-child \{ margin-top: 0; border-top: none; padding-top: 0; \}/, 'confirms the shared reset rule that caused the collision still exists (it is correct for ordinary divider sections)')
-  assert.match(styles, /\.referral-representation-section\.member-profile-section \{ padding-top: 30px; \}/, 'a same-or-higher-specificity rule restores the card\'s own top padding regardless of first-child position')
+  assert.match(styles, /\.referral-representation-section\.member-profile-section \{ padding-top: 30px; border-top: 1px solid var\(--border\); \}/, 'one same-specificity rule restores both the card\'s own top padding and its top border regardless of first-child position -- not a stack of ever-more-specific patches')
 })
 
-test('"About" and "Practice & locations" share the same reusable heading class and resolve to identical typography -- serif, same size, same weight, no uppercase eyebrow styling on Practice & locations', () => {
-  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /<h2 className="profile-block-heading">About<\/h2>/)
-  assert.match(publicPage, /<h3 className="profile-block-heading">Practice &amp; locations<\/h3>/)
-  assert.doesNotMatch(publicPage, /className="profile-block-subheading">Practice/, 'no longer uses the small-uppercase eyebrow treatment')
-  assert.match(styles, /\.about-physician-section \.profile-block-heading \{ font-size: 1\.1rem; \}/, 'one scoped rule guarantees identical resolved font-size regardless of each heading\'s nesting depth')
+test('About / Background / Case interests / Clinical interests / Practice & locations / Research & teaching all share the SAME .profile-block-heading class -- one typography rule, not a scoped override needed per section', () => {
+  assert.doesNotMatch(engagement, /profile-block-subheading/, 'the old small-uppercase eyebrow sub-heading class is gone entirely -- every major section now uses the one serif heading class')
+  assert.match(engagement, /<h2 className="profile-block-heading">About<\/h2>/)
+  assert.match(engagement, /<h2 className="profile-block-heading">Background<\/h2>/)
+  assert.match(engagement, /<h2 className="profile-block-heading">\{heading\}<\/h2>/, 'ProfileInterestSection (Case interests / Clinical interests) uses the same class')
+  assert.match(engagement, /<h2 className="profile-block-heading">Practice &amp; locations<\/h2>/)
+  assert.match(engagement, /<h2 className="profile-block-heading">Research &amp; teaching<\/h2>/)
+  // Exactly one CSS rule defines the resolved typography -- no page-scoped
+  // override needed because every section now calls the class directly at
+  // the same nesting depth (no wrapper section nested headings inside
+  // another heading's section anymore).
+  const ruleCount = (styles.match(/\.profile-block-heading \{/g) ?? []).length
+  assert.equal(ruleCount, 1, `expected exactly one .profile-block-heading rule, found ${ruleCount}`)
 })
 
 test('the joined-Lamina member profile is a two-column layout with a sticky agent-chat rail, not the old single-column shell', () => {
@@ -394,10 +497,12 @@ test('raw snake_case backend tokens are humanized before reaching the referral c
   assert.match(referralSection, /<span aria-hidden="true">✓<\/span>\{humanizeClinicalTerm\(item\)\}/, 'pre-referral workup is humanized')
 })
 
-test('case-interest "especially interested in seeing" items are folded into Good-fit referrals only when not already duplicating rep.good_fit, never shown as a separate giant list', () => {
+test('case interests are their own public section (synchronized with the owner\'s own profile), never folded into the referral card -- so the disclaimer about referring physicians only appears there', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /goodFitSeen\.has\(item\.title\.toLowerCase\(\)\)/, 'exact-match dedupe against good-fit before folding case interests in')
-  assert.doesNotMatch(publicPage, /especially interested in seeing/, 'no separate duplicate "areas especially interested in seeing" block')
+  assert.doesNotMatch(publicPage, /caseInterests|especially interested in seeing/, 'no case-interest folding logic left in the referral-card section of this page')
+  assert.match(publicPage, /<ProfileInterestSection heading="Case interests" interestType="case_interest" interests=\{interests\} physicianName=\{name\} readOnly \/>/)
+  const interestSection = slice(engagement, 'function ProfileInterestSection', 'function ProfilePracticeLocationsSection')
+  assert.match(interestSection, /readOnly && interestType === 'case_interest' && items\.length > 0 && physicianName && <small className="profile-interest-disclaimer">/, 'the referring-physician disclaimer moved with it, shown only in read-only context')
 })
 
 test('good-fit referrals that exactly restate a clinical-focus entry are deduped, never shown twice', () => {
@@ -406,37 +511,38 @@ test('good-fit referrals that exactly restate a clinical-focus entry are deduped
   assert.match(publicPage, /dedupedGoodFit/)
 })
 
-test('research and teaching interests render only inside About -> Research & teaching, not duplicated again inside the referral section', () => {
+test('research and teaching interests render only inside the shared Research & teaching section, never duplicated inside the referral card', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.doesNotMatch(publicPage, /Research &amp; teaching interests|otherInterests/, 'the old duplicate research/teaching block inside the rep panel is gone')
-  assert.match(publicPage, /\(hasResearchSection \|\| hasTeachingSection\) && <div className="profile-block">/)
+  assert.doesNotMatch(publicPage, /Research &amp; teaching interests|otherInterests|researchInterests|teachingInterests/, 'no research/teaching logic lives inline in this page anymore -- it is all inside the shared component')
+  assert.match(publicPage, /<ProfileResearchTeachingSection sections=\{sections\} interests=\{interests\} readOnly \/>/)
 })
 
 test('the About section has exactly ONE heading, reading simply "About" (not "About this physician") -- no separate inner "About" heading, and no doubled divider above the bio', () => {
+  assert.doesNotMatch(engagement, /About this physician/, 'the old redundant "About this physician" + "About" pairing is gone entirely')
+  const aboutSection = slice(engagement, 'function AboutSection', 'function PostCard')
+  const headingCount = (aboutSection.match(/>About</g) ?? []).length
+  assert.equal(headingCount, 1, `expected exactly one literal "About" heading in AboutSection, found ${headingCount}`)
+  assert.match(aboutSection, /<h2 className="profile-block-heading">About<\/h2>/)
+  assert.match(aboutSection, /className="profile-block profile-about"/, 'always one .profile-block divider -- no longer a conditional showHeading toggle, since both pages now want the same single heading')
+  // Both pages call the exact same AboutSection -- one real "About" heading
+  // on each page, never nested inside a second wrapper heading.
+  const ownPage = profilePageFn()
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /className="member-profile-section about-physician-section"/)
-  assert.doesNotMatch(publicPage, /About this physician/, 'the old redundant "About this physician" + "About" pairing is gone')
-  const aboutBlock = slice(publicPage, 'className="member-profile-section about-physician-section"', 'Recent network updates')
-  const headingCount = (aboutBlock.match(/>About</g) ?? []).length
-  assert.equal(headingCount, 1, `expected exactly one "About" heading inside the section, found ${headingCount}`)
-  assert.match(publicPage, /<h2 className="profile-block-heading">About<\/h2>/)
-  assert.match(publicPage, /<AboutSection items=\{sections\.about\} readOnly showHeading=\{false\}\s*\/>/, 'AboutSection renders without its own heading/divider when nested here')
-  assert.match(engagement, /className=\{showHeading \? 'profile-block profile-about' : 'profile-about'\}/, 'the .profile-block divider class itself is dropped when the heading is suppressed, not just the heading text')
+  assert.match(ownPage, /<AboutSection items=\{profile\.sections\.about\} personaId=\{personaId\} onSaved=\{onItemSaved\} \/>/)
+  assert.match(publicPage, /<AboutSection items=\{sections\.about\} readOnly \/>/)
 })
 
-test('About gathers background/interests/practice-details/research-teaching under subsections of one heading, with a restrained two-column grid for the lighter practice-detail fields', () => {
-  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /about-physician-section/)
-  assert.match(publicPage, /className="about-practice-grid"/)
+test('About / Background / Case interests / Clinical interests / Practice & locations / Research & teaching are flat, independent top-level sections on both pages -- not nested inside one umbrella "About" wrapper', () => {
+  assert.doesNotMatch(engagement, /about-physician-section/, 'the old wrapper section that wrongly nested everything under one About heading is gone')
+  assert.match(engagement, /className="about-practice-grid"/, 'the lighter practice-detail fields (skills/languages/links) still use a restrained two-column grid')
   assert.match(styles, /\.about-practice-grid \{ display: grid; grid-template-columns: repeat\(auto-fit/)
 })
 
-test('Practice & locations shows the location value directly, with no redundant inner "Locations" subheading -- parallel to the simplified About structure', () => {
-  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  const practiceBlock = slice(publicPage, 'Practice &amp; locations', 'about-practice-grid')
-  assert.match(practiceBlock, /className="profile-location-value"/)
-  assert.doesNotMatch(practiceBlock, /<ProfileSection category="locations"/, 'locations no longer goes through ProfileSection, which would render its own "Locations" heading')
-  assert.match(publicPage, /sections\.locations\.map\(\(item\) => item\.title\)\.join\(' · '\)/, 'the actual location value renders directly, e.g. "San Francisco, CA"')
+test('Practice & locations shows the location value directly, with no redundant inner "Locations" subheading -- parallel to the simplified About structure, and the same for both own and public profiles', () => {
+  const section = slice(engagement, 'function ProfilePracticeLocationsSection', 'function ProfileResearchTeachingSection')
+  assert.match(section, /className="profile-location-value"/)
+  assert.match(section, /<ProfileSection category="locations" items=\{sections\.locations\} personaId=\{personaId\} onSaved=\{onSaved\} showHeading=\{false\} \/>/, 'the editable path keeps real add/edit controls but suppresses the redundant "Locations" heading')
+  assert.match(section, /sections\.locations\.map\(\(item\) => item\.title\)\.join\(' · '\)/, 'read-only renders the actual location value directly, e.g. "San Francisco, CA"')
 })
 
 test('recent network updates reuse FeedCard (the real Network Feed post component) directly, never a second simplified post renderer', () => {

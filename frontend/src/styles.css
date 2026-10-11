@@ -707,14 +707,18 @@ button.lam-row:hover { background: #fff9f1; }
 .referral-representation-section { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 30px 32px; box-shadow: var(--shadow-soft); }
 /* The referral card is also a .member-profile-section (for the shared
  * top-of-page spacing rhythm), and when it's the first section on the page --
- * the common case -- .member-profile-section:first-child { padding-top: 0 }
- * (class+pseudo, specificity 0,2,0) outranks this card's own shorthand
- * `padding: 30px 32px` (specificity 0,1,0) on that one longhand property, so
- * only padding-top was silently zeroed while the other three sides still got
- * 30px/32px. That's why the heading sat flush against the top border. Restate
- * padding-top here with matching specificity (two classes) so the card's own
- * padding always wins, first-child or not. */
-.referral-representation-section.member-profile-section { padding-top: 30px; }
+ * the common case -- .member-profile-section:first-child { margin-top: 0;
+ * border-top: none; padding-top: 0; } (class+pseudo, specificity 0,2,0)
+ * outranks this card's own shorthand `border`/`padding` declarations (plain
+ * class, specificity 0,1,0) on those two longhand properties specifically:
+ * padding-top was silently zeroed (the earlier title-padding fix) and
+ * border-top was silently set to `none`, leaving only the surface/background
+ * colour meeting the page background at the top edge -- a faint, soft
+ * transition instead of a real 1px border, while the other three edges kept
+ * their real border. Restate both longhands here with matching (two-class)
+ * specificity so the card's own border and padding always win, first-child
+ * or not -- one rule, not a stack of ever-more-specific patches. */
+.referral-representation-section.member-profile-section { padding-top: 30px; border-top: 1px solid var(--border); }
 .referral-representation-section > h2 { margin: 0 0 6px; }
 .referral-rep-block { padding: 26px 0; border-top: 1px solid var(--border); }
 .referral-rep-block:first-of-type { padding-top: 24px; border-top: 0; }
@@ -729,22 +733,6 @@ button.lam-row:hover { background: #fff9f1; }
 .referral-checklist li > span { flex: 0 0 auto; color: var(--success); font-weight: 700; }
 .referral-representation-section .profile-interest-disclaimer { display: block; margin-top: 4px; padding-top: 18px; border-top: 1px solid var(--border); }
 
-/* A proper "About this physician" section: one h2, no inner "About" heading
- * (AboutSection renders showHeading={false} here), no doubled divider (see
- * AboutSection's own conditional .profile-block class) -- just the bio
- * directly under the one heading, then Background / Practice & locations /
- * Research & teaching as same-weight subsections with their own h3. */
-.about-physician-section .profile-block:first-of-type { margin-top: 24px; }
-.profile-block-subheading { margin: 0 0 14px; color: var(--clinical); font-family: var(--font-ui); font-size: .64rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
-/* "About" and "Practice & locations" are peer sections and read as unrelated
- * if one is a serif title and the other a small uppercase eyebrow. Both reuse
- * the SAME .profile-block-heading class (About's own h2 already does); this
- * rule just makes the resolved size identical regardless of nesting depth --
- * About's h2 is a direct child of .member-profile-section (picks up the
- * 1.1rem from that rule elsewhere on the page), Practice & locations' heading
- * is nested one level deeper inside .profile-block, so it needs restating
- * here rather than relying on a direct-child selector that wouldn't reach it. */
-.about-physician-section .profile-block-heading { font-size: 1.1rem; }
 .about-practice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
 .about-practice-grid > .profile-section-v2 { margin-top: 0; }
 .profile-location-value { margin: 10px 0 0; color: var(--clinical); font-size: .78rem; line-height: 1.5; }
@@ -1089,13 +1077,6 @@ button.lam-row:hover { background: #fff9f1; }
    professional profile, practice updates, and the network feed.
    ========================================================================== */
 
-/* Improve your agent: strong but restrained Home/My Agent visibility. */
-.improve-agent-card { margin-top: 20px; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 14px; background: var(--surface); padding: 22px 24px; box-shadow: var(--shadow-soft); }
-.improve-agent-card.done { border-left-color: var(--success); }
-.improve-agent-card h2 { margin: 4px 0 8px; font-size: 1.15rem; line-height: 1.4; }
-.improve-agent-stat { margin: 0 0 14px; color: var(--text-secondary); font-size: .72rem; }
-.improve-agent-card .button-primary { display: inline-flex; }
-
 /* Network updates feed: professional utility, no vanity mechanics. */
 .feed-stream { display: flex; flex-direction: column; gap: 16px; max-width: 640px; margin-top: 18px; }
 .feed-post { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 18px 20px; }
@@ -1190,6 +1171,12 @@ button.lam-row:hover { background: #fff9f1; }
 .profile-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .profile-section-heading h2 { margin: 0; font-size: 1rem; }
 .profile-section-empty { margin: 8px 0 0; color: var(--text-secondary); font-size: .68rem; }
+/* "quiet" sub-sections (Research / Publications / Teaching nested inside the
+ * merged "Research & teaching" section) are field-level labels, not their own
+ * major section -- small sans/uppercase, the same tier as TRAINING/EXPERIENCE/
+ * AFFILIATIONS, not a second same-size serif heading competing with the real
+ * section title above them. */
+.profile-section-v2.quiet .profile-section-heading h2 { color: var(--text-secondary); font-family: var(--font-ui); font-size: .64rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 .profile-item-list { display: grid; gap: 2px; margin-top: 10px; }
 .profile-item-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border-top: 1px solid rgb(222 216 206 / 60%); padding: 11px 2px; }
 .profile-item-row:first-child { border-top: 0; }
@@ -1206,7 +1193,11 @@ button.lam-row:hover { background: #fff9f1; }
 
 /* -------------------------------------------------- Pass 7D: one-page profile */
 .profile-block { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 22px; }
-.profile-block:first-of-type { margin-top: 20px; }
+/* Complete reset (margin/border/padding together), not just margin -- a
+ * partial reset here is exactly the bug class fixed on the referral card
+ * above: whichever property is left out silently keeps its old value even
+ * though the element is first and shouldn't have a leading divider at all. */
+.profile-block:first-of-type { margin-top: 20px; border-top: 0; padding-top: 0; }
 .profile-block-heading { margin: 0 0 4px; font-size: 1.05rem; }
 .profile-about-text { max-width: 640px; margin: 10px 0 0; color: var(--clinical); font-family: var(--font-display); font-size: .92rem; line-height: 1.6; }
 .profile-about .text-button { margin-top: 10px; }
@@ -1219,6 +1210,8 @@ button.lam-row:hover { background: #fff9f1; }
 
 .profile-timeline-group { margin-top: 20px; }
 .profile-timeline-group:first-of-type { margin-top: 0; }
+.profile-timeline-group.empty { margin-top: 10px; }
+.profile-timeline-group.empty:first-of-type { margin-top: 0; }
 .profile-timeline-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .profile-timeline-heading h3 { margin: 0; color: var(--text-secondary); font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .profile-timeline { position: relative; margin-top: 12px; padding-left: 16px; border-left: 1px solid var(--border); }
@@ -1229,11 +1222,6 @@ button.lam-row:hover { background: #fff9f1; }
 .profile-timeline-item p { margin: 4px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
 .profile-timeline-item small { display: block; margin-top: 4px; color: #a39c8c; font-size: .56rem; text-transform: uppercase; letter-spacing: .03em; }
 
-.profile-suggestions-row { margin: 4px 0 20px; }
-.profile-suggestions-indicator { display: block; width: 100%; max-width: 480px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; background: #fdf3e8; padding: 13px 16px; cursor: pointer; text-align: left; }
-.profile-suggestions-indicator strong { display: block; color: var(--clinical); font-size: .8rem; }
-.profile-suggestions-indicator span { display: block; margin: 4px 0; color: var(--text-secondary); font-size: .66rem; line-height: 1.5; }
-.profile-suggestions-indicator b { color: var(--accent-hover); font-size: .66rem; font-weight: 700; }
 .suggestions-dialog .learning-grid { margin-top: 18px; }
 .enrichment-provenance { color: var(--text-secondary); font-size: .62rem; }
 
@@ -1265,16 +1253,13 @@ button.lam-row:hover { background: #fff9f1; }
 .profile-section-explainer { max-width: 620px; margin: 0 0 12px; color: var(--text-secondary); font-size: .68rem; line-height: 1.55; }
 
 /* ----------------------------------------------------------- Pass 5B: interests */
-.interests-panel .interest-group { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
-.interests-panel .interest-group:first-of-type { margin-top: 0; border-top: 0; padding-top: 0; }
-.interest-group.primary .profile-section-heading h3 { color: var(--accent-hover); }
 .interest-group h3 { margin: 0; font-size: .88rem; }
+.profile-section-heading.quiet-heading { justify-content: flex-end; }
 .interest-item-list { display: grid; gap: 2px; margin-top: 8px; }
 .interest-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border-top: 1px solid rgb(222 216 206 / 60%); padding: 10px 2px; }
 .interest-row:first-child { border-top: 0; }
 .interest-row strong { display: block; color: var(--clinical); font-size: .78rem; }
 .interest-row p { margin: 4px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
-.interest-training-hint { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
 
 /* --------------------------------------------------------- Pass 5B: enrichment */
 .enrichment-candidate .enrichment-category { display: block; margin-top: 8px; color: var(--accent-hover); font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
@@ -1846,6 +1831,28 @@ button.lam-row:hover { background: #fff9f1; }
 .agent-banner-action h3 { margin: 0; font-size: 1.3rem; }
 .agent-banner-action .agent-banner-support { font-size: .76rem; }
 .agent-banner-action .button-primary { margin-top: 16px; }
+/* Reuses .status-label/.spark-icon verbatim (same idle/loading/ready pulse
+ * language as the Patient Detail next-step rail) -- these two rules just
+ * give it the same inline layout + heading spacing .next-step-card already
+ * scopes for itself. */
+.agent-banner-action .status-label { display: inline-flex; align-items: center; }
+.agent-banner-action .status-label + h3 { margin-top: 14px; }
+.agent-banner-action .muted-note { margin-top: 10px; font-size: .64rem; }
+
+/* Profile assistant banner: same .agent-banner shell as the Dashboard, just a
+ * little tighter in a single-column profile page (no digest-tile row below
+ * it to visually balance against). */
+.profile-assistant-banner { margin-top: 24px; }
+.profile-assistant-banner .agent-banner-main h2 { max-width: 340px; }
+
+/* The small follow-up-to-training banner reuses .training-reminder (My Agent
+ * Overview's established copper mini-hero) verbatim -- this is only the
+ * margin needed to sit correctly among the profile page's other sections. */
+.profile-training-followup { margin-top: 26px; }
+
+/* Shown only when arriving via the physician's own "View as others see it"
+ * link (?preview=1) -- ordinary public visitors never see this. */
+.profile-preview-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; border: 1px solid var(--mineral-subtle); border-radius: 9px; background: var(--mineral-surface); padding: 10px 16px; color: var(--mineral-deep); font-size: .68rem; font-weight: 600; }
 /* Both controls sit on one baseline-aligned row, directly under the headline. */
 .agent-banner-view-row { position: relative; z-index: 1; display: flex; align-items: baseline; gap: 22px; margin-top: 18px; flex-wrap: wrap; }
 .agent-digest-toggle { white-space: nowrap; }

@@ -134,9 +134,9 @@ test('Home never invents a numerical agent-quality score, and has no XP/streak/l
   assert.doesNotMatch(home(), /score|ranking|quality|streak|\bXP\b|level up/i)
 })
 
-test('posts/publishing are not a major owner surface: no Publish button is wired into the reused profile page for the owner identity', () => {
-  const profilePage = slice(engagement, 'export function ProfessionalProfilePage', 'export function NetworkPhysicianProfilePage')
-  assert.match(profilePage, /itemActions=\{personaId === 'owner' \? undefined : /)
+test('posts/publishing are not a major owner surface: no Publish button is wired into the shared Research & teaching section for the owner identity', () => {
+  const section = slice(engagement, 'function ProfileResearchTeachingSection', 'function EnrichmentCandidateCard')
+  assert.match(section, /itemActions=\{!readOnly && personaId && personaId !== 'owner' \? /)
 })
 
 /* --------------------------------------------------------------- honesty / gaps */
