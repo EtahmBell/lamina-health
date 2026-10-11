@@ -1473,16 +1473,23 @@ button.lam-row:hover { background: #fff9f1; }
 .network-hero-copy .eyebrow { margin: 0 0 7px; }
 .network-hero-copy h2 { font-size: 1.7rem; line-height: 1.2; }
 .network-hero-copy p:not(.eyebrow) { max-width: 36ch; margin: 10px 0 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
-/* The motif: a tilted partial globe (one visible edge arc + two latitude arcs,
-   never a closed sphere outline) with a hub radiating several connection arcs
-   to scattered nodes -- design_references/map_guidance_banner.png's feeling,
-   reinterpreted as restrained vector lines, not a literal dotted world map. */
-.network-hero-globe-art { position: absolute; left: 50%; top: 50%; z-index: 0; width: 360px; height: 300px; transform: translate(-50%, -50%); opacity: .6; }
-.globe-tilt { transform: rotate(-9deg); transform-origin: 120px 120px; }
-.globe-edge { stroke: var(--mineral-subtle); stroke-width: 1.2; opacity: .5; }
-.globe-ring { stroke: var(--mineral-subtle); stroke-width: 1; opacity: .35; }
-.globe-arc { stroke: var(--mineral); stroke-width: 1.1; opacity: .6; stroke-dasharray: 2 4; stroke-linecap: round; }
-.globe-node { fill: var(--mineral-deep); opacity: .75; }
+/* The motif: a proper wireframe globe -- one silhouette circle + latitude/
+   longitude ellipses sharing its center (never individually rotated; only the
+   whole .globe-tilt group turns once, which is what keeps it reading as ONE
+   sphere instead of scattered ovals). Positioned off-center and cropped by the
+   hero's own overflow:hidden so only a partial view shows -- "partial globe"
+   is a framing/clipping choice, not an incomplete shape. A few solid routing
+   arcs between specific node pairs, one dashed for texture, read as deliberate
+   paths rather than a scribble. Layered opacity (sphere/grid faintest, arcs and
+   nodes progressively more present, the copper hub most prominent) gives it
+   depth without any fills or gradients. */
+.network-hero-globe-art { position: absolute; right: -72px; top: 50%; z-index: 0; width: 340px; height: 340px; transform: translateY(-50%); opacity: .85; }
+.globe-tilt { transform: rotate(-11deg); transform-origin: 120px 120px; }
+.globe-sphere { stroke: var(--mineral-subtle); stroke-width: 1; opacity: .3; }
+.globe-ring { stroke: var(--mineral-subtle); stroke-width: 1; opacity: .3; }
+.globe-arc { stroke: var(--mineral-deep); stroke-width: 1.2; opacity: .62; stroke-linecap: round; }
+.globe-arc.dashed { stroke-dasharray: 2.5 5; opacity: .48; }
+.globe-node { fill: var(--mineral-deep); opacity: .8; }
 .globe-node.hub { fill: var(--accent); opacity: 1; }
 .network-hero-action { position: relative; z-index: 1; flex: 0 0 auto; width: 240px; border: 1px solid var(--border); border-radius: 10px; background: rgb(255 254 251 / 94%); padding: 24px; }
 .network-hero-action h3 { margin: 0; font-size: 1.05rem; line-height: 1.35; }
@@ -1491,7 +1498,7 @@ button.lam-row:hover { background: #fff9f1; }
 @media (max-width: 860px) {
   .network-hero { flex-direction: column; align-items: stretch; padding: 32px 26px; }
   .network-hero-action { width: auto; }
-  .network-hero-globe-art { opacity: .4; }
+  .network-hero-globe-art { opacity: .45; }
 }
 
 .network-section-title { margin: 32px 0 14px; font-size: 1.1rem; }

@@ -761,14 +761,18 @@ test('the Network hero is restructured as ONE continuous surface (copy + decorat
   assert.match(styles, /\.network-hero \{ position: relative; display: flex;/, 'one flex surface, not a 2-column grid with a separately-colored sub-pane')
 })
 
-test('the network globe motif is an abstract CSS/SVG illustration -- a tilted partial globe with several nodes and multiple hub-radiating arcs, mineral-toned with one copper "you" node, no literal map/airline-route imagery -- reinterpreting design_references/map_guidance_banner.png', () => {
+test('the network globe motif is a composed wireframe globe (one sphere silhouette + unrotated latitude/longitude grid sharing its center, only the whole group tilts), with purposeful routing arcs between specific node pairs -- not scattered random lines/circles -- mineral-toned with one copper "you" node, no literal map/airline-route imagery -- reinterpreting design_references/map_guidance_banner.png', () => {
   const hero = slice(network, 'function NetworkHero', 'function SuggestedConnectionCard')
   const nodeCount = (hero.match(/className="globe-node/g) ?? []).length
-  const arcCount = (hero.match(/className="globe-arc"/g) ?? []).length
+  const arcCount = (hero.match(/className="globe-arc/g) ?? []).length
+  const gridCount = (hero.match(/className="globe-ring"/g) ?? []).length
   assert.ok(nodeCount >= 5 && nodeCount <= 8, `expected 5-8 nodes, found ${nodeCount}`)
   assert.ok(arcCount >= 3 && arcCount <= 5, `expected 3-5 arcs, found ${arcCount}`)
-  assert.match(hero, /className="globe-edge"/, 'a partial globe edge, not a closed sphere outline')
-  assert.match(styles, /\.globe-tilt \{ transform: rotate\(-9deg\)/, 'the sphere is clearly tilted')
+  assert.match(hero, /<circle className="globe-sphere" cx="120" cy="120" r="84" \/>/, 'one sphere silhouette, the recognizable globe structure')
+  assert.ok(gridCount >= 4, 'a latitude/longitude grid, not just arcs floating in space')
+  assert.doesNotMatch(hero, /transform="rotate/, 'grid lines are never individually rotated -- that is what made the previous version read as scattered ovals rather than one sphere')
+  assert.match(hero, /className="globe-arc dashed"/, 'at least one dashed route for texture, not every path identical')
+  assert.match(styles, /\.globe-tilt \{ transform: rotate\(-11deg\)/, 'the whole composed sphere tilts as one group')
   assert.match(styles, /\.globe-node\.hub \{ fill: var\(--accent\); opacity: 1; \}/, 'exactly one copper "you" node; the rest are mineral')
   assert.doesNotMatch(hero, /usa|united-states|map|airline/i)
 })

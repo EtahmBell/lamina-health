@@ -135,11 +135,21 @@ function ConnectionRow({ member, navigate }: { member: NetworkRelationship; navi
  * (design_references/dash_banner.png) -- same composition language, adapted
  * rather than copied: one continuous surface (not a separately-colored sub-pane),
  * large headline+support on the left, a decorative motif floating centrally
- * behind everything, a white inset action card on the right. The motif itself
- * follows design_references/map_guidance_banner.png's feeling (a tilted partial
- * globe with a hub radiating multiple connection arcs to scattered nodes across
- * its surface), reinterpreted in Lamina's restrained vector-line language -- no
- * dot-matrix continents, no stock imagery, no literal map. */
+ * behind everything, a white inset action card on the right.
+ *
+ * The motif is a proper wireframe globe, not ad hoc arcs -- the structure that
+ * reads as "globe" rather than "random lines": one silhouette circle, latitude
+ * ellipses that share its center but shrink in ry toward the poles, and
+ * longitude ellipses that share its center but vary in rx to suggest wrap, all
+ * UNROTATED individually (only the whole group tilts once -- rotating each grid
+ * line independently is what made the previous version read as scattered rather
+ * than as one coherent sphere). "Partial globe" comes from positioning/clipping
+ * (see .network-hero-globe-art's off-center placement + the hero's own
+ * overflow:hidden), per design_references/map_guidance_banner.png's framing,
+ * not from drawing an incomplete circle. A handful of great-circle-style routing
+ * arcs connect specific node pairs (not just hub-to-everything), with one
+ * dashed for texture -- reinterpreted in Lamina's restrained vector-line
+ * language, no dot-matrix continents, no stock imagery, no literal map. */
 function NetworkHero({ onAdd }: { onAdd: () => void }) {
   return <section className="network-hero">
     <div className="network-hero-copy">
@@ -149,20 +159,23 @@ function NetworkHero({ onAdd }: { onAdd: () => void }) {
     </div>
     <svg className="network-hero-globe-art" viewBox="0 0 240 240" fill="none" aria-hidden="true">
       <g className="globe-tilt">
-        <path className="globe-edge" d="M26,166 Q40,68 138,38 Q202,24 218,88" />
-        <path className="globe-ring" d="M44,148 Q120,184 200,136" />
-        <path className="globe-ring" d="M32,106 Q122,76 208,102" />
-        <path className="globe-arc" d="M118,120 Q84,74 58,98" />
-        <path className="globe-arc" d="M118,120 Q152,58 190,72" />
-        <path className="globe-arc" d="M118,120 Q170,122 200,158" />
-        <path className="globe-arc" d="M118,120 Q92,162 72,188" />
-        <path className="globe-arc" d="M118,120 Q62,132 40,152" />
-        <circle className="globe-node" cx="58" cy="98" r="3" />
-        <circle className="globe-node" cx="190" cy="72" r="2.6" />
-        <circle className="globe-node" cx="200" cy="158" r="3" />
-        <circle className="globe-node" cx="72" cy="188" r="2.6" />
-        <circle className="globe-node" cx="40" cy="152" r="2.6" />
-        <circle className="globe-node hub" cx="118" cy="120" r="4.5" />
+        <circle className="globe-sphere" cx="120" cy="120" r="84" />
+        <ellipse className="globe-ring" cx="120" cy="120" rx="84" ry="19" />
+        <ellipse className="globe-ring" cx="120" cy="86" rx="67" ry="11" />
+        <ellipse className="globe-ring" cx="120" cy="154" rx="67" ry="11" />
+        <ellipse className="globe-ring" cx="120" cy="120" rx="34" ry="84" />
+        <ellipse className="globe-ring" cx="120" cy="120" rx="62" ry="84" />
+        <path className="globe-arc" d="M176,66 Q199,92 198,120" />
+        <path className="globe-arc" d="M198,120 Q196,150 172,172" />
+        <path className="globe-arc" d="M130,118 Q156,88 176,66" />
+        <path className="globe-arc" d="M130,122 Q127,160 120,184" />
+        <path className="globe-arc dashed" d="M128,119 Q96,132 70,150" />
+        <circle className="globe-node" cx="176" cy="66" r="3" />
+        <circle className="globe-node" cx="198" cy="120" r="2.6" />
+        <circle className="globe-node" cx="172" cy="172" r="3" />
+        <circle className="globe-node" cx="120" cy="184" r="2.6" />
+        <circle className="globe-node" cx="70" cy="150" r="2.4" />
+        <circle className="globe-node hub" cx="130" cy="119" r="4.5" />
       </g>
     </svg>
     <div className="network-hero-action">
