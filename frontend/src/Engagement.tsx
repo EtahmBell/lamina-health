@@ -2190,7 +2190,7 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
           {clinicalInterests.length > 0 && <InterestsPanel interests={data.professional_profile.interests} types={['clinical_interest']} readOnly />}
 
           {hasPracticeExtras && <div className="profile-block">
-            <h3 className="profile-block-subheading">Practice &amp; locations</h3>
+            <h3 className="profile-block-heading">Practice &amp; locations</h3>
             {/* The location value renders directly under the "Practice &
              * locations" heading -- no redundant inner "Locations" subheading
              * (that was the same relationship as the fixed About/About

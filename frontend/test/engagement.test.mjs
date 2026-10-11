@@ -327,10 +327,23 @@ test('the "Public Lamina agent" badge and the network-relationship action have c
 })
 
 test('the referral card gives its title and internal subsections real breathing room, not a cramped box', () => {
-  assert.match(styles, /\.referral-representation-section \{ border: 1px solid var\(--border\); border-radius: 14px; background: var\(--surface\); padding: 30px 28px;/)
+  assert.match(styles, /\.referral-representation-section \{ border: 1px solid var\(--border\); border-radius: 14px; background: var\(--surface\); padding: 30px 32px;/)
   assert.match(styles, /\.referral-representation-section > h2 \{ margin: 0 0 6px;/, 'the title is not flush against the card edge with zero margin below it')
   assert.match(styles, /\.referral-rep-block \{ padding: 26px 0;/)
   assert.match(styles, /\.referral-rep-block:first-of-type \{ padding-top: 24px;/)
+})
+
+test('the referral card\'s own top padding always wins over the shared .member-profile-section:first-child reset, which was silently zeroing padding-top via a specificity collision', () => {
+  assert.match(styles, /\.member-profile-section:first-child \{ margin-top: 0; border-top: none; padding-top: 0; \}/, 'confirms the shared reset rule that caused the collision still exists (it is correct for ordinary divider sections)')
+  assert.match(styles, /\.referral-representation-section\.member-profile-section \{ padding-top: 30px; \}/, 'a same-or-higher-specificity rule restores the card\'s own top padding regardless of first-child position')
+})
+
+test('"About" and "Practice & locations" share the same reusable heading class and resolve to identical typography -- serif, same size, same weight, no uppercase eyebrow styling on Practice & locations', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(publicPage, /<h2 className="profile-block-heading">About<\/h2>/)
+  assert.match(publicPage, /<h3 className="profile-block-heading">Practice &amp; locations<\/h3>/)
+  assert.doesNotMatch(publicPage, /className="profile-block-subheading">Practice/, 'no longer uses the small-uppercase eyebrow treatment')
+  assert.match(styles, /\.about-physician-section \.profile-block-heading \{ font-size: 1\.1rem; \}/, 'one scoped rule guarantees identical resolved font-size regardless of each heading\'s nesting depth')
 })
 
 test('the joined-Lamina member profile is a two-column layout with a sticky agent-chat rail, not the old single-column shell', () => {

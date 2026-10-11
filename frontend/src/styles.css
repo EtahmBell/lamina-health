@@ -704,7 +704,17 @@ button.lam-row:hover { background: #fff9f1; }
  * not labels), a compact checklist for pre-referral workup (materially
  * different -- an action list, not a tag cloud). Raw backend tokens are
  * humanized (see humanizeClinicalTerm) before they ever reach this markup. */
-.referral-representation-section { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 30px 28px; box-shadow: var(--shadow-soft); }
+.referral-representation-section { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 30px 32px; box-shadow: var(--shadow-soft); }
+/* The referral card is also a .member-profile-section (for the shared
+ * top-of-page spacing rhythm), and when it's the first section on the page --
+ * the common case -- .member-profile-section:first-child { padding-top: 0 }
+ * (class+pseudo, specificity 0,2,0) outranks this card's own shorthand
+ * `padding: 30px 32px` (specificity 0,1,0) on that one longhand property, so
+ * only padding-top was silently zeroed while the other three sides still got
+ * 30px/32px. That's why the heading sat flush against the top border. Restate
+ * padding-top here with matching specificity (two classes) so the card's own
+ * padding always wins, first-child or not. */
+.referral-representation-section.member-profile-section { padding-top: 30px; }
 .referral-representation-section > h2 { margin: 0 0 6px; }
 .referral-rep-block { padding: 26px 0; border-top: 1px solid var(--border); }
 .referral-rep-block:first-of-type { padding-top: 24px; border-top: 0; }
@@ -726,6 +736,15 @@ button.lam-row:hover { background: #fff9f1; }
  * Research & teaching as same-weight subsections with their own h3. */
 .about-physician-section .profile-block:first-of-type { margin-top: 24px; }
 .profile-block-subheading { margin: 0 0 14px; color: var(--clinical); font-family: var(--font-ui); font-size: .64rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+/* "About" and "Practice & locations" are peer sections and read as unrelated
+ * if one is a serif title and the other a small uppercase eyebrow. Both reuse
+ * the SAME .profile-block-heading class (About's own h2 already does); this
+ * rule just makes the resolved size identical regardless of nesting depth --
+ * About's h2 is a direct child of .member-profile-section (picks up the
+ * 1.1rem from that rule elsewhere on the page), Practice & locations' heading
+ * is nested one level deeper inside .profile-block, so it needs restating
+ * here rather than relying on a direct-child selector that wouldn't reach it. */
+.about-physician-section .profile-block-heading { font-size: 1.1rem; }
 .about-practice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
 .about-practice-grid > .profile-section-v2 { margin-top: 0; }
 .profile-location-value { margin: 10px 0 0; color: var(--clinical); font-size: .78rem; line-height: 1.5; }
