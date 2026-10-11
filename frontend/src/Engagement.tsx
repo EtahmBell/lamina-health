@@ -2177,7 +2177,7 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
         </section>}
 
         {hasAboutSection && <section className="member-profile-section about-physician-section">
-          <h2 className="profile-block-heading">About this physician</h2>
+          <h2 className="profile-block-heading">About</h2>
           <AboutSection items={sections.about} readOnly showHeading={false} />
 
           {(sections.training.length > 0 || sections.experience.length > 0 || sections.affiliations.length > 0) && <div className="profile-block">
@@ -2191,12 +2191,18 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
 
           {hasPracticeExtras && <div className="profile-block">
             <h3 className="profile-block-subheading">Practice &amp; locations</h3>
-            <div className="about-practice-grid">
+            {/* The location value renders directly under the "Practice &
+             * locations" heading -- no redundant inner "Locations" subheading
+             * (that was the same relationship as the fixed About/About
+             * duplication above). Skills/Languages/Links keep their own
+             * headings below since those labels aren't redundant with
+             * "Practice & locations". */}
+            {sections.locations.length > 0 && <p className="profile-location-value">{sections.locations.map((item) => item.title).join(' · ')}</p>}
+            {(sections.skills_or_procedures.length > 0 || sections.languages.length > 0 || sections.professional_links.length > 0) && <div className="about-practice-grid">
               {sections.skills_or_procedures.length > 0 && <ProfileChipSection category="skills_or_procedures" items={sections.skills_or_procedures} readOnly heading="Skills &amp; procedures" />}
               {sections.languages.length > 0 && <ProfileChipSection category="languages" items={sections.languages} readOnly />}
-              {sections.locations.length > 0 && <ProfileSection category="locations" items={sections.locations} readOnly />}
               {sections.professional_links.length > 0 && <ProfileSection category="professional_links" items={sections.professional_links} readOnly heading="Professional links" />}
-            </div>
+            </div>}
           </div>}
 
           {(hasResearchSection || hasTeachingSection) && <div className="profile-block">

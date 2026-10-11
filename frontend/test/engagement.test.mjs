@@ -322,6 +322,17 @@ test('"Add to network" is a real filled primary button when disconnected, using 
   assert.match(action, /: <button type="button" className="button-primary network-relationship-action" disabled=\{relationship\.busy\} onClick=\{\(\) => void relationship\.add\(\)\}>Add to network <span>→<\/span><\/button>/, 'disconnected: a real filled .button-primary, the same family as other major Network CTAs, not a weak text/secondary link')
 })
 
+test('the "Public Lamina agent" badge and the network-relationship action have clear vertical separation in the top-right hero column, both still right-aligned', () => {
+  assert.match(styles, /\.profile-hero-status \{ display: flex; flex-direction: column; align-items: flex-end; gap: 16px;/)
+})
+
+test('the referral card gives its title and internal subsections real breathing room, not a cramped box', () => {
+  assert.match(styles, /\.referral-representation-section \{ border: 1px solid var\(--border\); border-radius: 14px; background: var\(--surface\); padding: 30px 28px;/)
+  assert.match(styles, /\.referral-representation-section > h2 \{ margin: 0 0 6px;/, 'the title is not flush against the card edge with zero margin below it')
+  assert.match(styles, /\.referral-rep-block \{ padding: 26px 0;/)
+  assert.match(styles, /\.referral-rep-block:first-of-type \{ padding-top: 24px;/)
+})
+
 test('the joined-Lamina member profile is a two-column layout with a sticky agent-chat rail, not the old single-column shell', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.match(publicPage, /className="member-profile-layout"/)
@@ -388,21 +399,31 @@ test('research and teaching interests render only inside About -> Research & tea
   assert.match(publicPage, /\(hasResearchSection \|\| hasTeachingSection\) && <div className="profile-block">/)
 })
 
-test('About this physician has exactly ONE heading -- no separate inner "About" heading, and no doubled divider above the bio', () => {
+test('the About section has exactly ONE heading, reading simply "About" (not "About this physician") -- no separate inner "About" heading, and no doubled divider above the bio', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
   assert.match(publicPage, /className="member-profile-section about-physician-section"/)
+  assert.doesNotMatch(publicPage, /About this physician/, 'the old redundant "About this physician" + "About" pairing is gone')
   const aboutBlock = slice(publicPage, 'className="member-profile-section about-physician-section"', 'Recent network updates')
-  const headingCount = (aboutBlock.match(/About this physician|>About</g) ?? []).length
+  const headingCount = (aboutBlock.match(/>About</g) ?? []).length
   assert.equal(headingCount, 1, `expected exactly one "About" heading inside the section, found ${headingCount}`)
+  assert.match(publicPage, /<h2 className="profile-block-heading">About<\/h2>/)
   assert.match(publicPage, /<AboutSection items=\{sections\.about\} readOnly showHeading=\{false\}\s*\/>/, 'AboutSection renders without its own heading/divider when nested here')
   assert.match(engagement, /className=\{showHeading \? 'profile-block profile-about' : 'profile-about'\}/, 'the .profile-block divider class itself is dropped when the heading is suppressed, not just the heading text')
 })
 
-test('About this physician gathers background/interests/practice-details/research-teaching under subsections of one heading, with a restrained two-column grid for the lighter practice-detail fields', () => {
+test('About gathers background/interests/practice-details/research-teaching under subsections of one heading, with a restrained two-column grid for the lighter practice-detail fields', () => {
   const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
-  assert.match(publicPage, /About this physician/)
+  assert.match(publicPage, /about-physician-section/)
   assert.match(publicPage, /className="about-practice-grid"/)
   assert.match(styles, /\.about-practice-grid \{ display: grid; grid-template-columns: repeat\(auto-fit/)
+})
+
+test('Practice & locations shows the location value directly, with no redundant inner "Locations" subheading -- parallel to the simplified About structure', () => {
+  const publicPage = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  const practiceBlock = slice(publicPage, 'Practice &amp; locations', 'about-practice-grid')
+  assert.match(practiceBlock, /className="profile-location-value"/)
+  assert.doesNotMatch(practiceBlock, /<ProfileSection category="locations"/, 'locations no longer goes through ProfileSection, which would render its own "Locations" heading')
+  assert.match(publicPage, /sections\.locations\.map\(\(item\) => item\.title\)\.join\(' · '\)/, 'the actual location value renders directly, e.g. "San Francisco, CA"')
 })
 
 test('recent network updates reuse FeedCard (the real Network Feed post component) directly, never a second simplified post renderer', () => {
