@@ -1,4 +1,11 @@
-from backend.models import HistoricalCase, LabObservation, PatientRecord, PhysicianProfile
+from backend.models import (
+    ClinicalRepresentation,
+    HistoricalCase,
+    LabObservation,
+    PatientRecord,
+    PhysicianCaseRules,
+    PhysicianProfile,
+)
 
 PRIMARY_PATIENT_ID = "patient-ckd-htn-001"
 MARIA_PATIENT_ID = "patient-ida-002"
@@ -91,6 +98,32 @@ PATIENTS = {
         ),
     ),
 }
+
+# ONE canonical physician identity for Dr. Noah Chen, shared by every patient pool
+# he appears in (Jordan's and Tonjit's). His stable professional footprint lives
+# here; what differs per case family (diabetes vs. CKD/hypertension) lives in
+# PHYSICIAN_CASE_RULES below, never in a second competing PhysicianProfile object.
+PHYSICIAN_CHEN = PhysicianProfile(
+    id="physician-chen",
+    name="Dr. Noah Chen (synthetic)",
+    specialty="Endocrinology",
+    subspecialty="Diabetes",
+    focus_areas=["complex diabetes", "type 2 diabetes", "treatment intensification", "metabolic disease"],
+    accepts_signals=["type_2_diabetes", "progressive_glycemic_control"],
+    explicit_rules=[
+        "Accept progressive type 2 diabetes with worsening HbA1c despite primary-care medication escalation."
+    ],
+    required_workup=["Current HbA1c", "Home glucose log"],
+    historical_cases=[
+        HistoricalCase(
+            label="Progressive type 2 diabetes despite oral medication escalation",
+            features=["type_2_diabetes", "progressive_glycemic_control"],
+        )
+    ],
+    insurance_networks=["Lamina Demo PPO", "Bay Demo HMO"],
+    location="Oakland, CA",
+    availability_days=15,
+)
 
 PHYSICIANS = [
     PhysicianProfile(
@@ -191,24 +224,7 @@ PHYSICIANS = [
         location="San Francisco, CA",
         availability_days=18,
     ),
-    PhysicianProfile(
-        id="physician-chen",
-        name="Dr. Noah Chen (synthetic)",
-        specialty="Endocrinology",
-        subspecialty="Diabetes",
-        focus_areas=["complex diabetes", "metabolic disease"],
-        accepts_signals=["diabetes"],
-        explicit_rules=[
-            "Diabetes alone does not make endocrinology the lead service for progressive CKD."
-        ],
-        required_workup=["Current HbA1c"],
-        historical_cases=[
-            HistoricalCase(label="Complex diabetes medication management", features=["diabetes"])
-        ],
-        insurance_networks=["Bay Demo HMO"],
-        location="Oakland, CA",
-        availability_days=15,
-    ),
+    PHYSICIAN_CHEN,
 ]
 
 MARIA_PHYSICIANS = [
@@ -331,27 +347,7 @@ MARIA_PHYSICIANS = [
 ]
 
 TONJIT_PHYSICIANS = [
-    PhysicianProfile(
-        id="physician-chen",
-        name="Dr. Noah Chen (synthetic)",
-        specialty="Endocrinology",
-        subspecialty="Diabetes",
-        focus_areas=["type 2 diabetes", "treatment intensification", "metabolic disease"],
-        accepts_signals=["type_2_diabetes", "progressive_glycemic_control"],
-        explicit_rules=[
-            "Accept progressive type 2 diabetes with worsening HbA1c despite primary-care medication escalation."
-        ],
-        required_workup=["Current HbA1c", "Home glucose log"],
-        historical_cases=[
-            HistoricalCase(
-                label="Progressive type 2 diabetes despite oral medication escalation",
-                features=["type_2_diabetes", "progressive_glycemic_control"],
-            )
-        ],
-        insurance_networks=["Lamina Demo PPO", "Bay Demo HMO"],
-        location="Oakland, CA",
-        availability_days=15,
-    ),
+    PHYSICIAN_CHEN,
     PhysicianProfile(
         id="physician-okonkwo",
         name="Dr. Adaeze Okonkwo (synthetic)",
@@ -390,6 +386,60 @@ TONJIT_PHYSICIANS = [
         availability_days=12,
     ),
 ]
+
+# Case-family-specific referral rules. A physician may legitimately evaluate
+# different case families differently (Dr. Chen rejects a CKD/hypertension lead
+# referral but accepts a progressive type 2 diabetes one) -- that variation lives
+# here, keyed by (physician_id, case_family), rather than as two competing
+# PhysicianProfile objects sharing one id. Physicians who only ever see one case
+# family (everyone else, for now) have no entry here and simply fall back to
+# their own PhysicianProfile fields -- see resolve_case_rules() below.
+PHYSICIAN_CASE_RULES: list[PhysicianCaseRules] = [
+    PhysicianCaseRules(
+        physician_id="physician-chen",
+        case_family="ckd_hypertension",
+        accepts_signals=["diabetes"],
+        explicit_rules=[
+            "Diabetes alone does not make endocrinology the lead service for progressive CKD."
+        ],
+        required_workup=["Current HbA1c"],
+        historical_cases=[
+            HistoricalCase(label="Complex diabetes medication management", features=["diabetes"])
+        ],
+    ),
+    PhysicianCaseRules(
+        physician_id="physician-chen",
+        case_family="type_2_diabetes",
+        accepts_signals=PHYSICIAN_CHEN.accepts_signals,
+        explicit_rules=PHYSICIAN_CHEN.explicit_rules,
+        required_workup=PHYSICIAN_CHEN.required_workup,
+        historical_cases=PHYSICIAN_CHEN.historical_cases,
+    ),
+]
+PHYSICIAN_CASE_RULES_BY_KEY: dict[tuple[str, str], PhysicianCaseRules] = {
+    (rule.physician_id, rule.case_family): rule for rule in PHYSICIAN_CASE_RULES
+}
+
+
+def resolve_case_rules(
+    profile: PhysicianProfile, context: ClinicalRepresentation
+) -> PhysicianCaseRules:
+    """The referral representation a physician applies for one patient's case
+    family. Falls back to the physician's own general PhysicianProfile fields
+    when no case-specific override exists, so physicians who only ever see one
+    case family (nearly everyone, today) are completely unaffected."""
+    override = PHYSICIAN_CASE_RULES_BY_KEY.get((profile.id, context.case_family))
+    if override is not None:
+        return override
+    return PhysicianCaseRules(
+        physician_id=profile.id,
+        case_family=context.case_family,
+        accepts_signals=profile.accepts_signals,
+        explicit_rules=profile.explicit_rules,
+        required_workup=profile.required_workup,
+        historical_cases=profile.historical_cases,
+    )
+
 
 DEMO_NETWORK_PHYSICIANS = [
     PhysicianProfile(
@@ -454,7 +504,9 @@ EXPANDED_NETWORK_PHYSICIANS = [
 ALL_PHYSICIANS = [
     *PHYSICIANS,
     *MARIA_PHYSICIANS,
-    *[p for p in TONJIT_PHYSICIANS if p.id != "physician-chen"],
+    # PHYSICIAN_CHEN is already included via PHYSICIANS -- excluded here by
+    # identity (not just id) since TONJIT_PHYSICIANS reuses that same canonical object.
+    *[p for p in TONJIT_PHYSICIANS if p is not PHYSICIAN_CHEN],
     *DEMO_NETWORK_PHYSICIANS,
     *EXPANDED_NETWORK_PHYSICIANS,
 ]

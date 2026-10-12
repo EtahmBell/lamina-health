@@ -8,9 +8,11 @@ from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
 from backend.models import ClinicalFit, ConsultationMessageType, EvidenceKind
 from backend.synthetic_data import (
+    ALL_PHYSICIANS,
     MARIA_PATIENT_ID,
     MARIA_PHYSICIANS,
     PATIENTS,
+    PHYSICIAN_CHEN,
     PHYSICIANS,
     PRIMARY_PATIENT_ID,
     TONJIT_PATIENT_ID,
@@ -282,3 +284,38 @@ def test_jordan_and_maria_consults_are_unaffected_by_adding_tonjit() -> None:
 
     maria_result = consult_network(PATIENTS[MARIA_PATIENT_ID], MARIA_PHYSICIANS)
     assert maria_result.recommended_physician.physician_id == "physician-sanchez"
+
+
+def test_physician_chen_resolves_to_exactly_one_canonical_identity() -> None:
+    jordan_chen = next(item for item in PHYSICIANS if item.id == "physician-chen")
+    tonjit_chen = next(item for item in TONJIT_PHYSICIANS if item.id == "physician-chen")
+    assert jordan_chen is tonjit_chen is PHYSICIAN_CHEN
+
+    chen_entries_in_directory = [item for item in ALL_PHYSICIANS if item.id == "physician-chen"]
+    assert len(chen_entries_in_directory) == 1, "physician-chen must appear exactly once in the directory"
+    assert chen_entries_in_directory[0] is PHYSICIAN_CHEN
+
+    assert jordan_chen.name == tonjit_chen.name == "Dr. Noah Chen (synthetic)"
+    assert jordan_chen.specialty == tonjit_chen.specialty == "Endocrinology"
+    assert jordan_chen.location == tonjit_chen.location == "Oakland, CA"
+
+
+def test_jordan_physician_chen_rejection_is_unchanged_by_case_family_rules() -> None:
+    patient, context = patient_and_context()
+    result = evaluate_physician(patient, context, PHYSICIAN_CHEN)
+    assert result.clinical_fit == ClinicalFit.POOR
+    assert result.accepts_case is False
+    assert "progressive CKD" in result.reason
+    assert result.required_workup == ["Current HbA1c"]
+    assert result.evidence[0].kind == EvidenceKind.EXPLICIT_RULE
+    assert "does not make endocrinology the lead service" in result.evidence[0].detail
+
+
+def test_tonjit_physician_chen_acceptance_is_correct_through_the_shared_identity() -> None:
+    patient = PATIENTS[TONJIT_PATIENT_ID]
+    context = build_patient_context(patient)
+    result = evaluate_physician(patient, context, PHYSICIAN_CHEN)
+    assert result.clinical_fit == ClinicalFit.STRONG
+    assert result.accepts_case is True
+    assert result.required_workup == ["Current HbA1c", "Home glucose log"]
+    assert "Accept progressive type 2 diabetes" in result.evidence[0].detail

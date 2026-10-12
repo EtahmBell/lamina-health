@@ -54,7 +54,7 @@ export const DEMO_PATIENTS: DemoPatientSummary[] = [
     implemented: true,
     recent: true,
     stage: 'new',
-    stageNote: 'Real agent-consulted demo case.',
+    stageNote: 'Worsening glycemic control despite medication escalation.',
   },
   {
     id: 'patient-syncope-003',

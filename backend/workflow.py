@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from backend.config import environment
-from backend.models import ConsultationResult
+from backend.models import ConsultationResult, Referral
 
 # A believable starting roster for a brand-new workspace, so Network -> Colleagues
 # never opens empty (see WorkflowStore.network_members). Deliberately drawn only from
@@ -65,6 +65,12 @@ class WorkflowStore:
                   id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL,
                   patient_id TEXT NOT NULL,
                   completed_at TEXT NOT NULL, result_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS referrals (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL,
+                  patient_id TEXT NOT NULL, status TEXT NOT NULL,
+                  referral_json TEXT NOT NULL,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS agent_preferences (
                   workspace_id TEXT NOT NULL, key TEXT NOT NULL, statement TEXT NOT NULL,
@@ -296,6 +302,8 @@ class WorkflowStore:
                 """
                 CREATE INDEX IF NOT EXISTS consultations_workspace_id
                   ON consultations(workspace_id, id DESC);
+                CREATE INDEX IF NOT EXISTS referrals_workspace_id
+                  ON referrals(workspace_id, patient_id, id DESC);
                 CREATE INDEX IF NOT EXISTS demo_workspaces_expiry
                   ON demo_workspaces(expires_at);
                 CREATE INDEX IF NOT EXISTS demo_workspace_bootstraps_expiry
@@ -562,6 +570,7 @@ class WorkflowStore:
                 for table in (
                     "patient_activity",
                     "consultations",
+                    "referrals",
                     "agent_preferences",
                     "network_members",
                     "specialist_case_reviews",
@@ -754,6 +763,45 @@ class WorkflowStore:
             if row
             else None
         )
+
+    def create_referral(self, workspace_id: str, referral: Referral) -> Referral:
+        now = self._now()
+        base = referral.model_copy(update={"created_at": now, "updated_at": now})
+        with self._connect() as db:
+            cursor = db.execute(
+                """INSERT INTO referrals(
+                     workspace_id, patient_id, status, referral_json, created_at, updated_at
+                   ) VALUES (?, ?, ?, '', ?, ?)""",
+                (workspace_id, base.patient_id, base.status.value, now, now),
+            )
+            referral_id = int(cursor.lastrowid)
+            final = base.model_copy(update={"id": referral_id})
+            db.execute(
+                "UPDATE referrals SET referral_json=? WHERE workspace_id=? AND id=?",
+                (final.model_dump_json(), workspace_id, referral_id),
+            )
+        return final
+
+    def update_referral(self, workspace_id: str, referral: Referral) -> Referral:
+        if referral.id is None:
+            raise ValueError("update_referral requires a persisted referral (id is None)")
+        now = self._now()
+        final = referral.model_copy(update={"updated_at": now})
+        with self._connect() as db:
+            db.execute(
+                """UPDATE referrals SET status=?, referral_json=?, updated_at=?
+                   WHERE workspace_id=? AND id=?""",
+                (final.status.value, final.model_dump_json(), now, workspace_id, final.id),
+            )
+        return final
+
+    def get_referral(self, workspace_id: str, referral_id: int) -> Referral | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT referral_json FROM referrals WHERE workspace_id=? AND id=?",
+                (workspace_id, referral_id),
+            ).fetchone()
+        return Referral.model_validate_json(row["referral_json"]) if row else None
 
     def specialist_reviews(self, workspace_id: str, specialist_npi: str) -> dict[int, str]:
         with self._connect() as db:

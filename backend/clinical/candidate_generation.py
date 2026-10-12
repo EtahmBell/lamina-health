@@ -1,4 +1,5 @@
 from backend.models import CandidateReason, ClinicalRepresentation, PhysicianProfile
+from backend.synthetic_data import resolve_case_rules
 
 
 def generate_candidates(
@@ -9,7 +10,8 @@ def generate_candidates(
     """Generate a deliberately broad, inspectable demo slate; ranking happens later."""
     candidates: list[CandidateReason] = []
     for physician in physicians:
-        overlap = sorted(set(context.signals) & set(physician.accepts_signals))
+        accepts_signals = resolve_case_rules(physician, context).accepts_signals
+        overlap = sorted(set(context.signals) & set(accepts_signals))
         reasons = [f"Practice signal overlap: {signal.replace('_', ' ')}" for signal in overlap]
         if physician.specialty == "Nephrology" and context.progressive_renal_dysfunction:
             reasons.insert(0, "Progressive renal dysfunction makes nephrology directly relevant")

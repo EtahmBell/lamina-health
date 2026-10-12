@@ -36,6 +36,7 @@ def build_patient_context(patient: PatientRecord) -> ClinicalRepresentation:
             signals.append("renal_function_documented")
         return ClinicalRepresentation(
             patient_id=patient.id,
+            case_family="type_2_diabetes",
             summary=(
                 f"{patient.age}-year-old with type 2 diabetes and steadily worsening glycemic "
                 "control despite escalating primary-care medication management."
@@ -79,6 +80,7 @@ def build_patient_context(patient: PatientRecord) -> ClinicalRepresentation:
         ]
         return ClinicalRepresentation(
             patient_id=patient.id,
+            case_family="iron_deficiency_anemia",
             summary=(
                 f"{patient.age}-year-old with persistent microcytic iron-deficiency anaemia "
                 "despite oral iron and no documented prior endoscopic evaluation."
@@ -137,6 +139,7 @@ def build_patient_context(patient: PatientRecord) -> ClinicalRepresentation:
         signals.append("ckd_stage_3")
     return ClinicalRepresentation(
         patient_id=patient.id,
+        case_family="ckd_hypertension",
         summary=(
             f"{patient.age}-year-old with resistant hypertension on three agents, diabetes, "
             f"and progressive {ckd_stage} chronic kidney disease."

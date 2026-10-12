@@ -3,11 +3,15 @@ from .fixtures import (
     MARIA_PATIENT_ID,
     MARIA_PHYSICIANS,
     PATIENTS,
+    PHYSICIAN_CASE_RULES,
+    PHYSICIAN_CASE_RULES_BY_KEY,
+    PHYSICIAN_CHEN,
     PHYSICIANS,
     PHYSICIANS_BY_PATIENT,
     PRIMARY_PATIENT_ID,
     TONJIT_PATIENT_ID,
     TONJIT_PHYSICIANS,
+    resolve_case_rules,
 )
 from .identities import SYNTHETIC_PHYSICIAN_NPIS, synthetic_agent_id
 
@@ -16,11 +20,15 @@ __all__ = [
     "MARIA_PATIENT_ID",
     "MARIA_PHYSICIANS",
     "PATIENTS",
+    "PHYSICIAN_CASE_RULES",
+    "PHYSICIAN_CASE_RULES_BY_KEY",
+    "PHYSICIAN_CHEN",
     "PHYSICIANS",
     "PHYSICIANS_BY_PATIENT",
     "PRIMARY_PATIENT_ID",
     "TONJIT_PATIENT_ID",
     "TONJIT_PHYSICIANS",
+    "resolve_case_rules",
     "SYNTHETIC_PHYSICIAN_NPIS",
     "synthetic_agent_id",
 ]

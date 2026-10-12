@@ -74,6 +74,7 @@ class PatientRecord(StrictModel):
 class ClinicalRepresentation(StrictModel):
     patient_id: str
     synthetic: Literal[True] = True
+    case_family: Literal["ckd_hypertension", "iron_deficiency_anemia", "type_2_diabetes"]
     summary: str
     facts: list[str]
     signals: list[str]
@@ -113,6 +114,21 @@ class PhysicianProfile(StrictModel):
     insurance_networks: list[str]
     location: str
     availability_days: int
+
+
+class PhysicianCaseRules(StrictModel):
+    """A physician's referral representation for one case family. A physician
+    may legitimately evaluate different case families differently (e.g. an
+    endocrinologist sees diabetes referrals very differently from a CKD
+    comorbidity mention) -- this is the ONE place that variation lives, so a
+    physician id never has to carry two conflicting PhysicianProfile objects."""
+
+    physician_id: str
+    case_family: Literal["ckd_hypertension", "iron_deficiency_anemia", "type_2_diabetes"]
+    accepts_signals: list[str]
+    explicit_rules: list[str]
+    required_workup: list[str]
+    historical_cases: list[HistoricalCase]
 
 
 class CandidateReason(StrictModel):

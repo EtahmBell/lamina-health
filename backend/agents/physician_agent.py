@@ -8,7 +8,7 @@ from backend.models import (
     PhysicianProfile,
 )
 from backend.physicians import similar_cases
-from backend.synthetic_data import TONJIT_PATIENT_ID
+from backend.synthetic_data import resolve_case_rules
 
 
 def _insurance_status(patient: PatientRecord, profile: PhysicianProfile) -> str:
@@ -23,7 +23,8 @@ def evaluate_physician(
     profile: PhysicianProfile,
 ) -> PhysicianEvaluation:
     evidence = [Evidence(kind=EvidenceKind.PATIENT_FACT, detail=fact) for fact in context.facts]
-    matches = similar_cases(context, profile)
+    case_rules = resolve_case_rules(profile, context)
+    matches = similar_cases(context, case_rules.historical_cases)
     for case, overlap in matches:
         evidence.append(
             Evidence(
@@ -40,7 +41,7 @@ def evaluate_physician(
 
     if profile.id == "physician-sanchez":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.STRONG, True, "high"
         reason = (
@@ -50,7 +51,7 @@ def evaluate_physician(
         urgency = "Routine outpatient source evaluation"
     elif profile.id == "physician-alvarez":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.MODERATE, True, "high"
         reason = (
@@ -60,7 +61,7 @@ def evaluate_physician(
         urgency = "Routine outpatient source evaluation"
     elif profile.id == "physician-brooks":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.MODERATE, True, "high"
         reason = (
@@ -70,7 +71,7 @@ def evaluate_physician(
         urgency = "Appropriate later or alongside GI if replacement needs escalate"
     elif profile.id == "physician-wu":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.MODERATE, True, "high"
         reason = (
@@ -80,7 +81,7 @@ def evaluate_physician(
         urgency = "Routine outpatient source evaluation"
     elif profile.id == "physician-kim":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.POOR, False, "medium"
         reason = (
@@ -90,7 +91,7 @@ def evaluate_physician(
         urgency = "Continue primary-care coordination"
     elif profile.id == "physician-reed":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.POOR, False, "high"
         reason = (
@@ -104,49 +105,49 @@ def evaluate_physician(
         urgency = "Expedited outpatient evaluation"
     elif profile.id == "physician-onadeko":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.MODERATE, True, "high"
         reason = "The hypertension phenotype fits, but the physician's explicit rule places nephrology first because renal function is progressively declining."
         urgency = "Routine after or alongside nephrology"
     elif profile.id == "physician-patel":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.MODERATE, True, "medium"
         reason = "General cardiology can assess resistant hypertension and cardiovascular risk, but it does not best explain the renal trajectory."
         urgency = "Routine"
     elif profile.id == "physician-rossi":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.POOR, False, "high"
         reason = "No arrhythmia, syncope, or device concern is present; cardiology taxonomy alone is not a fit signal for electrophysiology."
         urgency = "Not indicated from supplied facts"
-    elif profile.id == "physician-chen" and patient.id == TONJIT_PATIENT_ID:
+    elif profile.id == "physician-chen" and context.case_family == "type_2_diabetes":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.STRONG, True, "high"
         reason = "Steadily rising HbA1c despite medication escalation is a clear fit for this endocrinology practice's treatment-intensification focus."
         urgency = "Routine outpatient evaluation"
     elif profile.id == "physician-okonkwo":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.MODERATE, True, "high"
         reason = "General endocrinology is also an appropriate treatment-intensification option, with a longer synthetic access interval than the recommended destination."
         urgency = "Routine outpatient evaluation"
     elif profile.id == "physician-torres":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.POOR, False, "medium"
         reason = "Primary care has already managed this case directly; internal medicine can continue coordination but is not the next specialty destination for escalating glycemic control."
         urgency = "Continue primary-care coordination"
     else:
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.POOR, False, "high"
         reason = "Diabetes is relevant, but the immediate referral question is progressive CKD with resistant hypertension rather than complex glycemic management."
@@ -154,7 +155,7 @@ def evaluate_physician(
 
     if profile.id == "physician-jung":
         evidence.insert(
-            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
     return PhysicianEvaluation(
         physician_id=profile.id,
@@ -164,7 +165,7 @@ def evaluate_physician(
         accepts_case=accepts,
         reason=reason,
         evidence=evidence,
-        required_workup=profile.required_workup,
+        required_workup=case_rules.required_workup,
         urgency=urgency,
         availability=f"Approximately {profile.availability_days} days",
         insurance_status=_insurance_status(patient, profile),

@@ -47,6 +47,31 @@ export type PatientActivity = {
   latest_recommended_physician: string | null; latest_recommended_specialty: string | null
 }
 export type ConsultationRecord = { id: number; patient_id: string; completed_at: string; result: Consultation }
+export type ReferralStatus = 'draft' | 'assembling' | 'preflight' | 'resolving' | 'ready_for_review'
+export type RequirementStatus = 'satisfied' | 'missing_from_packet' | 'optional_not_present'
+export type CoordinationEventType =
+  | 'referral_created' | 'packet_assembled' | 'preflight_started' | 'requirement_checked'
+  | 'information_requested' | 'record_search_started' | 'record_found' | 'record_not_found'
+  | 'information_attached' | 'requirement_rechecked' | 'preflight_completed' | 'referral_ready'
+  | 'physician_action_required'
+export type CoordinationActor = 'referring_agent' | 'receiving_agent' | 'system'
+export type AutonomyLevel = 'automatic' | 'physician_required'
+export type PacketItemProvenance = { source: string; attached_by: string; attached_during: string; observed_date: string | null }
+export type PacketItem = { key: string; label: string; value: string; provenance: PacketItemProvenance }
+export type ReferralPacket = { items: PacketItem[] }
+export type ReferralRequirement = { key: string; label: string; required: boolean; freshness_days: number | null }
+export type RequirementCheck = { key: string; label: string; required: boolean; status: RequirementStatus }
+export type CoordinationEvent = {
+  sequence: number; event_type: CoordinationEventType; actor: CoordinationActor | null
+  autonomy: AutonomyLevel | null; summary: string; metadata: Record<string, string | number | boolean>; created_at: string
+}
+export type Referral = {
+  id: number | null; patient_id: string; referring_physician_id: string; receiving_physician_id: string
+  specialty: string; referral_question: string; urgency: string; status: ReferralStatus
+  created_at: string; updated_at: string; packet: ReferralPacket
+  receiving_requirements: ReferralRequirement[]; requirement_results: RequirementCheck[]
+  coordination_events: CoordinationEvent[]
+}
 export type AgentLearning = { key: string; statement: string; provenance: string; status: 'suggested' | 'confirmed' | 'rejected'; updated_at: string | null }
 export type MyAgent = {
   id: string; physician: string; specialty: string; status: string; synthetic: boolean; location: string
@@ -481,6 +506,11 @@ export const getPatient = (id: string) => request<Patient>(`/api/patients/${enco
 export const consultNetwork = (id: string, pcpGuidance?: string) => request<Consultation>(`/api/patients/${encodeURIComponent(id)}/consultations`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pcp_guidance: pcpGuidance?.trim() || null }),
 })
+export const createReferral = (patientId: string, receivingPhysicianId: string) => request<Referral>(`/api/patients/${encodeURIComponent(patientId)}/referrals`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
+})
+export const getReferral = (referralId: number) => request<Referral>(`/api/referrals/${referralId}`)
+export const runReferralPreflight = (referralId: number) => request<Referral>(`/api/referrals/${referralId}/preflight`, { method: 'POST' })
 export const getPatientActivity = () => request<PatientActivity[]>('/api/workspace/activity')
 export const getConsultationHistory = () => request<ConsultationRecord[]>('/api/workspace/consultations')
 export const getConsultationRecord = (id: number) => request<ConsultationRecord>(`/api/workspace/consultations/${id}`)
