@@ -812,6 +812,32 @@ class WorkflowStore:
             ).fetchone()
         return Referral.model_validate_json(row["referral_json"]) if row else None
 
+    def list_referrals(
+        self,
+        workspace_id: str,
+        *,
+        receiving_physician_id: str | None = None,
+        status: str | None = None,
+    ) -> list[Referral]:
+        """Query persisted referrals, optionally filtered by receiving
+        physician and/or status. This is the lookup the receiving-side
+        "Incoming requests" feature (a later pass) will use to find
+        submitted referrals for a given physician -- e.g.
+        list_referrals(workspace_id, receiving_physician_id="physician-chen",
+        status="submitted")."""
+        query = "SELECT referral_json FROM referrals WHERE workspace_id=?"
+        params: list[str] = [workspace_id]
+        if status is not None:
+            query += " AND status=?"
+            params.append(status)
+        query += " ORDER BY id"
+        with self._connect() as db:
+            rows = db.execute(query, params).fetchall()
+        referrals = [Referral.model_validate_json(row["referral_json"]) for row in rows]
+        if receiving_physician_id is not None:
+            referrals = [r for r in referrals if r.receiving_physician_id == receiving_physician_id]
+        return referrals
+
     def specialist_reviews(self, workspace_id: str, specialist_npi: str) -> dict[int, str]:
         with self._connect() as db:
             rows = db.execute(

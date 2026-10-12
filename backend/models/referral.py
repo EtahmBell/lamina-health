@@ -13,6 +13,7 @@ class ReferralStatus(StrEnum):
     PREFLIGHT = "preflight"
     RESOLVING = "resolving"
     READY_FOR_REVIEW = "ready_for_review"
+    SUBMITTED = "submitted"
 
 
 class RequirementStatus(StrEnum):
@@ -35,6 +36,7 @@ class CoordinationEventType(StrEnum):
     PREFLIGHT_COMPLETED = "preflight_completed"
     REFERRAL_READY = "referral_ready"
     PHYSICIAN_ACTION_REQUIRED = "physician_action_required"
+    REFERRAL_SUBMITTED = "referral_submitted"
 
 
 class CoordinationActor(StrEnum):

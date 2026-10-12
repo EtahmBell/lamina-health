@@ -19,6 +19,7 @@ import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
 import { ReferralCoordinationSurface } from './Referral.tsx'
+import { ModalPortal } from './ModalPortal.tsx'
 
 type Navigate = (path: string) => void
 
@@ -637,7 +638,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
       <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selected.availability}</p>
       <p className="fit-rationale">{selected.reason}</p>
       <div className="best-fit-actions">{referralQuestion
-        ? <ReferralCoordinationSurface key={selected.physician_id} patientId={consultation.patient_id} receivingPhysicianId={selected.physician_id} receivingPhysicianName={cleanName(selected.physician_name)} />
+        ? <ReferralCoordinationSurface key={selected.physician_id} patientId={consultation.patient_id} patientLabel={patientName(consultation.patient_id)} receivingPhysicianId={selected.physician_id} receivingPhysicianName={cleanName(selected.physician_name)} />
         : <><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(selected.physician_name)} · {selected.specialty}</span><span>Workup: {selected.required_workup.join(' · ') || 'None specified'}</span><span>No referral was transmitted.</span></div>}</>}</div>
     </article>
 
@@ -663,7 +664,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
 
     <section className="network-transparency"><button className="network-transparency-toggle" onClick={() => setNetworkOpen(true)} aria-expanded={networkOpen}><span><b>How your agent handled this</b></span><em>View consultation details <i>⌄</i></em></button></section>
     <p className="disclaimer">{consultation.disclaimer}</p>
-    {networkOpen && <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setNetworkOpen(false) }}>
+    {networkOpen && <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setNetworkOpen(false) }}>
       <div className="post-flow-dialog consult-detail-dialog" role="dialog" aria-modal="true" aria-label="Consultation details">
         <button className="text-button post-flow-close" onClick={() => setNetworkOpen(false)} aria-label="Close">×</button>
         <p className="eyebrow">Consultation details</p>
@@ -675,7 +676,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
           <p>These are structured inputs and recorded conclusions, not private model reasoning.</p>
         </div>
       </div>
-    </div>}
+    </div></ModalPortal>}
   </section>
 }
 

@@ -106,7 +106,7 @@ test('alternatives and the technical transparency section are both collapsed by 
   assert.match(view, /Other referral options <span>\{alternativesOpen \? '−' : '\+'\}<\/span>/)
   assert.match(view, /alternativesOpen && <div className="alternatives-list">/, 'alternatives render as compact rows, not full duplicate cards')
   assert.match(view, /How your agent handled this/)
-  assert.match(view, /networkOpen && <div className="post-flow-overlay"/, 'detailed consultation activity now opens in a modal, not an inline expansion')
+  assert.match(view, /networkOpen && <ModalPortal><div className="post-flow-overlay"/, 'detailed consultation activity now opens in a modal (via a top-level portal), not an inline expansion')
 })
 
 test('the recommendation-ready default card is compact -- one fit indicator, one metadata line, one rationale sentence, driven by the currently selected candidate', () => {

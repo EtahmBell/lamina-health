@@ -47,13 +47,13 @@ export type PatientActivity = {
   latest_recommended_physician: string | null; latest_recommended_specialty: string | null
 }
 export type ConsultationRecord = { id: number; patient_id: string; completed_at: string; result: Consultation }
-export type ReferralStatus = 'draft' | 'assembling' | 'preflight' | 'resolving' | 'ready_for_review'
+export type ReferralStatus = 'draft' | 'assembling' | 'preflight' | 'resolving' | 'ready_for_review' | 'submitted'
 export type RequirementStatus = 'satisfied' | 'missing_from_packet' | 'optional_not_present'
 export type CoordinationEventType =
   | 'referral_created' | 'packet_assembled' | 'preflight_started' | 'requirement_checked'
   | 'information_requested' | 'record_search_started' | 'record_found' | 'record_not_found'
   | 'information_attached' | 'requirement_rechecked' | 'preflight_completed' | 'referral_ready'
-  | 'physician_action_required'
+  | 'physician_action_required' | 'referral_submitted'
 export type CoordinationActor = 'referring_agent' | 'receiving_agent' | 'system'
 export type AutonomyLevel = 'automatic' | 'physician_required'
 export type PacketItemProvenance = { source: string; attached_by: string; attached_during: string; observed_date: string | null }

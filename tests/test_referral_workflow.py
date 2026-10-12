@@ -8,8 +8,8 @@ from backend.demo_identity import LUCY_AGENT_ID, PCP_AGENT_ID
 from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
 from backend.models import CoordinationEventType, ReferralStatus, RequirementStatus
-from backend.referrals import build_referral, run_preflight
-from backend.synthetic_data import PATIENTS, TONJIT_PATIENT_ID
+from backend.referrals import build_referral, run_preflight, submit_referral
+from backend.synthetic_data import PATIENTS, PRIMARY_PATIENT_ID, TONJIT_PATIENT_ID
 from backend.workflow import WorkflowStore
 
 CHEN_ID = "physician-chen"
@@ -155,7 +155,8 @@ def test_resolver_finds_and_attaches_the_real_renal_result_and_referral_becomes_
     final_check = next(item for item in updated.requirement_results if item.key == "recent_renal_function")
     assert final_check.status == RequirementStatus.SATISFIED
     assert all(item.status != RequirementStatus.MISSING_FROM_PACKET for item in updated.requirement_results if item.required)
-    assert updated.status == ReferralStatus.READY_FOR_REVIEW
+    assert updated.status == ReferralStatus.SUBMITTED, "a fully resolved referral auto-submits -- see Part C"
+    assert any(event.event_type == CoordinationEventType.REFERRAL_SUBMITTED for event in updated.coordination_events)
 
 
 def test_record_search_and_attachment_events_are_tagged_automatic_not_physician_required() -> None:
@@ -194,6 +195,7 @@ def test_coordination_log_proves_the_actual_workflow_occurred_in_order() -> None
         CoordinationEventType.REQUIREMENT_RECHECKED,
         CoordinationEventType.PREFLIGHT_COMPLETED,
         CoordinationEventType.REFERRAL_READY,
+        CoordinationEventType.REFERRAL_SUBMITTED,
     ]
     assert [event.sequence for event in updated.coordination_events] == list(range(1, len(event_types) + 1))
 
@@ -212,15 +214,15 @@ def test_event_actors_are_distinguishable_and_provenance_points_to_the_real_resu
 def test_rerunning_preflight_does_not_duplicate_the_packet_item_or_corrupt_state() -> None:
     patient, referral = tonjit_referral()
     once = run_preflight(patient, referral)
-    assert once.status == ReferralStatus.READY_FOR_REVIEW
+    assert once.status == ReferralStatus.SUBMITTED
     renal_items = [item for item in once.packet.items if item.key == "recent_renal_function"]
     assert len(renal_items) == 1
 
     twice = run_preflight(patient, once)
-    assert twice.status == ReferralStatus.READY_FOR_REVIEW
+    assert twice.status == ReferralStatus.SUBMITTED
+    assert len(twice.coordination_events) == len(once.coordination_events), "a submitted referral is a safe no-op to re-run"
     renal_items_after_rerun = [item for item in twice.packet.items if item.key == "recent_renal_function"]
     assert len(renal_items_after_rerun) == 1
-    assert len(twice.coordination_events) == len(once.coordination_events), "a ready referral is a safe no-op to re-run"
 
 
 # --------------------------------------------------------------------- PART X
@@ -261,12 +263,12 @@ def test_api_create_preflight_get_boundary_works_end_to_end(api_client: TestClie
 
     preflight = api_client.post(f"/api/referrals/{referral_id}/preflight")
     assert preflight.status_code == 200
-    assert preflight.json()["status"] == "ready_for_review"
+    assert preflight.json()["status"] == "submitted"
 
     fetched = api_client.get(f"/api/referrals/{referral_id}")
     assert fetched.status_code == 200
-    assert fetched.json()["status"] == "ready_for_review"
-    assert len(fetched.json()["coordination_events"]) == 17
+    assert fetched.json()["status"] == "submitted"
+    assert len(fetched.json()["coordination_events"]) == 18
 
 
 def test_api_404s_for_unknown_referral_and_unknown_physician(api_client: TestClient) -> None:
@@ -300,3 +302,103 @@ def test_tonjit_demo_reset_clears_referrals_so_the_closed_loop_demo_can_replay(a
     )
     assert recreated.status_code == 200
     assert recreated.json()["status"] == "assembling"
+
+
+# --------------------------------------------------------------------- PART N
+
+
+def test_ready_for_review_and_submitted_are_distinct_valid_states() -> None:
+    assert ReferralStatus.READY_FOR_REVIEW.value == "ready_for_review"
+    assert ReferralStatus.SUBMITTED.value == "submitted"
+    assert ReferralStatus.READY_FOR_REVIEW != ReferralStatus.SUBMITTED
+
+
+def test_only_a_ready_for_review_referral_can_be_submitted() -> None:
+    patient, referral = tonjit_referral()
+    for not_ready_status in (
+        ReferralStatus.DRAFT, ReferralStatus.ASSEMBLING, ReferralStatus.PREFLIGHT, ReferralStatus.RESOLVING,
+    ):
+        candidate = referral.model_copy(update={"status": not_ready_status})
+        with pytest.raises(ValueError):
+            submit_referral(candidate)
+
+    ready = referral.model_copy(update={"status": ReferralStatus.READY_FOR_REVIEW})
+    submitted = submit_referral(ready)
+    assert submitted.status == ReferralStatus.SUBMITTED
+
+
+def test_a_successfully_resolved_tonjit_referral_reaches_submitted() -> None:
+    patient, referral = tonjit_referral()
+    updated = run_preflight(patient, referral)
+    assert updated.status == ReferralStatus.SUBMITTED
+
+
+def test_an_unresolved_referral_does_not_submit() -> None:
+    patient = PATIENTS[TONJIT_PATIENT_ID]
+    patient_without_renal = patient.model_copy(
+        update={"labs": [lab for lab in patient.labs if lab.test not in ("creatinine", "eGFR")]}
+    )
+    referral = build_referral(patient_without_renal, CHEN_ID, "Endocrinology")
+    updated = run_preflight(patient_without_renal, referral)
+    assert updated.status != ReferralStatus.SUBMITTED
+    assert updated.status == ReferralStatus.RESOLVING
+    assert not any(event.event_type == CoordinationEventType.REFERRAL_SUBMITTED for event in updated.coordination_events)
+
+
+def test_submission_records_referral_submitted_with_structured_metadata() -> None:
+    patient, referral = tonjit_referral()
+    updated = run_preflight(patient, referral)
+    submitted_event = next(event for event in updated.coordination_events if event.event_type == CoordinationEventType.REFERRAL_SUBMITTED)
+    assert submitted_event.actor == submitted_event.actor  # present at all
+    assert submitted_event.metadata["receiving_physician_id"] == CHEN_ID
+    assert submitted_event.metadata["specialty"] == "Endocrinology"
+    assert submitted_event.created_at
+
+
+def test_submitted_referral_preserves_packet_and_provenance_data() -> None:
+    patient, referral = tonjit_referral()
+    updated = run_preflight(patient, referral)
+    assert updated.status == ReferralStatus.SUBMITTED
+    renal_item = updated.packet.item("recent_renal_function")
+    assert renal_item is not None
+    assert renal_item.provenance.attached_by == LUCY_AGENT_ID
+    assert renal_item.provenance.observed_date == "2026-07-20"
+    hba1c_item = updated.packet.item("recent_hba1c")
+    assert hba1c_item is not None
+
+
+def test_submission_is_idempotent_when_called_directly_twice() -> None:
+    patient, referral = tonjit_referral()
+    once = run_preflight(patient, referral)
+    assert once.status == ReferralStatus.SUBMITTED
+    twice = submit_referral(once)
+    assert twice.status == ReferralStatus.SUBMITTED
+    assert len(twice.coordination_events) == len(once.coordination_events)
+
+
+# --------------------------------------------------------------------- PART P
+
+
+def test_receiving_physician_can_query_their_submitted_referrals(tmp_path) -> None:
+    store = WorkflowStore(tmp_path / "query-workflow.sqlite")
+    workspace_id = "workspace-a"
+
+    patient = PATIENTS[TONJIT_PATIENT_ID]
+    tonjit_referral_obj = build_referral(patient, CHEN_ID, "Endocrinology")
+    persisted = store.create_referral(workspace_id, tonjit_referral_obj)
+    completed = run_preflight(patient, persisted)
+    store.update_referral(workspace_id, completed)
+
+    jordan_patient = PATIENTS[PRIMARY_PATIENT_ID]
+    other_referral = build_referral(jordan_patient, "physician-jung", "Nephrology")
+    store.create_referral(workspace_id, other_referral)  # left at 'assembling', never submitted
+
+    submitted_for_chen = store.list_referrals(workspace_id, receiving_physician_id=CHEN_ID, status="submitted")
+    assert len(submitted_for_chen) == 1
+    assert submitted_for_chen[0].patient_id == TONJIT_PATIENT_ID
+
+    submitted_for_jung = store.list_referrals(workspace_id, receiving_physician_id="physician-jung", status="submitted")
+    assert submitted_for_jung == []
+
+    all_submitted = store.list_referrals(workspace_id, status="submitted")
+    assert len(all_submitted) == 1

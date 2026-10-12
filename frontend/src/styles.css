@@ -536,11 +536,7 @@ button.lam-row:hover { background: #fff9f1; }
 .trend-chart-body { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; margin-top: 12px; }
 .trend-chart-scale { position: relative; }
 .trend-chart-scale span { position: absolute; right: 0; width: 100%; color: var(--text-secondary); font-size: .58rem; font-variant-numeric: tabular-nums; text-align: right; transform: translateY(-50%); white-space: nowrap; }
-/* isolation: isolate contains each chart's own stacking context, so its
-   SVG's overflow: visible content (axis labels/lines extending past the
-   plot box) can never paint above unrelated content elsewhere on the page,
-   including an open modal overlay. */
-.trend-chart-plot { position: relative; isolation: isolate; height: 128px; }
+.trend-chart-plot { position: relative; height: 128px; }
 .trend-chart-plot > svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .trend-grid { stroke: #e7e1d7; stroke-dasharray: 3 3; }
 .trend-grid.baseline { stroke: var(--border); stroke-dasharray: none; }
@@ -1276,13 +1272,13 @@ button.lam-row:hover { background: #fff9f1; }
 
 /* -------------------------------------------------------- Pass 5B: post flow */
 .post-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-/* isolation: isolate forces each of these into its own stacking context, so
-   z-index ordering is unambiguous regardless of any transform/overflow
-   quirks elsewhere on the page (notably the patient-detail trend charts,
-   whose SVGs use overflow: visible) -- a real fix for content painting
-   through the modal, not a z-index-number guess. */
-.post-flow-overlay { position: fixed; inset: 0; z-index: 500; isolation: isolate; display: flex; align-items: center; justify-content: center; background: rgb(36 30 24 / 45%); padding: 24px; }
-.post-flow-dialog { position: relative; isolation: isolate; width: min(100%, 560px); max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background-color: var(--surface); background: var(--surface); padding: 30px 32px; box-shadow: 0 24px 60px rgb(36 52 71 / 18%); }
+/* Every .post-flow-overlay instance is mounted via <ModalPortal> directly
+   under document.body (a sibling of #root, outside Patient Detail's DOM
+   subtree entirely) -- see ModalPortal.tsx. That structural escape is the
+   real fix for charts/content painting above a modal; isolation here is
+   just cheap, self-contained belt-and-suspenders on the modal itself. */
+.post-flow-overlay { position: fixed; inset: 0; z-index: 60; isolation: isolate; display: flex; align-items: center; justify-content: center; background: rgb(36 30 24 / 45%); padding: 24px; }
+.post-flow-dialog { position: relative; isolation: isolate; width: min(100%, 560px); max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background-color: var(--surface); padding: 30px 32px; box-shadow: 0 24px 60px rgb(36 52 71 / 18%); }
 .post-flow-close { position: absolute; top: 16px; right: 18px; font-size: 1.1rem; line-height: 1; color: var(--text-secondary); }
 .post-flow-dialog h2 { margin: 4px 0 18px; font-size: 1.1rem; }
 .post-synthetic-notice { margin: 0 0 14px; border-left: 3px solid var(--accent); background: #fdf3e8; padding: 9px 13px; color: var(--clinical); font-size: .66rem; border-radius: 0 8px 8px 0; }
@@ -2047,6 +2043,14 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-phase.phase-fading { opacity: 0; }
 .referral-found-value { font-family: var(--font-display); color: var(--clinical); }
 @media (prefers-reduced-motion: reduce) { .referral-phase { transition: none; } }
+
+/* Brief, non-blocking confirmation toast -- the right rail remains the
+   durable state; this is just a quiet acknowledgement that fades on its own. */
+.lamina-toast { position: fixed; right: 24px; bottom: 24px; z-index: 70; display: flex; flex-direction: column; gap: 3px; max-width: 320px; border: 1px solid var(--mineral-subtle); border-radius: 10px; background: var(--surface); padding: 12px 16px; box-shadow: 0 16px 36px rgb(36 52 71 / 18%); animation: toast-in 220ms ease-out; }
+.lamina-toast strong { display: flex; align-items: center; gap: 6px; color: var(--mineral-deep); font-size: .74rem; font-weight: 600; }
+.lamina-toast span:not([aria-hidden]) { color: var(--text-secondary); font-size: .68rem; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .lamina-toast { animation: none; } }
 
 /* Recommendation card: compact by default (design_references/'s .specialist is
    the model -- name, specialty, one fit line, one metadata line, one rationale

@@ -1,7 +1,7 @@
 from .packet import assemble_initial_packet
 from .requirements import evaluate_requirements, requirements_for
 from .resolver import resolve_missing_requirement
-from .service import build_referral, run_preflight
+from .service import build_referral, run_preflight, submit_referral
 
 __all__ = [
     "assemble_initial_packet",
@@ -10,4 +10,5 @@ __all__ = [
     "resolve_missing_requirement",
     "build_referral",
     "run_preflight",
+    "submit_referral",
 ]

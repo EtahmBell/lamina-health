@@ -103,11 +103,13 @@ def build_referral(
 def run_preflight(patient: PatientRecord, referral: Referral) -> Referral:
     """Check receiving requirements against the packet, resolve any missing
     required item by searching the patient's existing chart, and advance the
-    referral to ready_for_review once (and only once) every required field is
-    satisfied. Safe to call repeatedly: already-satisfied items are never
-    re-resolved or duplicated, and a referral already ready_for_review is
-    returned unchanged."""
-    if referral.status == ReferralStatus.READY_FOR_REVIEW:
+    referral to ready_for_review -- and, since the physician already
+    authorized this by clicking Start referral, immediately on to submitted
+    -- once (and only once) every required field is satisfied. Safe to call
+    repeatedly: already-satisfied items are never re-resolved or duplicated,
+    and a referral already ready_for_review or submitted is returned
+    unchanged."""
+    if referral.status in (ReferralStatus.READY_FOR_REVIEW, ReferralStatus.SUBMITTED):
         return referral
 
     referral.status = ReferralStatus.PREFLIGHT
@@ -225,5 +227,39 @@ def _complete_preflight(referral: Referral) -> Referral:
         event_type=CoordinationEventType.REFERRAL_READY,
         actor=CoordinationActor.SYSTEM,
         summary="Referral is ready for specialist review.",
+    )
+    # The physician already authorized this handoff by clicking Start referral
+    # (see Part C) -- reaching ready_for_review is not a second decision point,
+    # so submission happens automatically rather than waiting on another click.
+    return submit_referral(referral)
+
+
+def submit_referral(referral: Referral) -> Referral:
+    """Hand a completed referral packet off to the receiving physician's
+    workflow. Only a referral that has reached ready_for_review can be
+    submitted; calling this on an already-submitted referral is a safe
+    no-op (idempotent), and calling it on anything else (draft, resolving,
+    etc.) is a programming error, not a recoverable user state."""
+    if referral.status == ReferralStatus.SUBMITTED:
+        return referral
+    if referral.status != ReferralStatus.READY_FOR_REVIEW:
+        raise ValueError(
+            f"Cannot submit a referral in status {referral.status.value!r}; "
+            "it must first reach ready_for_review."
+        )
+    referral.status = ReferralStatus.SUBMITTED
+    metadata: dict[str, str | int | bool] = {
+        "receiving_physician_id": referral.receiving_physician_id,
+        "specialty": referral.specialty,
+    }
+    if referral.id is not None:
+        metadata["referral_id"] = referral.id
+    _append_event(
+        referral,
+        event_type=CoordinationEventType.REFERRAL_SUBMITTED,
+        actor=CoordinationActor.SYSTEM,
+        autonomy=AutonomyLevel.AUTOMATIC,
+        summary=f"Completed referral packet sent for {referral.specialty} review.",
+        metadata=metadata,
     )
     return referral

@@ -31,7 +31,7 @@ const baseReferral = {
 
 const READY_REFERRAL = {
   ...baseReferral,
-  status: 'ready_for_review',
+  status: 'submitted',
   packet: { items: [
     { key: 'recent_hba1c', label: 'Recent HbA1c', value: '9.6% on 2026-09-05', provenance: { source: 'patient_chart', attached_by: 'agent-lucy-saruhashi', attached_during: 'initial_assembly', observed_date: '2026-09-05' } },
     { key: 'recent_renal_function', label: 'Recent renal function', value: 'Creatinine: 0.9 mg/dL, eGFR: 97 mL/min/1.73m2 (2026-07-20)', provenance: { source: 'patient_chart', attached_by: 'agent-lucy-saruhashi', attached_during: 'preflight', observed_date: '2026-07-20' } },
@@ -48,12 +48,13 @@ const READY_REFERRAL = {
     event(9, 'requirement_rechecked', { actor: 'receiving_agent', metadata: { requirement: 'recent_renal_function', result: 'satisfied' } }),
     event(10, 'preflight_completed', { actor: 'system' }),
     event(11, 'referral_ready', { actor: 'system' }),
+    event(12, 'referral_submitted', { actor: 'system', autonomy: 'automatic', metadata: { receiving_physician_id: 'physician-chen', specialty: 'Endocrinology' } }),
   ],
 }
 
 const NO_MISSING_REFERRAL = {
   ...baseReferral,
-  status: 'ready_for_review',
+  status: 'submitted',
   receiving_requirements: [requirement('recent_hba1c', 'Recent HbA1c')],
   packet: { items: [{ key: 'recent_hba1c', label: 'Recent HbA1c', value: '9.6%', provenance: { source: 'patient_chart', attached_by: 'agent-lucy-saruhashi', attached_during: 'initial_assembly', observed_date: '2026-09-05' } }] },
   coordination_events: [
@@ -63,6 +64,7 @@ const NO_MISSING_REFERRAL = {
     event(4, 'requirement_checked', { actor: 'receiving_agent', metadata: { requirement: 'recent_hba1c', result: 'satisfied' } }),
     event(5, 'preflight_completed', { actor: 'system' }),
     event(6, 'referral_ready', { actor: 'system' }),
+    event(7, 'referral_submitted', { actor: 'system', autonomy: 'automatic', metadata: { receiving_physician_id: 'physician-chen', specialty: 'Endocrinology' } }),
   ],
 }
 
@@ -84,9 +86,9 @@ const UNRESOLVED_REFERRAL = {
 
 /* ------------------------------------------------------------ phase derivation (Part U) */
 
-test('a referral with a resolved missing requirement derives preparing -> checking -> missing -> found -> ready, using the real attached result', () => {
+test('a referral with a resolved missing requirement derives preparing -> checking -> missing -> found -> ready -> sent, using the real attached result', () => {
   const phases = derivePhases(READY_REFERRAL)
-  assert.deepEqual(phases.map((phase) => phase.kind), ['preparing', 'checking', 'missing', 'found', 'ready'])
+  assert.deepEqual(phases.map((phase) => phase.kind), ['preparing', 'checking', 'missing', 'found', 'ready', 'sent'])
   const missing = phases.find((phase) => phase.kind === 'missing')
   assert.equal(missing.requirementLabel, 'Recent renal function')
   const found = phases.find((phase) => phase.kind === 'found')
@@ -97,10 +99,23 @@ test('a referral with a resolved missing requirement derives preparing -> checki
   assert.equal(ready.resolvedCount, 1)
 })
 
-test('a referral with nothing missing never shows a fabricated missing/found phase', () => {
+test('a referral with nothing missing never shows a fabricated missing/found phase, but still ends in sent', () => {
   const phases = derivePhases(NO_MISSING_REFERRAL)
-  assert.deepEqual(phases.map((phase) => phase.kind), ['preparing', 'checking', 'ready'])
+  assert.deepEqual(phases.map((phase) => phase.kind), ['preparing', 'checking', 'ready', 'sent'])
   assert.equal(phases.find((phase) => phase.kind === 'ready').resolvedCount, 0)
+})
+
+test('the UI does not stop permanently at ready -- a successfully submitted referral always reaches the sent phase after ready', () => {
+  const phases = derivePhases(READY_REFERRAL).map((phase) => phase.kind)
+  const readyIndex = phases.indexOf('ready')
+  const sentIndex = phases.indexOf('sent')
+  assert.ok(readyIndex > -1 && sentIndex > -1 && sentIndex === readyIndex + 1)
+})
+
+test('an unresolved referral never reaches the sent phase', () => {
+  const phases = derivePhases(UNRESOLVED_REFERRAL).map((phase) => phase.kind)
+  assert.ok(!phases.includes('sent'))
+  assert.ok(!phases.includes('ready'))
 })
 
 test('an unresolved referral derives the real unresolved phase instead of falsely rendering ready', () => {
@@ -161,7 +176,7 @@ test('the coordination modal and consultation-detail modal share the same post-f
 test('consultation detail now opens in a modal, not an inline expansion constrained to the right rail', () => {
   const view = recommendation()
   assert.match(view, /View consultation details/)
-  assert.match(view, /networkOpen && <div className="post-flow-overlay"/)
+  assert.match(view, /networkOpen && <ModalPortal><div className="post-flow-overlay"/)
   assert.doesNotMatch(view, /networkOpen && <div className="network-record">/, 'the old inline-expansion structure is gone')
 })
 
@@ -242,15 +257,36 @@ test('timeline dots are colored by which agent actually acted on the event, usin
   assert.match(styles, /\.coordination-event\.actor-system::before \{ background: var\(--border\); \}/)
 })
 
-/* ------------------------------------------------------- polish pass: modal painting */
+/* ------------------------------------------------------- modal portal (Part A/M) */
 
-test('the modal overlay and dialog each establish their own isolated stacking context with an opaque background, so underlying charts cannot paint through', () => {
-  assert.match(styles, /\.post-flow-overlay \{[^}]*isolation: isolate;/)
-  assert.match(styles, /\.post-flow-dialog \{[^}]*isolation: isolate;[^}]*background-color: var\(--surface\);/)
+test('both activity modals mount through the shared ModalPortal, not inline inside Patient Detail', () => {
+  assert.match(referralSource, /import \{ ModalPortal \} from '\.\/ModalPortal\.tsx'/)
+  assert.match(referralSource, /return <ModalPortal><div className="post-flow-overlay"/)
+  assert.match(app, /import \{ ModalPortal \} from '\.\/ModalPortal\.tsx'/)
+  assert.match(app, /networkOpen && <ModalPortal><div className="post-flow-overlay"/)
 })
 
-test('chart plot containers are isolated into their own stacking context so overflow: visible SVG content cannot bleed above a modal', () => {
-  assert.match(styles, /\.trend-chart-plot \{ position: relative; isolation: isolate;/)
+test('ModalPortal renders into a dedicated node appended to document.body, a sibling of #root -- not a descendant of the patient page DOM', () => {
+  const portalSource = readFileSync(new URL('../src/ModalPortal.tsx', import.meta.url), 'utf8')
+  assert.match(portalSource, /document\.body\.appendChild\(node\)/)
+  assert.match(portalSource, /createPortal\(children, root\)/)
+  assert.doesNotMatch(portalSource, /getElementById\('root'\)/, 'must not portal back inside the app root')
+})
+
+test('ModalPortal locks body scroll while open and restores it cleanly on close', () => {
+  const portalSource = readFileSync(new URL('../src/ModalPortal.tsx', import.meta.url), 'utf8')
+  assert.match(portalSource, /document\.body\.style\.overflow = 'hidden'/)
+  assert.match(portalSource, /document\.body\.style\.overflow = ''/)
+  assert.match(portalSource, /return unlockBodyScroll/, 'cleanup runs on unmount')
+})
+
+test('the overlay still uses fixed viewport positioning and an opaque dialog background -- the portal is the structural fix, isolation is just cheap extra safety', () => {
+  assert.match(styles, /\.post-flow-overlay \{ position: fixed; inset: 0;/)
+  assert.match(styles, /\.post-flow-dialog \{[^}]*background-color: var\(--surface\);/)
+})
+
+test('the now-redundant chart isolation patch from the previous pass was removed, not left behind', () => {
+  assert.doesNotMatch(styles, /\.trend-chart-plot \{[^}]*isolation: isolate/, 'the portal makes this unnecessary -- charts can never be an ancestor of the modal anymore')
 })
 
 /* --------------------------------------------------- polish pass: Tonjit demo reset */
@@ -258,4 +294,38 @@ test('chart plot containers are isolated into their own stacking context so over
 test('a Tonjit referral-demo reset endpoint exists and is wired through the generic request helper', () => {
   const api = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
   assert.match(api, /resetTonjitDemo = \(\) => request<DemoResetResult>\('\/api\/workspace\/demo\/reset\/tonjit', \{ method: 'POST' \}\)/)
+})
+
+/* ------------------------------------------------------ referral handoff (Part B-L) */
+
+test('the sent phase renders "Referral sent" / Awaiting specialist review, never the word accepted', () => {
+  assert.match(referralSource, /case 'sent':/)
+  assert.match(referralSource, /<h3>Referral sent\.<\/h3>/)
+  assert.match(referralSource, /Awaiting specialist review/)
+  assert.doesNotMatch(referralSource, /accepted/i)
+})
+
+test('the confirmation toast only fires from the real "sent" phase reveal, never from error/unresolved paths', () => {
+  const toastTrigger = referralSource.match(/if \(phase\.kind === 'sent'\) setToastVisible\(true\)/g) ?? []
+  assert.ok(toastTrigger.length >= 1, 'toast is triggered when the sent phase is revealed')
+  assert.doesNotMatch(referralSource, /setToastVisible\(true\)[^}]*catch|catch[^}]*setToastVisible\(true\)/s, 'never set from the error path')
+})
+
+test('Toast is a small, non-blocking, auto-dismissing confirmation -- not the durable rail state', () => {
+  assert.match(referralSource, /function Toast\(/)
+  assert.match(referralSource, /window\.setTimeout\(onDismiss, TOAST_VISIBLE_MS\)/)
+  assert.match(referralSource, /role="status" aria-live="polite"/)
+})
+
+test('"See agent coordination" remains available once submission completes, not just while ready', () => {
+  assert.match(referralSource, /\{status === 'done' && referral && <button type="button" className="text-button" onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination/)
+})
+
+test('the coordination modal footer reflects the real submitted status, derived from referral data not a hardcoded physician', () => {
+  assert.match(referralSource, /referral\.status === 'submitted' \? '✓ Referral sent to the receiving specialist'/)
+})
+
+test('EVENT_TYPE_TITLES maps referral_submitted to a plain operational label, not fabricated reasoning', () => {
+  const phasesSource = readFileSync(new URL('../src/referralPhases.ts', import.meta.url), 'utf8')
+  assert.match(phasesSource, /referral_submitted: 'Referral sent'/)
 })

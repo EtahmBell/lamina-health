@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createReferral, runReferralPreflight, type Referral } from './api.ts'
 import { PCP_NAME } from './demoIdentity.ts'
+import { ModalPortal } from './ModalPortal.tsx'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
@@ -45,6 +46,13 @@ function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; 
           : 'All required information was already included in the referral.'}</p>
         <small>Referral packet complete</small>
       </>
+    case 'sent':
+      return <>
+        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Sent to Dr. {who}</span>
+        <h3>Referral sent.</h3>
+        <p>The completed referral packet has been sent to Dr. {who} for review.</p>
+        <small>Awaiting specialist review</small>
+      </>
     case 'unresolved':
       return <>
         <span className="status-label warning">Needs your input</span>
@@ -61,14 +69,15 @@ function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; 
  * call itself is never delayed or slept (see Part E/F/Y).
  */
 export function ReferralCoordinationSurface({
-  patientId, receivingPhysicianId, receivingPhysicianName,
-}: { patientId: string; receivingPhysicianId: string; receivingPhysicianName: string }) {
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName,
+}: { patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string }) {
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [visiblePhase, setVisiblePhase] = useState<DisplayPhase | null>(null)
   const [fading, setFading] = useState(false)
   const [referral, setReferral] = useState<Referral | null>(null)
   const [coordinationOpen, setCoordinationOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [toastVisible, setToastVisible] = useState(false)
   const timers = useRef<number[]>([])
   const cancelled = useRef(false)
 
@@ -107,6 +116,7 @@ export function ReferralCoordinationSurface({
     } else {
       setVisiblePhase(phase)
     }
+    if (phase.kind === 'sent') setToastVisible(true)
     await sleep(PHASE_HOLD_MS[phase.kind])
   }
 
@@ -148,6 +158,29 @@ export function ReferralCoordinationSurface({
       receivingPhysicianName={receivingPhysicianName}
       onClose={() => setCoordinationOpen(false)}
     />}
+    {toastVisible && <Toast
+      title="Referral sent"
+      message={`${patientLabel}'s referral was sent to Dr. ${lastName(receivingPhysicianName)}.`}
+      onDismiss={() => setToastVisible(false)}
+    />}
+  </div>
+}
+
+const TOAST_VISIBLE_MS = 3200
+
+/**
+ * A brief, non-blocking confirmation -- not the durable state (the rail is).
+ * Auto-dismisses; does not require interaction. The smallest reusable
+ * implementation that didn't already exist elsewhere in Lamina.
+ */
+function Toast({ title, message, onDismiss }: { title: string; message: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const id = window.setTimeout(onDismiss, TOAST_VISIBLE_MS)
+    return () => window.clearTimeout(id)
+  }, [onDismiss])
+  return <div className="lamina-toast" role="status" aria-live="polite">
+    <strong><span aria-hidden="true">✓</span> {title}</strong>
+    <span>{message}</span>
   </div>
 }
 
@@ -168,7 +201,7 @@ export function AgentCoordinationModal({
   const resolvedCount = referral.coordination_events.filter((event) => event.event_type === 'information_attached').length
   const needsPhysician = referral.coordination_events.some((event) => event.event_type === 'physician_action_required')
   const referringLabel = `${PCP_NAME}'s Agent`
-  return <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <div className="post-flow-dialog coordination-dialog" role="dialog" aria-modal="true" aria-label="Agent coordination">
       <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
       <p className="eyebrow">Agent coordination</p>
@@ -185,7 +218,7 @@ export function AgentCoordinationModal({
           <p>{event.summary}</p>
         </div>)}
       </div>
-      <p className="coordination-footer">{referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
+      <p className="coordination-footer">{referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
     </div>
-  </div>
+  </div></ModalPortal>
 }

@@ -12,8 +12,17 @@ export type DisplayPhase =
   | { kind: 'missing'; requirementLabel: string }
   | { kind: 'found'; requirementLabel: string; value: string; observedDate: string | null }
   | { kind: 'ready'; resolvedCount: number }
+  | { kind: 'sent' }
   | { kind: 'unresolved'; requirementLabels: string[] }
 
+/**
+ * Phases are derived from which events actually exist in the log, not from
+ * the referral's final `status` alone -- by the time a successful referral
+ * is inspected, auto-submission has usually already advanced `status` past
+ * `ready_for_review` straight to `submitted` (see Part C), so `referral_ready`
+ * and `referral_submitted` are two separate phases in sequence, not a status
+ * branch.
+ */
 export function derivePhases(referral: Referral): DisplayPhase[] {
   const phases: DisplayPhase[] = [{ kind: 'preparing' }]
   const events = referral.coordination_events
@@ -30,10 +39,16 @@ export function derivePhases(referral: Referral): DisplayPhase[] {
     }
   }
 
-  if (referral.status === 'ready_for_review') {
+  const hasReady = events.some((event) => event.event_type === 'referral_ready')
+  const hasSubmitted = events.some((event) => event.event_type === 'referral_submitted')
+  if (hasReady) {
     const resolvedCount = events.filter((event) => event.event_type === 'information_attached').length
     phases.push({ kind: 'ready', resolvedCount })
-  } else {
+  }
+  if (hasSubmitted) {
+    phases.push({ kind: 'sent' })
+  }
+  if (!hasReady && !hasSubmitted) {
     const requirementLabels = events
       .filter((event) => event.event_type === 'physician_action_required')
       .map((event) => labelFor(String(event.metadata.requirement ?? '')))
@@ -47,7 +62,7 @@ export function derivePhases(referral: Referral): DisplayPhase[] {
  * absorb each real step (Part 5 polish pass). Pure frontend presentation
  * pacing; the backend call itself is never delayed. */
 export const PHASE_HOLD_MS: Record<DisplayPhase['kind'], number> = {
-  preparing: 1500, checking: 1500, missing: 1800, found: 1800, ready: 600, unresolved: 600,
+  preparing: 1500, checking: 1500, missing: 1800, found: 1800, ready: 900, sent: 600, unresolved: 600,
 }
 
 /** Crossfade duration between phases, in ms. */
@@ -71,6 +86,7 @@ export const EVENT_TYPE_TITLES: Record<string, string> = {
   preflight_completed: 'Preflight completed',
   referral_ready: 'Referral ready for review',
   physician_action_required: 'Physician action required',
+  referral_submitted: 'Referral sent',
 }
 
 export function eventActorLabel(event: CoordinationEvent, referringLabel: string, receivingPhysicianName: string): string {
