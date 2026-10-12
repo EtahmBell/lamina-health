@@ -28,6 +28,8 @@ def generate_candidates(
             reasons.append("Haematology remains relevant for refractory deficiency or IV iron")
         if physician.specialty == "Colorectal Surgery":
             reasons.append("Included to confirm diagnostic evaluation should precede surgery")
+        if physician.specialty == "Endocrinology" and context.progressive_glycemic_control:
+            reasons.insert(0, "Worsening glycemic control despite medication escalation makes endocrinology directly relevant")
         if pcp_guidance:
             specialty = physician.specialty.casefold()
             if any(word in pcp_guidance.casefold() for word in specialty.split()):

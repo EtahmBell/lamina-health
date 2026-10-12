@@ -27,6 +27,8 @@ SYNTHETIC_PHYSICIAN_NPIS = {
     "physician-chen-emily": "9900000026",
     "physician-rahman": "9900000027",
     "physician-rosen": "9900000028",
+    "physician-okonkwo": "9900000029",
+    "physician-torres": "9900000030",
 }
 
 

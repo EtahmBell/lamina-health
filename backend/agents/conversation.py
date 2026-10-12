@@ -52,6 +52,8 @@ def build_consultation_messages(
 ) -> list[ConsultationMessage]:
     if context.persistent_iron_deficiency_anemia:
         return _build_anemia_messages(consultation_id, context, profiles, evaluations, recommended)
+    if context.progressive_glycemic_control:
+        return _build_diabetes_messages(consultation_id, context, profiles, evaluations, recommended)
     profiles_by_id = {profile.id: profile for profile in profiles}
     messages = [
         _message(
@@ -342,6 +344,151 @@ def _build_anemia_messages(
                 "recommended_physician_id": recommended.physician_id,
                 "clinical_fit": ClinicalFit.STRONG.value,
                 "sequencing_decision": "gastroenterology_first",
+            },
+        )
+    )
+    return messages
+
+
+def _build_diabetes_messages(
+    consultation_id: str,
+    context: ClinicalRepresentation,
+    profiles: list[PhysicianProfile],
+    evaluations: list[PhysicianEvaluation],
+    recommended: PhysicianEvaluation,
+) -> list[ConsultationMessage]:
+    profiles_by_id = {profile.id: profile for profile in profiles}
+    messages = [
+        _message(
+            consultation_id=consultation_id,
+            sequence=1,
+            sender_agent_id=PCP_AGENT_ID,
+            sender_name=PCP_SENDER_NAME,
+            sender_role="Primary Care",
+            recipient_agent_id="network",
+            message_type=ConsultationMessageType.CONSULT_REQUEST,
+            summary=f"Requests specialty guidance for {context.summary}",
+            evidence=[],
+            related_patient_facts=context.facts,
+        )
+    ]
+    sequence = 2
+    related_facts = [
+        fact
+        for fact in context.facts
+        if any(term in fact.casefold() for term in ("hba1c", "glucose", "weight", "medication"))
+    ]
+    for evaluation in evaluations:
+        profile = profiles_by_id[evaluation.physician_id]
+        messages.append(
+            _message(
+                consultation_id=consultation_id,
+                sequence=sequence,
+                sender_agent_id=synthetic_agent_id(evaluation.physician_id),
+                sender_name=f"{evaluation.physician_name.replace(' (synthetic)', '')} Agent",
+                sender_role=profile.subspecialty,
+                recipient_agent_id=PCP_AGENT_ID,
+                message_type=(
+                    ConsultationMessageType.FIT_RESPONSE
+                    if evaluation.accepts_case
+                    else ConsultationMessageType.REDIRECT
+                ),
+                summary=evaluation.reason,
+                evidence=[
+                    item
+                    for item in evaluation.evidence
+                    if item.kind
+                    in {
+                        EvidenceKind.EXPLICIT_RULE,
+                        EvidenceKind.PRACTICE_SIMILARITY,
+                        EvidenceKind.OPERATIONAL,
+                    }
+                ],
+                related_patient_facts=related_facts,
+                metadata={
+                    "clinical_fit": evaluation.clinical_fit.value,
+                    "accepts_case": evaluation.accepts_case,
+                    "availability": evaluation.availability,
+                    "required_workup": " · ".join(evaluation.required_workup) or "None specified",
+                },
+            )
+        )
+        sequence += 1
+
+    chen = next(item for item in evaluations if item.physician_id == "physician-chen")
+    messages.append(
+        _message(
+            consultation_id=consultation_id,
+            sequence=sequence,
+            sender_agent_id=synthetic_agent_id("physician-chen"),
+            sender_name="Dr. Noah Chen Agent",
+            sender_role="Endocrinology",
+            recipient_agent_id=PCP_AGENT_ID,
+            message_type=ConsultationMessageType.FOLLOW_UP_QUESTION,
+            summary="Has insulin or a GLP-1/SGLT2 agent been discussed, or is the regimen still oral monotherapy plus one added agent?",
+            evidence=[item for item in chen.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
+            related_patient_facts=[fact for fact in context.facts if "medication" in fact.casefold()],
+        )
+    )
+    sequence += 1
+    messages.append(
+        _message(
+            consultation_id=consultation_id,
+            sequence=sequence,
+            sender_agent_id=PCP_AGENT_ID,
+            sender_name=PCP_SENDER_NAME,
+            sender_role="Primary Care",
+            recipient_agent_id=synthetic_agent_id("physician-chen"),
+            message_type=ConsultationMessageType.FOLLOW_UP_ANSWER,
+            summary="Insulin has not yet been discussed; the regimen remains oral therapy, with one agent already added to metformin.",
+            evidence=[],
+            related_patient_facts=[fact for fact in context.facts if "medication" in fact.casefold()],
+            metadata={"insulin_discussed": False},
+        )
+    )
+    sequence += 1
+    messages.append(
+        _message(
+            consultation_id=consultation_id,
+            sequence=sequence,
+            sender_agent_id=synthetic_agent_id("physician-chen"),
+            sender_name="Dr. Noah Chen Agent",
+            sender_role="Endocrinology",
+            recipient_agent_id=PCP_AGENT_ID,
+            message_type=ConsultationMessageType.REFERRAL_REQUIREMENT,
+            summary=(
+                "Accepts as the first referral for treatment-intensification review; requests "
+                "a recent HbA1c and home glucose log before the visit."
+            ),
+            evidence=[item for item in chen.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
+            related_patient_facts=related_facts,
+            metadata={
+                "accepts_after_clarification": True,
+                "required_workup": " · ".join(chen.required_workup) or "None specified",
+            },
+        )
+    )
+    sequence += 1
+    messages.append(
+        _message(
+            consultation_id=consultation_id,
+            sequence=sequence,
+            sender_agent_id=NETWORK_AGENT_ID,
+            sender_name="Network Orchestrator",
+            sender_role="Recommendation synthesis",
+            recipient_agent_id=PCP_AGENT_ID,
+            message_type=ConsultationMessageType.SYNTHESIS,
+            summary=(
+                "Recommends Dr. Noah Chen in endocrinology for treatment-intensification review. "
+                "General endocrinology remains appropriate as a backup with a longer synthetic "
+                "access interval."
+            ),
+            evidence=recommended.evidence,
+            related_patient_facts=context.facts,
+            metadata={
+                "recommended_physician_id": recommended.physician_id,
+                "clinical_fit": ClinicalFit.STRONG.value,
+                "sequencing_decision": "endocrinology_first",
             },
         )
     )

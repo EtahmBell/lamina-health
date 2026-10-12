@@ -2,6 +2,7 @@ from backend.models import HistoricalCase, LabObservation, PatientRecord, Physic
 
 PRIMARY_PATIENT_ID = "patient-ckd-htn-001"
 MARIA_PATIENT_ID = "patient-ida-002"
+TONJIT_PATIENT_ID = "patient-t2dm-003"
 
 PATIENTS = {
     PRIMARY_PATIENT_ID: PatientRecord(
@@ -54,6 +55,40 @@ PATIENTS = {
         ],
         insurance="Lamina Demo PPO",
         location="Oakland, CA",
+    ),
+    TONJIT_PATIENT_ID: PatientRecord(
+        id=TONJIT_PATIENT_ID,
+        display_name="Tonjit Askarov (synthetic)",
+        age=52,
+        diagnoses=["Type 2 diabetes mellitus"],
+        medications=["Metformin", "Sitagliptin"],
+        labs=[
+            LabObservation(date="2025-03-10", test="HbA1c", value=7.1, unit="%"),
+            LabObservation(date="2025-09-08", test="HbA1c", value=7.8, unit="%"),
+            LabObservation(date="2026-03-16", test="HbA1c", value=8.7, unit="%"),
+            LabObservation(date="2026-09-05", test="HbA1c", value=9.6, unit="%"),
+            LabObservation(date="2025-03-10", test="fasting_glucose", value=128, unit="mg/dL"),
+            LabObservation(date="2025-09-08", test="fasting_glucose", value=154, unit="mg/dL"),
+            LabObservation(date="2026-03-16", test="fasting_glucose", value=183, unit="mg/dL"),
+            LabObservation(date="2026-09-05", test="fasting_glucose", value=214, unit="mg/dL"),
+            LabObservation(date="2026-09-05", test="weight", value=91, unit="kg"),
+            LabObservation(date="2026-07-20", test="creatinine", value=0.9, unit="mg/dL"),
+            LabObservation(date="2026-07-20", test="eGFR", value=97, unit="mL/min/1.73m2"),
+            LabObservation(date="2026-07-20", test="urine_albumin", value=18, unit="mg/g"),
+        ],
+        clinical_notes=[
+            "HbA1c has risen steadily over the past 18 months despite stepwise oral medication escalation.",
+            "Metformin was established at diagnosis; sitagliptin was added in September 2025 after the first noted rise in HbA1c.",
+            "Weight increased from approximately 84 kg to 91 kg over the same period.",
+            "No prior endocrinology evaluation; management has been entirely primary-care based.",
+            "Recent renal function and urine albumin are both within normal limits.",
+        ],
+        insurance="Lamina Demo PPO",
+        location="Fremont, CA",
+        referral_question=(
+            "Persistent worsening type 2 diabetes despite medication escalation. Please "
+            "evaluate for treatment intensification and additional management options."
+        ),
     ),
 }
 
@@ -295,6 +330,67 @@ MARIA_PHYSICIANS = [
     ),
 ]
 
+TONJIT_PHYSICIANS = [
+    PhysicianProfile(
+        id="physician-chen",
+        name="Dr. Noah Chen (synthetic)",
+        specialty="Endocrinology",
+        subspecialty="Diabetes",
+        focus_areas=["type 2 diabetes", "treatment intensification", "metabolic disease"],
+        accepts_signals=["type_2_diabetes", "progressive_glycemic_control"],
+        explicit_rules=[
+            "Accept progressive type 2 diabetes with worsening HbA1c despite primary-care medication escalation."
+        ],
+        required_workup=["Current HbA1c", "Home glucose log"],
+        historical_cases=[
+            HistoricalCase(
+                label="Progressive type 2 diabetes despite oral medication escalation",
+                features=["type_2_diabetes", "progressive_glycemic_control"],
+            )
+        ],
+        insurance_networks=["Lamina Demo PPO", "Bay Demo HMO"],
+        location="Oakland, CA",
+        availability_days=15,
+    ),
+    PhysicianProfile(
+        id="physician-okonkwo",
+        name="Dr. Adaeze Okonkwo (synthetic)",
+        specialty="Endocrinology",
+        subspecialty="General endocrinology",
+        focus_areas=["type 2 diabetes", "metabolic disease"],
+        accepts_signals=["type_2_diabetes", "progressive_glycemic_control"],
+        explicit_rules=[
+            "Accept progressive type 2 diabetes needing treatment intensification."
+        ],
+        required_workup=["Current HbA1c", "Home glucose log"],
+        historical_cases=[
+            HistoricalCase(
+                label="Type 2 diabetes requiring treatment intensification",
+                features=["type_2_diabetes", "progressive_glycemic_control"],
+            )
+        ],
+        insurance_networks=["Lamina Demo PPO"],
+        location="San Francisco, CA",
+        availability_days=30,
+    ),
+    PhysicianProfile(
+        id="physician-torres",
+        name="Dr. Marcus Torres (synthetic)",
+        specialty="Internal Medicine",
+        subspecialty="Complex diagnostic medicine",
+        focus_areas=["initial diabetes management", "care coordination"],
+        accepts_signals=["type_2_diabetes"],
+        explicit_rules=[
+            "Complete initial medication titration in primary care before internal medicine consultation."
+        ],
+        required_workup=["Current HbA1c"],
+        historical_cases=[],
+        insurance_networks=["Lamina Demo PPO"],
+        location="Oakland, CA",
+        availability_days=12,
+    ),
+]
+
 DEMO_NETWORK_PHYSICIANS = [
     PhysicianProfile(
         id="physician-cha",
@@ -355,8 +451,15 @@ EXPANDED_NETWORK_PHYSICIANS = [
     _network_only("physician-rosen", "Dr. Natalie Rosen", "Hematology/Oncology", "Benign hematology", "San Francisco, CA", 24),
 ]
 
-ALL_PHYSICIANS = [*PHYSICIANS, *MARIA_PHYSICIANS, *DEMO_NETWORK_PHYSICIANS, *EXPANDED_NETWORK_PHYSICIANS]
+ALL_PHYSICIANS = [
+    *PHYSICIANS,
+    *MARIA_PHYSICIANS,
+    *[p for p in TONJIT_PHYSICIANS if p.id != "physician-chen"],
+    *DEMO_NETWORK_PHYSICIANS,
+    *EXPANDED_NETWORK_PHYSICIANS,
+]
 PHYSICIANS_BY_PATIENT = {
     PRIMARY_PATIENT_ID: PHYSICIANS,
     MARIA_PATIENT_ID: MARIA_PHYSICIANS,
+    TONJIT_PATIENT_ID: TONJIT_PHYSICIANS,
 }

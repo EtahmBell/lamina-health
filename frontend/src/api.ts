@@ -11,7 +11,7 @@ const isWorkspaceScopedPath = (path: string) => path.startsWith('/api/workspace'
 
 export type LabObservation = {
   date: string
-  test: 'creatinine' | 'eGFR' | 'hemoglobin' | 'ferritin' | 'serum_iron' | 'TIBC' | 'transferrin_saturation' | 'MCV' | 'WBC' | 'platelets'
+  test: 'creatinine' | 'eGFR' | 'hemoglobin' | 'ferritin' | 'serum_iron' | 'TIBC' | 'transferrin_saturation' | 'MCV' | 'WBC' | 'platelets' | 'HbA1c' | 'fasting_glucose' | 'weight' | 'urine_albumin'
   value: number
   unit: string
 }
@@ -19,6 +19,7 @@ export type Patient = {
   id: string; display_name: string; synthetic: true; age: number; diagnoses: string[]
   medications: string[]; labs: LabObservation[]; clinical_notes: string[]; insurance: string; location: string
   clinical_data_source: 'synthetic_fixture' | 'medplum_fhir'
+  referral_question?: string | null
 }
 export type Evidence = { kind: string; detail: string }
 export type ConsultationMessage = {

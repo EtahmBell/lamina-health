@@ -9,6 +9,50 @@ def build_patient_context(patient: PatientRecord) -> ClinicalRepresentation:
     creatinine = _values(patient, "creatinine")
     egfr = _values(patient, "eGFR")
     hemoglobin = _values(patient, "hemoglobin")
+    hba1c = _values(patient, "HbA1c")
+    if hba1c:
+        fasting_glucose = _values(patient, "fasting_glucose")
+        weight = _values(patient, "weight")
+        progressive_glycemic_control = (
+            len(hba1c) >= 2
+            and hba1c[-1] > hba1c[0]
+            and (not fasting_glucose or fasting_glucose[-1] > fasting_glucose[0])
+        )
+        renal_function_documented = bool(creatinine and egfr)
+        facts = [
+            f"Age {patient.age}",
+            f"HbA1c rose from {hba1c[0]:.1f}% to {hba1c[-1]:.1f}% despite medication adjustments",
+        ]
+        if fasting_glucose:
+            facts.append(
+                f"Home fasting glucose rose from {fasting_glucose[0]:.0f} to "
+                f"{fasting_glucose[-1]:.0f} mg/dL"
+            )
+        if weight:
+            facts.append(f"Weight increased to {weight[-1]:.0f} kg over the same period")
+        facts.append("Primary care has already escalated oral medication therapy")
+        signals = ["type_2_diabetes", "progressive_glycemic_control"]
+        if renal_function_documented:
+            signals.append("renal_function_documented")
+        return ClinicalRepresentation(
+            patient_id=patient.id,
+            summary=(
+                f"{patient.age}-year-old with type 2 diabetes and steadily worsening glycemic "
+                "control despite escalating primary-care medication management."
+            ),
+            facts=facts,
+            signals=signals,
+            creatinine_trend=creatinine,
+            egfr_trend=egfr,
+            resistant_hypertension=False,
+            progressive_renal_dysfunction=False,
+            ckd_stage="not applicable",
+            hba1c_trend=hba1c,
+            fasting_glucose_trend=fasting_glucose,
+            weight_trend=weight,
+            progressive_glycemic_control=progressive_glycemic_control,
+            renal_function_documented=renal_function_documented,
+        )
     if hemoglobin:
         ferritin = _values(patient, "ferritin")
         serum_iron = _values(patient, "serum_iron")

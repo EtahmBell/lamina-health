@@ -8,6 +8,7 @@ from backend.models import (
     PhysicianProfile,
 )
 from backend.physicians import similar_cases
+from backend.synthetic_data import TONJIT_PATIENT_ID
 
 
 def _insurance_status(patient: PatientRecord, profile: PhysicianProfile) -> str:
@@ -122,6 +123,27 @@ def evaluate_physician(
         fit, accepts, confidence = ClinicalFit.POOR, False, "high"
         reason = "No arrhythmia, syncope, or device concern is present; cardiology taxonomy alone is not a fit signal for electrophysiology."
         urgency = "Not indicated from supplied facts"
+    elif profile.id == "physician-chen" and patient.id == TONJIT_PATIENT_ID:
+        evidence.insert(
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+        )
+        fit, accepts, confidence = ClinicalFit.STRONG, True, "high"
+        reason = "Steadily rising HbA1c despite medication escalation is a clear fit for this endocrinology practice's treatment-intensification focus."
+        urgency = "Routine outpatient evaluation"
+    elif profile.id == "physician-okonkwo":
+        evidence.insert(
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+        )
+        fit, accepts, confidence = ClinicalFit.MODERATE, True, "high"
+        reason = "General endocrinology is also an appropriate treatment-intensification option, with a longer synthetic access interval than the recommended destination."
+        urgency = "Routine outpatient evaluation"
+    elif profile.id == "physician-torres":
+        evidence.insert(
+            0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])
+        )
+        fit, accepts, confidence = ClinicalFit.POOR, False, "medium"
+        reason = "Primary care has already managed this case directly; internal medicine can continue coordination but is not the next specialty destination for escalating glycemic control."
+        urgency = "Continue primary-care coordination"
     else:
         evidence.insert(
             0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=profile.explicit_rules[0])

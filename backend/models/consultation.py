@@ -47,6 +47,10 @@ class LabObservation(StrictModel):
         "MCV",
         "WBC",
         "platelets",
+        "HbA1c",
+        "fasting_glucose",
+        "weight",
+        "urine_albumin",
     ]
     value: float
     unit: str
@@ -64,6 +68,7 @@ class PatientRecord(StrictModel):
     insurance: str
     location: str
     clinical_data_source: Literal["synthetic_fixture", "medplum_fhir"] = "synthetic_fixture"
+    referral_question: str | None = None
 
 
 class ClinicalRepresentation(StrictModel):
@@ -82,6 +87,11 @@ class ClinicalRepresentation(StrictModel):
     persistent_iron_deficiency_anemia: bool = False
     microcytic_anemia: bool = False
     prior_endoscopy_documented: bool | None = None
+    hba1c_trend: list[float] = Field(default_factory=list)
+    fasting_glucose_trend: list[float] = Field(default_factory=list)
+    weight_trend: list[float] = Field(default_factory=list)
+    progressive_glycemic_control: bool = False
+    renal_function_documented: bool = False
 
 
 class HistoricalCase(StrictModel):

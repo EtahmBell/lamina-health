@@ -29,7 +29,7 @@ test('the synthetic patient population spans a believable spread of stages, not 
   const demoPatients = readFileSync(new URL('../src/demoPatients.ts', import.meta.url), 'utf8')
   assert.match(demoPatients, /export type PatientStage = 'new' \| 'in_review' \| 'referred' \| 'workup' \| 'followup' \| 'closed'/)
   const implementedCount = (demoPatients.match(/implemented: true/g) || []).length
-  assert.equal(implementedCount, 2, 'only Jordan and Maria carry a wired consult-engine case')
+  assert.equal(implementedCount, 3, 'only Jordan, Maria, and Tonjit carry a wired consult-engine case')
   const stages = new Set([...demoPatients.matchAll(/stage: '(\w+)'/g)].map((match) => match[1]))
   for (const stage of ['new', 'in_review', 'workup', 'referred', 'followup', 'closed']) {
     assert.ok(stages.has(stage), `at least one patient should be in the ${stage} stage`)

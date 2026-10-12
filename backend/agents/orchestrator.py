@@ -38,6 +38,27 @@ def consult_network(
         consultation_id, context, physicians, evaluations, recommended
     )
     anemia_case = context.persistent_iron_deficiency_anemia
+    diabetes_case = context.progressive_glycemic_control
+    if anemia_case:
+        why = (
+            "Gastroenterology is the best first referral because persistent iron deficiency has "
+            "not had source evaluation. Haematology remains appropriate if that evaluation is "
+            "unrevealing, anaemia persists, unusual blood-count findings appear, or IV iron is "
+            "needed; its faster access does not override clinical sequencing."
+        )
+    elif diabetes_case:
+        why = (
+            "Endocrinology is the appropriate next referral because glycemic control has "
+            "worsened steadily despite reasonable primary-care medication escalation. "
+            "Explicit practice rules and historical case similarity both support treatment "
+            "intensification review ahead of continued primary-care titration."
+        )
+    else:
+        why = (
+            "The renal trajectory changes the referral priority: explicit nephrology and "
+            "hypertension-cardiology rules both support nephrology first. Historical case "
+            "similarity and access information reinforce, but do not determine, that choice."
+        )
     return ConsultationResult(
         consultation_id=consultation_id,
         patient_id=patient.id,
@@ -46,16 +67,7 @@ def consult_network(
         patient_context=context,
         messages=messages,
         recommended_physician=recommended,
-        why=(
-            "Gastroenterology is the best first referral because persistent iron deficiency has "
-            "not had source evaluation. Haematology remains appropriate if that evaluation is "
-            "unrevealing, anaemia persists, unusual blood-count findings appear, or IV iron is "
-            "needed; its faster access does not override clinical sequencing."
-            if anemia_case
-            else "The renal trajectory changes the referral priority: explicit nephrology and "
-            "hypertension-cardiology rules both support nephrology first. Historical case "
-            "similarity and access information reinforce, but do not determine, that choice."
-        ),
+        why=why,
         before_referral=recommended.required_workup,
         availability=recommended.availability,
         insurance=recommended.insurance_status,

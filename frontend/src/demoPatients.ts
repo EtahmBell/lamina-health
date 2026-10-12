@@ -1,9 +1,9 @@
-/** Lamina only wires a real, agent-consulted case for two patients (Jordan Lee,
- * Maria Santos) — see backend/synthetic_data/fixtures.py's consult engine. The
- * rest of this roster exists so the Patients page and Dashboard read like an
- * established practice with cases at every stage, not a sparse two-patient demo.
- * Their `stage`/`stageNote` are honest, static descriptions — never a fabricated
- * live consultation. */
+/** Lamina only wires a real, agent-consulted case for three patients (Jordan Lee,
+ * Maria Santos, Tonjit Askarov) — see backend/synthetic_data/fixtures.py's consult
+ * engine. The rest of this roster exists so the Patients page and Dashboard read
+ * like an established practice with cases at every stage, not a sparse three-patient
+ * demo. Their `stage`/`stageNote` are honest, static descriptions — never a
+ * fabricated live consultation. */
 export type PatientStage = 'new' | 'in_review' | 'referred' | 'workup' | 'followup' | 'closed'
 
 export type DemoPatientSummary = {
@@ -39,6 +39,18 @@ export const DEMO_PATIENTS: DemoPatientSummary[] = [
     age: 54,
     location: 'Oakland, CA',
     reason: 'Persistent iron-deficiency anaemia despite oral iron',
+    implemented: true,
+    recent: true,
+    stage: 'new',
+    stageNote: 'Real agent-consulted demo case.',
+  },
+  {
+    id: 'patient-t2dm-003',
+    name: 'Tonjit Askarov',
+    initials: 'TA',
+    age: 52,
+    location: 'Fremont, CA',
+    reason: 'Worsening type 2 diabetes despite medication escalation',
     implemented: true,
     recent: true,
     stage: 'new',

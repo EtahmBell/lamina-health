@@ -6,6 +6,8 @@ from .fixtures import (
     PHYSICIANS,
     PHYSICIANS_BY_PATIENT,
     PRIMARY_PATIENT_ID,
+    TONJIT_PATIENT_ID,
+    TONJIT_PHYSICIANS,
 )
 from .identities import SYNTHETIC_PHYSICIAN_NPIS, synthetic_agent_id
 
@@ -17,6 +19,8 @@ __all__ = [
     "PHYSICIANS",
     "PHYSICIANS_BY_PATIENT",
     "PRIMARY_PATIENT_ID",
+    "TONJIT_PATIENT_ID",
+    "TONJIT_PHYSICIANS",
     "SYNTHETIC_PHYSICIAN_NPIS",
     "synthetic_agent_id",
 ]

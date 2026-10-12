@@ -42,11 +42,15 @@ const LAB_LABELS: Record<LabObservation['test'], string> = {
   MCV: 'MCV',
   WBC: 'WBC',
   platelets: 'Platelets',
+  HbA1c: 'HbA1c',
+  fasting_glucose: 'Fasting glucose',
+  weight: 'Weight',
+  urine_albumin: 'Urine albumin',
 }
 
 const DISPLAY_ORDER: LabObservation['test'][] = [
-  'creatinine', 'eGFR', 'hemoglobin', 'ferritin', 'serum_iron',
-  'TIBC', 'transferrin_saturation', 'MCV', 'WBC', 'platelets',
+  'HbA1c', 'fasting_glucose', 'creatinine', 'eGFR', 'hemoglobin', 'ferritin', 'serum_iron',
+  'TIBC', 'transferrin_saturation', 'MCV', 'WBC', 'platelets', 'weight', 'urine_albumin',
 ]
 
 export const labLabel = (test: LabObservation['test']) => LAB_LABELS[test]

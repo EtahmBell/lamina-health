@@ -13,6 +13,8 @@ from backend.synthetic_data import (
     PATIENTS,
     PHYSICIANS,
     PRIMARY_PATIENT_ID,
+    TONJIT_PATIENT_ID,
+    TONJIT_PHYSICIANS,
 )
 from backend.workflow import WorkflowStore
 
@@ -210,6 +212,7 @@ def test_api_lists_and_runs_both_demo_cases(api_client: TestClient) -> None:
     assert {patient["id"] for patient in patients.json()} == {
         PRIMARY_PATIENT_ID,
         MARIA_PATIENT_ID,
+        TONJIT_PATIENT_ID,
     }
 
     response = api_client.post(
@@ -220,3 +223,62 @@ def test_api_lists_and_runs_both_demo_cases(api_client: TestClient) -> None:
     payload = response.json()
     assert payload["recommended_physician"]["specialty"] == "Gastroenterology"
     assert payload["alternatives"][0]["specialty"] == "Haematology"
+
+
+def test_tonjit_patient_context_captures_worsening_glycemic_control_and_documented_renal_function() -> None:
+    patient = PATIENTS[TONJIT_PATIENT_ID]
+    context = build_patient_context(patient)
+    assert patient.synthetic is True
+    assert patient.age == 52
+    assert patient.location == "Fremont, CA"
+    assert context.hba1c_trend == [7.1, 7.8, 8.7, 9.6]
+    assert context.fasting_glucose_trend == [128, 154, 183, 214]
+    assert context.weight_trend == [91]
+    assert context.progressive_glycemic_control is True
+    assert context.renal_function_documented is True
+    assert context.creatinine_trend == [0.9]
+    assert context.egfr_trend == [97]
+
+
+def test_tonjit_referral_question_is_stored_on_the_patient_record() -> None:
+    patient = PATIENTS[TONJIT_PATIENT_ID]
+    assert patient.referral_question is not None
+    assert "treatment intensification" in patient.referral_question.casefold()
+
+
+def test_tonjit_recommends_endocrinology_and_rejects_internal_medicine_distractor() -> None:
+    result = consult_network(PATIENTS[TONJIT_PATIENT_ID], TONJIT_PHYSICIANS)
+
+    assert result.recommended_physician.physician_id == "physician-chen"
+    assert result.recommended_physician.specialty == "Endocrinology"
+    assert result.recommended_physician.clinical_fit == ClinicalFit.STRONG
+    assert result.alternatives[0].physician_id == "physician-okonkwo"
+    torres = next(item for item in result.consultation if item.physician_id == "physician-torres")
+    assert torres.clinical_fit == ClinicalFit.POOR
+    assert torres.accepts_case is False
+    assert "endocrinology" in result.why.casefold()
+    assert result.messages[-1].message_type == ConsultationMessageType.SYNTHESIS
+
+
+def test_tonjit_api_run_does_not_crash_and_returns_chen(api_client: TestClient) -> None:
+    response = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/consultations",
+        json={"pcp_guidance": "Considering an endocrinology referral"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommended_physician"]["physician_name"].startswith("Dr. Noah Chen")
+    assert payload["messages"]
+
+
+def test_jordan_and_maria_consults_are_unaffected_by_adding_tonjit() -> None:
+    jordan_result = consult_network(PATIENTS[PRIMARY_PATIENT_ID], PHYSICIANS)
+    assert jordan_result.recommended_physician.physician_id == "physician-jung"
+    chen_for_jordan = next(
+        item for item in jordan_result.consultation if item.physician_id == "physician-chen"
+    )
+    assert chen_for_jordan.clinical_fit == ClinicalFit.POOR
+    assert chen_for_jordan.accepts_case is False
+
+    maria_result = consult_network(PATIENTS[MARIA_PATIENT_ID], MARIA_PHYSICIANS)
+    assert maria_result.recommended_physician.physician_id == "physician-sanchez"
