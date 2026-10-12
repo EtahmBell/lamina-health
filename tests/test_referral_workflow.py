@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from backend.api import consult as consult_api
 from backend.api import referrals as referrals_api
+from backend.api import workspace as workspace_api
 from backend.demo_identity import LUCY_AGENT_ID, PCP_AGENT_ID
 from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
@@ -25,6 +26,7 @@ def api_client(monkeypatch: pytest.MonkeyPatch, tmp_path) -> TestClient:
     monkeypatch.setattr(consult_api, "data_source", SyntheticClinicalDataSource())
     monkeypatch.setattr(consult_api, "workflow_store", store)
     monkeypatch.setattr(referrals_api, "workflow_store", store)
+    monkeypatch.setattr(workspace_api, "workflow_store", store)
     return TestClient(app)
 
 
@@ -275,3 +277,26 @@ def test_api_404s_for_unknown_referral_and_unknown_physician(api_client: TestCli
 
     missing_referral = api_client.get("/api/referrals/999999")
     assert missing_referral.status_code == 404
+
+
+def test_tonjit_demo_reset_clears_referrals_so_the_closed_loop_demo_can_replay(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    referral_id = created["id"]
+    api_client.post(f"/api/referrals/{referral_id}/preflight")
+    assert api_client.get(f"/api/referrals/{referral_id}").status_code == 200
+
+    reset = api_client.post("/api/workspace/demo/reset/tonjit")
+    assert reset.status_code == 200
+    payload = reset.json()
+    assert payload["patient_id"] == TONJIT_PATIENT_ID
+    assert payload["removed_referrals"] == 1
+
+    assert api_client.get(f"/api/referrals/{referral_id}").status_code == 404
+
+    recreated = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    )
+    assert recreated.status_code == 200
+    assert recreated.json()["status"] == "assembling"

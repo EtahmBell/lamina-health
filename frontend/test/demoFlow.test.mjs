@@ -101,7 +101,7 @@ test('non-implemented patients show a believable stage label, not a blanket "no 
 test('Profile exposes a demo reset behind a confirmation', () => {
   assert.match(profile(), /<h2>Demo environment<\/h2>/)
   assert.match(profile(), /Synthetic data · no PHI/)
-  assert.match(profile(), /<DemoResetControl \/>/)
+  assert.match(profile(), /<DemoResetControl patient="jordan" \/>/)
   assert.match(resetControl(), /Jordan Lee demo case/)
   assert.match(resetControl(), /Reset Jordan to pre-consult state\./)
   assert.match(resetControl(), /Reset Jordan demo case\?/)
@@ -110,10 +110,18 @@ test('Profile exposes a demo reset behind a confirmation', () => {
   assert.match(resetControl(), />Reset case</)
 })
 
+test('a second, Tonjit-specific referral-demo reset control is offered alongside Jordan\'s, following the same pattern', () => {
+  assert.match(profile(), /<DemoResetControl patient="tonjit" \/>/)
+  assert.match(resetControl(), /Reset Tonjit referral demo/)
+  assert.match(resetControl(), /Tonjit's Lamina consultation and referral history/)
+})
+
 test('reset calls the canonical endpoint and confirms quietly', () => {
   assert.match(api, /'\/api\/workspace\/demo\/reset\/jordan', \{ method: 'POST' \}/)
-  assert.match(resetControl(), /await resetJordanDemo\(\)/)
+  assert.match(api, /'\/api\/workspace\/demo\/reset\/tonjit', \{ method: 'POST' \}/)
+  assert.match(resetControl(), /resetTonjitDemo\(\) : resetJordanDemo\(\)/)
   assert.match(resetControl(), /Jordan demo case reset\./)
+  assert.match(resetControl(), /Tonjit referral demo reset\./)
   assert.doesNotMatch(resetControl(), /window\.location|location\.reload/, 'no full page reload')
   assert.doesNotMatch(resetControl(), /Medplum/, 'reset must not claim clinical data is deleted')
 })

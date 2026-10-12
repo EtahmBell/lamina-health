@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, resetJordanDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type TrainProjection } from './api.ts'
+import { consultNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -452,15 +452,30 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
   </main></ProductShell>
 }
 
-/** Demo-only control. Clears Jordan's Lamina workflow history, never clinical data. */
-function DemoResetControl() {
+/** Demo-only control. Clears one demo case's Lamina workflow history, never clinical data. */
+function DemoResetControl({ patient }: { patient: 'jordan' | 'tonjit' }) {
   const [stage, setStage] = useState<'idle' | 'confirming' | 'working' | 'done'>('idle')
   const [removed, setRemoved] = useState(0)
   const [error, setError] = useState('')
+  const copy = patient === 'tonjit' ? {
+    title: 'Tonjit Askarov demo case',
+    description: 'Reset Tonjit to pre-consult state so the closed-loop referral demo can be replayed.',
+    buttonLabel: 'Reset Tonjit referral demo',
+    confirmHeading: 'Reset Tonjit referral demo?',
+    confirmBody: "This removes Tonjit's Lamina consultation and referral history and returns the case to its pre-consult demo state. Synthetic patient data is unchanged.",
+    doneLabel: 'Tonjit referral demo reset.',
+  } : {
+    title: 'Jordan Lee demo case',
+    description: 'Reset Jordan to pre-consult state.',
+    buttonLabel: 'Reset Jordan case',
+    confirmHeading: 'Reset Jordan demo case?',
+    confirmBody: "This removes Jordan's Lamina consultation history and returns the case to its pre-consult demo state. Synthetic patient data is unchanged.",
+    doneLabel: 'Jordan demo case reset.',
+  }
   const reset = async () => {
     setStage('working'); setError('')
     try {
-      const result = await resetJordanDemo()
+      const result = await (patient === 'tonjit' ? resetTonjitDemo() : resetJordanDemo())
       setRemoved(result.removed_consultations)
       setStage('done')
     } catch (resetError) {
@@ -470,17 +485,17 @@ function DemoResetControl() {
   }
   return <div className="demo-reset-block">
     <div className="demo-reset">
-      <div><strong>Jordan Lee demo case</strong><p>Reset Jordan to pre-consult state.</p></div>
-      {stage !== 'confirming' && <button className="button-secondary" onClick={() => { setStage('confirming'); setError('') }}>Reset Jordan case</button>}
+      <div><strong>{copy.title}</strong><p>{copy.description}</p></div>
+      {stage !== 'confirming' && <button className="button-secondary" onClick={() => { setStage('confirming'); setError('') }}>{copy.buttonLabel}</button>}
     </div>
     {stage === 'confirming' && <div className="demo-reset-confirm" role="group" aria-label="Confirm demo reset">
-      <strong>Reset Jordan demo case?</strong>
-      <p>This removes Jordan's Lamina consultation history and returns the case to its pre-consult demo state. Synthetic patient data is unchanged.</p>
+      <strong>{copy.confirmHeading}</strong>
+      <p>{copy.confirmBody}</p>
       {error && <p className="demo-reset-error" role="alert">{error}</p>}
       <div><button className="text-button" onClick={() => setStage('idle')}>Cancel</button><button className="button-primary" onClick={reset}>Reset case</button></div>
     </div>}
     {stage === 'working' && <p className="muted-note">Resetting…</p>}
-    {stage === 'done' && <p className="demo-reset-result" role="status"><b>✓</b>Jordan demo case reset.{removed > 0 ? ` ${removed} consultation${removed === 1 ? '' : 's'} removed.` : ''}</p>}
+    {stage === 'done' && <p className="demo-reset-result" role="status"><b>✓</b>{copy.doneLabel}{removed > 0 ? ` ${removed} consultation${removed === 1 ? '' : 's'} removed.` : ''}</p>}
   </div>
 }
 
@@ -526,7 +541,8 @@ function SettingsPage({ navigate }: { navigate: Navigate }) {
       <section className="profile-section">
         <h2>Demo environment</h2>
         <dl><div><dt>Environment</dt><dd>Synthetic data · no PHI</dd></div></dl>
-        <DemoResetControl />
+        <DemoResetControl patient="jordan" />
+        <DemoResetControl patient="tonjit" />
       </section>
       {user && <p className="muted-note profile-identity-link">This workspace's Dr. Lucy Saruhashi is a separate concept from your signed-in physician account. <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities →</button></p>}
       <p className="muted-note">Read-only for this demonstration. Account settings, credentialing, and production practice verification are not implemented.</p>

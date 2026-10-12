@@ -42,9 +42,16 @@ export function derivePhases(referral: Referral): DisplayPhase[] {
   return phases
 }
 
+/** How long each phase stays on screen once revealed, in ms -- deliberately a
+ * bit slower than a snappy UI transition so a viewer can actually read and
+ * absorb each real step (Part 5 polish pass). Pure frontend presentation
+ * pacing; the backend call itself is never delayed. */
 export const PHASE_HOLD_MS: Record<DisplayPhase['kind'], number> = {
-  preparing: 1300, checking: 1300, missing: 1500, found: 1500, ready: 450, unresolved: 450,
+  preparing: 1500, checking: 1500, missing: 1800, found: 1800, ready: 600, unresolved: 600,
 }
+
+/** Crossfade duration between phases, in ms. */
+export const PHASE_FADE_MS = 260
 
 export function lastName(physicianName: string): string {
   return physicianName.split(' ').at(-1) ?? physicianName

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createReferral, runReferralPreflight, type Referral } from './api.ts'
 import { PCP_NAME } from './demoIdentity.ts'
-import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, lastName, PHASE_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
+import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
 export type { DisplayPhase } from './referralPhases.ts'
@@ -83,15 +83,30 @@ export function ReferralCoordinationSurface({
     timers.current.push(id)
   })
 
+  /**
+   * Double-rAF so the browser actually paints the new content at opacity 0
+   * before we flip `fading` back off -- without this, React can batch the
+   * content swap and the fade-back-in into the same commit, so the browser
+   * never renders an intermediate opacity:0 frame to transition from, and
+   * the new phase just snaps in instead of fading (the "jarring flash" bug).
+   */
+  const nextPaint = () => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+
   const revealPhase = async (phase: DisplayPhase) => {
     if (cancelled.current) return
     if (!prefersReducedMotion()) {
       setFading(true)
-      await sleep(180)
+      await sleep(PHASE_FADE_MS)
       if (cancelled.current) return
+      setVisiblePhase(phase)
+      await nextPaint()
+      if (cancelled.current) return
+      setFading(false)
+    } else {
+      setVisiblePhase(phase)
     }
-    setVisiblePhase(phase)
-    setFading(false)
     await sleep(PHASE_HOLD_MS[phase.kind])
   }
 
@@ -164,7 +179,7 @@ export function AgentCoordinationModal({
         <p>{needsPhysician ? 'Physician action required' : 'No physician action required'}</p>
       </div>
       <div className="coordination-timeline">
-        {referral.coordination_events.map((event) => <div className="coordination-event" key={event.sequence}>
+        {referral.coordination_events.map((event) => <div className={`coordination-event actor-${event.actor ?? 'system'}`} key={event.sequence}>
           <span className="coordination-actor">{eventActorLabel(event, referringLabel, receivingPhysicianName)}</span>
           <strong>{EVENT_TYPE_TITLES[event.event_type] ?? event.event_type}</strong>
           <p>{event.summary}</p>

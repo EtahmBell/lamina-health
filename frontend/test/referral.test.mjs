@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { derivePhases } from '../src/referralPhases.ts'
+import { derivePhases, PHASE_FADE_MS, PHASE_HOLD_MS } from '../src/referralPhases.ts'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const referralSource = readFileSync(new URL('../src/Referral.tsx', import.meta.url), 'utf8')
@@ -193,4 +193,69 @@ test('reduced motion disables the phase crossfade and the status pulse, without 
   assert.match(referralSource, /if \(!prefersReducedMotion\(\)\) \{/)
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.referral-phase \{ transition: none; \} \}/)
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.status-label\.pulse \{ animation: none; \} \}/)
+})
+
+/* -------------------------------------------------------- polish pass: transitions */
+
+test('the content swap happens while still faded out, then a double-rAF lets the browser paint before fading back in -- fixing the flash/snap bug', () => {
+  const start = referralSource.indexOf('const revealPhase =')
+  const end = referralSource.indexOf('const start = async', start)
+  const body = referralSource.slice(start, end)
+  const fadeOutIndex = body.indexOf('setFading(true)')
+  const swapIndex = body.indexOf('setVisiblePhase(phase)')
+  const paintIndex = body.indexOf('await nextPaint()')
+  const fadeInIndex = body.indexOf('setFading(false)')
+  assert.ok(fadeOutIndex > -1 && swapIndex > -1 && paintIndex > -1 && fadeInIndex > -1, 'all four steps should be present')
+  assert.ok(fadeOutIndex < swapIndex, 'fade out must start before content swaps')
+  assert.ok(swapIndex < paintIndex, 'content swaps while still invisible')
+  assert.ok(paintIndex < fadeInIndex, 'a real paint is awaited before fading back in -- no same-tick snap')
+})
+
+test('phase transitions use one continuously stable surface -- content is swapped in place, not unmounted into separate cards', () => {
+  const view = recommendation()
+  assert.match(view, /<ReferralCoordinationSurface key=\{selected\.physician_id\}/, 'only the whole surface remounts on candidate switch, never per-phase')
+  assert.match(referralSource, /<div className=\{`referral-phase \$\{fading \? 'phase-fading' : ''\}`\}>/)
+})
+
+/* ------------------------------------------------------------- polish pass: pacing */
+
+test('pacing was slowed from the previous pass -- each phase holds longer, and the crossfade itself is slightly longer', () => {
+  assert.ok(PHASE_HOLD_MS.preparing >= 1500 && PHASE_HOLD_MS.preparing > 1300)
+  assert.ok(PHASE_HOLD_MS.checking >= 1500 && PHASE_HOLD_MS.checking > 1300)
+  assert.ok(PHASE_HOLD_MS.missing >= 1800 && PHASE_HOLD_MS.missing > 1500)
+  assert.ok(PHASE_HOLD_MS.found >= 1800 && PHASE_HOLD_MS.found > 1500)
+  assert.ok(PHASE_FADE_MS > 180)
+})
+
+test('the full Tonjit-style sequence (preparing, checking, missing, found, ready) still breathes without feeling sluggish', () => {
+  const totalHold = PHASE_HOLD_MS.preparing + PHASE_HOLD_MS.checking + PHASE_HOLD_MS.missing + PHASE_HOLD_MS.found + PHASE_HOLD_MS.ready
+  assert.ok(totalHold >= 7000, 'slower than before')
+  assert.ok(totalHold <= 12000, 'still not sluggish')
+})
+
+/* --------------------------------------------------- polish pass: timeline dot color */
+
+test('timeline dots are colored by which agent actually acted on the event, using the existing mineral/copper palette', () => {
+  assert.match(referralSource, /className=\{`coordination-event actor-\$\{event\.actor \?\? 'system'\}`\}/)
+  assert.match(styles, /\.coordination-event\.actor-referring_agent::before \{ background: var\(--mineral-deep\); \}/)
+  assert.match(styles, /\.coordination-event\.actor-receiving_agent::before \{ background: var\(--copper\); \}/)
+  assert.match(styles, /\.coordination-event\.actor-system::before \{ background: var\(--border\); \}/)
+})
+
+/* ------------------------------------------------------- polish pass: modal painting */
+
+test('the modal overlay and dialog each establish their own isolated stacking context with an opaque background, so underlying charts cannot paint through', () => {
+  assert.match(styles, /\.post-flow-overlay \{[^}]*isolation: isolate;/)
+  assert.match(styles, /\.post-flow-dialog \{[^}]*isolation: isolate;[^}]*background-color: var\(--surface\);/)
+})
+
+test('chart plot containers are isolated into their own stacking context so overflow: visible SVG content cannot bleed above a modal', () => {
+  assert.match(styles, /\.trend-chart-plot \{ position: relative; isolation: isolate;/)
+})
+
+/* --------------------------------------------------- polish pass: Tonjit demo reset */
+
+test('a Tonjit referral-demo reset endpoint exists and is wired through the generic request helper', () => {
+  const api = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
+  assert.match(api, /resetTonjitDemo = \(\) => request<DemoResetResult>\('\/api\/workspace\/demo\/reset\/tonjit', \{ method: 'POST' \}\)/)
 })

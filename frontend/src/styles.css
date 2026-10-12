@@ -536,7 +536,11 @@ button.lam-row:hover { background: #fff9f1; }
 .trend-chart-body { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; margin-top: 12px; }
 .trend-chart-scale { position: relative; }
 .trend-chart-scale span { position: absolute; right: 0; width: 100%; color: var(--text-secondary); font-size: .58rem; font-variant-numeric: tabular-nums; text-align: right; transform: translateY(-50%); white-space: nowrap; }
-.trend-chart-plot { position: relative; height: 128px; }
+/* isolation: isolate contains each chart's own stacking context, so its
+   SVG's overflow: visible content (axis labels/lines extending past the
+   plot box) can never paint above unrelated content elsewhere on the page,
+   including an open modal overlay. */
+.trend-chart-plot { position: relative; isolation: isolate; height: 128px; }
 .trend-chart-plot > svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .trend-grid { stroke: #e7e1d7; stroke-dasharray: 3 3; }
 .trend-grid.baseline { stroke: var(--border); stroke-dasharray: none; }
@@ -1272,8 +1276,13 @@ button.lam-row:hover { background: #fff9f1; }
 
 /* -------------------------------------------------------- Pass 5B: post flow */
 .post-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-.post-flow-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgb(36 30 24 / 45%); padding: 24px; }
-.post-flow-dialog { position: relative; width: min(100%, 560px); max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 30px 32px; box-shadow: 0 24px 60px rgb(36 52 71 / 18%); }
+/* isolation: isolate forces each of these into its own stacking context, so
+   z-index ordering is unambiguous regardless of any transform/overflow
+   quirks elsewhere on the page (notably the patient-detail trend charts,
+   whose SVGs use overflow: visible) -- a real fix for content painting
+   through the modal, not a z-index-number guess. */
+.post-flow-overlay { position: fixed; inset: 0; z-index: 500; isolation: isolate; display: flex; align-items: center; justify-content: center; background: rgb(36 30 24 / 45%); padding: 24px; }
+.post-flow-dialog { position: relative; isolation: isolate; width: min(100%, 560px); max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background-color: var(--surface); background: var(--surface); padding: 30px 32px; box-shadow: 0 24px 60px rgb(36 52 71 / 18%); }
 .post-flow-close { position: absolute; top: 16px; right: 18px; font-size: 1.1rem; line-height: 1; color: var(--text-secondary); }
 .post-flow-dialog h2 { margin: 4px 0 18px; font-size: 1.1rem; }
 .post-synthetic-notice { margin: 0 0 14px; border-left: 3px solid var(--accent); background: #fdf3e8; padding: 9px 13px; color: var(--clinical); font-size: .66rem; border-radius: 0 8px 8px 0; }
@@ -1673,7 +1682,13 @@ button.lam-row:hover { background: #fff9f1; }
 .coordination-summary p { margin: 0; color: var(--mineral-deep); font-size: .68rem; font-weight: 600; }
 .coordination-timeline { display: flex; flex-direction: column; margin-top: 18px; border-left: 2px solid var(--border); padding-left: 16px; }
 .coordination-event { position: relative; padding: 0 0 18px; }
-.coordination-event::before { content: ''; position: absolute; left: -21px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+/* Dot color identifies which agent acted -- mineral/blue for Dr. Saruhashi's
+   (referring) agent, copper for the receiving specialist's agent, a neutral
+   border tone for Lamina/system events. Subtle, matches the existing palette. */
+.coordination-event::before { content: ''; position: absolute; left: -21px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+.coordination-event.actor-referring_agent::before { background: var(--mineral-deep); }
+.coordination-event.actor-receiving_agent::before { background: var(--copper); }
+.coordination-event.actor-system::before { background: var(--border); }
 .coordination-event:last-child { padding-bottom: 0; }
 .coordination-actor { display: block; color: var(--text-secondary); font-size: .58rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .coordination-event strong { display: block; margin-top: 2px; font-size: .8rem; font-weight: 500; }
@@ -2028,7 +2043,7 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-coordination-surface p { margin: 6px 0 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
 .referral-coordination-surface small { display: block; margin-top: 4px; color: var(--text-secondary); font-size: .6rem; }
 .referral-coordination-surface > .text-button { margin-top: 10px; }
-.referral-phase { width: 100%; transition: opacity 180ms ease; }
+.referral-phase { width: 100%; transition: opacity 260ms ease-in-out; }
 .referral-phase.phase-fading { opacity: 0; }
 .referral-found-value { font-family: var(--font-display); color: var(--clinical); }
 @media (prefers-reduced-motion: reduce) { .referral-phase { transition: none; } }

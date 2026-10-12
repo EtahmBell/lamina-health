@@ -121,6 +121,7 @@ def test_jordan_demo_reset_is_narrow_and_reconsultation_remains_append_only(
     assert reset.json() == {
         "patient_id": PRIMARY_PATIENT_ID,
         "removed_consultations": 2,
+        "removed_referrals": 0,
         "remaining_consultations": 1,
         "reset_complete": True,
     }

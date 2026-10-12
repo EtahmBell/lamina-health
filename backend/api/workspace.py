@@ -10,7 +10,7 @@ from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.network_projection import project_agent_network
 from backend.provider_network import provider_network
 from backend.provider_network.service import ProviderNotFoundError
-from backend.synthetic_data import PATIENTS, PRIMARY_PATIENT_ID
+from backend.synthetic_data import PATIENTS, PRIMARY_PATIENT_ID, TONJIT_PATIENT_ID
 from backend.workflow import workflow_store
 
 router = APIRouter(prefix="/api/workspace", tags=["clinician-workspace"])
@@ -102,6 +102,14 @@ def patient_activity(workspace_id: DemoWorkspace) -> list[dict]:
 def reset_jordan_demo(workspace_id: MutableDemoWorkspace) -> dict:
     """Reset only the controlled Jordan synthetic case's Lamina-owned workflow state."""
     return workflow_store.reset_demo_case(workspace_id, PRIMARY_PATIENT_ID)
+
+
+@router.post("/demo/reset/tonjit")
+def reset_tonjit_demo(workspace_id: MutableDemoWorkspace) -> dict:
+    """Reset only the controlled Tonjit synthetic case's Lamina-owned workflow
+    state (consultation history and any referrals), so the closed-loop
+    referral demo can be replayed from its pre-consult state."""
+    return workflow_store.reset_demo_case(workspace_id, TONJIT_PATIENT_ID)
 
 
 @router.get("/network")

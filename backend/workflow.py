@@ -720,12 +720,21 @@ class WorkflowStore:
                    WHERE workspace_id=? AND patient_id=?""",
                 (workspace_id, patient_id),
             )
+            removed_referrals = db.execute(
+                "SELECT COUNT(*) FROM referrals WHERE workspace_id=? AND patient_id=?",
+                (workspace_id, patient_id),
+            ).fetchone()[0]
+            db.execute(
+                "DELETE FROM referrals WHERE workspace_id=? AND patient_id=?",
+                (workspace_id, patient_id),
+            )
             remaining = db.execute(
                 "SELECT COUNT(*) FROM consultations WHERE workspace_id=?", (workspace_id,)
             ).fetchone()[0]
         return {
             "patient_id": patient_id,
             "removed_consultations": removed,
+            "removed_referrals": removed_referrals,
             "remaining_consultations": remaining,
             "reset_complete": True,
         }
