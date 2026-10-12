@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from backend.api import consult as consult_api
 from backend.api import referrals as referrals_api
-from backend.demo_identity import PCP_AGENT_ID
+from backend.demo_identity import LUCY_AGENT_ID, PCP_AGENT_ID
 from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
 from backend.models import CoordinationEventType, ReferralStatus, RequirementStatus
@@ -34,7 +34,7 @@ def api_client(monkeypatch: pytest.MonkeyPatch, tmp_path) -> TestClient:
 def test_referral_can_be_created_for_tonjit_with_correct_parties_and_question() -> None:
     patient, referral = tonjit_referral()
     assert referral.patient_id == TONJIT_PATIENT_ID
-    assert referral.referring_physician_id == PCP_AGENT_ID
+    assert referral.referring_physician_id == LUCY_AGENT_ID
     assert referral.receiving_physician_id == CHEN_ID
     assert referral.specialty == "Endocrinology"
     assert referral.referral_question == patient.referral_question
@@ -75,6 +75,44 @@ def test_tonjits_underlying_chart_does_contain_renal_function_despite_initial_pa
     egfr = next(lab for lab in renal_labs if lab.test == "eGFR")
     assert creatinine.value == 0.9
     assert egfr.value == 97
+
+
+# --------------------------------------------------------------------- PART A
+
+
+def test_lianne_chas_agent_id_never_appears_anywhere_in_tonjits_referral() -> None:
+    """Regression for the provenance bug: Tonjit's referring physician is Dr.
+    Lucy Saruhashi, whose canonical agent id is LUCY_AGENT_ID -- the legacy
+    PCP_AGENT_ID (an unrelated historical identifier kept only so already
+    -stored consult transcripts keep resolving) must never leak into referral
+    data."""
+    patient, referral = tonjit_referral()
+    updated = run_preflight(patient, referral)
+
+    assert updated.referring_physician_id != PCP_AGENT_ID
+    assert updated.referring_physician_id == LUCY_AGENT_ID
+    for item in updated.packet.items:
+        assert item.provenance.attached_by != PCP_AGENT_ID
+        assert item.provenance.attached_by == LUCY_AGENT_ID
+    for event in updated.coordination_events:
+        assert PCP_AGENT_ID not in event.model_dump_json()
+
+
+def test_referring_agent_identity_is_resolved_from_the_referral_not_a_hardcoded_fallback() -> None:
+    """build_referral/run_preflight must thread whichever referring physician
+    created the referral through to packet provenance -- never silently fall
+    back to a module-level constant regardless of who actually referred."""
+    patient = PATIENTS[TONJIT_PATIENT_ID]
+    referral = build_referral(
+        patient, CHEN_ID, "Endocrinology", referring_physician_id="agent-some-other-pcp"
+    )
+    assert referral.referring_physician_id == "agent-some-other-pcp"
+    for item in referral.packet.items:
+        assert item.provenance.attached_by == "agent-some-other-pcp"
+
+    updated = run_preflight(patient, referral)
+    renal_item = updated.packet.item("recent_renal_function")
+    assert renal_item.provenance.attached_by == "agent-some-other-pcp"
 
 
 # --------------------------------------------------------------------- PART V
@@ -165,7 +203,7 @@ def test_event_actors_are_distinguishable_and_provenance_points_to_the_real_resu
     assert {"referring_agent", "receiving_agent", "system"} <= {actor.value for actor in actors}
 
     renal_item = updated.packet.item("recent_renal_function")
-    assert renal_item.provenance.attached_by == PCP_AGENT_ID
+    assert renal_item.provenance.attached_by == LUCY_AGENT_ID
     assert renal_item.provenance.observed_date == "2026-07-20"
 
 

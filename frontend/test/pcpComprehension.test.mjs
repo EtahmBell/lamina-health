@@ -106,7 +106,7 @@ test('alternatives and the technical transparency section are both collapsed by 
   assert.match(view, /Other referral options <span>\{alternativesOpen \? '−' : '\+'\}<\/span>/)
   assert.match(view, /alternativesOpen && <div className="alternatives-list">/, 'alternatives render as compact rows, not full duplicate cards')
   assert.match(view, /How your agent handled this/)
-  assert.match(view, /networkOpen && <div className="network-record">/)
+  assert.match(view, /networkOpen && <div className="post-flow-overlay"/, 'detailed consultation activity now opens in a modal, not an inline expansion')
 })
 
 test('the recommendation-ready default card is compact -- one fit indicator, one metadata line, one rationale sentence, driven by the currently selected candidate', () => {
@@ -151,7 +151,7 @@ test('the ready state renders the full recommendation directly in the sticky rai
   const page = patientPage()
   assert.match(page, /nextStepState === 'ready' && consultation && <>/)
   assert.match(page, /A specialist is ready for your review\./)
-  assert.match(page, /<RecommendationView consultation=\{consultation\} navigate=\{navigate\} recordId=\{recordId\} \/>/)
+  assert.match(page, /<RecommendationView consultation=\{consultation\} navigate=\{navigate\} recordId=\{recordId\} referralQuestion=\{patient\.referral_question\} \/>/)
 })
 
 /* ------------------------------------------------------------------ §11 */

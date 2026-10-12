@@ -9,7 +9,6 @@ taught to reach for it. Preflight (see resolver.py) is what notices the gap.
 
 from __future__ import annotations
 
-from backend.demo_identity import PCP_AGENT_ID
 from backend.models import ClinicalRepresentation, PacketItem, PacketItemProvenance, PatientRecord, ReferralPacket
 
 INITIAL_ASSEMBLY_FIELDS_BY_CASE_FAMILY: dict[str, list[str]] = {
@@ -22,7 +21,7 @@ def _latest_lab(patient: PatientRecord, test: str):
     return max(matches, key=lambda lab: lab.date) if matches else None
 
 
-def _hba1c_item(patient: PatientRecord, context: ClinicalRepresentation) -> PacketItem | None:
+def _hba1c_item(patient: PatientRecord, context: ClinicalRepresentation, referring_agent_id: str) -> PacketItem | None:
     lab = _latest_lab(patient, "HbA1c")
     if lab is None:
         return None
@@ -34,12 +33,12 @@ def _hba1c_item(patient: PatientRecord, context: ClinicalRepresentation) -> Pack
         label="Recent HbA1c",
         value=value,
         provenance=PacketItemProvenance(
-            source="patient_chart", attached_by=PCP_AGENT_ID, attached_during="initial_assembly", observed_date=lab.date
+            source="patient_chart", attached_by=referring_agent_id, attached_during="initial_assembly", observed_date=lab.date
         ),
     )
 
 
-def _medications_item(patient: PatientRecord, _context: ClinicalRepresentation) -> PacketItem | None:
+def _medications_item(patient: PatientRecord, _context: ClinicalRepresentation, referring_agent_id: str) -> PacketItem | None:
     if not patient.medications:
         return None
     return PacketItem(
@@ -47,12 +46,12 @@ def _medications_item(patient: PatientRecord, _context: ClinicalRepresentation) 
         label="Current diabetes medication list",
         value=", ".join(patient.medications),
         provenance=PacketItemProvenance(
-            source="patient_chart", attached_by=PCP_AGENT_ID, attached_during="initial_assembly", observed_date=None
+            source="patient_chart", attached_by=referring_agent_id, attached_during="initial_assembly", observed_date=None
         ),
     )
 
 
-def _glucose_log_item(patient: PatientRecord, context: ClinicalRepresentation) -> PacketItem | None:
+def _glucose_log_item(patient: PatientRecord, context: ClinicalRepresentation, referring_agent_id: str) -> PacketItem | None:
     lab = _latest_lab(patient, "fasting_glucose")
     if lab is None:
         return None
@@ -64,7 +63,7 @@ def _glucose_log_item(patient: PatientRecord, context: ClinicalRepresentation) -
         label="Home glucose log",
         value=value,
         provenance=PacketItemProvenance(
-            source="patient_chart", attached_by=PCP_AGENT_ID, attached_during="initial_assembly", observed_date=lab.date
+            source="patient_chart", attached_by=referring_agent_id, attached_during="initial_assembly", observed_date=lab.date
         ),
     )
 
@@ -76,12 +75,17 @@ _ITEM_BUILDERS = {
 }
 
 
-def assemble_initial_packet(patient: PatientRecord, context: ClinicalRepresentation) -> ReferralPacket:
+def assemble_initial_packet(
+    patient: PatientRecord, context: ClinicalRepresentation, referring_agent_id: str
+) -> ReferralPacket:
+    """`referring_agent_id` is always the actual referring physician's agent
+    identity for THIS referral -- never a global fallback constant -- so
+    packet provenance is correct no matter who referred the patient."""
     fields = INITIAL_ASSEMBLY_FIELDS_BY_CASE_FAMILY.get(context.case_family, [])
     items: list[PacketItem] = []
     for key in fields:
         builder = _ITEM_BUILDERS.get(key)
-        item = builder(patient, context) if builder else None
+        item = builder(patient, context, referring_agent_id) if builder else None
         if item is not None:
             items.append(item)
     return ReferralPacket(items=items)

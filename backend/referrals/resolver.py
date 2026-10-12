@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from backend.demo_identity import PCP_AGENT_ID
 from backend.models import PacketItem, PacketItemProvenance, PatientRecord, ReferralRequirement
 
 # Which structured chart lab tests, if all present and fresh enough, satisfy a
@@ -34,11 +33,14 @@ def _latest_lab(patient: PatientRecord, test: str):
 def resolve_missing_requirement(
     patient: PatientRecord,
     requirement: ReferralRequirement,
+    referring_agent_id: str,
     *,
     today: date | None = None,
 ) -> PacketItem | None:
     """Find existing chart data that satisfies `requirement`, or None if no
-    qualifying result exists. Never fabricates a result."""
+    qualifying result exists. Never fabricates a result. `referring_agent_id`
+    is the actual referring physician's agent identity for this referral --
+    never a global fallback constant -- so attachment provenance is correct."""
     test_names = REQUIREMENT_CHART_SOURCES.get(requirement.key)
     if not test_names:
         return None
@@ -61,7 +63,7 @@ def resolve_missing_requirement(
         value=f"{value} ({observed_date})",
         provenance=PacketItemProvenance(
             source="patient_chart",
-            attached_by=PCP_AGENT_ID,
+            attached_by=referring_agent_id,
             attached_during="preflight",
             observed_date=observed_date,
         ),

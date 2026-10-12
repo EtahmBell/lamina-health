@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from backend.clinical import build_patient_context
-from backend.demo_identity import PCP_AGENT_ID
+from backend.demo_identity import LUCY_AGENT_ID
 from backend.models import (
     AutonomyLevel,
     CoordinationActor,
@@ -60,7 +60,7 @@ def build_referral(
     receiving_physician_id: str,
     specialty: str,
     *,
-    referring_physician_id: str = PCP_AGENT_ID,
+    referring_physician_id: str = LUCY_AGENT_ID,
     urgency: str = "Routine outpatient referral",
 ) -> Referral:
     """Create a new referral and assemble its initial packet. Does not persist."""
@@ -86,7 +86,7 @@ def build_referral(
         summary=f"Referral created for {patient.display_name.replace(' (synthetic)', '')} to {specialty}.",
         metadata={"receiving_physician_id": receiving_physician_id},
     )
-    referral.packet = assemble_initial_packet(patient, context)
+    referral.packet = assemble_initial_packet(patient, context, referral.referring_physician_id)
     referral.receiving_requirements = requirements_for(receiving_physician_id, context.case_family)
     referral.status = ReferralStatus.ASSEMBLING
     _append_event(
@@ -155,7 +155,7 @@ def run_preflight(patient: PatientRecord, referral: Referral) -> Referral:
             summary=f"Searching the patient record for {requirement.label.lower()}.",
             metadata={"requirement": requirement.key},
         )
-        found = resolve_missing_requirement(patient, requirement)
+        found = resolve_missing_requirement(patient, requirement, referral.referring_physician_id)
         if found is None:
             _append_event(
                 referral,

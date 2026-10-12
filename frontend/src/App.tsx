@@ -18,6 +18,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
+import { ReferralCoordinationSurface } from './Referral.tsx'
 
 type Navigate = (path: string) => void
 
@@ -552,7 +553,7 @@ function ConsultationLog({ messages, focusEventId, highlight }: { messages: Cons
   return <div className="consult-record-stages"><header><strong>Structured consultation record</strong><small>{messages.length} backend events · original sequence preserved</small></header>{stages.map((stage) => <section className={`consult-record-stage ${stage.kind}`} key={stage.id}><div className="consult-record-stage-heading"><span>{stage.title}</span><small>{stage.messages.length} event{stage.messages.length === 1 ? '' : 's'}</small></div><div className="consult-record-events">{stage.messages.map((message) => <details className={`consult-record-event ${message.id === focusEventId ? 'targeted' : ''} ${message.id === focusEventId && highlight ? 'event-focus' : ''}`} id={eventDomId(message.id)} open={message.id === focusEventId} key={message.id}><summary><span>{message.sequence.toString().padStart(2, '0')}</span><div><strong>{messageSender(message)}</strong><small>{message.summary}</small></div><em>{messageLabel(message)}</em></summary><div className="consult-record-evidence"><p>{message.sender_role} → {message.recipient_agent_id === PCP_AGENT_ID ? PCP_AGENT_NAME : message.recipient_agent_id === 'network' ? 'Physician network' : 'Specialist agent'}</p>{message.related_patient_facts.map((fact) => <p key={fact}><b>Patient fact</b>{fact}</p>)}{message.evidence.map((item, index) => <p key={`${index}-${item.kind}`}><b>{item.kind.replaceAll('_', ' ')}</b>{item.detail}</p>)}{!message.evidence.length && !message.related_patient_facts.length && <p>No additional structured evidence on this event.</p>}</div></details>)}</div></section>)}</div>
 }
 
-function RecommendationView({ consultation, navigate, focusEventId = null, recordId }: { consultation: Consultation; navigate: Navigate; focusEventId?: string | null; recordId?: number }) {
+function RecommendationView({ consultation, navigate, focusEventId = null, recordId, referralQuestion = null }: { consultation: Consultation; navigate: Navigate; focusEventId?: string | null; recordId?: number; referralQuestion?: string | null }) {
   const [networkOpen, setNetworkOpen] = useState(Boolean(focusEventId))
   const [highlight, setHighlight] = useState(Boolean(focusEventId))
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -572,6 +573,12 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
     const frame = window.requestAnimationFrame(() => document.getElementById(eventDomId(focusEventId))?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
     return () => window.cancelAnimationFrame(frame)
   }, [focusEventId, networkOpen])
+  useEffect(() => {
+    if (!networkOpen) return
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setNetworkOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [networkOpen])
   const primary = consultation.recommended_physician
   const historical = evidenceFor(primary, 'historical_practice_similarity')
   const operational = evidenceFor(primary, 'operational')
@@ -613,7 +620,9 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
       <p className="fit-indicator">{selected.clinical_fit === 'strong' ? 'Strong clinical fit' : selected.clinical_fit === 'moderate' ? 'Moderate clinical fit' : 'Limited clinical fit'}</p>
       <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selected.availability}</p>
       <p className="fit-rationale">{selected.reason}</p>
-      <div className="best-fit-actions"><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(selected.physician_name)} · {selected.specialty}</span><span>Workup: {selected.required_workup.join(' · ') || 'None specified'}</span><span>No referral was transmitted.</span></div>}</div>
+      <div className="best-fit-actions">{referralQuestion
+        ? <ReferralCoordinationSurface key={selected.physician_id} patientId={consultation.patient_id} receivingPhysicianId={selected.physician_id} receivingPhysicianName={cleanName(selected.physician_name)} />
+        : <><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(selected.physician_name)} · {selected.specialty}</span><span>Workup: {selected.required_workup.join(' · ') || 'None specified'}</span><span>No referral was transmitted.</span></div>}</>}</div>
     </article>
 
     <div className="recommendation-feedback"><span>Does this reflect how you would practice?</span>{affirmed ? <em role="status">Noted. Nothing was changed on your agent.</em> : <><button className="text-button" onClick={() => setAffirmed(true)}>Yes</button><button className="text-button" onClick={() => navigate(calibrationPath(learningKeyForPatient(consultation.patient_id), consultation.patient_id, recordId))}>Not quite <b>→</b></button></>}</div>
@@ -636,15 +645,21 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
       </div>)}</div>}
     </section>
 
-    <section className="network-transparency"><button className="network-transparency-toggle" onClick={() => setNetworkOpen(!networkOpen)} aria-expanded={networkOpen}><span><b>How your agent handled this</b></span><em>{networkOpen ? 'Hide' : 'View'} <i>⌄</i></em></button>
-      {networkOpen && <div className="network-record">
-        <p className="agent-consult-count">{consultation.consultation.length} physician agent{consultation.consultation.length === 1 ? '' : 's'} consulted</p>
-        <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}</div>
-        <div className="record-note">Deliberate structured messages and evidence only. Hidden model chain-of-thought is not stored or shown.</div><ConsultationLog messages={consultation.messages} focusEventId={focusEventId} highlight={highlight} /><div className="evaluation-record-heading">Physician evaluation records</div>{consultation.consultation.map((agent) => { const rule = evidenceFor(agent, 'explicit_physician_rule'); const history = evidenceFor(agent, 'historical_practice_similarity'); return <details key={agent.physician_id} open={agent.physician_id === primary.physician_id}><summary><span className="mini-avatar">{physicianInitials(agent.physician_name)}</span><span className="agent-name"><b>{cleanName(agent.physician_name)}</b><small>{agent.specialty}</small></span><span className={`decision-badge ${agent.clinical_fit}`}>{agent.accepts_case ? agent.clinical_fit === 'strong' ? 'Strong fit' : 'Accepts' : 'Redirect'}</span><span className="chevron">⌄</span></summary><div className="structured-evidence"><p>{agent.reason}</p><div className="evidence-grid"><div><span>Decision</span><strong>{agent.accepts_case ? 'Accepts case' : 'Redirects / does not accept'}</strong></div><div><span>Availability</span><strong>{agent.availability}</strong></div><div><span>Insurance</span><strong>{insuranceLabel(agent.insurance_status)}</strong></div><div><span>Required workup</span><strong>{agent.required_workup.join(' · ')}</strong></div>{rule && <div className="wide"><span>Relevant physician rule</span><strong>{rule}</strong></div>}{history && <div className="wide"><span>Historical-practice signal</span><strong>{history}</strong></div>}</div></div></details> })}
-        <p>These are structured inputs and recorded conclusions, not private model reasoning.</p>
-      </div>}
-    </section>
+    <section className="network-transparency"><button className="network-transparency-toggle" onClick={() => setNetworkOpen(true)} aria-expanded={networkOpen}><span><b>How your agent handled this</b></span><em>View consultation details <i>⌄</i></em></button></section>
     <p className="disclaimer">{consultation.disclaimer}</p>
+    {networkOpen && <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setNetworkOpen(false) }}>
+      <div className="post-flow-dialog consult-detail-dialog" role="dialog" aria-modal="true" aria-label="Consultation details">
+        <button className="text-button post-flow-close" onClick={() => setNetworkOpen(false)} aria-label="Close">×</button>
+        <p className="eyebrow">Consultation details</p>
+        <h2>How your agent handled this</h2>
+        <div className="network-record">
+          <p className="agent-consult-count">{consultation.consultation.length} physician agent{consultation.consultation.length === 1 ? '' : 's'} consulted</p>
+          <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}</div>
+          <div className="record-note">Deliberate structured messages and evidence only. Hidden model chain-of-thought is not stored or shown.</div><ConsultationLog messages={consultation.messages} focusEventId={focusEventId} highlight={highlight} /><div className="evaluation-record-heading">Physician evaluation records</div>{consultation.consultation.map((agent) => { const rule = evidenceFor(agent, 'explicit_physician_rule'); const history = evidenceFor(agent, 'historical_practice_similarity'); return <details key={agent.physician_id} open={agent.physician_id === primary.physician_id}><summary><span className="mini-avatar">{physicianInitials(agent.physician_name)}</span><span className="agent-name"><b>{cleanName(agent.physician_name)}</b><small>{agent.specialty}</small></span><span className={`decision-badge ${agent.clinical_fit}`}>{agent.accepts_case ? agent.clinical_fit === 'strong' ? 'Strong fit' : 'Accepts' : 'Redirect'}</span><span className="chevron">⌄</span></summary><div className="structured-evidence"><p>{agent.reason}</p><div className="evidence-grid"><div><span>Decision</span><strong>{agent.accepts_case ? 'Accepts case' : 'Redirects / does not accept'}</strong></div><div><span>Availability</span><strong>{agent.availability}</strong></div><div><span>Insurance</span><strong>{insuranceLabel(agent.insurance_status)}</strong></div><div><span>Required workup</span><strong>{agent.required_workup.join(' · ')}</strong></div>{rule && <div className="wide"><span>Relevant physician rule</span><strong>{rule}</strong></div>}{history && <div className="wide"><span>Historical-practice signal</span><strong>{history}</strong></div>}</div></div></details> })}
+          <p>These are structured inputs and recorded conclusions, not private model reasoning.</p>
+        </div>
+      </div>
+    </div>}
   </section>
 }
 
@@ -802,7 +817,7 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
             <h3>A specialist is ready for your review.</h3>
             <p>Review the match below, then choose how to move care forward.</p>
           </div>
-          <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} />
+          <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} referralQuestion={patient.referral_question} />
         </>}
         {nextStepState === 'idle-prior' && <div className="next-step-card idle">
           <h3>Previous network consultation available.</h3>
