@@ -2041,7 +2041,7 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-coordination-surface > .text-button { margin-top: 10px; }
 .referral-mode-links { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 18px; }
 .referral-mode-links .text-button { margin-top: 0; }
-.referral-phase { width: 100%; transition: opacity 260ms ease-in-out; }
+.referral-phase { width: 100%; transition: opacity 500ms ease-in-out; }
 .referral-phase.phase-fading { opacity: 0; }
 .referral-found-value { font-family: var(--font-display); color: var(--clinical); }
 @media (prefers-reduced-motion: reduce) { .referral-phase { transition: none; } }
@@ -2051,7 +2051,7 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
    never jumps the layout. A deliberate spacing hierarchy (Part A), not a
    single global margin bump: each section-to-section relationship gets its
    own considered gap. */
-.best-fit-card.referral-card { padding-bottom: 26px; }
+.best-fit-card.referral-card { padding-bottom: 26px; position: relative; }
 .best-fit-card.referral-card .back-to-match { display: block; margin-bottom: 14px; font-size: .64rem; }
 .best-fit-card.referral-card .best-fit-kicker { margin-bottom: 2px; }
 .best-fit-card.referral-card .best-fit-physician { padding-top: 12px; }
@@ -2080,13 +2080,20 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .packet-item p { margin: 4px 0 0; color: var(--clinical); font-size: .74rem; line-height: 1.5; }
 .packet-item-provenance { display: block; margin-top: 4px; color: var(--text-secondary); font-size: .62rem; font-style: italic; }
 
-/* Full-card success-wash (Part D/E): the referral card itself is the
-   confirmation -- no separate toast. A restrained, translucent mineral/
-   blue-grey background transition on the SAME stable card, never a new
-   element popping in. Content inside still crossfades via .referral-phase. */
-.best-fit-card.referral-card { transition: background-color 420ms ease, border-color 420ms ease; }
-.best-fit-card.referral-card.success-wash { background-color: var(--mineral-surface); border-color: var(--mineral-subtle); }
-.referral-wash-line { margin: 6px 0 0; color: var(--mineral-deep); font-size: .76rem; line-height: 1.5; }
+/* Full-card completion takeover (Part 2-4): absolutely positioned over the
+   whole referral card (which is position: relative, above), so it covers
+   the kicker/physician row/back-button too -- no layout jump, no separate
+   toast, no second competing confirmation. Centered both ways via flex.
+   Always mounted at opacity 0 so toggling .visible is a pure CSS fade;
+   the wash background and the completion text fade away together because
+   they're the same element. */
+.referral-handoff-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; background: rgb(233 239 241 / 96%); border-radius: inherit; opacity: 0; pointer-events: none; transition: opacity 500ms ease-in-out; }
+.referral-handoff-overlay.visible { opacity: 1; pointer-events: auto; }
+.referral-handoff-check { font-family: var(--font-display); font-size: 1.4rem; color: var(--mineral-deep); }
+.referral-handoff-overlay h3 { margin: 2px 0 0; font-size: 1.1rem; font-weight: 500; color: var(--clinical); }
+.referral-handoff-overlay p { margin: 0; color: var(--mineral-deep); font-size: .8rem; font-weight: 600; }
+.referral-handoff-overlay small { color: var(--text-secondary); font-size: .64rem; }
+@media (prefers-reduced-motion: reduce) { .referral-handoff-overlay { transition: none; } }
 .referral-submission-meta { color: var(--text-secondary); font-size: .6rem; }
 @media (prefers-reduced-motion: reduce) { .best-fit-card.referral-card { transition: none; } }
 

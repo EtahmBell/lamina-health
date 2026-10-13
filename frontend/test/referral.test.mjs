@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { derivePhases, PHASE_FADE_MS, PHASE_HOLD_MS, restorePhase } from '../src/referralPhases.ts'
+import { derivePhases, PHASE_FADE_MS, PHASE_HOLD_MS, restorePhase, SUCCESS_WASH_HOLD_MS } from '../src/referralPhases.ts'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const referralSource = readFileSync(new URL('../src/Referral.tsx', import.meta.url), 'utf8')
@@ -238,18 +238,28 @@ test('phase transitions use one continuously stable surface -- content is swappe
 
 /* ------------------------------------------------------------- polish pass: pacing */
 
-test('pacing was slowed from the previous pass -- each phase holds longer, and the crossfade itself is slightly longer', () => {
-  assert.ok(PHASE_HOLD_MS.preparing >= 1500 && PHASE_HOLD_MS.preparing > 1300)
-  assert.ok(PHASE_HOLD_MS.checking >= 1500 && PHASE_HOLD_MS.checking > 1300)
-  assert.ok(PHASE_HOLD_MS.missing >= 1800 && PHASE_HOLD_MS.missing > 1500)
-  assert.ok(PHASE_HOLD_MS.found >= 1800 && PHASE_HOLD_MS.found > 1500)
-  assert.ok(PHASE_FADE_MS > 180)
+test('the crossfade duration is a slow, soft dissolve (~450-600ms), not the previous snappy ~260ms fade', () => {
+  assert.ok(PHASE_FADE_MS >= 450 && PHASE_FADE_MS <= 600, `expected 450-600ms, got ${PHASE_FADE_MS}`)
+  assert.match(styles, /\.referral-phase \{ width: 100%; transition: opacity 500ms ease-in-out; \}/)
 })
 
-test('the full Tonjit-style sequence (preparing, checking, missing, found, ready) still breathes without feeling sluggish', () => {
-  const totalHold = PHASE_HOLD_MS.preparing + PHASE_HOLD_MS.checking + PHASE_HOLD_MS.missing + PHASE_HOLD_MS.found + PHASE_HOLD_MS.ready
-  assert.ok(totalHold >= 7000, 'slower than before')
-  assert.ok(totalHold <= 12000, 'still not sluggish')
+test('the substantive phases (preparing/checking/missing/found) each hold roughly 1.8-2.2 seconds so they can actually be read', () => {
+  for (const kind of ['preparing', 'checking', 'missing', 'found']) {
+    assert.ok(PHASE_HOLD_MS[kind] >= 1800 && PHASE_HOLD_MS[kind] <= 2200, `${kind}: expected 1800-2200ms, got ${PHASE_HOLD_MS[kind]}`)
+  }
+})
+
+test('the success-wash hold is also roughly 1.8-2.2 seconds, matching the other substantive phases', () => {
+  assert.ok(SUCCESS_WASH_HOLD_MS >= 1800 && SUCCESS_WASH_HOLD_MS <= 2200, `expected 1800-2200ms, got ${SUCCESS_WASH_HOLD_MS}`)
+})
+
+test('the full live referral sequence lands in a demo-acceptable ballpark -- slower than the previous pass, not absurdly long', () => {
+  const crossfades = 6 // checking, missing, found, ready, wash-in, wash-out
+  const holds = PHASE_HOLD_MS.preparing + PHASE_HOLD_MS.checking + PHASE_HOLD_MS.missing + PHASE_HOLD_MS.found
+    + PHASE_HOLD_MS.ready + SUCCESS_WASH_HOLD_MS + PHASE_HOLD_MS.sent
+  const total = holds + crossfades * PHASE_FADE_MS
+  assert.ok(total > 10000, 'slower than the previous pass')
+  assert.ok(total < 20000, 'still a bounded, non-absurd demo sequence')
 })
 
 /* --------------------------------------------------- polish pass: timeline dot color */
@@ -309,10 +319,31 @@ test('the durable sent state renders "Awaiting Dr. X\'s review" as the primary h
   assert.doesNotMatch(referralSource, /accepted/i)
 })
 
-test('the brief completion moment and the durable card both derive their copy from the same real phase data, never two conflicting claims', () => {
-  assert.match(referralSource, /if \(justCompleted\) \{/)
-  assert.match(referralSource, /The completed packet was sent to Dr\. \{who\}\.<\/p>/)
-  assert.match(referralSource, /\{resolvedSummary\(phase\.resolvedCount\)\}/)
+test('the brief completion overlay and the durable card both derive their copy from the same real phase data, never two conflicting claims', () => {
+  assert.match(referralSource, /className=\{`referral-handoff-overlay \$\{justCompleted \? 'visible' : ''\}`\}/)
+  assert.match(referralSource, /<h3>Referral handoff complete<\/h3>/)
+  assert.match(referralSource, /<p>Sent to \{receivingPhysicianName\}<\/p>/)
+  assert.match(referralSource, /const sentResolvedCount = visiblePhase\.kind === 'sent' \? visiblePhase\.resolvedCount : 0/)
+  assert.match(referralSource, /\{sentResolvedCount > 0 && <small>\{resolvedSummary\(sentResolvedCount\)\} automatically\.<\/small>\}/)
+})
+
+test('"Referral handoff complete" is distinct from "Referral complete" -- it never implies the specialist has accepted', () => {
+  assert.match(referralSource, /Referral handoff complete/)
+  assert.doesNotMatch(referralSource, />Referral complete</)
+})
+
+test('the completion overlay covers the entire card (position: absolute over the position: relative card), not just the inner phase text -- so it reads as a true card takeover with no layout jump', () => {
+  assert.match(styles, /\.referral-handoff-overlay \{ position: absolute; inset: 0;/)
+  assert.match(styles, /\.best-fit-card\.referral-card \{ padding-bottom: 26px; position: relative; \}/)
+})
+
+test('the completion overlay is centered both horizontally and vertically within the card', () => {
+  assert.match(styles, /\.referral-handoff-overlay \{[^}]*align-items: center;[^}]*justify-content: center;[^}]*text-align: center;/)
+})
+
+test('the overlay has no links, status pill, or match information -- for this moment the completion message IS the card', () => {
+  const overlaySource = referralSource.slice(referralSource.indexOf('<div className={`referral-handoff-overlay'), referralSource.indexOf('{coordinationOpen'))
+  assert.doesNotMatch(overlaySource, /status-label|text-button|referral-mode-links/)
 })
 
 test('the durable card shows a quiet resolved-item + submitted-timestamp metadata line, sourced from real referral/event data', () => {
@@ -569,5 +600,30 @@ test('the referral card uses a deliberate spacing hierarchy, not one global marg
   assert.match(styles, /\.referral-coordination-surface h3 \{ margin: 14px 0 0;/)
   assert.match(styles, /\.referral-coordination-surface small \{ display: block; margin-top: 10px;/)
   assert.match(styles, /\.referral-mode-links \{[^}]*margin-top: 18px;/)
-  assert.match(styles, /\.best-fit-card\.referral-card \{ padding-bottom: 26px; \}/)
+  assert.match(styles, /\.best-fit-card\.referral-card \{ padding-bottom: 26px;/)
+})
+
+/* ========================================================================
+ * Final completion polish pass (slower crossfade + centered takeover)
+ * ===================================================================== */
+
+test('the sequence never stacks old-phase content, the completion overlay, and durable content at once -- revealSentPhase swaps state atomically, one clean moment at a time', () => {
+  const revealSentSource = referralSource.slice(referralSource.indexOf('const revealSentPhase ='), referralSource.indexOf('const start = async'))
+  // step 1: crossfade swaps visiblePhase + justCompleted together (one atomic apply())
+  assert.match(revealSentSource, /await crossfade\(\(\) => \{ setVisiblePhase\(phase\); setJustCompleted\(true\) \}\)/)
+  // step 2: justCompleted flips off on its own (the overlay's own CSS transition owns this fade)
+  assert.match(revealSentSource, /setJustCompleted\(false\)/)
+})
+
+test('the overlay is a pure CSS opacity transition (no JS double-rAF needed for its own fade), so wash background and completion text fade away together as one element', () => {
+  assert.match(styles, /\.referral-handoff-overlay \{[^}]*opacity: 0;[^}]*transition: opacity 500ms ease-in-out;/)
+  assert.match(styles, /\.referral-handoff-overlay\.visible \{ opacity: 1;/)
+})
+
+test('no backend calls happen anywhere in start() other than the single create+preflight pair before the phase loop begins', () => {
+  const startSource = referralSource.slice(referralSource.indexOf('const start = async'), referralSource.indexOf('if (status === \'error\')'))
+  const createCalls = startSource.match(/createReferral\(/g) ?? []
+  const preflightCalls = startSource.match(/runReferralPreflight\(/g) ?? []
+  assert.equal(createCalls.length, 1)
+  assert.equal(preflightCalls.length, 1)
 })

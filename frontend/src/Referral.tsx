@@ -9,7 +9,7 @@ export type { DisplayPhase } from './referralPhases.ts'
 
 const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
-function PhaseContent({ phase, receivingPhysicianName, justCompleted }: { phase: DisplayPhase; receivingPhysicianName: string; justCompleted?: boolean }) {
+function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; receivingPhysicianName: string }) {
   const who = lastName(receivingPhysicianName)
   switch (phase.kind) {
     case 'preparing':
@@ -47,17 +47,9 @@ function PhaseContent({ phase, receivingPhysicianName, justCompleted }: { phase:
         <small>Referral packet complete</small>
       </>
     case 'sent':
-      // Two renderings of the same real "submitted" phase data: a brief
-      // full-card completion moment (see the success-wash treatment on the
-      // outer card), then a crossfade into the durable "awaiting review"
-      // copy. Never two different claims -- just two moments in hierarchy.
-      if (justCompleted) {
-        return <>
-          <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Referral sent</span>
-          <p className="referral-wash-line">The completed packet was sent to Dr. {who}.</p>
-          <p className="referral-wash-line">{resolvedSummary(phase.resolvedCount)}.</p>
-        </>
-      }
+      // The durable rendering only -- the brief completion moment (Part 2-4)
+      // is a separate full-card overlay drawn on top of this, never a second
+      // competing claim inside the same text block.
       return <>
         <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Sent</span>
         <h3>Awaiting Dr. {who}'s review</h3>
@@ -87,18 +79,18 @@ function PhaseContent({ phase, receivingPhysicianName, justCompleted }: { phase:
  *   presentation pacing -- the backend call itself is never delayed (Part E/F/Y).
  */
 export function ReferralCoordinationSurface({
-  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onSuccessWashChange,
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral,
 }: {
   patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string
   restoredReferral: Referral | null
-  /** Lets the parent card apply a full-card success-wash background while the
-   * completion moment plays -- never fired on restoration, only on a live
-   * Start-referral run (see Part D). */
-  onSuccessWashChange?: (active: boolean) => void
 }) {
   const [status, setStatus] = useState<'running' | 'done' | 'error'>(restoredReferral ? 'done' : 'running')
   const [visiblePhase, setVisiblePhase] = useState<DisplayPhase | null>(restoredReferral ? restorePhase(restoredReferral) : null)
   const [fading, setFading] = useState(false)
+  // justCompleted is true only during the brief live completion moment --
+  // never on a restored/hydrated referral, never on error/unresolved paths.
+  // It drives a full-card overlay (position: absolute over .best-fit-card),
+  // not a change to the underlying phase content.
   const [justCompleted, setJustCompleted] = useState(false)
   const [referral, setReferral] = useState<Referral | null>(restoredReferral)
   const [coordinationOpen, setCoordinationOpen] = useState(false)
@@ -110,8 +102,6 @@ export function ReferralCoordinationSurface({
   useEffect(() => () => {
     cancelled.current = true
     timers.current.forEach((id) => window.clearTimeout(id))
-    onSuccessWashChange?.(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -158,19 +148,23 @@ export function ReferralCoordinationSurface({
   }
 
   /**
-   * The "sent" phase gets a stronger, two-moment reveal (Part D): first a
-   * brief full-card success wash ("Referral sent" / what was resolved),
-   * held long enough to register as a real completion event, then a
-   * crossfade into the durable "Awaiting Dr. X's review" card. Both moments
-   * render the exact same real phase data -- only the copy hierarchy and the
-   * outer card's background differ.
+   * The "sent" phase gets a stronger, three-moment reveal (Part 2-4):
+   * 1. Crossfade out of the last coordination phase, and prepare the
+   *    durable "Awaiting Dr. X's review" content underneath.
+   * 2. Simultaneously bring up a full-card completion overlay ("Referral
+   *    handoff complete") that visually covers everything -- its own CSS
+   *    opacity transition, so it's a true takeover, not a status line.
+   * 3. Hold, then fade the overlay away together with its background,
+   *    revealing the durable content that was already prepared underneath.
+   * Never stacks old-phase + overlay + durable content at once.
    */
   const revealSentPhase = async (phase: DisplayPhase & { kind: 'sent' }) => {
-    await crossfade(() => { setVisiblePhase(phase); setJustCompleted(true); onSuccessWashChange?.(true) })
+    await crossfade(() => { setVisiblePhase(phase); setJustCompleted(true) })
     if (cancelled.current) return
     await sleep(prefersReducedMotion() ? 500 : SUCCESS_WASH_HOLD_MS)
     if (cancelled.current) return
-    await crossfade(() => { setJustCompleted(false); onSuccessWashChange?.(false) })
+    setJustCompleted(false)
+    await sleep(prefersReducedMotion() ? 0 : PHASE_FADE_MS)
     if (cancelled.current) return
     await sleep(PHASE_HOLD_MS.sent)
   }
@@ -201,14 +195,26 @@ export function ReferralCoordinationSurface({
     return <div className="referral-coordination-surface error-banner" role="alert">{error}</div>
   }
   if (!visiblePhase) return null
+  const sentResolvedCount = visiblePhase.kind === 'sent' ? visiblePhase.resolvedCount : 0
   return <div className="referral-coordination-surface" role="status">
     <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
-      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} justCompleted={justCompleted} />
+      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} />
     </div>
     {status === 'done' && referral && !justCompleted && <div className="referral-mode-links">
       <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
       <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>
     </div>}
+    {/* Full-card completion takeover (Part 2-4): absolutely positioned over
+     * the whole .best-fit-card.referral-card (which is position: relative),
+     * so it covers the kicker/physician row/back-button too without any
+     * layout jump, and is trivially centered via flex. Its own CSS opacity
+     * transition drives the fade -- no JS double-rAF needed here. */}
+    <div className={`referral-handoff-overlay ${justCompleted ? 'visible' : ''}`} aria-hidden={!justCompleted} role={justCompleted ? 'status' : undefined}>
+      <span className="referral-handoff-check" aria-hidden="true">✓</span>
+      <h3>Referral handoff complete</h3>
+      <p>Sent to {receivingPhysicianName}</p>
+      {sentResolvedCount > 0 && <small>{resolvedSummary(sentResolvedCount)} automatically.</small>}
+    </div>
     {coordinationOpen && referral && <AgentCoordinationModal
       referral={referral}
       receivingPhysicianName={receivingPhysicianName}

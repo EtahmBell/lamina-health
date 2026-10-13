@@ -77,21 +77,23 @@ export function restorePhase(referral: Referral): DisplayPhase | null {
   return phases[phases.length - 1] ?? null
 }
 
-/** How long each phase stays on screen once revealed, in ms -- deliberately a
- * bit slower than a snappy UI transition so a viewer can actually read and
- * absorb each real step (Part 5 polish pass). Pure frontend presentation
- * pacing; the backend call itself is never delayed. */
+/** How long each phase stays on screen once revealed, in ms -- deliberately
+ * slow enough that a viewer can actually read and absorb each real step
+ * (~1.9-2.1s for the substantive phases), not a snappy UI transition. Pure
+ * frontend presentation pacing; the backend call itself is never delayed. */
 export const PHASE_HOLD_MS: Record<DisplayPhase['kind'], number> = {
-  preparing: 1500, checking: 1500, missing: 1800, found: 1800, ready: 900, sent: 400, unresolved: 600,
+  preparing: 1900, checking: 1900, missing: 1900, found: 2100, ready: 1000, sent: 500, unresolved: 1300,
 }
 
-/** How long the full-card success wash holds before crossfading into the
- * durable "Awaiting review" state, in ms. A live Start-referral run only --
- * never replayed on page reload/restoration. */
-export const SUCCESS_WASH_HOLD_MS = 1700
+/** How long the full-card success wash holds before fading away to reveal
+ * the durable "Awaiting review" state, in ms. A live Start-referral run
+ * only -- never replayed on page reload/restoration. */
+export const SUCCESS_WASH_HOLD_MS = 2000
 
-/** Crossfade duration between phases, in ms. */
-export const PHASE_FADE_MS = 260
+/** Crossfade duration between phases, in ms -- slow and soft (ChatGPT-style
+ * reasoning-text dissolve), not a snappy UI fade. Was 260ms; this pass widens
+ * it to read as "one thought gently dissolving into the next." */
+export const PHASE_FADE_MS = 500
 
 export function lastName(physicianName: string): string {
   return physicianName.split(' ').at(-1) ?? physicianName
