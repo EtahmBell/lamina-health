@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type TrainProjection } from './api.ts'
+import { consultNetwork, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -19,6 +19,7 @@ import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
 import { ReferralCoordinationSurface } from './Referral.tsx'
+import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
 type Navigate = (path: string) => void
@@ -579,6 +580,12 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   const [affirmed, setAffirmed] = useState(false)
   const [selectedId, setSelectedId] = useState(consultation.recommended_physician.physician_id)
   const [swapping, setSwapping] = useState(false)
+  // Discovery vs. Referral are frontend presentation modes only -- never a
+  // backend referral status, and never persisted client-side either. See
+  // Part B. `activeReferral` is populated purely by asking the backend
+  // (hydration effect below); there is no local fabrication of referral state.
+  const [viewMode, setViewMode] = useState<'discovery' | 'referral'>('discovery')
+  const [activeReferral, setActiveReferral] = useState<Referral | null>(null)
   useEffect(() => {
     if (!focusEventId) return
     setNetworkOpen(true); setHighlight(true)
@@ -596,6 +603,27 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [networkOpen])
+  /**
+   * Hydration: on mount, ask the backend whether this patient already has a
+   * referral -- e.g. from before a page reload -- rather than assuming none
+   * exists. A persisted referral with a real (non-draft) status always wins
+   * over whatever the user was doing before the reload (Part L): the right
+   * rail defaults to Referral mode, never back to Discovery, when one exists.
+   */
+  useEffect(() => {
+    if (!referralQuestion) return
+    let ignore = false
+    getActiveReferral(consultation.patient_id).then((existing) => {
+      if (ignore || !existing) return
+      const phase = restorePhase(existing)
+      if (phase) {
+        setActiveReferral(existing)
+        setSelectedId(existing.receiving_physician_id)
+        setViewMode('referral')
+      }
+    }).catch(() => {})
+    return () => { ignore = true }
+  }, [consultation.patient_id, referralQuestion])
   const primary = consultation.recommended_physician
   const historical = evidenceFor(primary, 'historical_practice_similarity')
   const operational = evidenceFor(primary, 'operational')
@@ -626,7 +654,61 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
       requestAnimationFrame(() => requestAnimationFrame(() => setSwapping(false)))
     }, 150)
   }
+  /**
+   * Once the physician clicks Start referral, the referral workflow object
+   * replaces the recommendation as the primary thing on screen (Part A) --
+   * a frontend view-mode switch only, reusing the exact same restrained
+   * fade the candidate-switcher above already uses (one stable surface
+   * morphing, never a hard remount flash). Respects reduced motion.
+   */
+  const startReferral = () => {
+    if (prefersReducedMotion()) { setViewMode('referral'); return }
+    setSwapping(true)
+    window.setTimeout(() => {
+      setViewMode('referral')
+      requestAnimationFrame(() => requestAnimationFrame(() => setSwapping(false)))
+    }, 150)
+  }
+  const activeReferralPhysician = activeReferral ? candidates.find((item) => item.physician_id === activeReferral.receiving_physician_id) : undefined
+  const activeReferralPhysicianLabel = activeReferralPhysician ? cleanName(activeReferralPhysician.physician_name) : 'another specialist'
+
+  // REFERRAL MODE -- "what is happening with this referral?" replaces
+  // "who should I refer this patient to?" as the primary surface (Part A/B).
+  // Discovery-only content (fit rationale, feedback, match details,
+  // alternatives, consult detail) is not rendered at all here, not merely
+  // hidden (Part F/M/N).
+  if (referralQuestion && viewMode === 'referral') {
+    return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
+      <article className={`best-fit-card compact referral-card ${swapping ? 'swapping' : ''}`}>
+        <button type="button" className="text-button back-to-match" onClick={() => setViewMode('discovery')}>← Back to match options</button>
+        <p className="best-fit-kicker">Referral to</p>
+        <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(selected.physician_name)}</span><div><h2>{cleanName(selected.physician_name)}</h2><p>{selected.specialty}</p></div></div>
+        <ReferralCoordinationSurface
+          key={selected.physician_id}
+          patientId={consultation.patient_id}
+          patientLabel={patientName(consultation.patient_id)}
+          receivingPhysicianId={selected.physician_id}
+          receivingPhysicianName={cleanName(selected.physician_name)}
+          restoredReferral={activeReferral}
+        />
+      </article>
+      <p className="disclaimer">{consultation.disclaimer}</p>
+    </section>
+  }
+
+  // DISCOVERY MODE -- the original "who should I refer this patient to?"
+  // experience, unchanged, plus a quiet notice when a referral already
+  // exists so the physician never loses track of it while browsing options.
   return <section className="recommendations" aria-label="Specialist recommendations" tabIndex={-1}>
+    {activeReferral && <div className="referral-active-notice">
+      <div><strong>Referral active with {activeReferralPhysicianLabel}</strong><span>Awaiting specialist review</span></div>
+      <button type="button" className="text-button" onClick={() => setViewMode('referral')}>Return to active referral →</button>
+    </div>}
+    <div className={`next-step-card ready ${swapping ? 'swapping' : ''}`}>
+      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Your agent got back to you</span>
+      <h3>A specialist is ready for your review.</h3>
+      <p>Review the match below, then choose how to move care forward.</p>
+    </div>
     {/* Compact by default (see design_references/) -- only name, specialty, one fit
      * indicator, one metadata line, one rationale sentence, and the primary action.
      * Everything denser lives behind "Review match details" below. */}
@@ -638,7 +720,11 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
       <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selected.availability}</p>
       <p className="fit-rationale">{selected.reason}</p>
       <div className="best-fit-actions">{referralQuestion
-        ? <ReferralCoordinationSurface key={selected.physician_id} patientId={consultation.patient_id} patientLabel={patientName(consultation.patient_id)} receivingPhysicianId={selected.physician_id} receivingPhysicianName={cleanName(selected.physician_name)} />
+        ? activeReferral && activeReferral.receiving_physician_id === selected.physician_id
+          ? <p className="referral-already-selected" role="status"><span aria-hidden="true">✓</span> Selected for referral</p>
+          : activeReferral
+            ? <p className="referral-locked-note">A referral is already active with {activeReferralPhysicianLabel}.</p>
+            : <button className="button-primary" onClick={startReferral}>Start referral <span>→</span></button>
         : <><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(selected.physician_name)} · {selected.specialty}</span><span>Workup: {selected.required_workup.join(' · ') || 'None specified'}</span><span>No referral was transmitted.</span></div>}</>}</div>
     </article>
 
@@ -829,11 +915,6 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
           <p>Comparing clinical fit, referral requirements, access, and your practice preferences…</p>
         </div>}
         {nextStepState === 'ready' && consultation && <>
-          <div className="next-step-card ready">
-            <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Your agent got back to you</span>
-            <h3>A specialist is ready for your review.</h3>
-            <p>Review the match below, then choose how to move care forward.</p>
-          </div>
           <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} referralQuestion={patient.referral_question} />
         </>}
         {nextStepState === 'idle-prior' && <div className="next-step-card idle">

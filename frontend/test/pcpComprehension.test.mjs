@@ -150,8 +150,10 @@ test('Review match details is a collapsed-by-default disclosure holding the rich
 test('the ready state renders the full recommendation directly in the sticky rail, not a tiny teaser card', () => {
   const page = patientPage()
   assert.match(page, /nextStepState === 'ready' && consultation && <>/)
-  assert.match(page, /A specialist is ready for your review\./)
   assert.match(page, /<RecommendationView consultation=\{consultation\} navigate=\{navigate\} recordId=\{recordId\} referralQuestion=\{patient\.referral_question\} \/>/)
+  // "A specialist is ready for your review" now lives inside RecommendationView's
+  // Discovery-mode render (it disappears entirely in Referral mode -- see Part D).
+  assert.match(recommendation(), /A specialist is ready for your review\./)
 })
 
 /* ------------------------------------------------------------------ §11 */

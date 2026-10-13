@@ -128,9 +128,10 @@ test('an unresolved referral derives the real unresolved phase instead of falsel
 
 /* --------------------------------------------------------- referring UI (Part S) */
 
-test('Start referral renders for the real flow via ReferralCoordinationSurface, gated on the real referral question, not a patient name', () => {
+test('ReferralCoordinationSurface renders in Referral mode, gated on the real referral question, not a patient name', () => {
   const view = recommendation()
-  assert.match(view, /referralQuestion\s*\n?\s*\?\s*<ReferralCoordinationSurface/)
+  assert.match(view, /if \(referralQuestion && viewMode === 'referral'\) \{/)
+  assert.match(view, /<ReferralCoordinationSurface/)
   assert.doesNotMatch(view, /TONJIT_ID|patient\.name === |patient\.display_name === /, 'the referral surface is gated on referral_question data, never a patient-name/id check')
   assert.doesNotMatch(referralSource, /Tonjit/i, 'no patient-name-specific branching anywhere in Referral.tsx')
 })
@@ -228,7 +229,7 @@ test('the content swap happens while still faded out, then a double-rAF lets the
 
 test('phase transitions use one continuously stable surface -- content is swapped in place, not unmounted into separate cards', () => {
   const view = recommendation()
-  assert.match(view, /<ReferralCoordinationSurface key=\{selected\.physician_id\}/, 'only the whole surface remounts on candidate switch, never per-phase')
+  assert.match(view, /<ReferralCoordinationSurface\s*\n\s*key=\{selected\.physician_id\}/, 'only the whole surface remounts on candidate switch, never per-phase')
   assert.match(referralSource, /<div className=\{`referral-phase \$\{fading \? 'phase-fading' : ''\}`\}>/)
 })
 
@@ -317,8 +318,10 @@ test('Toast is a small, non-blocking, auto-dismissing confirmation -- not the du
   assert.match(referralSource, /role="status" aria-live="polite"/)
 })
 
-test('"See agent coordination" remains available once submission completes, not just while ready', () => {
-  assert.match(referralSource, /\{status === 'done' && referral && <button type="button" className="text-button" onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination/)
+test('"See agent coordination" (and "View referral packet") remain available once submission completes, not just while ready', () => {
+  assert.match(referralSource, /\{status === 'done' && referral && <div className="referral-mode-links">/)
+  assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination/)
+  assert.match(referralSource, /onClick=\{\(\) => setPacketOpen\(true\)\}>View referral packet/)
 })
 
 test('the coordination modal footer reflects the real submitted status, derived from referral data not a hardcoded physician', () => {
@@ -342,35 +345,46 @@ test('restorePhase restores the real terminal phase for a stuck/unresolved refer
   assert.deepEqual(phase, { kind: 'unresolved', requirementLabels: ['Recent renal function'] })
 })
 
-test('restorePhase returns null for transient mid-flight statuses -- nothing real to restore, caller falls back to idle (Start referral)', () => {
-  for (const status of ['draft', 'assembling', 'preflight']) {
-    assert.equal(restorePhase({ ...baseReferral, status, coordination_events: [] }), null)
+test('restorePhase returns null only for draft (impossible in persisted data) -- assembling/preflight restore to the static preparing phase, never idle', () => {
+  assert.equal(restorePhase({ ...baseReferral, status: 'draft', coordination_events: [] }), null)
+  for (const status of ['assembling', 'preflight']) {
+    assert.deepEqual(restorePhase({ ...baseReferral, status, coordination_events: [] }), { kind: 'preparing' })
   }
 })
 
-test('ReferralCoordinationSurface hydrates from the backend on mount instead of assuming no referral exists', () => {
-  assert.match(referralSource, /import \{ createReferral, getActiveReferral, runReferralPreflight/)
-  assert.match(referralSource, /getActiveReferral\(patientId\)\.then/)
-  assert.match(referralSource, /useState<'hydrating' \| 'idle' \| 'running' \| 'done' \| 'error'>\('hydrating'\)/)
+test('RecommendationView (not ReferralCoordinationSurface) hydrates from the backend on mount instead of assuming no referral exists -- it owns viewMode', () => {
+  const view = recommendation()
+  assert.match(view, /getActiveReferral\(consultation\.patient_id\)\.then/)
+  assert.match(view, /const \[viewMode, setViewMode\] = useState<'discovery' \| 'referral'>\('discovery'\)/)
+  assert.match(view, /const \[activeReferral, setActiveReferral\] = useState<Referral \| null>\(null\)/)
+  assert.doesNotMatch(referralSource, /getActiveReferral/, 'ReferralCoordinationSurface itself no longer does its own hydration lookup')
 })
 
-test('a restored referral is only honored when it targets the currently selected physician, not a stale referral to a different candidate', () => {
-  assert.match(referralSource, /existing\.receiving_physician_id === receivingPhysicianId/)
+test('a restored referral syncs the selected candidate to whatever physician it was actually created for', () => {
+  const view = recommendation()
+  assert.match(view, /setSelectedId\(existing\.receiving_physician_id\)/)
 })
 
 test('hydration never calls createReferral or runReferralPreflight -- it is a pure read, never a rerun/resubmit', () => {
-  const hydrationEffectStart = referralSource.indexOf('useEffect(() => {\n    let ignore = false')
-  const hydrationEffectEnd = referralSource.indexOf('}, [patientId, receivingPhysicianId])', hydrationEffectStart)
-  const hydrationEffect = referralSource.slice(hydrationEffectStart, hydrationEffectEnd)
+  const view = recommendation()
+  const hydrationEffectStart = view.indexOf('if (!referralQuestion) return')
+  const hydrationEffectEnd = view.indexOf('}, [consultation.patient_id, referralQuestion])', hydrationEffectStart)
+  const hydrationEffect = view.slice(hydrationEffectStart, hydrationEffectEnd)
   assert.ok(hydrationEffect.length > 0, 'the hydration effect block should be found')
   assert.doesNotMatch(hydrationEffect, /createReferral\(|runReferralPreflight\(/)
   assert.match(hydrationEffect, /getActiveReferral/)
 })
 
+test('ReferralCoordinationSurface accepts a restoredReferral prop and jumps straight to its real terminal state -- no animation, no API call', () => {
+  assert.match(referralSource, /restoredReferral: Referral \| null/)
+  assert.match(referralSource, /useState<'running' \| 'done' \| 'error'>\(restoredReferral \? 'done' : 'running'\)/)
+  assert.match(referralSource, /useState<DisplayPhase \| null>\(restoredReferral \? restorePhase\(restoredReferral\) : null\)/)
+  assert.match(referralSource, /if \(restoredReferral\) return \/\/ already hydrated synchronously via initial state above/)
+})
+
 test('restoring a submitted referral still allows "See agent coordination" to open with the real restored events', () => {
-  assert.match(referralSource, /setReferral\(existing\)/)
-  assert.match(referralSource, /setStatus\('done'\)/)
-  assert.match(referralSource, /\{status === 'done' && referral && <button type="button" className="text-button" onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination/)
+  assert.match(referralSource, /useState<Referral \| null>\(restoredReferral\)/)
+  assert.match(referralSource, /\{status === 'done' && referral && <div className="referral-mode-links">/)
 })
 
 /* ------------------------------------------------------ patient-level referral lookup (backend) */
@@ -385,4 +399,134 @@ test('a patient-level active-referral lookup helper exists on the frontend API, 
 test('the Recommended Physician card has breathing room between the eyebrow and the physician identity row', () => {
   assert.match(styles, /\.best-fit-card\.compact \.best-fit-physician \{ padding: 8px 0 0; gap: 12px; \}/)
   assert.doesNotMatch(styles, /\.best-fit-card\.compact \.best-fit-physician \{ padding: 0; gap: 12px; \}/)
+})
+
+/* ========================================================================
+ * Discovery <-> Referral mode (this pass)
+ * ===================================================================== */
+
+const referralModeBranch = () => {
+  const view = recommendation()
+  const start = view.indexOf("if (referralQuestion && viewMode === 'referral')")
+  const end = view.indexOf('// DISCOVERY MODE', start)
+  return view.slice(start, end)
+}
+const discoveryModeBranch = () => {
+  const view = recommendation()
+  return view.slice(view.indexOf('// DISCOVERY MODE'))
+}
+
+/* -------------------------------------------------------------- Part S */
+
+test('Start referral switches the frontend viewMode to referral -- a presentation switch only, never a backend status', () => {
+  assert.match(discoveryModeBranch(), /onClick=\{startReferral\}>Start referral/)
+  const startReferralSource = recommendation().slice(recommendation().indexOf('const startReferral = '), recommendation().indexOf('const activeReferralPhysician ='))
+  assert.match(startReferralSource, /setViewMode\('referral'\)/)
+  assert.doesNotMatch(startReferralSource, /fetch\(|request\(|createReferral\(/, 'the mode switch itself makes no backend call -- ReferralCoordinationSurface does that once rendered')
+})
+
+test('the "Your agent got back to you / specialist ready for review" panel does not exist in the Referral-mode branch', () => {
+  assert.doesNotMatch(referralModeBranch(), /Your agent got back to you/)
+  assert.doesNotMatch(referralModeBranch(), /A specialist is ready for your review/)
+})
+
+test('"RECOMMENDED PHYSICIAN" is not the primary heading in Referral mode -- "Referral to" replaces it', () => {
+  assert.doesNotMatch(referralModeBranch(), /Recommended physician|Selected specialist/)
+  assert.match(referralModeBranch(), /<p className="best-fit-kicker">Referral to<\/p>/)
+})
+
+test('the physician identity (avatar/name/specialty) remains visible in Referral mode', () => {
+  assert.match(referralModeBranch(), /className="best-fit-physician"/)
+  assert.match(referralModeBranch(), /\{cleanName\(selected\.physician_name\)\}/)
+  assert.match(referralModeBranch(), /\{selected\.specialty\}/)
+})
+
+test('recommendation rationale, fit indicator, and feedback are not rendered in Referral mode', () => {
+  assert.doesNotMatch(referralModeBranch(), /fit-rationale|fit-indicator|fit-meta/)
+  assert.doesNotMatch(referralModeBranch(), /Does this reflect how you would practice/)
+})
+
+test('match details / alternatives / consult detail are not rendered in Referral mode -- they belong to Discovery', () => {
+  assert.doesNotMatch(referralModeBranch(), /Review match details|Other referral options|How your agent handled this/)
+})
+
+test('"Back to match options" appears in Referral mode, using exactly that wording', () => {
+  assert.match(referralModeBranch(), /← Back to match options/)
+  assert.doesNotMatch(referralModeBranch(), /discovery mode/i, '"discovery mode" is internal terminology, never user-facing copy')
+})
+
+/* -------------------------------------------------------------- Part T */
+
+test('Back to match options only flips the frontend viewMode -- no referral-cancelling/un-submitting API call', () => {
+  assert.match(referralModeBranch(), /onClick=\{\(\) => setViewMode\('discovery'\)\}>← Back to match options/)
+})
+
+test('Discovery mode shows a quiet "referral active" notice and "Return to active referral" once a referral exists', () => {
+  const discovery = discoveryModeBranch()
+  assert.match(discovery, /\{activeReferral && <div className="referral-active-notice">/)
+  assert.match(discovery, /Referral active with \{activeReferralPhysicianLabel\}/)
+  assert.match(discovery, /Awaiting specialist review/)
+  assert.match(discovery, /onClick=\{\(\) => setViewMode\('referral'\)\}>Return to active referral/)
+})
+
+test('Dr. Chen\'s card shows "Selected for referral" instead of "Start referral" once that physician is the active referral\'s destination', () => {
+  const discovery = discoveryModeBranch()
+  assert.match(discovery, /activeReferral && activeReferral\.receiving_physician_id === selected\.physician_id/)
+  assert.match(discovery, /Selected for referral/)
+})
+
+test('selecting a different physician while a referral is active cannot silently start/replace it -- a quiet locked note appears instead of Start referral', () => {
+  const discovery = discoveryModeBranch()
+  assert.match(discovery, /: activeReferral\s*\n\s*\? <p className="referral-locked-note">A referral is already active with \{activeReferralPhysicianLabel\}\.<\/p>/)
+})
+
+test('Review match details and Other referral options remain accessible in Discovery mode even when a referral is already active', () => {
+  const discovery = discoveryModeBranch()
+  assert.match(discovery, /Review match details/)
+  assert.match(discovery, /Other referral options/)
+})
+
+/* -------------------------------------------------------------- Part U */
+
+test('"View referral packet" opens a ModalPortal-based modal rendering the real packet question and items', () => {
+  assert.match(referralSource, /export function ReferralPacketModal/)
+  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'))
+  assert.match(modalSource, /<ModalPortal>/)
+  assert.match(modalSource, /role="dialog" aria-modal="true" aria-label="Referral packet"/)
+  assert.match(modalSource, /\{referral\.referral_question\}/)
+  assert.match(modalSource, /referral\.packet\.items\.map/)
+})
+
+test('the packet modal renders label/value/provenance generically from PacketItem data, never a hardcoded Tonjit string', () => {
+  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'))
+  assert.match(modalSource, /<strong>\{item\.label\}<\/strong>/)
+  assert.match(modalSource, /<p>\{item\.value\}<\/p>/)
+  assert.doesNotMatch(modalSource, /Tonjit|recent_renal_function|Creatinine|HbA1c/i)
+})
+
+test('an item added during preflight shows generic provenance -- "added during preflight", derived from PacketItemProvenance, not hardcoded to any one requirement', () => {
+  const fnSource = referralSource.slice(referralSource.indexOf('function packetItemProvenanceLine'), referralSource.indexOf('export function ReferralPacketModal'))
+  assert.match(fnSource, /item\.provenance\.attached_during !== 'preflight'/)
+  assert.match(fnSource, /Added during agent preflight/)
+  assert.doesNotMatch(fnSource, /recent_renal_function|renal/i, 'generic for any future preflight-attached item, not just renal function')
+})
+
+test('the referral packet modal closes via the shared close button/Escape, consistent with the other activity modals', () => {
+  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'))
+  assert.match(modalSource, /post-flow-close.*onClick=\{onClose\}/)
+  assert.match(modalSource, /event\.key === 'Escape'/)
+})
+
+/* -------------------------------------------------------------- Part V */
+
+test('switching back to the restored Referral mode via "Return to active referral" triggers no new backend call -- it reuses already-hydrated referral data', () => {
+  const discovery = discoveryModeBranch()
+  const returnButton = discovery.slice(discovery.indexOf('Return to active referral') - 120, discovery.indexOf('Return to active referral') + 30)
+  assert.doesNotMatch(returnButton, /fetch\(|request\(|createReferral\(|runReferralPreflight\(|getActiveReferral\(/)
+})
+
+test('hydration only switches to Referral mode when a real restorable phase exists -- otherwise Discovery (the default) is left untouched', () => {
+  const view = recommendation()
+  const hydrationBlock = view.slice(view.indexOf('if (!referralQuestion) return'), view.indexOf("}, [consultation.patient_id, referralQuestion])"))
+  assert.match(hydrationBlock, /if \(phase\) \{\s*\n\s*setActiveReferral\(existing\)\s*\n\s*setSelectedId\(existing\.receiving_physician_id\)\s*\n\s*setViewMode\('referral'\)\s*\n\s*\}/, 'setViewMode is only called inside the `if (phase)` branch, not unconditionally')
 })

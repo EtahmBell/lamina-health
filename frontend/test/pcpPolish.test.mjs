@@ -9,6 +9,7 @@ const contextSuggestions = readFileSync(new URL('../src/contextSuggestions.ts', 
 const slice = (from, to) => app.slice(app.indexOf(from), app.indexOf(to))
 
 const patientPage = () => slice('function PatientWorkspace', 'export default function App')
+const recommendation = () => slice('function RecommendationView', 'function PatientWorkspace')
 const consultationsIndex = () => slice('function ConsultationsPage', 'function PatientConsultationsPage')
 
 /* ------------------------------------------------------------------ banner */
@@ -102,8 +103,9 @@ test('Patient history has no subtitle -- the heading leads straight into the tim
 })
 
 test('the resolved-state badge carries a checkmark (matching the demo\'s consulting->resolved pill swap) and the headline gets extra breathing room', () => {
-  const page = patientPage()
-  const ready = page.slice(page.indexOf("nextStepState === 'ready'"), page.indexOf('<RecommendationView'))
+  // This badge now lives inside RecommendationView's Discovery-mode render
+  // (it disappears entirely once a referral is active -- see Part D).
+  const ready = recommendation()
   assert.match(ready, /<span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓<\/span>Your agent got back to you<\/span>/)
   assert.doesNotMatch(ready, /✦/, 'never the filled copper diamond/star')
   assert.ok(someRule('.next-step-card .status-label + h3', /margin-top: 18px/))

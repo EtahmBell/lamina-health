@@ -2039,10 +2039,41 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-coordination-surface p { margin: 6px 0 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
 .referral-coordination-surface small { display: block; margin-top: 4px; color: var(--text-secondary); font-size: .6rem; }
 .referral-coordination-surface > .text-button { margin-top: 10px; }
+.referral-mode-links { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 10px; }
+.referral-mode-links .text-button { margin-top: 0; }
 .referral-phase { width: 100%; transition: opacity 260ms ease-in-out; }
 .referral-phase.phase-fading { opacity: 0; }
 .referral-found-value { font-family: var(--font-display); color: var(--clinical); }
 @media (prefers-reduced-motion: reduce) { .referral-phase { transition: none; } }
+
+/* Referral mode card: "Referral to" replaces "Recommended physician" as the
+   primary framing (Part B/O) -- same compact card shell, so switching modes
+   never jumps the layout. */
+.best-fit-card.referral-card .back-to-match { display: block; margin-bottom: 10px; font-size: .64rem; }
+.best-fit-card.referral-card .best-fit-physician { padding-top: 8px; }
+
+/* Discovery-mode status strip, shown only once a referral is already
+   active -- visually secondary, never another primary action (Part J). */
+.referral-active-notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; border: 1px solid var(--mineral-subtle); border-radius: 10px; background: var(--mineral-surface); padding: 10px 14px; }
+.referral-active-notice strong { display: block; color: var(--mineral-deep); font-size: .72rem; font-weight: 600; }
+.referral-active-notice span { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .62rem; }
+.referral-active-notice .text-button { flex: 0 0 auto; }
+.referral-already-selected { margin: 0; color: var(--mineral-deep); font-size: .74rem; font-weight: 600; }
+.referral-locked-note { margin: 0; color: var(--text-secondary); font-size: .72rem; }
+
+/* Referral packet modal: a clinical handoff document, not a developer
+   inspector -- plain labeled rows, not a JSON dump. */
+.packet-dialog { width: min(100%, 620px); }
+.packet-section { margin-top: 18px; }
+.packet-section:first-of-type { margin-top: 14px; }
+.packet-section h3 { margin: 0 0 8px; color: var(--text-secondary); font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.packet-section > p { margin: 0; color: var(--clinical); font-size: .78rem; line-height: 1.55; }
+.packet-items { display: flex; flex-direction: column; gap: 14px; }
+.packet-item { border-top: 1px solid var(--border); padding-top: 12px; }
+.packet-item:first-child { border-top: 0; padding-top: 0; }
+.packet-item strong { display: block; font-size: .76rem; font-weight: 600; }
+.packet-item p { margin: 4px 0 0; color: var(--clinical); font-size: .74rem; line-height: 1.5; }
+.packet-item-provenance { display: block; margin-top: 4px; color: var(--text-secondary); font-size: .62rem; font-style: italic; }
 
 /* Brief, non-blocking confirmation toast -- the right rail remains the
    durable state; this is just a quiet acknowledgement that fades on its own. */
@@ -2058,6 +2089,12 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .best-fit-card.compact { margin-top: 18px; padding: 18px; transition: opacity 150ms ease; }
 .best-fit-card.compact.swapping { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .best-fit-card.compact { transition: none; } }
+/* The Discovery -> Referral mode switch reuses this exact same fade (Part
+   D/P) -- restrained, consistent with the existing candidate-swap and
+   referral-phase crossfades, never a hard remount flash. */
+.next-step-card.ready { transition: opacity 150ms ease; }
+.next-step-card.ready.swapping { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .next-step-card.ready { transition: none; } }
 .best-fit-card.compact .best-fit-physician { padding: 8px 0 0; gap: 12px; }
 .best-fit-card.compact .best-fit-physician h2 { margin: 0; font-size: 1.15rem; }
 .best-fit-card.compact .best-fit-physician p { margin: 2px 0 0; }

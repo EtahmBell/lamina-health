@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { createReferral, getActiveReferral, runReferralPreflight, type Referral } from './api.ts'
+import { createReferral, runReferralPreflight, type PacketItem, type Referral } from './api.ts'
 import { PCP_NAME } from './demoIdentity.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, restorePhase, type DisplayPhase } from './referralPhases.ts'
@@ -63,19 +63,30 @@ function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; 
 }
 
 /**
- * The right-rail surface for a real referral. Executes the real backend
- * create+preflight calls immediately, then reveals the resulting real phases
- * over several seconds purely as frontend presentation pacing -- the backend
- * call itself is never delayed or slept (see Part E/F/Y).
+ * The right-rail surface for a real referral -- rendered only once Referral
+ * mode is already active (the parent RecommendationView decides discovery
+ * vs. referral and does the hydration lookup). Two ways to enter:
+ *
+ * - `restoredReferral` provided (hydrated from a reload): jump straight to
+ *   its real terminal state, synchronously, with no animation and no API
+ *   calls -- restoring state is not the same event as creating it.
+ * - `restoredReferral` null (the physician just clicked Start referral):
+ *   run the real create+preflight calls immediately on mount, then reveal
+ *   the resulting real phases over several seconds purely as frontend
+ *   presentation pacing -- the backend call itself is never delayed (Part E/F/Y).
  */
 export function ReferralCoordinationSurface({
-  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName,
-}: { patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string }) {
-  const [status, setStatus] = useState<'hydrating' | 'idle' | 'running' | 'done' | 'error'>('hydrating')
-  const [visiblePhase, setVisiblePhase] = useState<DisplayPhase | null>(null)
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral,
+}: {
+  patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string
+  restoredReferral: Referral | null
+}) {
+  const [status, setStatus] = useState<'running' | 'done' | 'error'>(restoredReferral ? 'done' : 'running')
+  const [visiblePhase, setVisiblePhase] = useState<DisplayPhase | null>(restoredReferral ? restorePhase(restoredReferral) : null)
   const [fading, setFading] = useState(false)
-  const [referral, setReferral] = useState<Referral | null>(null)
+  const [referral, setReferral] = useState<Referral | null>(restoredReferral)
   const [coordinationOpen, setCoordinationOpen] = useState(false)
+  const [packetOpen, setPacketOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toastVisible, setToastVisible] = useState(false)
   const timers = useRef<number[]>([])
@@ -87,30 +98,11 @@ export function ReferralCoordinationSurface({
     timers.current = []
   }, [])
 
-  /**
-   * Hydration: on mount, ask the backend whether this patient already has a
-   * referral (e.g. from before a page reload) rather than assuming none
-   * exists. Restores the real persisted terminal state directly -- no
-   * animation replay, no preflight re-run, no re-submission. The backend
-   * referral is the only source of truth; nothing is cached client-side.
-   */
   useEffect(() => {
-    let ignore = false
-    getActiveReferral(patientId).then((existing) => {
-      if (ignore) return
-      if (existing && existing.receiving_physician_id === receivingPhysicianId) {
-        const phase = restorePhase(existing)
-        if (phase) {
-          setReferral(existing)
-          setVisiblePhase(phase)
-          setStatus('done')
-          return
-        }
-      }
-      setStatus('idle')
-    }).catch(() => { if (!ignore) setStatus('idle') })
-    return () => { ignore = true }
-  }, [patientId, receivingPhysicianId])
+    if (restoredReferral) return // already hydrated synchronously via initial state above
+    void start()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const sleep = (ms: number) => new Promise<void>((resolve) => {
     const id = window.setTimeout(resolve, ms)
@@ -166,9 +158,6 @@ export function ReferralCoordinationSurface({
     }
   }
 
-  if (status === 'idle') {
-    return <button className="button-primary" onClick={() => void start()}>Start referral <span>→</span></button>
-  }
   if (status === 'error') {
     return <div className="referral-coordination-surface error-banner" role="alert">{error}</div>
   }
@@ -177,11 +166,20 @@ export function ReferralCoordinationSurface({
     <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
       <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} />
     </div>
-    {status === 'done' && referral && <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>}
+    {status === 'done' && referral && <div className="referral-mode-links">
+      <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
+      <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>
+    </div>}
     {coordinationOpen && referral && <AgentCoordinationModal
       referral={referral}
       receivingPhysicianName={receivingPhysicianName}
       onClose={() => setCoordinationOpen(false)}
+    />}
+    {packetOpen && referral && <ReferralPacketModal
+      referral={referral}
+      patientLabel={patientLabel}
+      receivingPhysicianName={receivingPhysicianName}
+      onClose={() => setPacketOpen(false)}
     />}
     {toastVisible && <Toast
       title="Referral sent"
@@ -244,6 +242,57 @@ export function AgentCoordinationModal({
         </div>)}
       </div>
       <p className="coordination-footer">{referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
+    </div>
+  </div></ModalPortal>
+}
+
+/**
+ * Generic, reusable PacketItem -> provenance line. Only items actually
+ * attached during preflight get a provenance note -- items from initial
+ * assembly simply don't have one. This is driven entirely by the real
+ * PacketItemProvenance data (Part R); no requirement key or patient is ever
+ * named here, so it works unchanged for any future referral/requirement.
+ */
+function packetItemProvenanceLine(item: PacketItem): string | null {
+  if (item.provenance.attached_during !== 'preflight') return null
+  return `Added during agent preflight · found by ${PCP_NAME}'s Agent in the patient's existing record.`
+}
+
+/**
+ * "What exactly was sent to Dr. Chen?" -- a clinical handoff document, not a
+ * developer inspector. Renders directly from the real persisted
+ * ReferralPacket/PacketItem data; never a hardcoded per-patient summary.
+ */
+export function ReferralPacketModal({
+  referral, patientLabel, receivingPhysicianName, onClose,
+}: { referral: Referral; patientLabel: string; receivingPhysicianName: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="post-flow-dialog packet-dialog" role="dialog" aria-modal="true" aria-label="Referral packet">
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
+      <p className="eyebrow">Referral packet</p>
+      <h2>{patientLabel}</h2>
+      <p className="coordination-subhead">To {receivingPhysicianName} · {referral.specialty}</p>
+      <p className="coordination-subhead">From {PCP_NAME}</p>
+      <div className="packet-section">
+        <h3>Referral question</h3>
+        <p>{referral.referral_question}</p>
+      </div>
+      <div className="packet-section">
+        <h3>Included information</h3>
+        <div className="packet-items">
+          {referral.packet.items.map((item) => <div className="packet-item" key={item.key}>
+            <strong>{item.label}</strong>
+            <p>{item.value}</p>
+            {packetItemProvenanceLine(item) && <small className="packet-item-provenance">{packetItemProvenanceLine(item)}</small>}
+          </div>)}
+          {referral.packet.items.length === 0 && <p className="muted-note">No packet items recorded yet.</p>}
+        </div>
+      </div>
     </div>
   </div></ModalPortal>
 }
