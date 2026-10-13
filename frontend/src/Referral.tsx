@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, createReferral, getAgentOverview, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getTrainingHistory, runReferralPreflight, type AgentOverview, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type TrainProjection } from './api.ts'
+import { acceptReferral, createReferral, draftHandoff, findSchedulingOptions, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, ingestConsultationEncounter, routeSchedulingOptions, runReferralPreflight, sendHandoff, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
@@ -16,7 +16,7 @@ type Navigate = (path: string) => void
 
 const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
-function PhaseContent({ phase, receivingPhysicianName, patientLabel }: { phase: DisplayPhase; receivingPhysicianName: string; patientLabel: string }) {
+function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling }: { phase: DisplayPhase; receivingPhysicianName: string; patientLabel: string; scheduling?: SchedulingCoordination | null }) {
   const who = lastName(receivingPhysicianName)
   switch (phase.kind) {
     case 'preparing':
@@ -73,7 +73,24 @@ function PhaseContent({ phase, receivingPhysicianName, patientLabel }: { phase: 
         <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Accepted</span>
         <h3>Accepted by Dr. {who}</h3>
         <p>Dr. {who} accepted {patientLabel}'s referral and added them to their care.</p>
+        <p className="referral-next-step-note">Next: Scheduling</p>
         {phase.acceptedAt && <small className="referral-submission-meta">Accepted {formatSubmittedAt(phase.acceptedAt)}</small>}
+      </>
+    case 'scheduled': {
+      const slot = scheduling?.selected_option
+      return <>
+        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Scheduled</span>
+        <h3>Appointment with Dr. {who}</h3>
+        {slot && <p className="referral-found-value">{formatSubmittedAt(slot.starts_at)}</p>}
+        <p>The referral was accepted and the consultation is scheduled.</p>
+      </>
+    }
+    case 'handoff_received':
+      return <>
+        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Specialist follow-up received</span>
+        <h3>Dr. {who} returned his consultation update.</h3>
+        <p>Review the handoff for the full assessment and recommendations.</p>
+        {phase.receivedAt && <small className="referral-submission-meta">Received {formatSubmittedAt(phase.receivedAt)}</small>}
       </>
     case 'unresolved':
       return <>
@@ -120,9 +137,30 @@ export function ReferralCoordinationSurface({
   const [referral, setReferral] = useState<Referral | null>(restoredReferral)
   const [coordinationOpen, setCoordinationOpen] = useState(false)
   const [packetOpen, setPacketOpen] = useState(false)
+  // Scheduling/handoff detail lives in their own artifacts, never crammed
+  // into the referral (Part AB) -- fetched separately once the referral
+  // reaches the relevant milestone, never as part of the live phase-reveal
+  // animation (Lucy never creates these herself; they only ever appear via
+  // hydration/polling of Chen's own actions).
+  const [scheduling, setScheduling] = useState<SchedulingCoordination | null>(null)
+  const [handoff, setHandoff] = useState<HandoffSummary | null>(null)
+  const [schedulingDetailsOpen, setSchedulingDetailsOpen] = useState(false)
+  const [handoffOpen, setHandoffOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const timers = useRef<number[]>([])
   const cancelled = useRef(false)
+
+  useEffect(() => {
+    if (!referral?.id) return
+    let ignore = false
+    if (referral.status === 'scheduled' || referral.status === 'consult_returned') {
+      getScheduling(referral.id).then((value) => { if (!ignore) setScheduling(value) }).catch(() => {})
+    }
+    if (referral.status === 'consult_returned') {
+      getHandoff(referral.id).then((value) => { if (!ignore) setHandoff(value) }).catch(() => {})
+    }
+    return () => { ignore = true }
+  }, [referral?.id, referral?.status])
 
   const setWash = (active: boolean) => { setJustCompleted(active); onWashChange?.(active) }
 
@@ -227,11 +265,13 @@ export function ReferralCoordinationSurface({
   const sentResolvedCount = visiblePhase.kind === 'sent' ? visiblePhase.resolvedCount : 0
   return <div className="referral-coordination-surface" role="status">
     <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
-      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} />
+      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} scheduling={scheduling} />
     </div>
     {status === 'done' && referral && !justCompleted && <div className="referral-mode-links">
       <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
       <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>
+      {scheduling?.status === 'scheduled' && <button type="button" className="text-button" onClick={() => setSchedulingDetailsOpen(true)}>View scheduling details →</button>}
+      {handoff && <button type="button" className="text-button" onClick={() => setHandoffOpen(true)}>Review handoff →</button>}
     </div>}
     {/* Full-card completion takeover (Part 2-4): absolutely positioned over
      * the whole .best-fit-card.referral-card (which is position: relative),
@@ -256,6 +296,17 @@ export function ReferralCoordinationSurface({
       patientLabel={patientLabel}
       receivingPhysicianName={receivingPhysicianName}
       onClose={() => setPacketOpen(false)}
+    />}
+    {schedulingDetailsOpen && scheduling && <SchedulingDetailsModal
+      scheduling={scheduling}
+      receivingPhysicianName={receivingPhysicianName}
+      onClose={() => setSchedulingDetailsOpen(false)}
+    />}
+    {handoffOpen && handoff && <HandoffModal
+      handoff={handoff}
+      patientLabel={patientLabel}
+      receivingPhysicianName={receivingPhysicianName}
+      onClose={() => setHandoffOpen(false)}
     />}
   </div>
 }
@@ -294,7 +345,7 @@ export function AgentCoordinationModal({
           <p>{event.summary}</p>
         </div>)}
       </div>
-      <p className="coordination-footer">{referral.status === 'accepted' ? `✓ Referral accepted by ${receivingPhysicianName}` : referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
+      <p className="coordination-footer">{referral.status === 'consult_returned' ? '✓ Specialist consultation handoff received' : referral.status === 'scheduled' ? '✓ Consultation scheduled' : referral.status === 'accepted' ? `✓ Referral accepted by ${receivingPhysicianName}` : referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
     </div>
   </div></ModalPortal>
 }
@@ -346,6 +397,91 @@ export function ReferralPacketModal({
           {referral.packet.items.length === 0 && <p className="muted-note">No packet items recorded yet.</p>}
         </div>
       </div>
+    </div>
+  </div></ModalPortal>
+}
+
+/**
+ * Appointment detail (Part Q) -- read-only, reused by both physicians. Keeps
+ * it simple: no calendar, no date picker, just the real confirmed slot.
+ */
+export function SchedulingDetailsModal({
+  scheduling, receivingPhysicianName, onClose,
+}: { scheduling: SchedulingCoordination; receivingPhysicianName: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const slot = scheduling.selected_option
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="post-flow-dialog packet-dialog" role="dialog" aria-modal="true" aria-label="Scheduling details">
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
+      <p className="eyebrow">Scheduling details</p>
+      {slot && <h2>{formatSubmittedAt(slot.starts_at)}</h2>}
+      <p className="coordination-subhead">{receivingPhysicianName} · {CHEN_SPECIALTY}</p>
+      <div className="packet-section"><h3>Appointment type</h3><p>{slot?.appointment_type ?? 'Not yet confirmed'}</p></div>
+      <div className="packet-section"><h3>Location</h3><p>{slot?.location ?? '—'}</p></div>
+      <div className="packet-section"><h3>Status</h3><p>{scheduling.status === 'scheduled' ? 'Confirmed' : scheduling.status.replaceAll('_', ' ')}</p></div>
+      <div className="packet-section"><h3>Source</h3><small className="packet-item-provenance">Synthetic scheduling workflow</small></div>
+    </div>
+  </div></ModalPortal>
+}
+
+/**
+ * The specialist-to-PCP handoff (Part Z/AE) -- the SAME persisted
+ * HandoffSummary rendered for both physicians, never a separate Lucy copy.
+ * `onSend` is only ever provided by Chen's own draft-review flow; Lucy's
+ * read-only usage never passes it, since she can only ever receive an
+ * already-sent handoff (see getHandoff's as_physician_id gating).
+ */
+export function HandoffModal({
+  handoff, patientLabel, receivingPhysicianName, onClose, onSend,
+}: {
+  handoff: HandoffSummary; patientLabel: string; receivingPhysicianName: string
+  onClose: () => void
+  onSend?: () => Promise<void>
+}) {
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !sending) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, sending])
+  const isDraft = handoff.status === 'draft'
+  const handleSend = async () => {
+    if (!onSend) return
+    setSending(true); setError('')
+    try {
+      await onSend()
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : 'Could not send the handoff.')
+      setSending(false)
+    }
+  }
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !sending) onClose() }}>
+    <div className="post-flow-dialog packet-dialog" role="dialog" aria-modal="true" aria-label="Consultation handoff">
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close" disabled={sending}>×</button>
+      <p className="eyebrow">Handoff to {PCP_NAME}</p>
+      <h2>{patientLabel}</h2>
+      <div className="request-review-parties">
+        <div><span className="section-label">From</span><strong>{receivingPhysicianName}</strong><small>{CHEN_SPECIALTY}</small></div>
+        <div><span className="section-label">To</span><strong>{PCP_NAME}</strong><small>Primary Care</small></div>
+      </div>
+      <div className="packet-section"><h3>Assessment</h3><p>{handoff.assessment}</p></div>
+      <div className="packet-section"><h3>Key findings</h3><ul className="clinical-list">{handoff.key_findings.map((item) => <li key={item}>{item}</li>)}</ul></div>
+      <div className="packet-section"><h3>Recommendations</h3><p>{handoff.recommendations}</p></div>
+      <div className="packet-section"><h3>Follow-up</h3><p>{handoff.follow_up}</p></div>
+      <hr className="handoff-divider" />
+      <p className="handoff-provenance">Prepared by {receivingPhysicianName}'s Agent from the documented consultation.</p>
+      {isDraft
+        ? <p className="handoff-provenance">Requires {receivingPhysicianName}'s approval before sending.</p>
+        : <p className="handoff-provenance">Approved and sent by {receivingPhysicianName}{handoff.sent_at ? ` · ${formatSubmittedAt(handoff.sent_at)}` : ''}</p>}
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      {isDraft && onSend && <div className="request-review-actions">
+        <button className="button-primary" disabled={sending} onClick={handleSend}>{sending ? 'Sending…' : `Send to ${PCP_NAME} →`}</button>
+      </div>}
     </div>
   </div></ModalPortal>
 }
@@ -534,6 +670,254 @@ const CHEN_PATIENT_STAGE_META: Record<PatientStage, { label: string; tone: strin
 }
 const CHEN_PREVIOUS_CARE_PRIORITY = CHEN_PATIENT_STAGE_META.followup.priority
 const CHEN_SEEDED_PATIENTS = DEMO_PATIENTS.filter((patient) => patient.owner === 'chen')
+
+/**
+ * Appointment options (Part I/J): a focused list, not a calendar/date
+ * picker. The quiet "how these are confirmed" note makes the product
+ * boundary explicit without turning into marketing copy -- Lamina found the
+ * times; a patient, outreach channel, or the scheduling team confirms one
+ * (Part N: never claims Lamina contacted the patient).
+ */
+function SchedulingOptionsModal({
+  scheduling, patientLabel, receivingPhysicianName, busy, error, onSend, onClose,
+}: {
+  scheduling: SchedulingCoordination; patientLabel: string; receivingPhysicianName: string
+  busy: boolean; error: string; onSend: () => void; onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, busy])
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <div className="post-flow-dialog packet-dialog" role="dialog" aria-modal="true" aria-label="Appointment options">
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close" disabled={busy}>×</button>
+      <p className="eyebrow">Appointment options</p>
+      <h2>{patientLabel}</h2>
+      <p className="coordination-subhead">{receivingPhysicianName} · {CHEN_SPECIALTY}</p>
+      <div className="packet-section">
+        <h3>Available times</h3>
+        <div className="packet-items">
+          {scheduling.options.map((slot) => <div className="packet-item" key={slot.slot_id}>
+            <strong>{formatSubmittedAt(slot.starts_at)}</strong>
+            <p>{slot.appointment_type}</p>
+          </div>)}
+        </div>
+      </div>
+      <div className="packet-section scheduling-delivery-note">
+        <h3>How these options can be confirmed</h3>
+        <ul className="clinical-list">
+          <li>Patients using Lamina could choose directly.</li>
+          <li>Options could be sent through supported outreach channels.</li>
+          <li>Or the scheduling team can contact the patient with already-valid times.</li>
+        </ul>
+      </div>
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      <div className="request-review-actions">
+        <button className="button-primary" disabled={busy} onClick={onSend}>{busy ? 'Sending…' : 'Send options to scheduling →'}</button>
+      </div>
+    </div>
+  </div></ModalPortal>
+}
+
+type ChenDownstreamBusy = 'checking' | 'routing' | 'drafting' | null
+
+/**
+ * Dr. Chen's right-rail surface for an ACCEPTED referral (Parts D-AC): the
+ * downstream scheduling -> encounter -> handoff flow. Entirely state-driven
+ * from the real persisted artifacts (never a replayed animation on
+ * hydration) -- each click is a real backend call with a brief, calm loading
+ * pulse (Part AS), never a backend sleep. Exactly one current-state card at
+ * a time, same "right rail: current state / next action" convention as
+ * Lucy's own ReferralCoordinationSurface.
+ */
+export function ChenDownstreamCard({ referral, patientLabel }: { referral: Referral; patientLabel: string }) {
+  const [scheduling, setScheduling] = useState<SchedulingCoordination | null | undefined>(undefined)
+  const [encounter, setEncounter] = useState<ConsultationEncounter | null | undefined>(undefined)
+  const [handoff, setHandoff] = useState<HandoffSummary | null | undefined>(undefined)
+  const [busy, setBusy] = useState<ChenDownstreamBusy>(null)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [schedulingDetailsOpen, setSchedulingDetailsOpen] = useState(false)
+  const [handoffOpen, setHandoffOpen] = useState(false)
+  const [coordinationOpen, setCoordinationOpen] = useState(false)
+  const [liveReferral, setLiveReferral] = useState(referral)
+  const [error, setError] = useState('')
+  const cancelled = useRef(false)
+
+  useEffect(() => () => { cancelled.current = true }, [])
+
+  useEffect(() => {
+    if (!referral.id) return
+    let ignore = false
+    Promise.all([
+      getScheduling(referral.id),
+      getEncounter(referral.id),
+      getHandoff(referral.id, CHEN_ID),
+    ]).then(([s, e, h]) => { if (!ignore) { setScheduling(s); setEncounter(e); setHandoff(h) } }).catch(() => {})
+    return () => { ignore = true }
+  }, [referral.id])
+
+  const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, prefersReducedMotion() ? 0 : ms))
+
+  const findOptions = async () => {
+    if (!referral.id) return
+    setBusy('checking'); setError('')
+    try {
+      const [result] = await Promise.all([findSchedulingOptions(referral.id, CHEN_ID), sleep(3000)])
+      if (cancelled.current) return
+      setLiveReferral(result.referral)
+      setScheduling(result.scheduling)
+    } catch (findError) {
+      if (!cancelled.current) setError(findError instanceof Error ? findError.message : 'Could not find appointment options.')
+    } finally {
+      if (!cancelled.current) setBusy(null)
+    }
+  }
+
+  const sendToScheduling = async () => {
+    if (!referral.id) return
+    setBusy('routing'); setError('')
+    try {
+      const [result] = await Promise.all([routeSchedulingOptions(referral.id, CHEN_ID), sleep(1800)])
+      if (cancelled.current) return
+      setLiveReferral(result.referral)
+      setScheduling(result.scheduling)
+      setOptionsOpen(false)
+    } catch (routeError) {
+      if (!cancelled.current) setError(routeError instanceof Error ? routeError.message : 'Could not send options to scheduling.')
+    } finally {
+      if (!cancelled.current) setBusy(null)
+    }
+  }
+
+  const draftTheHandoff = async () => {
+    if (!referral.id) return
+    setBusy('drafting'); setError('')
+    try {
+      const [result] = await Promise.all([draftHandoff(referral.id, CHEN_ID), sleep(2500)])
+      if (cancelled.current) return
+      setLiveReferral(result.referral)
+      setHandoff(result.handoff)
+    } catch (draftError) {
+      if (!cancelled.current) setError(draftError instanceof Error ? draftError.message : 'Could not draft the handoff.')
+    } finally {
+      if (!cancelled.current) setBusy(null)
+    }
+  }
+
+  const sendTheHandoff = async () => {
+    if (!referral.id) return
+    const result = await sendHandoff(referral.id, CHEN_ID)
+    setLiveReferral(result.referral)
+    setHandoff(result.handoff)
+  }
+
+  if (scheduling === undefined || encounter === undefined || handoff === undefined) {
+    return <div className="next-step-card idle"><p className="muted-note">Opening referral…</p></div>
+  }
+
+  if (busy === 'checking') return <div className="next-step-card consulting">
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Checking availability</span>
+    <h3>Looking for appointment options.</h3>
+    <p>Your agent is looking for eligible new-patient Endocrinology appointments.</p>
+  </div>
+
+  if (busy === 'routing') return <div className="next-step-card consulting">
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Routing to scheduling</span>
+    <h3>Sending options to the scheduling workflow.</h3>
+  </div>
+
+  if (busy === 'drafting') return <div className="next-step-card consulting">
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Preparing handoff</span>
+    <h3>Preparing handoff.</h3>
+    <p>Your agent is summarizing the documented consultation for Dr. Saruhashi.</p>
+  </div>
+
+  const links = <div className="referral-mode-links">
+    <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>View referral history →</button>
+  </div>
+
+  if (handoff && handoff.status === 'sent') return <>
+    <div className="next-step-card ready">
+      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Handoff sent</span>
+      <h3>Dr. Saruhashi received the specialist update.</h3>
+      {handoff.sent_at && <small className="referral-submission-meta">Sent {formatSubmittedAt(handoff.sent_at)}</small>}
+      <div className="referral-mode-links">
+        <button type="button" className="text-button" onClick={() => setHandoffOpen(true)}>View handoff →</button>
+        <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>View referral history →</button>
+      </div>
+    </div>
+    {handoffOpen && <HandoffModal handoff={handoff} patientLabel={patientLabel} receivingPhysicianName={CHEN_NAME} onClose={() => setHandoffOpen(false)} />}
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+  </>
+
+  if (handoff && handoff.status === 'draft') return <>
+    <div className="next-step-card ready">
+      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Draft ready</span>
+      <h3>A handoff draft is ready for your review.</h3>
+      <button type="button" className="button-primary" onClick={() => setHandoffOpen(true)}>Review handoff →</button>
+      {links}
+    </div>
+    {handoffOpen && <HandoffModal handoff={handoff} patientLabel={patientLabel} receivingPhysicianName={CHEN_NAME} onClose={() => setHandoffOpen(false)} onSend={sendTheHandoff} />}
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+  </>
+
+  if (encounter) return <>
+    <div className="next-step-card ready">
+      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Consultation documented</span>
+      <h3>{patientLabel}'s {encounter.specialty} visit is available in the record.</h3>
+      <p>Your agent can prepare a concise update for Dr. Saruhashi from the documented consultation.</p>
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      <button type="button" className="button-primary" onClick={draftTheHandoff}>Draft handoff →</button>
+      {links}
+    </div>
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+  </>
+
+  if (scheduling && scheduling.status === 'scheduled') {
+    const slot = scheduling.selected_option
+    return <>
+      <div className="next-step-card ready">
+        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Scheduled</span>
+        <h3>Consultation scheduled</h3>
+        {slot && <p className="referral-found-value">{formatSubmittedAt(slot.starts_at)}</p>}
+        <p>{CHEN_NAME} · {CHEN_SPECIALTY}</p>
+        <p>The appointment has been confirmed.</p>
+        <div className="referral-mode-links">
+          <button type="button" className="text-button" onClick={() => setSchedulingDetailsOpen(true)}>View scheduling details →</button>
+          <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>View referral history →</button>
+        </div>
+      </div>
+      {schedulingDetailsOpen && <SchedulingDetailsModal scheduling={scheduling} receivingPhysicianName={CHEN_NAME} onClose={() => setSchedulingDetailsOpen(false)} />}
+      {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+    </>
+  }
+
+  if (scheduling && scheduling.status === 'options_ready') return <>
+    <div className="next-step-card ready">
+      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>{scheduling.options.length} appointment options found</span>
+      <h3>Your agent found valid new-patient times in your schedule.</h3>
+      <button type="button" className="button-primary" onClick={() => setOptionsOpen(true)}>View options →</button>
+      {links}
+    </div>
+    {optionsOpen && <SchedulingOptionsModal scheduling={scheduling} patientLabel={patientLabel} receivingPhysicianName={CHEN_NAME} busy={false} error={error} onSend={sendToScheduling} onClose={() => setOptionsOpen(false)} />}
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+  </>
+
+  return <>
+    <div className="next-step-card idle">
+      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Accepted</span>
+      <h3>Referred by {PCP_NAME}.</h3>
+      <p className="section-label">Referral question</p>
+      <p>{referral.referral_question}</p>
+      <p className="referral-next-step-note">Find appointment options</p>
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      <button type="button" className="consult-button" onClick={findOptions}>Find appointment options <span className="spark-icon" aria-hidden="true">✧</span></button>
+      <p className="bottom-note">Your agent can check {CHEN_NAME}'s available new-patient {CHEN_SPECIALTY} slots.</p>
+    </div>
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+  </>
+}
 
 /**
  * Dr. Chen's Patients page (Part F): his own pre-existing synthetic patient

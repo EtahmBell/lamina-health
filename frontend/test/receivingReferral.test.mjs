@@ -217,8 +217,8 @@ test('after acceptance, the parent removes the referral from its local incoming 
   assert.match(fn, /navigate\(`\/chen\/patients\/\$\{updated\.patient_id\}`\)/)
 })
 
-test('no decline/redirect/scheduling/insurance workflow exists on the receiving side', () => {
-  assert.doesNotMatch(receivingSideSource(), /Decline|Redirect|scheduling|insurance|prior authorization/i)
+test('no decline/redirect/insurance/prior-authorization workflow exists on the receiving side (real synthetic scheduling coordination is in scope for this pass and is expected to appear)', () => {
+  assert.doesNotMatch(receivingSideSource(), /Decline|Redirect|insurance|prior authorization/i)
 })
 
 /* ---------------------------------------------------------- Chen's persona */
@@ -256,14 +256,13 @@ test('in receiving mode, PatientWorkspace fetches the real active referral and r
   const fn = slice(app, 'function PatientWorkspace', 'export default function App')
   assert.match(fn, /if \(perspective !== 'receiving'\) return/)
   assert.match(fn, /getActiveReferral\(patientId\)\.then\(\(referral\) => \{ if \(!cancelled\) setReceivingReferral\(referral\) \}\)/)
-  assert.match(fn, /perspective === 'receiving'\s*\n\s*\? <ReceivingReferralCard referral=\{receivingReferral\} referringLabel=\{PCP_NAME\} demoPatient=\{demoPatient\} \/>/)
+  assert.match(fn, /perspective === 'receiving'\s*\n\s*\? <ReceivingReferralCard referral=\{receivingReferral\} patientLabel=\{patientName\(patientId\)\} demoPatient=\{demoPatient\} \/>/)
 })
 
-test('ReceivingReferralCard never says "Find a specialist" and shows the real referring physician and referral question when an accepted referral exists, and an honest lightweight status card for Chen\'s own pre-existing patients otherwise', () => {
+test('ReceivingReferralCard never says "Find a specialist" and delegates to the real downstream coordination card when an accepted referral exists, and an honest lightweight status card for Chen\'s own pre-existing patients otherwise', () => {
   const fn = slice(app, 'function ReceivingReferralCard', 'function PatientWorkspace')
   assert.doesNotMatch(fn, /Find a specialist/)
-  assert.match(fn, /Referred by \{referringLabel\}/)
-  assert.match(fn, /\{referral\.referral_question\}/)
+  assert.match(fn, /if \(referral\) return <ChenDownstreamCard referral=\{referral\} patientLabel=\{patientLabel\} \/>/)
   assert.match(fn, /if \(referral === undefined\)/, 'a loading state is distinct from "no referral exists"')
   assert.match(fn, /In your care/)
   assert.match(fn, /demoPatient\?\.reason/)

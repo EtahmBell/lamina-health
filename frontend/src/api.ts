@@ -47,14 +47,16 @@ export type PatientActivity = {
   latest_recommended_physician: string | null; latest_recommended_specialty: string | null
 }
 export type ConsultationRecord = { id: number; patient_id: string; completed_at: string; result: Consultation }
-export type ReferralStatus = 'draft' | 'assembling' | 'preflight' | 'resolving' | 'ready_for_review' | 'submitted' | 'accepted'
+export type ReferralStatus = 'draft' | 'assembling' | 'preflight' | 'resolving' | 'ready_for_review' | 'submitted' | 'accepted' | 'scheduled' | 'consult_returned'
 export type RequirementStatus = 'satisfied' | 'missing_from_packet' | 'optional_not_present'
 export type CoordinationEventType =
   | 'referral_created' | 'packet_assembled' | 'preflight_started' | 'requirement_checked'
   | 'information_requested' | 'record_search_started' | 'record_found' | 'record_not_found'
   | 'information_attached' | 'requirement_rechecked' | 'preflight_completed' | 'referral_ready'
   | 'physician_action_required' | 'referral_submitted' | 'referral_accepted'
-export type CoordinationActor = 'referring_agent' | 'receiving_agent' | 'system' | 'receiving_physician'
+  | 'scheduling_options_found' | 'scheduling_options_sent' | 'appointment_scheduled'
+  | 'consultation_ingested' | 'handoff_drafted' | 'handoff_sent'
+export type CoordinationActor = 'referring_agent' | 'receiving_agent' | 'system' | 'receiving_physician' | 'scheduling_workflow'
 export type AutonomyLevel = 'automatic' | 'physician_required'
 export type PacketItemProvenance = { source: string; attached_by: string; attached_during: string; observed_date: string | null }
 export type PacketItem = { key: string; label: string; value: string; provenance: PacketItemProvenance }
@@ -72,6 +74,31 @@ export type Referral = {
   receiving_requirements: ReferralRequirement[]; requirement_results: RequirementCheck[]
   coordination_events: CoordinationEvent[]
 }
+
+/** Downstream closed-loop referral artifacts (Part AB) -- each its own small
+ * object, never fields bolted onto Referral. */
+export type AppointmentSlot = { slot_id: string; starts_at: string; appointment_type: string; duration_minutes: number; location: string }
+export type SchedulingStatus = 'options_ready' | 'sent_to_scheduling' | 'scheduled'
+export type SchedulingCoordination = {
+  referral_id: number; status: SchedulingStatus; options: AppointmentSlot[]
+  selected_option: AppointmentSlot | null; source: string | null
+  routed_at: string | null; confirmed_at: string | null; created_at: string; updated_at: string
+}
+export type ConsultationEncounter = {
+  id: number | null; referral_id: number; patient_id: string; physician_id: string; specialty: string
+  occurred_at: string; source: 'synthetic_demo' | 'medplum'; status: 'completed'
+  assessment: string; key_findings: string[]; plan: string; follow_up: string; created_at: string
+}
+export type HandoffStatus = 'draft' | 'sent'
+export type HandoffSummary = {
+  id: number | null; referral_id: number; encounter_id: number; patient_id: string
+  from_physician_id: string; to_physician_id: string; drafted_by_agent_id: string
+  assessment: string; key_findings: string[]; recommendations: string; follow_up: string
+  status: HandoffStatus; approved_by_physician_id: string | null; drafted_at: string; sent_at: string | null
+}
+export type SchedulingOptionsResult = { referral: Referral; scheduling: SchedulingCoordination }
+export type EncounterResult = { referral: Referral; encounter: ConsultationEncounter }
+export type HandoffResult = { referral: Referral; handoff: HandoffSummary }
 export type AgentLearning = { key: string; statement: string; provenance: string; status: 'suggested' | 'confirmed' | 'rejected'; updated_at: string | null }
 export type MyAgent = {
   id: string; physician: string; specialty: string; status: string; synthetic: boolean; location: string
@@ -518,6 +545,30 @@ export const acceptReferral = (referralId: number, receivingPhysicianId: string)
 })
 /** The receiving-physician query: status='submitted' for Incoming requests, status='accepted' for the physician's accepted-patient list. */
 export const getPhysicianReferrals = (physicianId: string, status?: ReferralStatus) => request<Referral[]>(`/api/physicians/${encodeURIComponent(physicianId)}/referrals${status ? `?status=${status}` : ''}`)
+
+/** Downstream coordination (Part F/K/W/AA) -- scheduling, the externally-ingested
+ * consultation encounter, and the specialist-to-PCP handoff. */
+export const findSchedulingOptions = (referralId: number, receivingPhysicianId: string) => request<SchedulingOptionsResult>(`/api/referrals/${referralId}/scheduling/options`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
+})
+/** Routing also triggers the synthetic demo's stand-in confirmation immediately (Part M) -- never a separate call. */
+export const routeSchedulingOptions = (referralId: number, receivingPhysicianId: string) => request<SchedulingOptionsResult>(`/api/referrals/${referralId}/scheduling/route`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
+})
+export const getScheduling = (referralId: number) => request<SchedulingCoordination | null>(`/api/referrals/${referralId}/scheduling`)
+/** Demo-only control (Settings & Demo) -- never a normal Chen clinical button (Part C/R). */
+export const ingestConsultationEncounter = (referralId: number, receivingPhysicianId: string) => request<EncounterResult>(`/api/referrals/${referralId}/encounter/ingest`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
+})
+export const getEncounter = (referralId: number) => request<ConsultationEncounter | null>(`/api/referrals/${referralId}/encounter`)
+export const draftHandoff = (referralId: number, receivingPhysicianId: string) => request<HandoffResult>(`/api/referrals/${referralId}/handoff/draft`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
+})
+/** `asPhysicianId` is the explicit "acting as" identity gating draft visibility (Part AP) -- omit it for the referring side, which only ever sees a sent handoff. */
+export const getHandoff = (referralId: number, asPhysicianId?: string) => request<HandoffSummary | null>(`/api/referrals/${referralId}/handoff${asPhysicianId ? `?as_physician_id=${encodeURIComponent(asPhysicianId)}` : ''}`)
+export const sendHandoff = (referralId: number, receivingPhysicianId: string) => request<HandoffResult>(`/api/referrals/${referralId}/handoff/send`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
+})
 export const getPatientActivity = () => request<PatientActivity[]>('/api/workspace/activity')
 export const getConsultationHistory = () => request<ConsultationRecord[]>('/api/workspace/consultations')
 export const getConsultationRecord = (id: number) => request<ConsultationRecord>(`/api/workspace/consultations/${id}`)

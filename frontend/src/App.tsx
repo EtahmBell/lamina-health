@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type TrainProjection } from './api.ts'
+import { consultNetwork, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -18,7 +18,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ChenAgentPage, ChenHomePage, ChenNetworkPage, ChenPatientsPage, ReferralCoordinationSurface } from './Referral.tsx'
+import { ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -502,6 +502,51 @@ function DemoResetControl({ patient }: { patient: 'jordan' | 'tonjit' }) {
   </div>
 }
 
+/** Demo-only control (Settings & Demo). Clinical encounter completion is
+ * never a normal physician workflow decision inside the referral itself --
+ * it is represented as an INGESTED CLINICAL FACT arriving from the EHR/
+ * Medplum, simulated only from here, and only once there is something real
+ * to ingest (Tonjit's consultation has been scheduled) and nothing already
+ * on record (no completed encounter exists yet). */
+function TonjitEncounterSimulationControl() {
+  const [referral, setReferral] = useState<Referral | null | undefined>(undefined)
+  const [encounter, setEncounter] = useState<ConsultationEncounter | null | undefined>(undefined)
+  const [stage, setStage] = useState<'idle' | 'working' | 'done'>('idle')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    getActiveReferral(TONJIT_ID).then((result) => {
+      if (cancelled) return
+      setReferral(result)
+      if (result?.id != null) getEncounter(result.id).then((found) => { if (!cancelled) setEncounter(found) }).catch(() => { if (!cancelled) setEncounter(null) })
+      else setEncounter(null)
+    }).catch(() => { if (!cancelled) { setReferral(null); setEncounter(null) } })
+    return () => { cancelled = true }
+  }, [])
+  if (referral === undefined || encounter === undefined) return null
+  if (!referral || referral.id == null || referral.status !== 'scheduled' || encounter) return null
+  const referralId = referral.id
+  const simulate = async () => {
+    setStage('working'); setError('')
+    try {
+      const result = await ingestConsultationEncounter(referralId, CHEN_ID)
+      setEncounter(result.encounter)
+      setStage('done')
+    } catch (ingestError) {
+      setError(ingestError instanceof Error ? ingestError.message : 'Could not simulate the consultation encounter')
+      setStage('idle')
+    }
+  }
+  return <div className="demo-reset-block">
+    <div className="demo-reset">
+      <div><strong>Tonjit Askarov consultation</strong><p>Simulate the completed specialist consultation as if ingested from the EHR/Medplum, so Dr. Chen's Agent can draft the handoff.</p></div>
+      {stage !== 'done' && <button className="button-secondary" disabled={stage === 'working'} onClick={simulate}>{stage === 'working' ? 'Simulating…' : 'Simulate completed Tonjit consultation'}</button>}
+    </div>
+    {error && <p className="demo-reset-error" role="alert">{error}</p>}
+    {stage === 'done' && <p className="demo-reset-result" role="status"><b>✓</b>Consultation encounter documented in Tonjit's record.</p>}
+  </div>
+}
+
 /** Account/privacy/demo surface — deliberately separate from the Professional
  * Profile, which is now the primary-nav "Profile" destination. */
 function SettingsPage({ navigate }: { navigate: Navigate }) {
@@ -546,6 +591,7 @@ function SettingsPage({ navigate }: { navigate: Navigate }) {
         <dl><div><dt>Environment</dt><dd>Synthetic data · no PHI</dd></div></dl>
         <DemoResetControl patient="jordan" />
         <DemoResetControl patient="tonjit" />
+        <TonjitEncounterSimulationControl />
       </section>
       {user && <p className="muted-note profile-identity-link">This workspace's Dr. Lucy Saruhashi is a separate concept from your signed-in physician account. <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities →</button></p>}
       <p className="muted-note">Read-only for this demonstration. Account settings, credentialing, and production practice verification are not implemented.</p>
@@ -787,14 +833,9 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
  *   built from the same real stage data the Patients worklist already uses,
  *   never a fabricated specialist-treatment workflow.
  */
-function ReceivingReferralCard({ referral, referringLabel, demoPatient }: { referral: Referral | null | undefined; referringLabel: string; demoPatient: DemoPatientSummary | undefined }) {
+function ReceivingReferralCard({ referral, patientLabel, demoPatient }: { referral: Referral | null | undefined; patientLabel: string; demoPatient: DemoPatientSummary | undefined }) {
   if (referral === undefined) return <div className="next-step-card idle"><p className="muted-note">Opening patient…</p></div>
-  if (referral) return <div className="next-step-card ready">
-    <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Referral accepted</span>
-    <h3>Referred by {referringLabel}.</h3>
-    <p className="section-label">Referral question</p>
-    <p>{referral.referral_question}</p>
-  </div>
+  if (referral) return <ChenDownstreamCard referral={referral} patientLabel={patientLabel} />
   return <div className="next-step-card idle">
     <span className="status-label resolved">In your care</span>
     <h3>{demoPatient?.reason ?? 'Established patient'}</h3>
@@ -818,6 +859,10 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
   // 'receiving' mode; the PCP consult-network machinery below is entirely
   // unused on this path.
   const [receivingReferral, setReceivingReferral] = useState<Referral | null | undefined>(undefined)
+  // The documented consultation encounter, as if ingested from the EHR/
+  // Medplum (Part U/AF) -- the same persisted artifact either physician
+  // reads, never a per-perspective copy or a mutation of clinical_notes.
+  const [recordEncounter, setRecordEncounter] = useState<ConsultationEncounter | null>(null)
   const demoPatient = DEMO_PATIENTS.find((item) => item.id === patientId)
   const backPath = perspective === 'receiving' ? '/chen/patients' : '/patients'
   const refreshActivity = () => getPatientActivity()
@@ -831,6 +876,16 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
     getActiveReferral(patientId).then((referral) => { if (!cancelled) setReceivingReferral(referral) }).catch(() => { if (!cancelled) setReceivingReferral(null) })
     return () => { cancelled = true }
   }, [patientId, perspective])
+  useEffect(() => {
+    let cancelled = false
+    setRecordEncounter(null)
+    const referral$ = perspective === 'receiving' ? Promise.resolve(receivingReferral ?? null) : getActiveReferral(patientId).catch(() => null)
+    referral$.then((referral) => {
+      if (cancelled || !referral?.id) return
+      getEncounter(referral.id).then((found) => { if (!cancelled) setRecordEncounter(found) }).catch(() => {})
+    })
+    return () => { cancelled = true }
+  }, [patientId, perspective, receivingReferral])
   /**
    * On open, a patient who already has a completed consultation gets that
    * recommendation loaded directly -- the page reflects current care state, not
@@ -961,7 +1016,7 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
     <div className="patient-detail-grid">
       <aside ref={nextStepRef} className={`patient-next-step patient-top-card ${nextStepPinned ? 'pinned' : ''}`}>
         {perspective === 'receiving'
-          ? <ReceivingReferralCard referral={receivingReferral} referringLabel={PCP_NAME} demoPatient={demoPatient} />
+          ? <ReceivingReferralCard referral={receivingReferral} patientLabel={patientName(patientId)} demoPatient={demoPatient} />
           : <>
             <h2>Next step</h2>
             <p className="page-intro">Your agent helps with the follow-through.</p>
@@ -993,9 +1048,16 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
           </>}
       </aside>
       <div className="patient-clinical-main">
-        {(consultation || currentIssue) && <section className="patient-history-section patient-top-card" aria-labelledby="patient-history-heading">
+        {(consultation || currentIssue || recordEncounter) && <section className="patient-history-section patient-top-card" aria-labelledby="patient-history-heading">
           <h2 id="patient-history-heading">Patient history</h2>
           <div className="clinical-timeline">
+            {recordEncounter && <div className="timeline-event">
+              <time>{formatTime(recordEncounter.occurred_at)}</time>
+              <h4>{recordEncounter.specialty} consultation documented</h4>
+              <p>{recordEncounter.assessment}</p>
+              {recordEncounter.key_findings.length > 0 && <ul className="clinical-list">{recordEncounter.key_findings.map((item) => <li key={item}>{item}</li>)}</ul>}
+              <small className="packet-item-provenance">{recordEncounter.source === 'medplum' ? 'Synthetic FHIR via Medplum' : 'Synthetic demo encounter'}</small>
+            </div>}
             {consultation && <div className="timeline-event">
               {activity?.latest_consulted_at && <time>{formatTime(activity.latest_consulted_at)}</time>}
               <h4>Agent returned a specialist recommendation</h4>

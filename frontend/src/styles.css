@@ -2091,6 +2091,12 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .packet-item p { margin: 4px 0 0; color: var(--clinical); font-size: .74rem; line-height: 1.5; }
 .packet-item-provenance { display: block; margin-top: 4px; color: var(--text-secondary); font-size: .62rem; font-style: italic; }
 
+.referral-next-step-note { margin: 8px 0 0; color: var(--text-secondary); font-size: .68rem; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.handoff-divider { margin: 20px 0 14px; border: none; border-top: 1px solid var(--border); }
+.handoff-provenance { margin: 0 0 4px; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.scheduling-delivery-note .clinical-list li { border-top: 1px solid var(--border); padding: 8px 0; font-size: .72rem; }
+.scheduling-delivery-note .clinical-list li:first-child { border-top: 0; }
+
 /* Full-card completion takeover (Part 2-4): absolutely positioned over the
    whole referral card (which is position: relative, above), so it covers
    the kicker/physician row/back-button too -- no layout jump, no separate

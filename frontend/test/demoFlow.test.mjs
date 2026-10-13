@@ -9,7 +9,8 @@ const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to))
 const patientPage = () => slice(app, 'function PatientWorkspace', 'export default function App')
 const patientsList = () => slice(app, 'function PatientSelector', 'function ConsultationsPage')
-const resetControl = () => slice(app, 'function DemoResetControl', 'function SettingsPage')
+const resetControl = () => slice(app, 'function DemoResetControl', '/** Demo-only control (Settings & Demo). Clinical encounter completion')
+const encounterSimControl = () => slice(app, '/** Demo-only control (Settings & Demo). Clinical encounter completion', 'function SettingsPage')
 const profile = () => slice(app, 'function SettingsPage', 'function UnfinishedPatient')
 /** Every declaration block declared for a selector, in source order. */
 const rulesFor = (selector) => [...styles.matchAll(
@@ -124,6 +125,21 @@ test('reset calls the canonical endpoint and confirms quietly', () => {
   assert.match(resetControl(), /Tonjit referral demo reset\./)
   assert.doesNotMatch(resetControl(), /window\.location|location\.reload/, 'no full page reload')
   assert.doesNotMatch(resetControl(), /Medplum/, 'reset must not claim clinical data is deleted')
+})
+
+/* --------------------------------------- consultation encounter simulation */
+
+test('the Tonjit consultation-encounter simulation control is gated to only Tonjit\'s active referral, only once scheduled, and only while no encounter already exists', () => {
+  const fn = encounterSimControl()
+  assert.match(fn, /getActiveReferral\(TONJIT_ID\)/)
+  assert.match(fn, /if \(!referral \|\| referral\.id == null \|\| referral\.status !== 'scheduled' \|\| encounter\) return null/)
+  assert.match(fn, /ingestConsultationEncounter\(referralId, CHEN_ID\)/)
+})
+
+test('the consultation-encounter simulation control frames itself honestly as a demo stand-in for EHR/Medplum ingestion, never as a normal physician "complete consultation" action', () => {
+  const fn = encounterSimControl()
+  assert.match(fn, /as if ingested from the EHR\/Medplum/)
+  assert.doesNotMatch(fn, /Complete consultation|Complete visit/i)
 })
 
 /* ------------------------------------------------- simplified loading state */

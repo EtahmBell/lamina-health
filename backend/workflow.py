@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from backend.config import environment
-from backend.models import ConsultationResult, Referral
+from backend.models import ConsultationEncounter, ConsultationResult, HandoffSummary, Referral, SchedulingCoordination
 
 # A believable starting roster for a brand-new workspace, so Network -> Colleagues
 # never opens empty (see WorkflowStore.network_members). Deliberately drawn only from
@@ -71,6 +71,25 @@ class WorkflowStore:
                   patient_id TEXT NOT NULL, status TEXT NOT NULL,
                   referral_json TEXT NOT NULL,
                   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS scheduling_coordination (
+                  workspace_id TEXT NOT NULL, referral_id INTEGER NOT NULL,
+                  patient_id TEXT NOT NULL, status TEXT NOT NULL,
+                  coordination_json TEXT NOT NULL,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                  PRIMARY KEY(workspace_id, referral_id)
+                );
+                CREATE TABLE IF NOT EXISTS consultation_encounters (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL,
+                  referral_id INTEGER NOT NULL, patient_id TEXT NOT NULL,
+                  encounter_json TEXT NOT NULL, created_at TEXT NOT NULL,
+                  UNIQUE(workspace_id, referral_id)
+                );
+                CREATE TABLE IF NOT EXISTS handoff_summaries (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL,
+                  referral_id INTEGER NOT NULL, patient_id TEXT NOT NULL, status TEXT NOT NULL,
+                  handoff_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                  UNIQUE(workspace_id, referral_id)
                 );
                 CREATE TABLE IF NOT EXISTS agent_preferences (
                   workspace_id TEXT NOT NULL, key TEXT NOT NULL, statement TEXT NOT NULL,
@@ -304,6 +323,12 @@ class WorkflowStore:
                   ON consultations(workspace_id, id DESC);
                 CREATE INDEX IF NOT EXISTS referrals_workspace_id
                   ON referrals(workspace_id, patient_id, id DESC);
+                CREATE INDEX IF NOT EXISTS scheduling_coordination_patient
+                  ON scheduling_coordination(workspace_id, patient_id);
+                CREATE INDEX IF NOT EXISTS consultation_encounters_patient
+                  ON consultation_encounters(workspace_id, patient_id);
+                CREATE INDEX IF NOT EXISTS handoff_summaries_patient
+                  ON handoff_summaries(workspace_id, patient_id);
                 CREATE INDEX IF NOT EXISTS demo_workspaces_expiry
                   ON demo_workspaces(expires_at);
                 CREATE INDEX IF NOT EXISTS demo_workspace_bootstraps_expiry
@@ -728,6 +753,21 @@ class WorkflowStore:
                 "DELETE FROM referrals WHERE workspace_id=? AND patient_id=?",
                 (workspace_id, patient_id),
             )
+            # Downstream closed-loop artifacts (closed-loop referral pass 3) --
+            # scheduling/encounter/handoff all key off patient_id too, exactly
+            # like referrals, so one reset clears the whole chain (Part AI).
+            db.execute(
+                "DELETE FROM scheduling_coordination WHERE workspace_id=? AND patient_id=?",
+                (workspace_id, patient_id),
+            )
+            db.execute(
+                "DELETE FROM consultation_encounters WHERE workspace_id=? AND patient_id=?",
+                (workspace_id, patient_id),
+            )
+            db.execute(
+                "DELETE FROM handoff_summaries WHERE workspace_id=? AND patient_id=?",
+                (workspace_id, patient_id),
+            )
             remaining = db.execute(
                 "SELECT COUNT(*) FROM consultations WHERE workspace_id=?", (workspace_id,)
             ).fetchone()[0]
@@ -843,6 +883,104 @@ class WorkflowStore:
         if receiving_physician_id is not None:
             referrals = [r for r in referrals if r.receiving_physician_id == receiving_physician_id]
         return referrals
+
+    # ---------------------------------------------------------- scheduling
+
+    def upsert_scheduling(
+        self, workspace_id: str, patient_id: str, coordination: SchedulingCoordination
+    ) -> SchedulingCoordination:
+        now = self._now()
+        final = coordination.model_copy(update={"updated_at": now})
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO scheduling_coordination(
+                     workspace_id, referral_id, patient_id, status, coordination_json, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(workspace_id, referral_id) DO UPDATE SET
+                     status=excluded.status, coordination_json=excluded.coordination_json,
+                     updated_at=excluded.updated_at""",
+                (
+                    workspace_id, final.referral_id, patient_id, final.status.value,
+                    final.model_dump_json(), final.created_at, now,
+                ),
+            )
+        return final
+
+    def get_scheduling(self, workspace_id: str, referral_id: int) -> SchedulingCoordination | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT coordination_json FROM scheduling_coordination WHERE workspace_id=? AND referral_id=?",
+                (workspace_id, referral_id),
+            ).fetchone()
+        return SchedulingCoordination.model_validate_json(row["coordination_json"]) if row else None
+
+    # ---------------------------------------------------------- encounters
+
+    def create_encounter(
+        self, workspace_id: str, encounter: ConsultationEncounter
+    ) -> ConsultationEncounter:
+        now = self._now()
+        with self._connect() as db:
+            cursor = db.execute(
+                """INSERT INTO consultation_encounters(
+                     workspace_id, referral_id, patient_id, encounter_json, created_at
+                   ) VALUES (?, ?, ?, '', ?)""",
+                (workspace_id, encounter.referral_id, encounter.patient_id, now),
+            )
+            encounter_id = int(cursor.lastrowid)
+            final = encounter.model_copy(update={"id": encounter_id})
+            db.execute(
+                "UPDATE consultation_encounters SET encounter_json=? WHERE workspace_id=? AND id=?",
+                (final.model_dump_json(), workspace_id, encounter_id),
+            )
+        return final
+
+    def get_encounter(self, workspace_id: str, referral_id: int) -> ConsultationEncounter | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT encounter_json FROM consultation_encounters WHERE workspace_id=? AND referral_id=?",
+                (workspace_id, referral_id),
+            ).fetchone()
+        return ConsultationEncounter.model_validate_json(row["encounter_json"]) if row else None
+
+    # ------------------------------------------------------------ handoffs
+
+    def create_handoff(self, workspace_id: str, handoff: HandoffSummary) -> HandoffSummary:
+        now = self._now()
+        with self._connect() as db:
+            cursor = db.execute(
+                """INSERT INTO handoff_summaries(
+                     workspace_id, referral_id, patient_id, status, handoff_json, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, '', ?, ?)""",
+                (workspace_id, handoff.referral_id, handoff.patient_id, handoff.status.value, now, now),
+            )
+            handoff_id = int(cursor.lastrowid)
+            final = handoff.model_copy(update={"id": handoff_id})
+            db.execute(
+                "UPDATE handoff_summaries SET handoff_json=? WHERE workspace_id=? AND id=?",
+                (final.model_dump_json(), workspace_id, handoff_id),
+            )
+        return final
+
+    def update_handoff(self, workspace_id: str, handoff: HandoffSummary) -> HandoffSummary:
+        if handoff.id is None:
+            raise ValueError("update_handoff requires a persisted handoff (id is None)")
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE handoff_summaries SET status=?, handoff_json=?, updated_at=?
+                   WHERE workspace_id=? AND id=?""",
+                (handoff.status.value, handoff.model_dump_json(), now, workspace_id, handoff.id),
+            )
+        return handoff
+
+    def get_handoff(self, workspace_id: str, referral_id: int) -> HandoffSummary | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT handoff_json FROM handoff_summaries WHERE workspace_id=? AND referral_id=?",
+                (workspace_id, referral_id),
+            ).fetchone()
+        return HandoffSummary.model_validate_json(row["handoff_json"]) if row else None
 
     def specialist_reviews(self, workspace_id: str, specialist_npi: str) -> dict[int, str]:
         with self._connect() as db:

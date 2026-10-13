@@ -15,6 +15,22 @@ from .consultation import (
     PhysicianEvaluation,
     PhysicianProfile,
 )
+from .care_coordination import (
+    AppointmentSlot,
+    ConsultationEncounter,
+    DraftHandoffRequest,
+    EncounterIngestRequest,
+    EncounterResult,
+    HandoffResult,
+    HandoffStatus,
+    HandoffSummary,
+    RouteSchedulingRequest,
+    SchedulingCoordination,
+    SchedulingOptionsRequest,
+    SchedulingOptionsResult,
+    SchedulingStatus,
+    SendHandoffRequest,
+)
 from .referral import (
     AutonomyLevel,
     CoordinationActor,
@@ -33,6 +49,20 @@ from .referral import (
 )
 
 __all__ = [
+    "AppointmentSlot",
+    "ConsultationEncounter",
+    "DraftHandoffRequest",
+    "EncounterIngestRequest",
+    "EncounterResult",
+    "HandoffResult",
+    "HandoffStatus",
+    "HandoffSummary",
+    "RouteSchedulingRequest",
+    "SchedulingCoordination",
+    "SchedulingOptionsRequest",
+    "SchedulingOptionsResult",
+    "SchedulingStatus",
+    "SendHandoffRequest",
     "CandidateReason",
     "ClinicalFit",
     "ClinicalRepresentation",

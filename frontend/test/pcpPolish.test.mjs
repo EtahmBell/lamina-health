@@ -102,6 +102,16 @@ test('Patient history has no subtitle -- the heading leads straight into the tim
   assert.doesNotMatch(page, /The story so far/)
 })
 
+test('Patient history surfaces the documented consultation encounter as a real timeline milestone, sourced from the persisted artifact and never from mutated clinical_notes', () => {
+  const page = patientPage()
+  assert.match(page, /\{recordEncounter && <div className="timeline-event">/)
+  assert.match(page, /\{recordEncounter\.specialty\} consultation documented/)
+  assert.match(page, /\{recordEncounter\.assessment\}/)
+  assert.match(page, /recordEncounter\.key_findings/)
+  assert.match(page, /recordEncounter\.source === 'medplum' \? 'Synthetic FHIR via Medplum' : 'Synthetic demo encounter'/)
+  assert.doesNotMatch(page, /clinical_notes\s*=|setClinicalNotes/, 'the encounter must never mutate the patient\'s clinical_notes field directly')
+})
+
 test('the resolved-state badge carries a checkmark (matching the demo\'s consulting->resolved pill swap) and the headline gets extra breathing room', () => {
   // This badge now lives inside RecommendationView's Discovery-mode render
   // (it disappears entirely once a referral is active -- see Part D).

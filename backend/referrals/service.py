@@ -11,21 +11,28 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from backend.clinical import build_patient_context
-from backend.demo_identity import LUCY_AGENT_ID
+from backend.demo_identity import LUCY_AGENT_ID, PCP_NAME
 from backend.models import (
     AutonomyLevel,
+    ConsultationEncounter,
     CoordinationActor,
     CoordinationEvent,
     CoordinationEventType,
+    HandoffStatus,
+    HandoffSummary,
     PatientRecord,
     Referral,
     ReferralStatus,
     RequirementStatus,
+    SchedulingCoordination,
+    SchedulingStatus,
 )
+from backend.synthetic_data import synthetic_agent_id
 
 from .packet import assemble_initial_packet
 from .requirements import evaluate_requirements, requirements_for
 from .resolver import resolve_missing_requirement
+from .scheduling import synthetic_chen_availability
 
 
 def _now() -> str:
@@ -299,3 +306,257 @@ def accept_referral(
         metadata=metadata,
     )
     return referral
+
+
+# --------------------------------------------------------------------------
+# Downstream coordination (closed-loop referral pass 3): scheduling, the
+# externally-ingested consultation encounter, and the specialist-to-PCP
+# handoff. Each stage is its own narrow artifact (Part AB) -- Referral only
+# ever gains the minimal milestone statuses (`scheduled`, `consult_returned`)
+# it genuinely needs; everything else is read from the artifact itself.
+# --------------------------------------------------------------------------
+
+
+def find_scheduling_options(
+    referral: Referral,
+    receiving_physician_id: str,
+    receiving_physician_name: str,
+    existing: SchedulingCoordination | None,
+) -> SchedulingCoordination:
+    """Legitimate agent work (Part F): check Dr. Chen's known synthetic
+    availability and return valid new-patient slots. Safe to call repeatedly
+    -- an already-persisted SchedulingCoordination is returned unchanged
+    (and no duplicate event is appended), never regenerated with different
+    slots on a second click."""
+    if referral.receiving_physician_id != receiving_physician_id:
+        raise ValueError(
+            f"{receiving_physician_id!r} is not the receiving physician for this referral."
+        )
+    if existing is not None:
+        return existing
+    if referral.status != ReferralStatus.ACCEPTED:
+        raise ValueError(
+            f"Cannot find scheduling options for a referral in status {referral.status.value!r}; "
+            "it must first be accepted."
+        )
+    slots = synthetic_chen_availability()
+    now = _now()
+    _append_event(
+        referral,
+        event_type=CoordinationEventType.SCHEDULING_OPTIONS_FOUND,
+        actor=CoordinationActor.RECEIVING_AGENT,
+        autonomy=AutonomyLevel.AUTOMATIC,
+        summary=f"{receiving_physician_name}'s Agent found {len(slots)} valid new-patient appointment option(s).",
+        metadata={"referral_id": referral.id or 0, "option_count": len(slots)},
+    )
+    return SchedulingCoordination(
+        referral_id=referral.id or 0,
+        status=SchedulingStatus.OPTIONS_READY,
+        options=slots,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def route_options_to_scheduling(
+    referral: Referral,
+    coordination: SchedulingCoordination,
+    receiving_physician_id: str,
+    receiving_physician_name: str,
+) -> SchedulingCoordination:
+    """A real physician action (Part L): Dr. Chen is authorizing the next
+    administrative handoff, never implied by the agent merely finding
+    options. For this synthetic demo only (Part M), routing also triggers
+    `confirm_synthetic_appointment` immediately afterward -- the one place
+    this demo simulates "the scheduling workflow/patient confirmed a time"
+    without claiming Lamina contacted anyone (Part N)."""
+    if referral.receiving_physician_id != receiving_physician_id:
+        raise ValueError(
+            f"{receiving_physician_id!r} is not the receiving physician for this referral."
+        )
+    if coordination.status in (SchedulingStatus.SENT_TO_SCHEDULING, SchedulingStatus.SCHEDULED):
+        return coordination
+    if coordination.status != SchedulingStatus.OPTIONS_READY:
+        raise ValueError(f"Cannot route scheduling options in status {coordination.status.value!r}.")
+    routed = coordination.model_copy(
+        update={
+            "status": SchedulingStatus.SENT_TO_SCHEDULING,
+            "routed_at": _now(),
+            "updated_at": _now(),
+        }
+    )
+    _append_event(
+        referral,
+        event_type=CoordinationEventType.SCHEDULING_OPTIONS_SENT,
+        actor=CoordinationActor.RECEIVING_PHYSICIAN,
+        autonomy=AutonomyLevel.PHYSICIAN_REQUIRED,
+        summary=f"{receiving_physician_name} sent the available appointment options to the practice scheduling workflow.",
+        metadata={"referral_id": referral.id or 0},
+    )
+    return confirm_synthetic_appointment(referral, routed)
+
+
+def confirm_synthetic_appointment(
+    referral: Referral, coordination: SchedulingCoordination
+) -> SchedulingCoordination:
+    """The synthetic demo's own stand-in for real patient/staff confirmation
+    (Part M) -- never Dr. Chen's Agent, never the receiving physician.
+    Always selects one of the REAL options already returned by
+    `find_scheduling_options`, never a fabricated fourth time."""
+    if coordination.status == SchedulingStatus.SCHEDULED:
+        return coordination
+    if coordination.status != SchedulingStatus.SENT_TO_SCHEDULING:
+        raise ValueError(f"Cannot confirm an appointment in status {coordination.status.value!r}.")
+    selected = coordination.options[0]
+    confirmed = coordination.model_copy(
+        update={
+            "status": SchedulingStatus.SCHEDULED,
+            "selected_option": selected,
+            "source": "synthetic_demo",
+            "confirmed_at": _now(),
+            "updated_at": _now(),
+        }
+    )
+    _append_event(
+        referral,
+        event_type=CoordinationEventType.APPOINTMENT_SCHEDULED,
+        actor=CoordinationActor.SCHEDULING_WORKFLOW,
+        autonomy=AutonomyLevel.AUTOMATIC,
+        summary=f"Synthetic scheduling workflow confirmed the {selected.appointment_type.lower()} for {selected.starts_at}.",
+        metadata={"referral_id": referral.id or 0, "slot_id": selected.slot_id, "source": "synthetic_demo"},
+    )
+    referral.status = ReferralStatus.SCHEDULED
+    return confirmed
+
+
+def ingest_consultation_encounter(
+    referral: Referral,
+    receiving_physician_id: str,
+    existing: ConsultationEncounter | None,
+) -> ConsultationEncounter:
+    """Demo-only stand-in for a real EHR/Medplum encounter arriving in the
+    clinical record (Part C/S) -- deliberately never exposed as a normal
+    Chen "Complete consultation" button; see the `/encounter/ingest` demo
+    control. Idempotent: duplicate ingestion returns the existing encounter
+    unchanged, never a second one."""
+    if existing is not None:
+        return existing
+    if referral.receiving_physician_id != receiving_physician_id:
+        raise ValueError(
+            f"{receiving_physician_id!r} is not the receiving physician for this referral."
+        )
+    if referral.status != ReferralStatus.SCHEDULED:
+        raise ValueError(
+            f"Cannot ingest a consultation encounter for a referral in status {referral.status.value!r}; "
+            "the appointment must first be scheduled."
+        )
+    now = _now()
+    encounter = ConsultationEncounter(
+        referral_id=referral.id or 0,
+        patient_id=referral.patient_id,
+        physician_id=receiving_physician_id,
+        specialty=referral.specialty,
+        occurred_at=now,
+        source="synthetic_demo",
+        status="completed",
+        assessment="Type 2 diabetes with worsening glycemic control despite current oral therapy.",
+        key_findings=["HbA1c 9.6%"],
+        plan=(
+            "Treatment intensification per specialist assessment, with ongoing monitoring "
+            "coordinated between endocrinology and primary care."
+        ),
+        follow_up="Follow-up endocrinology visit in 3 months to reassess glycemic control.",
+        created_at=now,
+    )
+    _append_event(
+        referral,
+        event_type=CoordinationEventType.CONSULTATION_INGESTED,
+        actor=CoordinationActor.SYSTEM,
+        autonomy=AutonomyLevel.AUTOMATIC,
+        summary=f"A {referral.specialty.lower()} consultation encounter became available from the clinical record.",
+        metadata={"referral_id": referral.id or 0, "source": "synthetic_demo"},
+    )
+    return encounter
+
+
+def draft_handoff(
+    referral: Referral,
+    encounter: ConsultationEncounter,
+    receiving_physician_id: str,
+    receiving_physician_name: str,
+    existing: HandoffSummary | None,
+) -> HandoffSummary:
+    """Chen's Agent drafts a PCP handoff from the documented encounter (Part
+    W) -- deterministic from structured encounter data in this pass, never a
+    live model call (a future Responses-API-based synthesis layer could
+    replace this function's body without touching callers). Remains
+    `status=draft` until the physician explicitly sends it (Part AA)."""
+    if existing is not None:
+        return existing
+    if referral.receiving_physician_id != receiving_physician_id:
+        raise ValueError(
+            f"{receiving_physician_id!r} is not the receiving physician for this referral."
+        )
+    if encounter.referral_id != referral.id:
+        raise ValueError("Encounter does not belong to this referral.")
+    now = _now()
+    handoff = HandoffSummary(
+        referral_id=referral.id or 0,
+        encounter_id=encounter.id or 0,
+        patient_id=referral.patient_id,
+        from_physician_id=receiving_physician_id,
+        to_physician_id=referral.referring_physician_id,
+        drafted_by_agent_id=synthetic_agent_id(receiving_physician_id),
+        assessment=encounter.assessment,
+        key_findings=encounter.key_findings,
+        recommendations=encounter.plan,
+        follow_up=encounter.follow_up,
+        status=HandoffStatus.DRAFT,
+        drafted_at=now,
+    )
+    _append_event(
+        referral,
+        event_type=CoordinationEventType.HANDOFF_DRAFTED,
+        actor=CoordinationActor.RECEIVING_AGENT,
+        autonomy=AutonomyLevel.AUTOMATIC,
+        summary=f"{receiving_physician_name}'s Agent drafted a consultation handoff for {PCP_NAME} from the documented encounter.",
+        metadata={"referral_id": referral.id or 0, "encounter_id": encounter.id or 0},
+    )
+    return handoff
+
+
+def send_handoff(
+    referral: Referral,
+    handoff: HandoffSummary,
+    receiving_physician_id: str,
+    receiving_physician_name: str,
+) -> HandoffSummary:
+    """The one human approval gate in this whole downstream flow (Part AA):
+    Dr. Chen -- never his agent -- explicitly approves and sends. Idempotent
+    on an already-sent handoff; advances the referral to its final
+    `consult_returned` milestone."""
+    if referral.receiving_physician_id != receiving_physician_id:
+        raise ValueError(
+            f"{receiving_physician_id!r} is not the receiving physician for this referral."
+        )
+    if handoff.status == HandoffStatus.SENT:
+        return handoff
+    if handoff.status != HandoffStatus.DRAFT:
+        raise ValueError(f"Cannot send a handoff in status {handoff.status.value!r}.")
+    sent = handoff.model_copy(
+        update={
+            "status": HandoffStatus.SENT,
+            "approved_by_physician_id": receiving_physician_id,
+            "sent_at": _now(),
+        }
+    )
+    _append_event(
+        referral,
+        event_type=CoordinationEventType.HANDOFF_SENT,
+        actor=CoordinationActor.RECEIVING_PHYSICIAN,
+        autonomy=AutonomyLevel.PHYSICIAN_REQUIRED,
+        summary=f"{receiving_physician_name} approved and sent the consultation handoff to {PCP_NAME}.",
+        metadata={"referral_id": referral.id or 0, "handoff_id": handoff.id or 0},
+    )
+    referral.status = ReferralStatus.CONSULT_RETURNED
+    return sent

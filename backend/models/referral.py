@@ -15,6 +15,13 @@ class ReferralStatus(StrEnum):
     READY_FOR_REVIEW = "ready_for_review"
     SUBMITTED = "submitted"
     ACCEPTED = "accepted"
+    # Scheduling/encounter/handoff DETAIL deliberately lives in their own
+    # small artifacts (SchedulingCoordination/ConsultationEncounter/
+    # HandoffSummary), never crammed into Referral itself -- these two
+    # statuses are only the minimal downstream milestones the referral
+    # itself needs to carry (Part AB).
+    SCHEDULED = "scheduled"
+    CONSULT_RETURNED = "consult_returned"
 
 
 class RequirementStatus(StrEnum):
@@ -39,6 +46,14 @@ class CoordinationEventType(StrEnum):
     PHYSICIAN_ACTION_REQUIRED = "physician_action_required"
     REFERRAL_SUBMITTED = "referral_submitted"
     REFERRAL_ACCEPTED = "referral_accepted"
+    # Downstream coordination (closed-loop referral pass 3) -- see Part AG for
+    # the actor distinctions these carry.
+    SCHEDULING_OPTIONS_FOUND = "scheduling_options_found"
+    SCHEDULING_OPTIONS_SENT = "scheduling_options_sent"
+    APPOINTMENT_SCHEDULED = "appointment_scheduled"
+    CONSULTATION_INGESTED = "consultation_ingested"
+    HANDOFF_DRAFTED = "handoff_drafted"
+    HANDOFF_SENT = "handoff_sent"
 
 
 class CoordinationActor(StrEnum):
@@ -48,6 +63,10 @@ class CoordinationActor(StrEnum):
     # The one actor that is never an agent (see Part C) -- acceptance is an
     # explicit physician action, not something the receiving agent decides.
     RECEIVING_PHYSICIAN = "receiving_physician"
+    # The synthetic stand-in for "patient/staff confirmed a time outside the
+    # physician workflow" (Part M/N) -- never attributed to the receiving
+    # physician or their agent, since neither one did the confirming.
+    SCHEDULING_WORKFLOW = "scheduling_workflow"
 
 
 class AutonomyLevel(StrEnum):

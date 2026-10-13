@@ -14,6 +14,8 @@ export type DisplayPhase =
   | { kind: 'ready'; resolvedCount: number }
   | { kind: 'sent'; resolvedCount: number; submittedAt: string | null }
   | { kind: 'accepted'; acceptedAt: string | null }
+  | { kind: 'scheduled' }
+  | { kind: 'handoff_received'; receivedAt: string | null }
   | { kind: 'unresolved'; requirementLabels: string[] }
 
 /**
@@ -64,6 +66,13 @@ export function derivePhases(referral: Referral): DisplayPhase[] {
   // no referral_accepted event can exist yet.
   const acceptedEvent = events.find((event) => event.event_type === 'referral_accepted')
   if (acceptedEvent) phases.push({ kind: 'accepted', acceptedAt: acceptedEvent.created_at })
+  // Scheduling/handoff detail lives in their own artifacts (SchedulingCoordination/
+  // HandoffSummary), never crammed into the referral's own events (Part AB) --
+  // these two phases only mark THAT the milestone happened; the surface
+  // rendering them fetches the real artifact separately for its content.
+  if (events.some((event) => event.event_type === 'appointment_scheduled')) phases.push({ kind: 'scheduled' })
+  const handoffSentEvent = events.find((event) => event.event_type === 'handoff_sent')
+  if (handoffSentEvent) phases.push({ kind: 'handoff_received', receivedAt: handoffSentEvent.created_at })
   return phases
 }
 
@@ -90,7 +99,8 @@ export function restorePhase(referral: Referral): DisplayPhase | null {
  * (~1.9-2.1s for the substantive phases), not a snappy UI transition. Pure
  * frontend presentation pacing; the backend call itself is never delayed. */
 export const PHASE_HOLD_MS: Record<DisplayPhase['kind'], number> = {
-  preparing: 1900, checking: 1900, missing: 1900, found: 2100, ready: 1000, sent: 500, accepted: 1000, unresolved: 1300,
+  preparing: 1900, checking: 1900, missing: 1900, found: 2100, ready: 1000, sent: 500, accepted: 1000,
+  scheduled: 1000, handoff_received: 1000, unresolved: 1300,
 }
 
 /** How long the full-card success wash holds before fading away to reveal
@@ -137,6 +147,12 @@ export const EVENT_TYPE_TITLES: Record<string, string> = {
   physician_action_required: 'Physician action required',
   referral_submitted: 'Referral sent',
   referral_accepted: 'Referral accepted',
+  scheduling_options_found: 'Found appointment options',
+  scheduling_options_sent: 'Sent options to scheduling',
+  appointment_scheduled: 'Appointment scheduled',
+  consultation_ingested: 'Consultation encounter documented',
+  handoff_drafted: 'Drafted consultation handoff',
+  handoff_sent: 'Sent consultation handoff',
 }
 
 /** `receiving_physician` is the one actor that is a real person, never an
@@ -147,5 +163,9 @@ export function eventActorLabel(event: CoordinationEvent, referringLabel: string
   if (event.actor === 'receiving_physician') return receivingPhysicianName
   if (event.actor === 'receiving_agent') return `${receivingPhysicianName}'s Agent`
   if (event.actor === 'referring_agent') return referringLabel
+  // The synthetic stand-in for "patient/staff confirmed a time" (Part M/AG) --
+  // never attributed to the physician or their agent, and distinct from
+  // "Lamina" (system) so the audit trail reads honestly.
+  if (event.actor === 'scheduling_workflow') return 'Scheduling workflow'
   return 'Lamina'
 }
