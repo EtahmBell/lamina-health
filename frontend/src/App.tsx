@@ -586,6 +586,9 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   // (hydration effect below); there is no local fabrication of referral state.
   const [viewMode, setViewMode] = useState<'discovery' | 'referral'>('discovery')
   const [activeReferral, setActiveReferral] = useState<Referral | null>(null)
+  // Full-card success-wash background, driven by ReferralCoordinationSurface's
+  // real completion moment -- never set on a restored/hydrated referral.
+  const [successWash, setSuccessWash] = useState(false)
   useEffect(() => {
     if (!focusEventId) return
     setNetworkOpen(true); setHighlight(true)
@@ -679,7 +682,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   // hidden (Part F/M/N).
   if (referralQuestion && viewMode === 'referral') {
     return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
-      <article className={`best-fit-card compact referral-card ${swapping ? 'swapping' : ''}`}>
+      <article className={`best-fit-card compact referral-card ${swapping ? 'swapping' : ''} ${successWash ? 'success-wash' : ''}`}>
         <button type="button" className="text-button back-to-match" onClick={() => setViewMode('discovery')}>← Back to match options</button>
         <p className="best-fit-kicker">Referral to</p>
         <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(selected.physician_name)}</span><div><h2>{cleanName(selected.physician_name)}</h2><p>{selected.specialty}</p></div></div>
@@ -690,6 +693,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
           receivingPhysicianId={selected.physician_id}
           receivingPhysicianName={cleanName(selected.physician_name)}
           restoredReferral={activeReferral}
+          onSuccessWashChange={setSuccessWash}
         />
       </article>
       <p className="disclaimer">{consultation.disclaimer}</p>

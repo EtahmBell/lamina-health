@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { createReferral, runReferralPreflight, type PacketItem, type Referral } from './api.ts'
 import { PCP_NAME } from './demoIdentity.ts'
 import { ModalPortal } from './ModalPortal.tsx'
-import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, restorePhase, type DisplayPhase } from './referralPhases.ts'
+import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
 export type { DisplayPhase } from './referralPhases.ts'
 
 const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
-function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; receivingPhysicianName: string }) {
+function PhaseContent({ phase, receivingPhysicianName, justCompleted }: { phase: DisplayPhase; receivingPhysicianName: string; justCompleted?: boolean }) {
   const who = lastName(receivingPhysicianName)
   switch (phase.kind) {
     case 'preparing':
@@ -47,11 +47,22 @@ function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; 
         <small>Referral packet complete</small>
       </>
     case 'sent':
+      // Two renderings of the same real "submitted" phase data: a brief
+      // full-card completion moment (see the success-wash treatment on the
+      // outer card), then a crossfade into the durable "awaiting review"
+      // copy. Never two different claims -- just two moments in hierarchy.
+      if (justCompleted) {
+        return <>
+          <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Referral sent</span>
+          <p className="referral-wash-line">The completed packet was sent to Dr. {who}.</p>
+          <p className="referral-wash-line">{resolvedSummary(phase.resolvedCount)}.</p>
+        </>
+      }
       return <>
-        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Sent to Dr. {who}</span>
-        <h3>Referral sent.</h3>
+        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Sent</span>
+        <h3>Awaiting Dr. {who}'s review</h3>
         <p>The completed referral packet has been sent to Dr. {who} for review.</p>
-        <small>Awaiting specialist review</small>
+        <small className="referral-submission-meta">{resolvedSummary(phase.resolvedCount)}{phase.submittedAt ? ` · Submitted ${formatSubmittedAt(phase.submittedAt)}` : ''}</small>
       </>
     case 'unresolved':
       return <>
@@ -76,26 +87,31 @@ function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; 
  *   presentation pacing -- the backend call itself is never delayed (Part E/F/Y).
  */
 export function ReferralCoordinationSurface({
-  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral,
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onSuccessWashChange,
 }: {
   patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string
   restoredReferral: Referral | null
+  /** Lets the parent card apply a full-card success-wash background while the
+   * completion moment plays -- never fired on restoration, only on a live
+   * Start-referral run (see Part D). */
+  onSuccessWashChange?: (active: boolean) => void
 }) {
   const [status, setStatus] = useState<'running' | 'done' | 'error'>(restoredReferral ? 'done' : 'running')
   const [visiblePhase, setVisiblePhase] = useState<DisplayPhase | null>(restoredReferral ? restorePhase(restoredReferral) : null)
   const [fading, setFading] = useState(false)
+  const [justCompleted, setJustCompleted] = useState(false)
   const [referral, setReferral] = useState<Referral | null>(restoredReferral)
   const [coordinationOpen, setCoordinationOpen] = useState(false)
   const [packetOpen, setPacketOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [toastVisible, setToastVisible] = useState(false)
   const timers = useRef<number[]>([])
   const cancelled = useRef(false)
 
   useEffect(() => () => {
     cancelled.current = true
     timers.current.forEach((id) => window.clearTimeout(id))
-    timers.current = []
+    onSuccessWashChange?.(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -120,21 +136,43 @@ export function ReferralCoordinationSurface({
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
 
-  const revealPhase = async (phase: DisplayPhase) => {
+  const crossfade = async (apply: () => void) => {
     if (cancelled.current) return
     if (!prefersReducedMotion()) {
       setFading(true)
       await sleep(PHASE_FADE_MS)
       if (cancelled.current) return
-      setVisiblePhase(phase)
+      apply()
       await nextPaint()
       if (cancelled.current) return
       setFading(false)
     } else {
-      setVisiblePhase(phase)
+      apply()
     }
-    if (phase.kind === 'sent') setToastVisible(true)
+  }
+
+  const revealPhase = async (phase: DisplayPhase) => {
+    await crossfade(() => setVisiblePhase(phase))
+    if (cancelled.current) return
     await sleep(PHASE_HOLD_MS[phase.kind])
+  }
+
+  /**
+   * The "sent" phase gets a stronger, two-moment reveal (Part D): first a
+   * brief full-card success wash ("Referral sent" / what was resolved),
+   * held long enough to register as a real completion event, then a
+   * crossfade into the durable "Awaiting Dr. X's review" card. Both moments
+   * render the exact same real phase data -- only the copy hierarchy and the
+   * outer card's background differ.
+   */
+  const revealSentPhase = async (phase: DisplayPhase & { kind: 'sent' }) => {
+    await crossfade(() => { setVisiblePhase(phase); setJustCompleted(true); onSuccessWashChange?.(true) })
+    if (cancelled.current) return
+    await sleep(prefersReducedMotion() ? 500 : SUCCESS_WASH_HOLD_MS)
+    if (cancelled.current) return
+    await crossfade(() => { setJustCompleted(false); onSuccessWashChange?.(false) })
+    if (cancelled.current) return
+    await sleep(PHASE_HOLD_MS.sent)
   }
 
   const start = async () => {
@@ -147,7 +185,8 @@ export function ReferralCoordinationSurface({
       if (cancelled.current) return
       setReferral(preflighted)
       for (const phase of derivePhases(preflighted).slice(1)) {
-        await revealPhase(phase)
+        if (phase.kind === 'sent') await revealSentPhase(phase)
+        else await revealPhase(phase)
         if (cancelled.current) return
       }
       setStatus('done')
@@ -164,9 +203,9 @@ export function ReferralCoordinationSurface({
   if (!visiblePhase) return null
   return <div className="referral-coordination-surface" role="status">
     <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
-      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} />
+      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} justCompleted={justCompleted} />
     </div>
-    {status === 'done' && referral && <div className="referral-mode-links">
+    {status === 'done' && referral && !justCompleted && <div className="referral-mode-links">
       <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
       <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>
     </div>}
@@ -181,29 +220,6 @@ export function ReferralCoordinationSurface({
       receivingPhysicianName={receivingPhysicianName}
       onClose={() => setPacketOpen(false)}
     />}
-    {toastVisible && <Toast
-      title="Referral sent"
-      message={`${patientLabel}'s referral was sent to Dr. ${lastName(receivingPhysicianName)}.`}
-      onDismiss={() => setToastVisible(false)}
-    />}
-  </div>
-}
-
-const TOAST_VISIBLE_MS = 3200
-
-/**
- * A brief, non-blocking confirmation -- not the durable state (the rail is).
- * Auto-dismisses; does not require interaction. The smallest reusable
- * implementation that didn't already exist elsewhere in Lamina.
- */
-function Toast({ title, message, onDismiss }: { title: string; message: string; onDismiss: () => void }) {
-  useEffect(() => {
-    const id = window.setTimeout(onDismiss, TOAST_VISIBLE_MS)
-    return () => window.clearTimeout(id)
-  }, [onDismiss])
-  return <div className="lamina-toast" role="status" aria-live="polite">
-    <strong><span aria-hidden="true">✓</span> {title}</strong>
-    <span>{message}</span>
   </div>
 }
 

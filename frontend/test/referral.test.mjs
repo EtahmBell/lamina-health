@@ -97,6 +97,9 @@ test('a referral with a resolved missing requirement derives preparing -> checki
   assert.equal(found.observedDate, '2026-07-20')
   const ready = phases.find((phase) => phase.kind === 'ready')
   assert.equal(ready.resolvedCount, 1)
+  const sent = phases.find((phase) => phase.kind === 'sent')
+  assert.equal(sent.resolvedCount, 1)
+  assert.equal(sent.submittedAt, '2026-10-12T00:00:00+00:00')
 })
 
 test('a referral with nothing missing never shows a fabricated missing/found phase, but still ends in sent', () => {
@@ -214,11 +217,11 @@ test('reduced motion disables the phase crossfade and the status pulse, without 
 /* -------------------------------------------------------- polish pass: transitions */
 
 test('the content swap happens while still faded out, then a double-rAF lets the browser paint before fading back in -- fixing the flash/snap bug', () => {
-  const start = referralSource.indexOf('const revealPhase =')
-  const end = referralSource.indexOf('const start = async', start)
+  const start = referralSource.indexOf('const crossfade =')
+  const end = referralSource.indexOf('const revealPhase =', start)
   const body = referralSource.slice(start, end)
   const fadeOutIndex = body.indexOf('setFading(true)')
-  const swapIndex = body.indexOf('setVisiblePhase(phase)')
+  const swapIndex = body.indexOf('apply()')
   const paintIndex = body.indexOf('await nextPaint()')
   const fadeInIndex = body.indexOf('setFading(false)')
   assert.ok(fadeOutIndex > -1 && swapIndex > -1 && paintIndex > -1 && fadeInIndex > -1, 'all four steps should be present')
@@ -299,29 +302,54 @@ test('a Tonjit referral-demo reset endpoint exists and is wired through the gene
 
 /* ------------------------------------------------------ referral handoff (Part B-L) */
 
-test('the sent phase renders "Referral sent" / Awaiting specialist review, never the word accepted', () => {
+test('the durable sent state renders "Awaiting Dr. X\'s review" as the primary headline -- no standalone "Referral sent." heading, never the word accepted', () => {
   assert.match(referralSource, /case 'sent':/)
-  assert.match(referralSource, /<h3>Referral sent\.<\/h3>/)
-  assert.match(referralSource, /Awaiting specialist review/)
+  assert.doesNotMatch(referralSource, /<h3>Referral sent\.<\/h3>/, 'the repetitive standalone heading was removed')
+  assert.match(referralSource, /<h3>Awaiting Dr\. \{who\}'s review<\/h3>/)
   assert.doesNotMatch(referralSource, /accepted/i)
 })
 
-test('the confirmation toast only fires from the real "sent" phase reveal, never from error/unresolved paths', () => {
-  const toastTrigger = referralSource.match(/if \(phase\.kind === 'sent'\) setToastVisible\(true\)/g) ?? []
-  assert.ok(toastTrigger.length >= 1, 'toast is triggered when the sent phase is revealed')
-  assert.doesNotMatch(referralSource, /setToastVisible\(true\)[^}]*catch|catch[^}]*setToastVisible\(true\)/s, 'never set from the error path')
+test('the brief completion moment and the durable card both derive their copy from the same real phase data, never two conflicting claims', () => {
+  assert.match(referralSource, /if \(justCompleted\) \{/)
+  assert.match(referralSource, /The completed packet was sent to Dr\. \{who\}\.<\/p>/)
+  assert.match(referralSource, /\{resolvedSummary\(phase\.resolvedCount\)\}/)
 })
 
-test('Toast is a small, non-blocking, auto-dismissing confirmation -- not the durable rail state', () => {
-  assert.match(referralSource, /function Toast\(/)
-  assert.match(referralSource, /window\.setTimeout\(onDismiss, TOAST_VISIBLE_MS\)/)
-  assert.match(referralSource, /role="status" aria-live="polite"/)
+test('the durable card shows a quiet resolved-item + submitted-timestamp metadata line, sourced from real referral/event data', () => {
+  assert.match(referralSource, /className="referral-submission-meta"/)
+  assert.match(referralSource, /phase\.submittedAt \? ` · Submitted \$\{formatSubmittedAt\(phase\.submittedAt\)\}` : ''/)
 })
 
-test('"See agent coordination" (and "View referral packet") remain available once submission completes, not just while ready', () => {
-  assert.match(referralSource, /\{status === 'done' && referral && <div className="referral-mode-links">/)
+test('the old bottom-right toast was removed -- the full-card success wash is now the primary (and only) confirmation', () => {
+  assert.doesNotMatch(referralSource, /function Toast\(/)
+  assert.doesNotMatch(referralSource, /lamina-toast/)
+  assert.doesNotMatch(styles, /\.lamina-toast/)
+})
+
+test('"See agent coordination" (and "View referral packet") remain available once submission completes, not just while ready -- but not during the brief completion wash itself', () => {
+  assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-mode-links">/)
   assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination/)
   assert.match(referralSource, /onClick=\{\(\) => setPacketOpen\(true\)\}>View referral packet/)
+})
+
+test('the success wash state appears only via the real "sent" phase reveal -- never from the error/unresolved paths', () => {
+  const revealSentSource = referralSource.slice(referralSource.indexOf('const revealSentPhase ='), referralSource.indexOf('const start = async'))
+  assert.match(revealSentSource, /setJustCompleted\(true\)/)
+  assert.doesNotMatch(referralSource, /catch[\s\S]{0,200}setJustCompleted\(true\)/, 'never set from the error-catch path')
+})
+
+test('the success wash honors reduced motion -- a short static hold instead of an animated crossfade, but the completion moment still occurs', () => {
+  const revealSentSource = referralSource.slice(referralSource.indexOf('const revealSentPhase ='), referralSource.indexOf('const start = async'))
+  assert.match(revealSentSource, /prefersReducedMotion\(\) \? 500 : SUCCESS_WASH_HOLD_MS/)
+})
+
+test('the full-card success-wash background transition respects prefers-reduced-motion', () => {
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.best-fit-card\.referral-card \{ transition: none; \} \}/)
+})
+
+test('the success wash makes no backend calls itself -- create+preflight already happened before any phase was revealed', () => {
+  const revealSentSource = referralSource.slice(referralSource.indexOf('const revealSentPhase ='), referralSource.indexOf('const start = async'))
+  assert.doesNotMatch(revealSentSource, /createReferral\(|runReferralPreflight\(/)
 })
 
 test('the coordination modal footer reflects the real submitted status, derived from referral data not a hardcoded physician', () => {
@@ -337,7 +365,7 @@ test('EVENT_TYPE_TITLES maps referral_submitted to a plain operational label, no
 
 test('restorePhase restores the real terminal phase for a submitted referral -- sent, not the animated sequence', () => {
   const phase = restorePhase(READY_REFERRAL)
-  assert.deepEqual(phase, { kind: 'sent' })
+  assert.deepEqual(phase, { kind: 'sent', resolvedCount: 1, submittedAt: '2026-10-12T00:00:00+00:00' })
 })
 
 test('restorePhase restores the real terminal phase for a stuck/unresolved referral honestly', () => {
@@ -384,7 +412,7 @@ test('ReferralCoordinationSurface accepts a restoredReferral prop and jumps stra
 
 test('restoring a submitted referral still allows "See agent coordination" to open with the real restored events', () => {
   assert.match(referralSource, /useState<Referral \| null>\(restoredReferral\)/)
-  assert.match(referralSource, /\{status === 'done' && referral && <div className="referral-mode-links">/)
+  assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-mode-links">/)
 })
 
 /* ------------------------------------------------------ patient-level referral lookup (backend) */
@@ -529,4 +557,17 @@ test('hydration only switches to Referral mode when a real restorable phase exis
   const view = recommendation()
   const hydrationBlock = view.slice(view.indexOf('if (!referralQuestion) return'), view.indexOf("}, [consultation.patient_id, referralQuestion])"))
   assert.match(hydrationBlock, /if \(phase\) \{\s*\n\s*setActiveReferral\(existing\)\s*\n\s*setSelectedId\(existing\.receiving_physician_id\)\s*\n\s*setViewMode\('referral'\)\s*\n\s*\}/, 'setViewMode is only called inside the `if (phase)` branch, not unconditionally')
+})
+
+/* ========================================================================
+ * Spacing / vertical rhythm (this pass, Part A)
+ * ===================================================================== */
+
+test('the referral card uses a deliberate spacing hierarchy, not one global margin bump', () => {
+  assert.match(styles, /\.best-fit-card\.referral-card \.best-fit-physician \{ padding-top: 12px; \}/)
+  assert.match(styles, /\.best-fit-card\.referral-card \.referral-coordination-surface \{ margin-top: 22px; \}/)
+  assert.match(styles, /\.referral-coordination-surface h3 \{ margin: 14px 0 0;/)
+  assert.match(styles, /\.referral-coordination-surface small \{ display: block; margin-top: 10px;/)
+  assert.match(styles, /\.referral-mode-links \{[^}]*margin-top: 18px;/)
+  assert.match(styles, /\.best-fit-card\.referral-card \{ padding-bottom: 26px; \}/)
 })

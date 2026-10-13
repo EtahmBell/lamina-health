@@ -12,7 +12,7 @@ export type DisplayPhase =
   | { kind: 'missing'; requirementLabel: string }
   | { kind: 'found'; requirementLabel: string; value: string; observedDate: string | null }
   | { kind: 'ready'; resolvedCount: number }
-  | { kind: 'sent' }
+  | { kind: 'sent'; resolvedCount: number; submittedAt: string | null }
   | { kind: 'unresolved'; requirementLabels: string[] }
 
 /**
@@ -46,7 +46,9 @@ export function derivePhases(referral: Referral): DisplayPhase[] {
     phases.push({ kind: 'ready', resolvedCount })
   }
   if (hasSubmitted) {
-    phases.push({ kind: 'sent' })
+    const resolvedCount = events.filter((event) => event.event_type === 'information_attached').length
+    const submittedEvent = events.find((event) => event.event_type === 'referral_submitted')
+    phases.push({ kind: 'sent', resolvedCount, submittedAt: submittedEvent?.created_at ?? null })
   }
   if (!hasReady && !hasSubmitted) {
     const requirementLabels = events
@@ -80,14 +82,33 @@ export function restorePhase(referral: Referral): DisplayPhase | null {
  * absorb each real step (Part 5 polish pass). Pure frontend presentation
  * pacing; the backend call itself is never delayed. */
 export const PHASE_HOLD_MS: Record<DisplayPhase['kind'], number> = {
-  preparing: 1500, checking: 1500, missing: 1800, found: 1800, ready: 900, sent: 600, unresolved: 600,
+  preparing: 1500, checking: 1500, missing: 1800, found: 1800, ready: 900, sent: 400, unresolved: 600,
 }
+
+/** How long the full-card success wash holds before crossfading into the
+ * durable "Awaiting review" state, in ms. A live Start-referral run only --
+ * never replayed on page reload/restoration. */
+export const SUCCESS_WASH_HOLD_MS = 1700
 
 /** Crossfade duration between phases, in ms. */
 export const PHASE_FADE_MS = 260
 
 export function lastName(physicianName: string): string {
   return physicianName.split(' ').at(-1) ?? physicianName
+}
+
+/** "1 missing item resolved automatically" / "All required information was
+ * already included" -- shared by the success wash and the durable sent card. */
+export function resolvedSummary(resolvedCount: number): string {
+  return resolvedCount > 0
+    ? `${resolvedCount} missing item${resolvedCount === 1 ? '' : 's'} resolved automatically`
+    : 'All required information was already included'
+}
+
+/** "Oct 12 · 12:49 PM" -- same compact timestamp convention App.tsx's own
+ * eventTimestamp() already uses elsewhere in the app. */
+export function formatSubmittedAt(value: string): string {
+  return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(', ', ' · ')
 }
 
 export const EVENT_TYPE_TITLES: Record<string, string> = {
