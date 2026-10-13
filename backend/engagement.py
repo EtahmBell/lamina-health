@@ -32,6 +32,7 @@ BASE_TIMESTAMP = "2026-01-01T00:00:00+00:00"
 PHYSICIANS_BY_ID = {physician.id: physician for physician in ALL_PHYSICIANS}
 PERSONA_BY_PHYSICIAN_ID = {
     "physician-jung": "iain",
+    "physician-chen": "chen",
     "physician-onadeko": "onadeko",
     "physician-alvarez": "sofia",
     "physician-sanchez": "tiffany",
@@ -71,6 +72,21 @@ PERSONAS: dict[str, dict[str, Any]] = {
         "location": "Oakland, CA",
         "agent_id": synthetic_agent_id("physician-jung"),
         "agent_name": "Dr. Iain Jung's Agent",
+        "synthetic": True,
+    },
+    # The receiving specialist in the closed-loop referral demo (Part A) --
+    # same canonical physician-chen identity the referral domain already uses
+    # (see backend/synthetic_data/fixtures.py's PHYSICIAN_CHEN), never a
+    # second competing identity object.
+    "chen": {
+        "id": "chen",
+        "physician_id": "physician-chen",
+        "npi": SYNTHETIC_PHYSICIAN_NPIS["physician-chen"],
+        "name": "Dr. Noah Chen",
+        "specialty": "Endocrinology",
+        "location": "Oakland, CA",
+        "agent_id": synthetic_agent_id("physician-chen"),
+        "agent_name": "Dr. Noah Chen's Agent",
         "synthetic": True,
     },
     "onadeko": {
@@ -206,7 +222,7 @@ PERSONAS: dict[str, dict[str, Any]] = {
         "synthetic": True,
     },
 }
-EDITABLE_PERSONAS = {"lucy", "iain"}
+EDITABLE_PERSONAS = {"lucy", "iain", "chen"}
 INTEREST_TYPES = {
     "clinical_interest",
     "case_interest",
@@ -403,6 +419,18 @@ BASE_PROFILE_ITEMS: dict[str, list[dict[str, Any]]] = {
         _item("iain-interest-cardiorenal", "clinical_interests", "Cardiorenal disease"),
         _item("iain-location-oakland", "locations", "Oakland, CA"),
     ],
+    "chen": [
+        _item(
+            "chen-about",
+            "about",
+            "Endocrinologist focused on complex type 2 diabetes and treatment intensification.",
+        ),
+        _item("chen-interest-diabetes", "clinical_interests", "Complex diabetes"),
+        _item("chen-interest-t2dm", "clinical_interests", "Type 2 diabetes"),
+        _item("chen-interest-intensification", "clinical_interests", "Treatment intensification"),
+        _item("chen-interest-metabolic", "clinical_interests", "Metabolic disease"),
+        _item("chen-location-oakland", "locations", "Oakland, CA"),
+    ],
     "onadeko": [
         _item(
             "onadeko-about",
@@ -467,6 +495,12 @@ BASE_INTERESTS: dict[str, list[dict[str, Any]]] = {
 
 
 TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
+    # Deliberately empty: Chen's own calibration question bank is next-pass
+    # work (referral-preference authoring), not this pass (Part K). An empty
+    # list -- not a missing key -- lets every generic projection below degrade
+    # to an honest "nothing trained yet" state instead of a KeyError, exactly
+    # like a brand-new real physician with no training history yet.
+    "chen": [],
     "iain": [
         {
             "id": "iain-resistant-htn-normal-kidney",
@@ -670,7 +704,7 @@ BRANCH_QUESTIONS: dict[str, dict[str, Any]] = {
     },
 }
 
-INITIALIZATION_QUESTIONS: dict[str, list[dict[str, Any]]] = {}
+INITIALIZATION_QUESTIONS: dict[str, list[dict[str, Any]]] = {"chen": []}
 _INITIALIZATION_PROMPTS = {
     "lucy": (
         (
@@ -1076,7 +1110,14 @@ def question_by_id(persona_id: str, question_id: str) -> dict | None:
 
 def generated_training_questions(persona_id: str):
     """Yield a large deterministic bank from grounded calibration dimensions."""
-    practice = "primary-care coordination" if persona_id == "lucy" else "nephrology"
+    if persona_id == "lucy":
+        practice = "primary-care coordination"
+    elif persona_id == "iain":
+        practice = "nephrology"
+    else:
+        # Generic, truthful fallback for any other persona (e.g. Chen) --
+        # never a hardcoded assumption that every non-Lucy physician is Iain.
+        practice = PERSONAS[persona_id]["specialty"].lower()
     for dimension_index, (dimension, conditions) in enumerate(_CALIBRATION_DIMENSIONS.items()):
         for condition_index, condition in enumerate(conditions):
             yield {

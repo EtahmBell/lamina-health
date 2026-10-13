@@ -445,6 +445,72 @@ def test_perspective_and_public_profile_security_boundaries(
     assert "gaps" not in public["practice_representation"]
 
 
+def test_chen_is_a_real_editable_persona_with_his_canonical_profile_data(
+    engagement_store: WorkflowStore,
+) -> None:
+    """Dr. Noah Chen is now the convenient secondary demo persona (replacing
+    Iain in the switcher only, see App.tsx) -- this proves his backend
+    profile/representation/overview actually work, truthfully, without a
+    second competing physician identity object."""
+    with TestClient(app) as client:
+        profile = client.get(_url("/api/workspace/physician/profile", "chen")).json()
+        representation = client.get(
+            _url("/api/workspace/physician/agent-representation", "chen")
+        ).json()
+        overview = client.get(_url("/api/workspace/physician/agent-overview", "chen")).json()
+        training = client.get(_url("/api/workspace/physician/training", "chen")).json()
+
+    assert profile["physician"]["name"] == "Dr. Noah Chen"
+    assert profile["physician"]["specialty"] == "Endocrinology"
+    assert profile["physician"]["npi"] == CHEN_NPI
+    # Sourced from the same canonical PHYSICIAN_CHEN the referral domain uses
+    # (backend/synthetic_data/fixtures.py) -- never a duplicated/fabricated identity.
+    assert "type 2 diabetes" in representation["sections"]["clinical_focus"]
+    assert "type_2_diabetes" in representation["sections"]["good_fit"]
+    assert representation["ranking_effect"] == "none"
+    assert overview["specialty"] == "Endocrinology"
+    assert overview["location"] == "Oakland, CA"
+    # Truthful, never the old hardcoded "Nephrologist" fallback.
+    assert "Nephrologist" not in overview["portrait"]
+    assert "Endocrinology" in overview["portrait"]
+    assert overview["initialization"]["initialized"] is False
+    assert training["questions"] == []
+
+
+def test_chen_public_profile_is_reachable_and_shows_his_real_referral_representation(
+    engagement_store: WorkflowStore,
+) -> None:
+    with TestClient(app) as client:
+        public = client.get("/api/workspace/network/physicians/chen/profile").json()
+    assert public["physician"]["name"] == "Dr. Noah Chen"
+    assert "training" not in public
+    assert "type 2 diabetes" in public["practice_representation"]["clinical_focus"]
+
+
+def test_replacing_iain_in_the_demo_switcher_does_not_change_his_own_backend_data(
+    engagement_store: WorkflowStore,
+) -> None:
+    """Part A: Chen replaces Iain only as the convenient secondary DEMO
+    PERSONA (a frontend switcher list) -- his own engagement data must be
+    byte-for-byte what it always was."""
+    with TestClient(app) as client:
+        iain = client.get(_url("/api/workspace/physician/profile", "iain")).json()
+        representation = client.get(
+            _url("/api/workspace/physician/agent-representation", "iain")
+        ).json()
+
+    assert iain["physician"]["name"] == "Dr. Iain Jung"
+    assert iain["physician"]["specialty"] == "Nephrology"
+    assert "CKD stage 3–4" in representation["sections"]["clinical_focus"]
+
+
+def test_iains_agent_overview_portrait_is_unchanged(engagement_store: WorkflowStore) -> None:
+    with TestClient(app) as client:
+        overview = client.get(_url("/api/workspace/physician/agent-overview", "iain")).json()
+    assert "Nephrologist in Oakland" in overview["portrait"]
+    assert "proteinuric CKD" in overview["portrait"]
+
+
 def test_engagement_tables_are_additive(engagement_store: WorkflowStore) -> None:
     with sqlite3.connect(engagement_store.path) as database:
         tables = {

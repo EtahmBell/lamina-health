@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, createReferral, getPhysicianReferrals, runReferralPreflight, type PacketItem, type Referral } from './api.ts'
-import { CHEN_ID, CHEN_NAME, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
+import { acceptReferral, createReferral, getAgentOverview, getPhysicianReferrals, getPracticeRepresentation, getTrainingHistory, runReferralPreflight, type AgentOverview, type PacketItem, type PracticeRepresentation, type Referral, type TrainProjection } from './api.ts'
+import { CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
+import { AgentOverviewPanel, ChatTab, NetworkFeedTab, trainingPath, TrainTab } from './Engagement.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
@@ -94,17 +95,23 @@ function PhaseContent({ phase, receivingPhysicianName, patientLabel }: { phase: 
  *   presentation pacing -- the backend call itself is never delayed (Part E/F/Y).
  */
 export function ReferralCoordinationSurface({
-  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral,
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange,
 }: {
   patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string
   restoredReferral: Referral | null
+  /** Mirrors justCompleted up to the parent, which owns the actual card
+   * element -- the wash background lives there (see .handoff-wash), not on
+   * this overlay, so its visible edge is the card's own border-box and can
+   * never mismatch the card's radius (Part H). Never called for a restored/
+   * hydrated referral. */
+  onWashChange?: (active: boolean) => void
 }) {
   const [status, setStatus] = useState<'running' | 'done' | 'error'>(restoredReferral ? 'done' : 'running')
   const [visiblePhase, setVisiblePhase] = useState<DisplayPhase | null>(restoredReferral ? restorePhase(restoredReferral) : null)
   const [fading, setFading] = useState(false)
   // justCompleted is true only during the brief live completion moment --
   // never on a restored/hydrated referral, never on error/unresolved paths.
-  // It drives a full-card overlay (position: absolute over .best-fit-card),
+  // It drives a centered text overlay (position: absolute over .best-fit-card),
   // not a change to the underlying phase content.
   const [justCompleted, setJustCompleted] = useState(false)
   const [referral, setReferral] = useState<Referral | null>(restoredReferral)
@@ -114,9 +121,13 @@ export function ReferralCoordinationSurface({
   const timers = useRef<number[]>([])
   const cancelled = useRef(false)
 
+  const setWash = (active: boolean) => { setJustCompleted(active); onWashChange?.(active) }
+
   useEffect(() => () => {
     cancelled.current = true
     timers.current.forEach((id) => window.clearTimeout(id))
+    onWashChange?.(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -174,11 +185,11 @@ export function ReferralCoordinationSurface({
    * Never stacks old-phase + overlay + durable content at once.
    */
   const revealSentPhase = async (phase: DisplayPhase & { kind: 'sent' }) => {
-    await crossfade(() => { setVisiblePhase(phase); setJustCompleted(true) })
+    await crossfade(() => { setVisiblePhase(phase); setWash(true) })
     if (cancelled.current) return
     await sleep(prefersReducedMotion() ? 500 : SUCCESS_WASH_HOLD_MS)
     if (cancelled.current) return
-    setJustCompleted(false)
+    setWash(false)
     await sleep(prefersReducedMotion() ? 0 : PHASE_FADE_MS)
     if (cancelled.current) return
     await sleep(PHASE_HOLD_MS.sent)
@@ -223,7 +234,9 @@ export function ReferralCoordinationSurface({
      * the whole .best-fit-card.referral-card (which is position: relative),
      * so it covers the kicker/physician row/back-button too without any
      * layout jump, and is trivially centered via flex. Its own CSS opacity
-     * transition drives the fade -- no JS double-rAF needed here. */}
+     * transition drives the text fade -- no JS double-rAF needed here. The
+     * translucent wash itself lives on the card element (.handoff-wash, set
+     * by the parent via onWashChange), not here -- see Part H. */}
     <div className={`referral-handoff-overlay ${justCompleted ? 'visible' : ''}`} aria-hidden={!justCompleted} role={justCompleted ? 'status' : undefined}>
       <span className="referral-handoff-check" aria-hidden="true">✓</span>
       <h3>Referral handoff complete</h3>
@@ -554,5 +567,59 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
       </button>)}
     </div>}
     {reviewing && <RequestReviewModal referral={reviewing} receivingPhysicianName={CHEN_NAME} onAccepted={handleAccepted} onClose={() => setReviewing(null)} />}
+  </main>
+}
+
+/* ===================================================================== Part B/D
+ * Dr. Chen's Profile reuses ProfessionalProfilePage directly (wired up at the
+ * route level in App.tsx) -- no special Chen-only profile page exists. The
+ * two small pages below exist only because that SHARED profile page links out
+ * to "View how my agent represents me" and (via the public-preview page) "View
+ * network posts" -- both reuse existing generic shared components
+ * (AgentOverviewPanel/TrainTab/ChatTab/NetworkFeedTab), exactly like Lucy's
+ * and Iain's own agent/network pages, never a parallel implementation.
+ */
+
+const CHEN_AGENT_TABS = ['overview', 'train', 'test'] as const
+type ChenAgentTab = typeof CHEN_AGENT_TABS[number]
+const resolveChenAgentTab = (value: string | null): ChenAgentTab =>
+  value && (CHEN_AGENT_TABS as readonly string[]).includes(value) ? (value as ChenAgentTab) : 'overview'
+
+export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
+  const tabParam = params?.get('tab') ?? null
+  const [representation, setRepresentation] = useState<PracticeRepresentation | null>(null)
+  const [overview, setOverview] = useState<AgentOverview | null>(null)
+  const [trainProjection, setTrainProjection] = useState<TrainProjection | null>(null)
+  const [tab, setTab] = useState<ChenAgentTab>(() => resolveChenAgentTab(tabParam))
+  const [error, setError] = useState('')
+  useEffect(() => {
+    getPracticeRepresentation('chen').then(setRepresentation).catch(() => {})
+    getAgentOverview('chen').then(setOverview).catch((err: Error) => setError(err.message))
+    getTrainingHistory('chen').then(setTrainProjection).catch(() => {})
+  }, [])
+  useEffect(() => { setTab(resolveChenAgentTab(tabParam)) }, [tabParam])
+  const selectTab = (next: ChenAgentTab) => { setTab(next); window.history.replaceState({}, '', `/chen/agent?tab=${next}`) }
+  const agentName = `${CHEN_NAME}'s Agent`
+  return <main className="page-shell agent-page">
+    {error && <div className="error-banner" role="alert">{error}</div>}
+    {!overview && !error && <p className="muted-note">Opening your agent…</p>}
+    {overview && <>
+      <section className="agent-hero"><div className="agent-hero-mark"><LaminaMark /></div><div>
+        <p className="eyebrow">Your physician agent</p>
+        <h1>{agentName}</h1>
+        <p>{CHEN_SPECIALTY} · Represents your practice to referring physician agents.</p>
+      </div></section>
+      <nav className="agent-tabs" aria-label="My Agent sections">{CHEN_AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('chen')} />}
+      {tab === 'test' && <ChatTab personaId="chen" agentName={agentName} navigate={navigate} trainPath={trainingPath('chen')} />}
+    </>}
+  </main>
+}
+
+export function ChenNetworkPage({ navigate }: { navigate: Navigate }) {
+  return <main className="page-shell physician-directory-page">
+    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>Professional updates connected through your Lamina network.</p></div></header>
+    <NetworkFeedTab personaId="chen" navigate={navigate} />
   </main>
 }

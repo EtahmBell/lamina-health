@@ -216,7 +216,7 @@ export type SpecialistWorkspace = {
   recent_cases: SpecialistCaseSummary[]; latest_case_activity: string | null
   recommended_case_count: number; unreviewed_case_count: number; case_count: number
 }
-export type DemoPhysicianPerspective = 'lucy' | 'iain'
+export type DemoPhysicianPerspective = 'lucy' | 'iain' | 'chen'
 export type ProfileProvenance = 'synthetic_demo' | 'nppes' | 'physician_entered' | 'imported' | 'confirmed_by_physician' | 'confirmed_public_candidate'
 export type ProfileCategory = 'about' | 'training' | 'experience' | 'affiliations' | 'clinical_interests' | 'skills_or_procedures' | 'research' | 'publications' | 'teaching' | 'languages' | 'locations' | 'professional_links'
 export type ControlledPhysicianIdentity = {

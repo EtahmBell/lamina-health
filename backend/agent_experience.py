@@ -5,9 +5,13 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from backend.engagement import BASE_TIMESTAMP, PERSONAS, normalize_question
+from backend.engagement import BASE_TIMESTAMP, PERSONAS, PHYSICIANS_BY_ID, normalize_question
 
 _TEST_CASES: dict[str, list[dict[str, Any]]] = {
+    # Empty, not missing: Chen's own calibration/test-case bank is next-pass
+    # work (Part K), not this one. Avoids a KeyError if this endpoint is ever
+    # reached for him, same as TRAINING_QUESTIONS/INITIALIZATION_QUESTIONS.
+    "chen": [],
     "lucy": [
         {
             "id": "lucy-test-progressive-ckd",
@@ -136,12 +140,22 @@ def deterministic_portrait(
             "resistant-hypertension referrals toward nephrology and that persistent iron "
             "deficiency without source evaluation generally starts with gastroenterology."
         )
-    else:
+    elif persona_id == "iain":
         portrait = (
             "Nephrologist in Oakland with interests in proteinuric CKD, cardiorenal disease, "
             "and difficult-to-control blood pressure in CKD. Your agent understands your "
             "preferred CKD workup and the situations that make resistant hypertension a good "
             "fit for your practice."
+        )
+    else:
+        # Generic, truthful fallback for any other persona (e.g. Chen) --
+        # built from their own canonical specialty/focus data, never a
+        # fabricated nephrology portrait (the old unconditional else-branch).
+        physician = PHYSICIANS_BY_ID[PERSONAS[persona_id]["physician_id"]]
+        focus = ", ".join(physician.focus_areas) if physician.focus_areas else physician.specialty
+        portrait = (
+            f"{physician.specialty} physician in {PERSONAS[persona_id]['location']} with interests "
+            f"in {focus}. Your agent has not been trained on your practice preferences yet."
         )
     facts = [item["statement"] for item in confirmed_learnings]
     if facts:

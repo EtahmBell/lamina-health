@@ -92,16 +92,16 @@ function relativeDayLabel(value: string) {
 
 /* -------------------------------------------------------------------- paths */
 
-export const trainingPath = (perspective: PhysicianIdentity) => (perspective === 'iain' ? '/specialist/agent/train' : perspective === 'owner' ? '/me/agent/train' : '/agent/train')
-export const professionalProfilePath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/profile' : '/profile')
-export const networkProfilePath = (perspective: DemoPhysicianPerspective, controlledId: string) => (perspective === 'iain' ? `/specialist/network/profile/${controlledId}` : `/network/profile/${controlledId}`)
+export const trainingPath = (perspective: PhysicianIdentity) => (perspective === 'iain' ? '/specialist/agent/train' : perspective === 'chen' ? '/chen/agent/train' : perspective === 'owner' ? '/me/agent/train' : '/agent/train')
+export const professionalProfilePath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/profile' : perspective === 'chen' ? '/chen/profile' : '/profile')
+export const networkProfilePath = (perspective: DemoPhysicianPerspective, controlledId: string) => (perspective === 'iain' ? `/specialist/network/profile/${controlledId}` : perspective === 'chen' ? `/chen/network/profile/${controlledId}` : `/network/profile/${controlledId}`)
 /** "View as others see it" lands on the real public-profile page (never a
  * separate preview implementation) with an explicit ?preview=1 flag, so the
  * page can show a small "Previewing your public profile" bar -- ordinary
  * visitors reaching the same URL without this flag never see it. */
 export const networkProfilePreviewPath = (perspective: DemoPhysicianPerspective, controlledId: string) => `${networkProfilePath(perspective, controlledId)}?preview=1`
-export const networkUpdatesPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network?tab=feed' : '/network?tab=feed')
-export const networkPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network' : '/network')
+export const networkUpdatesPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network?tab=feed' : perspective === 'chen' ? '/chen/network?tab=feed' : '/network?tab=feed')
+export const networkPath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network' : perspective === 'chen' ? '/chen/network' : '/network')
 export const settingsPath = '/settings'
 
 /** Shared by both physician-profile shells (the NPPES directory page and the
@@ -2135,7 +2135,7 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
   </div>
 }
 
-const agentPracticePath = (perspective: PhysicianIdentity) => (perspective === 'iain' ? '/specialist/agent' : perspective === 'owner' ? '/me/agent?tab=practice' : '/agent?tab=knowledge')
+const agentPracticePath = (perspective: PhysicianIdentity) => (perspective === 'iain' ? '/specialist/agent' : perspective === 'chen' ? '/chen/agent' : perspective === 'owner' ? '/me/agent?tab=practice' : '/agent?tab=knowledge')
 /** Legacy ?tab= deep links degrade to a scroll target on the one continuous page, or a redirect for the retired Updates tab. */
 const LEGACY_PROFILE_TAB_SECTION: Record<string, string | null> = {
   overview: null, background: 'profile-section-training', research: 'profile-section-research', interests: 'profile-section-interests',

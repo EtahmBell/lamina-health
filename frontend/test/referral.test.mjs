@@ -367,8 +367,8 @@ test('"See agent coordination" (and "View referral packet") remain available onc
 
 test('the success wash state appears only via the real "sent" phase reveal -- never from the error/unresolved paths', () => {
   const revealSentSource = referralSource.slice(referralSource.indexOf('const revealSentPhase ='), referralSource.indexOf('const start = async'))
-  assert.match(revealSentSource, /setJustCompleted\(true\)/)
-  assert.doesNotMatch(referralSource, /catch[\s\S]{0,200}setJustCompleted\(true\)/, 'never set from the error-catch path')
+  assert.match(revealSentSource, /setWash\(true\)/)
+  assert.doesNotMatch(referralSource, /catch[\s\S]{0,200}setWash\(true\)/, 'never set from the error-catch path')
 })
 
 test('the success wash honors reduced motion -- a short static hold instead of an animated crossfade, but the completion moment still occurs', () => {
@@ -618,15 +618,43 @@ test('the referral card uses a deliberate spacing hierarchy, not one global marg
 
 test('the sequence never stacks old-phase content, the completion overlay, and durable content at once -- revealSentPhase swaps state atomically, one clean moment at a time', () => {
   const revealSentSource = referralSource.slice(referralSource.indexOf('const revealSentPhase ='), referralSource.indexOf('const start = async'))
-  // step 1: crossfade swaps visiblePhase + justCompleted together (one atomic apply())
-  assert.match(revealSentSource, /await crossfade\(\(\) => \{ setVisiblePhase\(phase\); setJustCompleted\(true\) \}\)/)
-  // step 2: justCompleted flips off on its own (the overlay's own CSS transition owns this fade)
-  assert.match(revealSentSource, /setJustCompleted\(false\)/)
+  // step 1: crossfade swaps visiblePhase + the wash (local + mirrored-up) together (one atomic apply())
+  assert.match(revealSentSource, /await crossfade\(\(\) => \{ setVisiblePhase\(phase\); setWash\(true\) \}\)/)
+  // step 2: the wash flips off on its own (the overlay's own CSS transition owns this fade)
+  assert.match(revealSentSource, /setWash\(false\)/)
 })
 
-test('the overlay is a pure CSS opacity transition (no JS double-rAF needed for its own fade), so wash background and completion text fade away together as one element', () => {
+test('the overlay is a pure CSS opacity transition (no JS double-rAF needed for its own fade) for the completion text', () => {
   assert.match(styles, /\.referral-handoff-overlay \{[^}]*opacity: 0;[^}]*transition: opacity 500ms ease-in-out;/)
   assert.match(styles, /\.referral-handoff-overlay\.visible \{ opacity: 1;/)
+})
+
+/* ========================================================================
+ * Success-wash card-shape fix (geometry bug: inset:0 + border-radius:inherit
+ * against an asymmetric-bordered card mismatched at the corners)
+ * ===================================================================== */
+
+test('the wash background lives on the card itself, not on a separately-positioned/radiused overlay -- the root cause of the corner mismatch', () => {
+  assert.doesNotMatch(styles, /\.referral-handoff-overlay \{[^}]*background:/, 'the overlay must not carry its own background any more')
+  assert.doesNotMatch(styles, /\.referral-handoff-overlay \{[^}]*border-radius: inherit/, 'border-radius: inherit against an inset box was the actual bug')
+  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash \{ background: rgb\(233 239 241 \/ 96%\); \}/)
+})
+
+test('the wash transitions via background-color on the card, with a reduced-motion override, mirroring the overlay\'s own fade timing', () => {
+  assert.match(styles, /\.best-fit-card\.referral-card \{ transition: background-color 500ms ease-in-out; \}/)
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.best-fit-card\.referral-card \{ transition: none; \} \}/)
+})
+
+test('ReferralCoordinationSurface mirrors the wash state up to the parent via onWashChange, exactly in lockstep with its own local justCompleted', () => {
+  assert.match(referralSource, /onWashChange\?: \(active: boolean\) => void/)
+  assert.match(referralSource, /const setWash = \(active: boolean\) => \{ setJustCompleted\(active\); onWashChange\?\.\(active\) \}/)
+})
+
+test('the parent card toggles .handoff-wash from onWashChange, and resets it on unmount so a cancelled run never leaves a stuck wash', () => {
+  assert.match(app, /const \[washActive, setWashActive\] = useState\(false\)/)
+  assert.match(app, /\$\{washActive \? 'handoff-wash' : ''\}/)
+  assert.match(app, /onWashChange=\{setWashActive\}/)
+  assert.match(referralSource, /onWashChange\?\.\(false\)\s*\n\s*\/\/ eslint-disable-next-line react-hooks\/exhaustive-deps\s*\n\s*\}, \[\]\)/)
 })
 
 test('no backend calls happen anywhere in start() other than the single create+preflight pair before the phase loop begins', () => {

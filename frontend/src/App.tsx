@@ -18,7 +18,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ChenPatientsPage, ReferralCoordinationSurface } from './Referral.tsx'
+import { ChenAgentPage, ChenNetworkPage, ChenPatientsPage, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -77,19 +77,31 @@ const SPECIALIST_NAV_ITEMS = [
   { id: 'specialist-network', title: 'Network', icon: <NetworkNavIcon />, path: '/specialist/network' },
 ]
 
-/** Chen is a minimal third demo persona (Part X) -- unlike Iain, he has no
- * engagement/training/network backend wired up in this pass, only Patients
- * (Incoming requests + accepted patients) and the reused Patient Detail
- * shell, so this nav is deliberately a single item. */
+/** Chen's own nav stays minimal -- Profile is reached via the avatar menu's
+ * profilePath, exactly like Lucy's and Iain's own Profile links, not a
+ * sidebar nav item (Part D: "using the existing product navigation
+ * convention"). */
 const CHEN_NAV_ITEMS = [
   { id: 'chen-patients', title: 'Patients', icon: '✦', path: '/chen/patients' },
 ]
 
+/** Every demo perspective that actually exists as a real page, used to
+ * resolve the avatar pill's current name/initials correctly no matter which
+ * one is open right now -- including Iain, whose pages are still fully
+ * functional (Part A: "do not delete Iain Jung from... any other synthetic
+ * data"), just no longer offered in the switcher below. */
 const DEMO_PERSPECTIVES = [
   { id: 'pcp' as const, name: PCP_NAME, role: 'Referring physician', initials: 'LS', path: '/home', profilePath: '/profile' },
   { id: 'specialist' as const, name: SPECIALIST_NAME, role: 'Specialist', initials: 'IJ', path: '/specialist/home', profilePath: '/specialist/profile' },
-  { id: 'chen' as const, name: CHEN_NAME, role: 'Receiving specialist', initials: 'NC', path: '/chen/patients', profilePath: '/chen/patients' },
+  { id: 'chen' as const, name: CHEN_NAME, role: 'Receiving specialist', initials: 'NC', path: '/chen/patients', profilePath: '/chen/profile' },
 ]
+
+/** The convenient secondary demo persona for the switcher dropdown (Part A):
+ * Dr. Noah Chen -- the receiving specialist in the main closed-loop referral
+ * demo -- replaces Dr. Iain Jung here. This changes only which physician is
+ * one click away; it is not a change to the referral/network/clinical
+ * domain, and Iain's own pages remain directly reachable and unchanged. */
+const SWITCHABLE_DEMO_PERSPECTIVES = DEMO_PERSPECTIVES.filter((item) => item.id !== 'specialist')
 
 /** The top-right avatar/account control. Combines the demo perspective switch with
  * profile and settings access, now that Profile is no longer a primary-nav item. */
@@ -114,7 +126,7 @@ function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; pers
       <button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate(current.profilePath) }}>Profile</button>
       <div className="perspective-menu-divider" role="separator" /><button role="menuitem" className="perspective-option" onClick={() => { setOpen(false); navigate(settingsPath) }}>Settings &amp; demo</button>
       <div className="perspective-menu-divider" role="separator" /><p className="perspective-menu-label">Demo perspective</p>
-      {DEMO_PERSPECTIVES.map((item) => <button key={item.id} role="menuitemradio" aria-checked={item.id === perspective} className={`perspective-option ${item.id === perspective ? 'active' : ''}`} onClick={() => switchTo(item.path)}>
+      {SWITCHABLE_DEMO_PERSPECTIVES.map((item) => <button key={item.id} role="menuitemradio" aria-checked={item.id === perspective} className={`perspective-option ${item.id === perspective ? 'active' : ''}`} onClick={() => switchTo(item.path)}>
         <span className="perspective-option-check" aria-hidden="true">{item.id === perspective ? '✓' : ''}</span>
         <span><strong>{item.name}</strong><small>{item.role}</small></span>
       </button>)}
@@ -593,6 +605,11 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   const [affirmed, setAffirmed] = useState(false)
   const [selectedId, setSelectedId] = useState(consultation.recommended_physician.physician_id)
   const [swapping, setSwapping] = useState(false)
+  // Mirrors ReferralCoordinationSurface's brief live completion moment -- the
+  // wash background lives on this card (see .handoff-wash in styles.css), not
+  // on a separately-shaped overlay, so it can never mismatch the card's own
+  // border-radius (Part H). Only ever true during a live Start-referral run.
+  const [washActive, setWashActive] = useState(false)
   // Discovery vs. Referral are frontend presentation modes only -- never a
   // backend referral status, and never persisted client-side either. See
   // Part B. `activeReferral` is populated purely by asking the backend
@@ -692,7 +709,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   // hidden (Part F/M/N).
   if (referralQuestion && viewMode === 'referral') {
     return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
-      <article className={`best-fit-card compact referral-card ${swapping ? 'swapping' : ''}`}>
+      <article className={`best-fit-card compact referral-card ${swapping ? 'swapping' : ''} ${washActive ? 'handoff-wash' : ''}`}>
         <button type="button" className="text-button back-to-match" onClick={() => setViewMode('discovery')}>← Back to match options</button>
         <p className="best-fit-kicker">Referral to</p>
         <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(selected.physician_name)}</span><div><h2>{cleanName(selected.physician_name)}</h2><p>{selected.specialty}</p></div></div>
@@ -702,6 +719,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
           patientLabel={patientName(consultation.patient_id)}
           receivingPhysicianId={selected.physician_id}
           receivingPhysicianName={cleanName(selected.physician_name)}
+          onWashChange={setWashActive}
           restoredReferral={activeReferral}
         />
       </article>
@@ -1106,6 +1124,13 @@ export default function App() {
   if (path === '/chen' || path === '/chen/patients') return <ProductShell navigate={navigate} section="chen-patients" perspective="chen"><ChenPatientsPage navigate={navigate} /></ProductShell>
   const chenPatientId = path.match(/^\/chen\/patients\/([^/]+)$/)?.[1]
   if (chenPatientId === TONJIT_ID) return <PatientWorkspace patientId={chenPatientId} navigate={navigate} perspective="receiving" />
+  if (path === '/chen/profile') return <ProductShell navigate={navigate} section="chen-profile" perspective="chen"><ProfessionalProfilePage personaId="chen" navigate={navigate} params={params} /></ProductShell>
+  if (path === '/chen/agent') return <ProductShell navigate={navigate} section="chen-agent" perspective="chen"><ChenAgentPage navigate={navigate} params={params} /></ProductShell>
+  if (path === '/chen/agent/train') return <ProductShell navigate={navigate} section="chen-agent" perspective="chen"><TrainingPage personaId="chen" agentName={`${CHEN_NAME}'s Agent`} navigate={navigate} exitPath="/chen/agent?tab=train" params={params} /></ProductShell>
+  if (path === '/chen/network') return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><ChenNetworkPage navigate={navigate} /></ProductShell>
+  if (path === '/chen/network/updates') return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><ChenNetworkPage navigate={navigate} /></ProductShell>
+  const chenNetworkProfileId = path.match(/^\/chen\/network\/profile\/([^/]+)$/)?.[1]
+  if (chenNetworkProfileId) return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><NetworkPhysicianProfilePage controlledId={chenNetworkProfileId} navigate={navigate} backPath="/chen/patients" perspective="chen" params={params} /></ProductShell>
   if (path === '/network') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={params} /></ProductShell>
   const networkNpi = path.match(/^\/network\/([^/]+)$/)?.[1]
   if (networkNpi) return <ProductShell navigate={navigate} section="network"><PhysicianProfilePage npi={networkNpi} navigate={navigate} /></ProductShell>

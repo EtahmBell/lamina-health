@@ -895,7 +895,7 @@ test('legacy /network/updates and /specialist/network/updates alias to the Feed 
 })
 
 test('Home "View network" lands on Network -> Feed, not a standalone feed route', () => {
-  assert.match(engagement, /export const networkUpdatesPath = \(perspective: DemoPhysicianPerspective\) => \(perspective === 'iain' \? '\/specialist\/network\?tab=feed' : '\/network\?tab=feed'\)/)
+  assert.match(engagement, /export const networkUpdatesPath = \(perspective: DemoPhysicianPerspective\) => \(perspective === 'iain' \? '\/specialist\/network\?tab=feed' : perspective === 'chen' \? '\/chen\/network\?tab=feed' : '\/network\?tab=feed'\)/)
 })
 
 test('My Network retains the existing search/add/list behavior; the graph is deliberately gone (Dashboard+Network polish pass)', () => {

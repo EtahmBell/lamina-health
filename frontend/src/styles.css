@@ -2056,6 +2056,18 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .best-fit-card.referral-card .best-fit-kicker { margin-bottom: 2px; }
 .best-fit-card.referral-card .best-fit-physician { padding-top: 12px; }
 .best-fit-card.referral-card .referral-coordination-surface { margin-top: 22px; }
+/* The success wash (Part H) is the card's OWN background, toggled by a
+   class -- not a separately-positioned/radiused overlay. A child box inset
+   by the card's border width (1px sides/bottom, 3px top accent) can never
+   carry the same border-radius as the card's own outer curve without a
+   corner mismatch; the card's native background, by contrast, is already
+   clipped to its own border-box by the browser with zero separate geometry,
+   so it can never drift from the card's actual rendered shape, and the
+   accent border -- painted by the card itself, never covered by a child --
+   stays visible throughout. */
+.best-fit-card.referral-card { transition: background-color 500ms ease-in-out; }
+.best-fit-card.referral-card.handoff-wash { background: rgb(233 239 241 / 96%); }
+@media (prefers-reduced-motion: reduce) { .best-fit-card.referral-card { transition: none; } }
 
 /* Discovery-mode status strip, shown only once a referral is already
    active -- visually secondary, never another primary action (Part J). */
@@ -2084,10 +2096,11 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
    whole referral card (which is position: relative, above), so it covers
    the kicker/physician row/back-button too -- no layout jump, no separate
    toast, no second competing confirmation. Centered both ways via flex.
-   Always mounted at opacity 0 so toggling .visible is a pure CSS fade;
-   the wash background and the completion text fade away together because
-   they're the same element. */
-.referral-handoff-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; background: rgb(233 239 241 / 96%); border-radius: inherit; opacity: 0; pointer-events: none; transition: opacity 500ms ease-in-out; }
+   Always mounted at opacity 0 so toggling .visible is a pure CSS fade. This
+   overlay carries the completion TEXT only -- the wash background lives on
+   the card itself (.handoff-wash, above), toggled in lockstep, so the two
+   visually fade together even though they're now two separate elements. */
+.referral-handoff-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; opacity: 0; pointer-events: none; transition: opacity 500ms ease-in-out; }
 .referral-handoff-overlay.visible { opacity: 1; pointer-events: auto; }
 .referral-handoff-check { font-family: var(--font-display); font-size: 1.4rem; color: var(--mineral-deep); }
 .referral-handoff-overlay h3 { margin: 2px 0 0; font-size: 1.1rem; font-weight: 500; color: var(--clinical); }
@@ -2095,7 +2108,6 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-handoff-overlay small { color: var(--text-secondary); font-size: .64rem; }
 @media (prefers-reduced-motion: reduce) { .referral-handoff-overlay { transition: none; } }
 .referral-submission-meta { color: var(--text-secondary); font-size: .6rem; }
-@media (prefers-reduced-motion: reduce) { .best-fit-card.referral-card { transition: none; } }
 
 /* Receiving side (Part E/F): a lightweight intermittent inbox, not a
    permanent right rail or a dense dashboard. */
