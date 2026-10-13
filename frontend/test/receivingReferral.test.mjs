@@ -133,20 +133,21 @@ test('resolvedCountFor derives the resolved-item count from real information_att
 })
 
 test('ChenPatientsPage hides the Incoming requests control entirely when there are zero submitted referrals -- no noisy empty card', () => {
-  const fn = slice(referralSource, 'export function ChenPatientsPage', referralSource.length)
+  const fn = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
   assert.match(fn, /\{incoming && incoming\.length > 0 && <IncomingRequestsControl/)
 })
 
 test('ChenPatientsPage queries submitted and accepted referrals from the real backend, scoped to Dr. Chen, never a frontend fixture', () => {
-  const fn = slice(referralSource, 'export function ChenPatientsPage', referralSource.length)
+  const fn = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
   assert.match(fn, /getPhysicianReferrals\(CHEN_ID, 'submitted'\)/)
   assert.match(fn, /getPhysicianReferrals\(CHEN_ID, 'accepted'\)/)
 })
 
-test('accepted patients render as real patient rows linking to Chen\'s Patient Detail, and an honest empty state exists when there are none', () => {
-  const fn = slice(referralSource, 'export function ChenPatientsPage', referralSource.length)
-  assert.match(fn, /navigate\(`\/chen\/patients\/\$\{referral\.patient_id\}`\)/)
-  assert.match(fn, /No patients yet/)
+test('accepted referrals are merged into the shared WorklistRows rendering at the top (priority -1), and an honest empty state exists when there are none', () => {
+  const fn = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
+  assert.match(fn, /label: 'Accepted referral', tone: 'copper', nextStep: 'Open patient', priority: -1/)
+  assert.match(fn, /<WorklistRows rows=\{active\} navigate=\{navigate\} basePath="\/chen\/patients" \/>/)
+  assert.match(fn, /No patients found/)
 })
 
 /* ---------------------------------------------------------- Request Review */
@@ -228,21 +229,21 @@ test('demoIdentity.ts defines Chen\'s canonical demo identity, matching the real
   assert.match(demoIdentity, /export const CHEN_NAME = 'Dr\. Noah Chen'/)
 })
 
-test('DEMO_PERSPECTIVES includes Chen as a third perspective, routed to /chen/patients', () => {
-  assert.match(app, /id: 'chen' as const, name: CHEN_NAME, role: 'Receiving specialist', initials: 'NC', path: '\/chen\/patients'/)
+test('DEMO_PERSPECTIVES includes Chen as a third perspective, routed to his real Dashboard', () => {
+  assert.match(app, /id: 'chen' as const, name: CHEN_NAME, role: 'Receiving specialist', initials: 'NC', path: '\/chen\/home'/)
 })
 
 test('the Chen routes are registered in the SPA dispatcher, reusing ProductShell and PatientWorkspace rather than new pages', () => {
   const dispatch = slice(app, 'export default function App', app.length)
-  assert.match(dispatch, /path === '\/chen' \|\| path === '\/chen\/patients'/)
+  assert.match(dispatch, /path === '\/chen' \|\| path === '\/chen\/home'/)
   assert.match(dispatch, /perspective="chen"/)
   assert.match(dispatch, /<ChenPatientsPage navigate=\{navigate\} \/>/)
-  assert.match(dispatch, /chenPatientId === TONJIT_ID\) return <PatientWorkspace patientId=\{chenPatientId\} navigate=\{navigate\} perspective="receiving" \/>/)
+  assert.match(dispatch, /chenPatientId === TONJIT_ID \|\| \(chenPatientId && CHEN_PATIENT_IDS\.includes\(chenPatientId\)\)\) return <PatientWorkspace patientId=\{chenPatientId\} navigate=\{navigate\} perspective="receiving" \/>/)
 })
 
-test('Chen\'s sidebar has no "My Agent" object -- acceptance is his own action, not an agent concept in this pass', () => {
+test('Chen now has a "My Agent" sidebar object, same standing as Lucy\'s and Iain\'s (closed-loop referral pass 2: full first-class workspace)', () => {
   const shell = slice(app, 'function ProductShell', 'function LandingPage')
-  assert.match(shell, /perspective === 'chen'\s*\n\s*\? null/)
+  assert.match(shell, /perspective === 'chen'\s*\n\s*\? <button className=\{`sidebar-clinician \$\{onAgent \? 'active' : ''\}`\}[\s\S]{0,200}CHEN_AGENT_NAME/)
 })
 
 /* ------------------------------------------------------- Patient Detail reuse */
@@ -255,14 +256,17 @@ test('in receiving mode, PatientWorkspace fetches the real active referral and r
   const fn = slice(app, 'function PatientWorkspace', 'export default function App')
   assert.match(fn, /if \(perspective !== 'receiving'\) return/)
   assert.match(fn, /getActiveReferral\(patientId\)\.then\(\(referral\) => \{ if \(!cancelled\) setReceivingReferral\(referral\) \}\)/)
-  assert.match(fn, /perspective === 'receiving'\s*\n\s*\? <ReceivingReferralCard referral=\{receivingReferral\} referringLabel=\{PCP_NAME\} \/>/)
+  assert.match(fn, /perspective === 'receiving'\s*\n\s*\? <ReceivingReferralCard referral=\{receivingReferral\} referringLabel=\{PCP_NAME\} demoPatient=\{demoPatient\} \/>/)
 })
 
-test('ReceivingReferralCard never says "Find a specialist" and shows the real referring physician and referral question', () => {
+test('ReceivingReferralCard never says "Find a specialist" and shows the real referring physician and referral question when an accepted referral exists, and an honest lightweight status card for Chen\'s own pre-existing patients otherwise', () => {
   const fn = slice(app, 'function ReceivingReferralCard', 'function PatientWorkspace')
   assert.doesNotMatch(fn, /Find a specialist/)
   assert.match(fn, /Referred by \{referringLabel\}/)
   assert.match(fn, /\{referral\.referral_question\}/)
+  assert.match(fn, /if \(referral === undefined\)/, 'a loading state is distinct from "no referral exists"')
+  assert.match(fn, /In your care/)
+  assert.match(fn, /demoPatient\?\.reason/)
 })
 
 test('the PCP consult-network effects are skipped entirely in receiving mode -- Chen\'s view never calls consultNetwork', () => {

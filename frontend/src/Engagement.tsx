@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { DemoPatientSummary } from './demoPatients.ts'
 import {
   ApiError,
   addNetworkMember,
@@ -212,6 +213,25 @@ function buildAgentDigest(records: ConsultationRecord[], overview: AgentOverview
     })
   }
   return tiles.slice(0, 3)
+}
+
+/** A patients-list row: shared by Lucy's Patients page and any other
+ * physician's own Patients page (e.g. Chen's) -- the rendering is generic,
+ * only the row DATA (label/tone/nextStep/priority) differs per physician's
+ * own practice semantics. `basePath` is the only perspective-specific bit
+ * (which Patient Detail namespace a row opens into). */
+export type WorklistRowData = { patient: DemoPatientSummary; label: string; tone: string; nextStep: string; priority: number; updated: string | null }
+
+/** "Active patients" (still moving through care) vs "Previous care" (loop complete or
+ * inactive) — grouped by care state, never by recency. */
+export function WorklistRows({ rows, navigate, basePath = '/patients' }: { rows: WorklistRowData[]; navigate: Navigate; basePath?: string }) {
+  return <div className="lam-list patient-worklist">{rows.map(({ patient, label, tone, nextStep, updated }) => <button key={patient.id} className="lam-row worklist-row" onClick={() => navigate(`${basePath}/${patient.id}`)}>
+    <span className="lam-row-mark patient-row-avatar">{patient.initials}</span>
+    <span className="lam-row-main"><strong>{patient.name}</strong><small>{patient.age} years · {patient.reason}</small></span>
+    <span className={`worklist-status ${tone}`}>{label}</span>
+    <span className="worklist-next-step">{nextStep}</span>
+    <span className="worklist-updated">{updated ? `Updated ${updated}` : ''}</span>
+  </button>)}</div>
 }
 
 /** The persistent agent object woven through the workspace, not a separate module.
@@ -2013,7 +2033,7 @@ export function TrainTab({ trainProjection, navigate, trainPath }: {
 const CHAT_STARTER_PROMPTS = [
   'What kinds of cases am I most interested in?',
   'What have you learned about how I practice?',
-  'When would I choose nephrology over cardiology?',
+  'What makes a case a good fit for my practice?',
   'What do I usually want before a referral?',
   'Where are you still unsure about me?',
 ]

@@ -47,6 +47,12 @@ DEMO_ENRICHMENT = {
         ("teaching", "Clinical teaching in CKD referral assessment"),
         ("clinical_interests", "Progressive CKD and resistant hypertension"),
     ],
+    "chen": [
+        ("training", "Synthetic endocrinology training background"),
+        ("research", "Type 2 diabetes treatment intensification research interest"),
+        ("teaching", "Clinical teaching in complex diabetes management"),
+        ("clinical_interests", "Complex diabetes and metabolic disease"),
+    ],
     "lucy": [
         ("clinical_interests", "Primary-care specialty coordination"),
         ("teaching", "Teaching on longitudinal care transitions"),

@@ -11,6 +11,27 @@ PRIMARY_PATIENT_ID = "patient-ckd-htn-001"
 MARIA_PATIENT_ID = "patient-ida-002"
 TONJIT_PATIENT_ID = "patient-t2dm-003"
 
+# Dr. Chen's pre-existing synthetic patient panel (closed-loop referral pass
+# 2) -- believable established endocrinology patients, lightweight by design
+# (no referral_question, no elaborate case-family wiring): these patients
+# already belong to Chen at the start of the demo, never arriving via the
+# referral workflow. Tonjit is deliberately NOT included here -- he only
+# becomes Chen's patient through the real accept_referral flow.
+CHEN_ELENA_PATIENT_ID = "patient-chen-elena-001"
+CHEN_DANIEL_PATIENT_ID = "patient-chen-daniel-002"
+CHEN_MAYA_PATIENT_ID = "patient-chen-maya-003"
+CHEN_ROBERT_PATIENT_ID = "patient-chen-robert-004"
+CHEN_AISHA_PATIENT_ID = "patient-chen-aisha-005"
+CHEN_PETER_PATIENT_ID = "patient-chen-peter-006"
+CHEN_SEEDED_PATIENT_IDS = [
+    CHEN_ELENA_PATIENT_ID,
+    CHEN_DANIEL_PATIENT_ID,
+    CHEN_MAYA_PATIENT_ID,
+    CHEN_ROBERT_PATIENT_ID,
+    CHEN_AISHA_PATIENT_ID,
+    CHEN_PETER_PATIENT_ID,
+]
+
 PATIENTS = {
     PRIMARY_PATIENT_ID: PatientRecord(
         id=PRIMARY_PATIENT_ID,
@@ -96,6 +117,105 @@ PATIENTS = {
             "Persistent worsening type 2 diabetes despite medication escalation. Please "
             "evaluate for treatment intensification and additional management options."
         ),
+    ),
+    CHEN_ELENA_PATIENT_ID: PatientRecord(
+        id=CHEN_ELENA_PATIENT_ID,
+        display_name="Elena Martinez (synthetic)",
+        age=46,
+        diagnoses=["Type 1 diabetes mellitus", "Recurrent nocturnal hypoglycemia"],
+        medications=["Insulin glargine", "Insulin lispro"],
+        labs=[
+            LabObservation(date="2026-04-02", test="HbA1c", value=7.4, unit="%"),
+            LabObservation(date="2026-08-14", test="HbA1c", value=7.2, unit="%"),
+        ],
+        clinical_notes=[
+            "Several nocturnal hypoglycemic episodes recorded via continuous glucose monitor over the past month.",
+            "Basal insulin dose under review to reduce overnight lows.",
+            "No recent hospitalization; episodes managed at home.",
+        ],
+        insurance="Lamina Demo PPO",
+        location="Oakland, CA",
+    ),
+    CHEN_DANIEL_PATIENT_ID: PatientRecord(
+        id=CHEN_DANIEL_PATIENT_ID,
+        display_name="Daniel Cho (synthetic)",
+        age=61,
+        diagnoses=["Type 2 diabetes mellitus"],
+        medications=["Metformin", "Semaglutide"],
+        labs=[
+            LabObservation(date="2026-05-20", test="HbA1c", value=8.3, unit="%"),
+            LabObservation(date="2026-08-26", test="HbA1c", value=7.6, unit="%"),
+        ],
+        clinical_notes=[
+            "Semaglutide added three months ago after insufficient control on metformin alone.",
+            "Follow-up visit scheduled to reassess HbA1c response.",
+            "Tolerating medication intensification well; no GI side effects reported.",
+        ],
+        insurance="Bay Demo HMO",
+        location="Oakland, CA",
+    ),
+    CHEN_MAYA_PATIENT_ID: PatientRecord(
+        id=CHEN_MAYA_PATIENT_ID,
+        display_name="Maya Thompson (synthetic)",
+        age=34,
+        diagnoses=["Thyroid nodule, indeterminate cytology"],
+        medications=[],
+        labs=[],
+        clinical_notes=[
+            "Thyroid nodule identified on routine neck ultrasound.",
+            "Fine-needle aspiration cytology returned indeterminate; repeat biopsy or diagnostic lobectomy under consideration.",
+            "No compressive symptoms or voice change reported.",
+        ],
+        insurance="Lamina Demo PPO",
+        location="Berkeley, CA",
+    ),
+    CHEN_ROBERT_PATIENT_ID: PatientRecord(
+        id=CHEN_ROBERT_PATIENT_ID,
+        display_name="Robert Greene (synthetic)",
+        age=58,
+        diagnoses=["Type 2 diabetes mellitus", "Obesity"],
+        medications=["Metformin", "Insulin glargine"],
+        labs=[
+            LabObservation(date="2026-06-11", test="HbA1c", value=9.1, unit="%"),
+            LabObservation(date="2026-08-29", test="weight", value=112, unit="kg"),
+        ],
+        clinical_notes=[
+            "Persistent hyperglycemia despite basal insulin and metformin.",
+            "Weight has remained stable despite dietary counseling.",
+            "Considering additional glucose-lowering therapy with weight-loss benefit.",
+        ],
+        insurance="Lamina Demo PPO",
+        location="Oakland, CA",
+    ),
+    CHEN_AISHA_PATIENT_ID: PatientRecord(
+        id=CHEN_AISHA_PATIENT_ID,
+        display_name="Aisha Khan (synthetic)",
+        age=29,
+        diagnoses=["Graves disease", "Hyperthyroidism"],
+        medications=["Methimazole"],
+        labs=[],
+        clinical_notes=[
+            "Started on methimazole for Graves disease four months ago.",
+            "Symptoms of hyperthyroidism have improved; monitoring treatment response.",
+            "No ophthalmologic involvement reported.",
+        ],
+        insurance="Bay Demo HMO",
+        location="Oakland, CA",
+    ),
+    CHEN_PETER_PATIENT_ID: PatientRecord(
+        id=CHEN_PETER_PATIENT_ID,
+        display_name="Peter Wallace (synthetic)",
+        age=67,
+        diagnoses=["Osteoporosis", "History of fragility fracture"],
+        medications=["Alendronate", "Vitamin D", "Calcium carbonate"],
+        labs=[],
+        clinical_notes=[
+            "Sustained a distal radius fragility fracture one year ago.",
+            "Started on oral bisphosphonate therapy following fracture.",
+            "Follow-up DEXA scan planned to reassess bone density.",
+        ],
+        insurance="Lamina Demo PPO",
+        location="San Francisco, CA",
     ),
 }
 

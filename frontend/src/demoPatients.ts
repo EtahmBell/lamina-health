@@ -17,6 +17,11 @@ export type DemoPatientSummary = {
   recent: boolean
   stage: PatientStage
   stageNote: string
+  /** Which physician's own patient panel this belongs to -- undefined means
+   * Lucy's roster (the historical default, every existing entry below).
+   * Chen's own pre-existing synthetic patients (closed-loop referral pass 2)
+   * are tagged 'chen' so they render on his Patients page, never Lucy's. */
+  owner?: 'chen'
 }
 
 export const DEMO_PATIENTS: DemoPatientSummary[] = [
@@ -152,4 +157,91 @@ export const DEMO_PATIENTS: DemoPatientSummary[] = [
     stage: 'closed',
     stageNote: 'Cardiology referral completed last quarter; case closed on this end.',
   },
+  // Dr. Chen's pre-existing synthetic patient panel (closed-loop referral pass
+  // 2) -- real, openable fixture patients (see backend/synthetic_data/fixtures.py),
+  // never Lucy's roster. Tonjit is deliberately absent here: he only becomes
+  // Chen's patient through the real referral-acceptance flow, never a static
+  // entry (see CHEN_PATIENT_IDS below / Part E).
+  {
+    id: 'patient-chen-elena-001',
+    name: 'Elena Martinez',
+    initials: 'EM',
+    age: 46,
+    location: 'Oakland, CA',
+    reason: 'Type 1 diabetes with recurrent nocturnal hypoglycemia',
+    implemented: false,
+    recent: true,
+    stage: 'in_review',
+    stageNote: 'Basal insulin dose under review to reduce overnight lows.',
+    owner: 'chen',
+  },
+  {
+    id: 'patient-chen-daniel-002',
+    name: 'Daniel Cho',
+    initials: 'DC',
+    age: 61,
+    location: 'Oakland, CA',
+    reason: 'Type 2 diabetes after recent medication intensification',
+    implemented: false,
+    recent: true,
+    stage: 'followup',
+    stageNote: 'Follow-up visit scheduled to reassess response to semaglutide.',
+    owner: 'chen',
+  },
+  {
+    id: 'patient-chen-maya-003',
+    name: 'Maya Thompson',
+    initials: 'MT',
+    age: 34,
+    location: 'Berkeley, CA',
+    reason: 'Thyroid nodule with indeterminate cytology',
+    implemented: false,
+    recent: true,
+    stage: 'workup',
+    stageNote: 'Repeat biopsy or diagnostic lobectomy under consideration.',
+    owner: 'chen',
+  },
+  {
+    id: 'patient-chen-robert-004',
+    name: 'Robert Greene',
+    initials: 'RG',
+    age: 58,
+    location: 'Oakland, CA',
+    reason: 'Type 2 diabetes with persistent hyperglycemia and obesity',
+    implemented: false,
+    recent: true,
+    stage: 'new',
+    stageNote: 'Considering additional glucose-lowering therapy with weight-loss benefit.',
+    owner: 'chen',
+  },
+  {
+    id: 'patient-chen-aisha-005',
+    name: 'Aisha Khan',
+    initials: 'AK',
+    age: 29,
+    location: 'Oakland, CA',
+    reason: 'Graves disease with treatment-response monitoring',
+    implemented: false,
+    recent: true,
+    stage: 'new',
+    stageNote: 'Symptoms improved on methimazole; monitoring treatment response.',
+    owner: 'chen',
+  },
+  {
+    id: 'patient-chen-peter-006',
+    name: 'Peter Wallace',
+    initials: 'PW',
+    age: 67,
+    location: 'San Francisco, CA',
+    reason: 'Osteoporosis following fragility fracture',
+    implemented: false,
+    recent: false,
+    stage: 'followup',
+    stageNote: 'Follow-up DEXA scan planned to reassess bone density.',
+    owner: 'chen',
+  },
 ]
+
+/** Chen's seeded patient-panel ids, derived (not hand-duplicated) so the
+ * Tonjit-exclusion invariant is checkable in one place (Part E). */
+export const CHEN_PATIENT_IDS = DEMO_PATIENTS.filter((patient) => patient.owner === 'chen').map((patient) => patient.id)

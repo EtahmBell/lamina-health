@@ -9,6 +9,7 @@ from backend.main import app
 from backend.models import ClinicalFit, ConsultationMessageType, EvidenceKind
 from backend.synthetic_data import (
     ALL_PHYSICIANS,
+    CHEN_SEEDED_PATIENT_IDS,
     MARIA_PATIENT_ID,
     MARIA_PHYSICIANS,
     PATIENTS,
@@ -215,6 +216,7 @@ def test_api_lists_and_runs_both_demo_cases(api_client: TestClient) -> None:
         PRIMARY_PATIENT_ID,
         MARIA_PATIENT_ID,
         TONJIT_PATIENT_ID,
+        *CHEN_SEEDED_PATIENT_IDS,
     }
 
     response = api_client.post(

@@ -80,9 +80,9 @@ test('specialist shell uses the consolidated three-item navigation (post-8B): Da
   assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
 })
 
-test('Chen shell uses a minimal single-item Patients navigation -- he has no engagement/training persona wired up in this pass', () => {
+test('Chen shell now uses the full standard Dashboard/Patients/Network navigation, same shape as Lucy\'s own (closed-loop referral pass 2: full first-class workspace)', () => {
   const navBlock = slice(app, 'const CHEN_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Patients'"])
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
 })
 
 test('the specialist sidebar card never claims Active status for a reserved provider (Dashboard+Network polish pass: the bottom-left object was simplified to a name only — "Active"/"Synthetic demo profile" status lines are gone for both personas, so there is nothing left to misclaim)', () => {

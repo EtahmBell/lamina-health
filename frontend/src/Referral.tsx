@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, createReferral, getAgentOverview, getPhysicianReferrals, getPracticeRepresentation, getTrainingHistory, runReferralPreflight, type AgentOverview, type PacketItem, type PracticeRepresentation, type Referral, type TrainProjection } from './api.ts'
-import { CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
-import { AgentOverviewPanel, ChatTab, NetworkFeedTab, trainingPath, TrainTab } from './Engagement.tsx'
+import { acceptReferral, createReferral, getAgentOverview, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getTrainingHistory, runReferralPreflight, type AgentOverview, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type TrainProjection } from './api.ts'
+import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
+import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
+import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
+import { timeAwareGreeting } from './greeting.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
@@ -514,15 +516,37 @@ export function RequestReviewModal({
   </>
 }
 
+/** Dr. Chen's own pre-existing synthetic patients (Part C/D), rendered with
+ * the same shared WorklistRows component Lucy's Patients page uses -- only
+ * the cosmetic stage copy differs, reframed for an established specialist
+ * practice rather than Lucy's referral-intake funnel. Reuses the existing
+ * `PatientStage` vocabulary already on each fixture (demoPatients.ts); no new
+ * stage enum. "Follow-up scheduled" lands in Previous care, matching the same
+ * priority convention Lucy's own PATIENT_STAGE_META already uses. */
+const CHEN_PATIENT_STAGE_META: Record<PatientStage, { label: string; tone: string; nextStep: string; priority: number }> = {
+  in_review: { label: 'Ready for review', tone: 'copper', nextStep: 'Review latest labs', priority: 0 },
+  new: { label: 'Active', tone: 'slate', nextStep: 'Continue monitoring', priority: 1 },
+  referred: { label: 'Active', tone: 'slate', nextStep: 'Continue monitoring', priority: 1 },
+  workup: { label: 'Awaiting workup', tone: 'slate', nextStep: 'Order workup', priority: 2 },
+  followup: { label: 'Follow-up scheduled', tone: 'quiet', nextStep: 'Confirm follow-up visit', priority: 5 },
+  closed: { label: 'Previous care', tone: 'quiet', nextStep: 'View history', priority: 6 },
+}
+const CHEN_PREVIOUS_CARE_PRIORITY = CHEN_PATIENT_STAGE_META.followup.priority
+const CHEN_SEEDED_PATIENTS = DEMO_PATIENTS.filter((patient) => patient.owner === 'chen')
+
 /**
- * Dr. Chen's Patients page (Part Q/P): before acceptance a referred patient
- * is only an incoming request, never listed here as a patient. The accepted
- * list is queried the same way the incoming popover is -- real persisted referrals
- * filtered by status, never a frontend fixture (Part W: "accepted patient"
- * simply means "a referral to me with status=accepted" -- no separate
- * relationship table needed).
+ * Dr. Chen's Patients page (Part F): his own pre-existing synthetic patient
+ * panel, grouped exactly like Lucy's (active vs. previous care, searchable),
+ * plus accepted referrals merged in at the top. Before acceptance a referred
+ * patient is only an incoming request, never listed here as a patient. Both
+ * lists are queried the same way the incoming popover is -- real persisted
+ * referrals filtered by status, never a frontend fixture (Part W: "accepted
+ * patient" simply means "a referral to me with status=accepted" -- no
+ * separate relationship table needed). A referred patient is NEVER part of
+ * the static seeded roster above (Part E) -- only `accepted` ever adds one.
  */
 export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
+  const [query, setQuery] = useState('')
   const [incoming, setIncoming] = useState<Referral[] | null>(null)
   const [accepted, setAccepted] = useState<Referral[] | null>(null)
   const [error, setError] = useState('')
@@ -543,9 +567,25 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
     navigate(`/chen/patients/${updated.patient_id}`)
   }
 
+  const visibleSeeded = CHEN_SEEDED_PATIENTS.filter((patient) => `${patient.name} ${patient.reason}`.toLowerCase().includes(query.toLowerCase()))
+  const seededRows: WorklistRowData[] = visibleSeeded.map((patient) => {
+    const meta = CHEN_PATIENT_STAGE_META[patient.stage]
+    return { patient, label: meta.label, tone: meta.tone, nextStep: meta.nextStep, priority: meta.priority, updated: null }
+  })
+  const acceptedRows: WorklistRowData[] = (accepted ?? [])
+    .map((referral): WorklistRowData | null => {
+      const patient = DEMO_PATIENTS.find((item) => item.id === referral.patient_id)
+      if (!patient || `${patient.name} ${patient.reason}`.toLowerCase().includes(query.toLowerCase()) === false) return null
+      return { patient, label: 'Accepted referral', tone: 'copper', nextStep: 'Open patient', priority: -1, updated: null }
+    })
+    .filter((row): row is WorklistRowData => row !== null)
+  const rows = [...acceptedRows, ...seededRows].sort((a, b) => a.priority - b.priority)
+  const active = rows.filter((row) => row.priority < CHEN_PREVIOUS_CARE_PRIORITY)
+  const previous = rows.filter((row) => row.priority >= CHEN_PREVIOUS_CARE_PRIORITY)
+
   return <main className="page-shell selector-page">
     <header className="selector-header">
-      <div><p className="eyebrow">Specialist patients</p><h1>Patients</h1><p>People accepted into your care.</p></div>
+      <div><p className="eyebrow">Specialist patients</p><h1>Patients</h1><p>People in your active care.</p></div>
       {incoming && incoming.length > 0 && <IncomingRequestsControl
         referrals={incoming}
         open={requestsOpen}
@@ -553,19 +593,91 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
         onReview={(referral) => { setRequestsOpen(false); setReviewing(referral) }}
       />}
     </header>
+    <label className="patient-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients or clinical problem…" aria-label="Search patients" /></label>
     {error && <div className="error-banner" role="alert">{error}</div>}
-    {accepted && accepted.length === 0 && <div className="empty-state specialist-empty">
+    {active.length > 0 && <section className="patient-worklist-section">
+      <div className="home-section-heading"><h2>Active patients</h2><span>{active.length}</span></div>
+      <WorklistRows rows={active} navigate={navigate} basePath="/chen/patients" />
+    </section>}
+    {previous.length > 0 && <section className="patient-worklist-section">
+      <div className="home-section-heading"><h2>Previous care</h2><span>{previous.length}</span></div>
+      <WorklistRows rows={previous} navigate={navigate} basePath="/chen/patients" />
+    </section>}
+    {rows.length === 0 && <div className="empty-state specialist-empty">
       <LaminaMark />
-      <h2>No patients yet</h2>
-      <p>Patients appear here once you accept an incoming referral.</p>
+      <h2>No patients found</h2>
+      <p>Try a different name or clinical problem.</p>
     </div>}
-    {accepted && accepted.length > 0 && <div className="lam-list patient-worklist">
-      {accepted.map((referral) => <button key={referral.id} className="lam-row worklist-row" onClick={() => navigate(`/chen/patients/${referral.patient_id}`)}>
-        <span className="lam-row-mark patient-row-avatar">{patientInitials(referral.patient_id)}</span>
-        <span className="lam-row-main"><strong>{patientName(referral.patient_id)}</strong><small>{referral.specialty} · Accepted referral</small></span>
-        <span className="lam-row-action">Open patient <b>→</b></span>
-      </button>)}
-    </div>}
+    {reviewing && <RequestReviewModal referral={reviewing} receivingPhysicianName={CHEN_NAME} onAccepted={handleAccepted} onClose={() => setReviewing(null)} />}
+  </main>
+}
+
+/**
+ * Dr. Chen's Dashboard (Part B): the same general Dashboard architecture as
+ * Lucy's own HomePage -- greeting, agent banner, patients-with-next-steps,
+ * incoming-request awareness, recent activity, recent network -- populated
+ * with his own real data, never a special "endocrinologist dashboard."
+ * Incoming requests reuse the exact same submitted-referral data (and the
+ * same RequestReviewModal) as Patients -> Incoming requests, never a
+ * duplicate referral fixture (Part B1).
+ */
+export function ChenHomePage({ navigate }: { navigate: Navigate }) {
+  const [incoming, setIncoming] = useState<Referral[] | null>(null)
+  const [overview, setOverview] = useState<AgentOverview | null>(null)
+  const [feed, setFeed] = useState<NetworkFeed | null>(null)
+  const [reviewing, setReviewing] = useState<Referral | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    getPhysicianReferrals(CHEN_ID, 'submitted').then(setIncoming).catch((err: Error) => setError(err.message))
+    getAgentOverview('chen').then(setOverview).catch(() => {})
+    getNetworkFeed('chen').then(setFeed).catch(() => {})
+  }, [])
+
+  const handleAccepted = (updated: Referral) => {
+    setReviewing(null)
+    setIncoming((current) => current?.filter((item) => item.id !== updated.id) ?? current)
+    navigate(`/chen/patients/${updated.patient_id}`)
+  }
+
+  const greetingName = `Dr. ${CHEN_NAME.split(' ').at(-1)}`
+  const topPatients: WorklistRowData[] = CHEN_SEEDED_PATIENTS
+    .map((patient): WorklistRowData => {
+      const meta = CHEN_PATIENT_STAGE_META[patient.stage]
+      return { patient, label: meta.label, tone: meta.tone, nextStep: meta.nextStep, priority: meta.priority, updated: null }
+    })
+    .sort((a, b) => a.priority - b.priority)
+    .slice(0, 3)
+  const situationSummary = incoming && incoming.length > 0
+    ? `${incoming.length} incoming referral${incoming.length === 1 ? '' : 's'} ${incoming.length === 1 ? 'needs' : 'need'} your review.`
+    : null
+
+  return <main className="page-shell home-page dashboard-page">
+    <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1>{situationSummary && <p className="dashboard-situation">{situationSummary}</p>}</header>
+    {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
+    <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('chen')} viewAgentPath="/chen/agent?tab=overview" personaId="chen" />
+    {incoming && incoming.length > 0 && <section className="dashboard-needs-you">
+      <div className="home-section-heading"><div><h2>Incoming requests</h2></div><span>{incoming.length}</span></div>
+      <div className="lam-list needs-attention">
+        {incoming.map((referral) => <button key={referral.id} className="lam-row" onClick={() => setReviewing(referral)}>
+          <span className="lam-row-mark patient-row-avatar">{patientInitials(referral.patient_id)}</span>
+          <span className="lam-row-main">
+            <strong>{patientName(referral.patient_id)}</strong>
+            <span>Incoming referral ready for review</span>
+            <small>{resolvedSummary(resolvedCountFor(referral))}</small>
+          </span>
+          <span className="lam-row-action">Review <b>→</b></span>
+        </button>)}
+      </div>
+    </section>}
+    {topPatients.length > 0 && <section className="patient-worklist-section">
+      <div className="home-section-heading"><div><h2>Patients</h2></div><button className="text-button" onClick={() => navigate('/chen/patients')}>View all patients →</button></div>
+      <WorklistRows rows={topPatients} navigate={navigate} basePath="/chen/patients" />
+    </section>}
+    <div className="dashboard-bottom-row">
+      <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div><p className="home-empty">No agent activity yet.</p></section>
+      <NetworkHighlights feed={feed} navigate={navigate} perspective="chen" />
+    </div>
     {reviewing && <RequestReviewModal referral={reviewing} receivingPhysicianName={CHEN_NAME} onAccepted={handleAccepted} onClose={() => setReviewing(null)} />}
   </main>
 }
@@ -599,7 +711,7 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
   }, [])
   useEffect(() => { setTab(resolveChenAgentTab(tabParam)) }, [tabParam])
   const selectTab = (next: ChenAgentTab) => { setTab(next); window.history.replaceState({}, '', `/chen/agent?tab=${next}`) }
-  const agentName = `${CHEN_NAME}'s Agent`
+  const agentName = CHEN_AGENT_NAME
   return <main className="page-shell agent-page">
     {error && <div className="error-banner" role="alert">{error}</div>}
     {!overview && !error && <p className="muted-note">Opening your agent…</p>}
@@ -617,9 +729,39 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
   </main>
 }
 
-export function ChenNetworkPage({ navigate }: { navigate: Navigate }) {
+/** Mirrors SpecialistMyNetworkTab's exact shape (Specialist.tsx), generalized
+ * to Chen's perspective -- "Colleagues" (Part J): physicians explicitly added
+ * to his network, or whose agents have interacted with his, deduped by id. */
+function ChenMyNetworkTab({ navigate }: { navigate: Navigate }) {
+  const [feed, setFeed] = useState<NetworkFeed | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => { getNetworkFeed('chen').then(setFeed).catch((err: Error) => setError(err.message)) }, [])
+  const physicians = feed ? [...new Map(feed.items.map((item) => [item.physician.id, item.physician])).values()] : []
+  return <div className="my-network-tab">
+    <p className="network-intro">Physicians relevant to your practice — explicitly added to your network, or whose agents have interacted with yours.</p>
+    {error && <div className="error-banner" role="alert">{error}</div>}
+    {!feed && !error && <p className="muted-note">Loading network…</p>}
+    {feed && physicians.length === 0 && <div className="empty-state history-empty"><LaminaMark /><h2>No relevant physicians yet</h2><p>Physicians appear here once your agent participates in a network interaction, or once a professional connection is added.</p></div>}
+    {physicians.length > 0 && <div className="lam-list">{physicians.map((physician) => <button className="lam-row" key={physician.id} onClick={() => navigate(networkProfilePath('chen', physician.id))}>
+      <span className="lam-row-mark patient-row-avatar">{physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')}</span>
+      <span className="lam-row-main"><strong>{physician.name}</strong><span>{physician.specialty}</span><small>{physician.location}</small></span>
+      <span className="lam-row-action">View professional profile <b>→</b></span>
+    </button>)}</div>}
+  </div>
+}
+
+/** Dr. Chen's Network page (Part J): the same Colleagues/Feed tab structure
+ * as Lucy's and Iain's own Network pages -- reused, not a unique Chen
+ * network. Routes resolve back into Chen's own perspective (networkProfilePath
+ * 'chen'), never Lucy's or Iain's. */
+export function ChenNetworkPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
+  const tabParam = params?.get('tab') ?? null
+  const [tab, setTab] = useState<NetworkTab>(tabParam === 'my-network' ? 'my-network' : 'feed')
+  useEffect(() => { setTab(tabParam === 'my-network' ? 'my-network' : 'feed') }, [tabParam])
+  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'my-network' ? '/chen/network?tab=my-network' : '/chen/network') }
   return <main className="page-shell physician-directory-page">
-    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>Professional updates connected through your Lamina network.</p></div></header>
-    <NetworkFeedTab personaId="chen" navigate={navigate} />
+    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
+    <NetworkTabs tab={tab} onSelect={selectTab} />
+    {tab === 'my-network' ? <ChenMyNetworkTab navigate={navigate} /> : <NetworkFeedTab personaId="chen" navigate={navigate} />}
   </main>
 }

@@ -39,9 +39,9 @@ test('replacing Iain in the switcher does not touch his own routes, data, or the
 
 /* --------------------------------------------------- Part D/F: Chen workspace */
 
-test('switching to Chen lands on his real Patients workspace, and Profile is reached the same way Lucy\'s and Iain\'s are (via profilePath, not a new nav system)', () => {
-  assert.match(app, /id: 'chen' as const, name: CHEN_NAME, role: 'Receiving specialist', initials: 'NC', path: '\/chen\/patients', profilePath: '\/chen\/profile'/)
-  assert.match(app, /const CHEN_NAV_ITEMS = \[\s*\n\s*\{ id: 'chen-patients', title: 'Patients'/)
+test('switching to Chen lands on his real Dashboard, and Profile is reached the same way Lucy\'s and Iain\'s are (via profilePath, not a new nav system)', () => {
+  assert.match(app, /id: 'chen' as const, name: CHEN_NAME, role: 'Receiving specialist', initials: 'NC', path: '\/chen\/home', profilePath: '\/chen\/profile'/)
+  assert.match(app, /const CHEN_NAV_ITEMS = \[\s*\n\s*\{ id: 'chen-home', title: 'Dashboard'/)
 })
 
 test('Chen Profile, Agent, and Network routes are registered in the SPA dispatcher, reusing the shared shells', () => {
@@ -52,10 +52,11 @@ test('Chen Profile, Agent, and Network routes are registered in the SPA dispatch
   assert.match(dispatch, /path === '\/chen\/network'\)[\s\S]{0,160}ChenNetworkPage/)
 })
 
-test('Chen Patients and Incoming Requests routes are untouched by this pass', () => {
+test('Chen Patients and Incoming Requests routes still work (now alongside a real Dashboard route)', () => {
   const dispatch = routing()
-  assert.match(dispatch, /path === '\/chen' \|\| path === '\/chen\/patients'\)[\s\S]{0,160}ChenPatientsPage/)
-  assert.match(dispatch, /chenPatientId === TONJIT_ID\) return <PatientWorkspace patientId=\{chenPatientId\} navigate=\{navigate\} perspective="receiving"/)
+  assert.match(dispatch, /path === '\/chen' \|\| path === '\/chen\/home'\)[\s\S]{0,160}ChenHomePage/)
+  assert.match(dispatch, /path === '\/chen\/patients'\)[\s\S]{0,160}ChenPatientsPage/)
+  assert.match(dispatch, /chenPatientId === TONJIT_ID \|\| \(chenPatientId && CHEN_PATIENT_IDS\.includes\(chenPatientId\)\)\) return <PatientWorkspace patientId=\{chenPatientId\} navigate=\{navigate\} perspective="receiving"/)
 })
 
 /* --------------------------------------------------------------- Part B/C/E */
