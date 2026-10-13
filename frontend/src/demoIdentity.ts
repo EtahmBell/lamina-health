@@ -14,6 +14,16 @@ export const SPECIALIST_AGENT_NAME = "Dr. Iain Jung's Agent"
 export const SPECIALIST_SPECIALTY = 'Nephrology'
 export const SPECIALIST_NPI = '9900000001'
 
+/** The receiving physician for Tonjit's closed-loop referral demo -- the same
+ * canonical physician-chen identity used by the real backend referral domain
+ * (see backend/synthetic_data/fixtures.py's PHYSICIAN_CHEN). A minimal third
+ * demo perspective (Part X): unlike SPECIALIST_NAME/Iain, Chen has no
+ * engagement/training persona wired up in this pass -- only Patients and the
+ * reused Patient Detail shell. */
+export const CHEN_ID = 'physician-chen'
+export const CHEN_NAME = 'Dr. Noah Chen'
+export const CHEN_SPECIALTY = 'Endocrinology'
+
 /** NPI → controlled engagement persona id, for physicians with a real backend
  * PERSONAS entry (any persona id works for GET /network/physicians/{id}/profile --
  * see backend/api/engagement.py's network_physician_profile). Physicians outside
@@ -31,3 +41,7 @@ export const ENGAGEMENT_PERSONA_BY_NPI: Record<string, 'iain' | 'onadeko' | 'sof
 export const cleanName = (name: string) => name.replace(' (synthetic)', '')
 export const patientName = (id: string) => DEMO_PATIENTS.find((item) => item.id === id)?.name || id
 export const patientInitials = (id: string) => DEMO_PATIENTS.find((item) => item.id === id)?.initials || '··'
+export const patientAgeLocation = (id: string) => {
+  const match = DEMO_PATIENTS.find((item) => item.id === id)
+  return match ? `${match.age} · ${match.location}` : ''
+}

@@ -23,7 +23,7 @@ test('post-8B consolidated navigation: Cases is no longer a top-level destinatio
 })
 
 test('specialist nav matches the consolidated Dashboard/Patients/Network set (post-8B), with My Agent as the persistent sidebar object and Profile in the avatar menu', () => {
-  const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
+  const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'const CHEN_NAV_ITEMS')
   assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
 })
 

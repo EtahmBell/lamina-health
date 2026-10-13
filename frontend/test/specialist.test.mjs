@@ -70,14 +70,19 @@ test('the demo perspective menu never references Supabase auth or identity claim
 })
 
 test('PCP shell navigation and Lucy sidebar card are unchanged aside from the header control', () => {
-  assert.match(shell(), /const items = perspective === 'specialist' \? SPECIALIST_NAV_ITEMS : navItems/)
+  assert.match(shell(), /const items = perspective === 'specialist' \? SPECIALIST_NAV_ITEMS : perspective === 'chen' \? CHEN_NAV_ITEMS : navItems/)
   assert.match(shell(), /items\.map/)
   assert.match(shell(), /<strong>\{PCP_AGENT_NAME\}<\/strong>/)
 })
 
 test('specialist shell uses the consolidated three-item navigation (post-8B): Dashboard/Patients/Network, with My Agent as the persistent sidebar object and Profile in the avatar menu', () => {
-  const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
+  const navBlock = slice(app, 'const SPECIALIST_NAV_ITEMS', 'const CHEN_NAV_ITEMS')
   assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
+})
+
+test('Chen shell uses a minimal single-item Patients navigation -- he has no engagement/training persona wired up in this pass', () => {
+  const navBlock = slice(app, 'const CHEN_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Patients'"])
 })
 
 test('the specialist sidebar card never claims Active status for a reserved provider (Dashboard+Network polish pass: the bottom-left object was simplified to a name only — "Active"/"Synthetic demo profile" status lines are gone for both personas, so there is nothing left to misclaim)', () => {

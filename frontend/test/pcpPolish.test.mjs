@@ -155,7 +155,7 @@ test('Clinical overview continues directly beneath Patient history in the left c
 
 test('Next step has its own h2 heading + supporting line, matching Patient history\'s header treatment', () => {
   const page = patientPage()
-  assert.match(page, /<aside ref=\{nextStepRef\} className=\{`patient-next-step patient-top-card[^`]*`\}>\s*<h2>Next step<\/h2>\s*<p className="page-intro">Your agent helps with the follow-through\.<\/p>/)
+  assert.match(page, /<h2>Next step<\/h2>\s*<p className="page-intro">Your agent helps with the follow-through\.<\/p>/)
   assert.ok(someRule('.patient-top-card > h2', /font-size: 1\.5rem/))
 })
 

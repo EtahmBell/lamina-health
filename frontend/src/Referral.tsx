@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { createReferral, runReferralPreflight, type PacketItem, type Referral } from './api.ts'
-import { PCP_NAME } from './demoIdentity.ts'
+import { acceptReferral, createReferral, getPhysicianReferrals, runReferralPreflight, type PacketItem, type Referral } from './api.ts'
+import { CHEN_ID, CHEN_NAME, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
+import { LaminaMark } from './LaminaMark.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
 export type { DisplayPhase } from './referralPhases.ts'
 
+type Navigate = (path: string) => void
+
 const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
-function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; receivingPhysicianName: string }) {
+function PhaseContent({ phase, receivingPhysicianName, patientLabel }: { phase: DisplayPhase; receivingPhysicianName: string; patientLabel: string }) {
   const who = lastName(receivingPhysicianName)
   switch (phase.kind) {
     case 'preparing':
@@ -55,6 +58,18 @@ function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; 
         <h3>Awaiting Dr. {who}'s review</h3>
         <p>The completed referral packet has been sent to Dr. {who} for review.</p>
         <small className="referral-submission-meta">{resolvedSummary(phase.resolvedCount)}{phase.submittedAt ? ` · Submitted ${formatSubmittedAt(phase.submittedAt)}` : ''}</small>
+      </>
+    case 'accepted':
+      // Durable PCP-side state once the receiving physician accepts (Part R)
+      // -- a real physician action on the shared referral object, never a
+      // replayed success animation on Lucy's side (Part S). Replaces
+      // "Awaiting review" entirely; never shown alongside Start referral or
+      // recommendation content.
+      return <>
+        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Accepted</span>
+        <h3>Accepted by Dr. {who}</h3>
+        <p>Dr. {who} accepted {patientLabel}'s referral and added them to their care.</p>
+        {phase.acceptedAt && <small className="referral-submission-meta">Accepted {formatSubmittedAt(phase.acceptedAt)}</small>}
       </>
     case 'unresolved':
       return <>
@@ -198,7 +213,7 @@ export function ReferralCoordinationSurface({
   const sentResolvedCount = visiblePhase.kind === 'sent' ? visiblePhase.resolvedCount : 0
   return <div className="referral-coordination-surface" role="status">
     <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
-      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} />
+      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} />
     </div>
     {status === 'done' && referral && !justCompleted && <div className="referral-mode-links">
       <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
@@ -263,7 +278,7 @@ export function AgentCoordinationModal({
           <p>{event.summary}</p>
         </div>)}
       </div>
-      <p className="coordination-footer">{referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
+      <p className="coordination-footer">{referral.status === 'accepted' ? `✓ Referral accepted by ${receivingPhysicianName}` : referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
     </div>
   </div></ModalPortal>
 }
@@ -317,4 +332,227 @@ export function ReferralPacketModal({
       </div>
     </div>
   </div></ModalPortal>
+}
+
+/* ============================================================ RECEIVING SIDE
+ * Everything below is Dr. Chen's (the receiving physician's) side of the
+ * closed loop: Incoming requests triage, the Request Review modal, and the
+ * Patients page that hosts them. Acceptance is the only functional decision
+ * in this pass -- other receiving-side decisions are intentionally absent,
+ * never shown as fake-functional buttons (Part N).
+ */
+
+const resolvedCountFor = (referral: Referral) =>
+  referral.coordination_events.filter((event) => event.event_type === 'information_attached').length
+
+/**
+ * The compact "Incoming requests · N" control (Part E) -- hidden entirely
+ * when there are zero submitted referrals, never a noisy empty card. Opens a
+ * quick triage popover (Part F), not a navigation page.
+ */
+function IncomingRequestsControl({
+  referrals, open, onToggle, onReview,
+}: { referrals: Referral[]; open: boolean; onToggle: () => void; onReview: (referral: Referral) => void }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onClick = (event: MouseEvent) => { if (containerRef.current && !containerRef.current.contains(event.target as Node)) onToggle() }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onToggle() }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey) }
+  }, [open, onToggle])
+  return <div className="incoming-requests" ref={containerRef}>
+    <button type="button" className="incoming-requests-toggle" onClick={onToggle} aria-haspopup="menu" aria-expanded={open}>
+      Incoming requests <span>{referrals.length}</span>
+    </button>
+    {open && <div className="incoming-requests-popover" role="menu" aria-label="Incoming requests">
+      {referrals.map((referral) => <div className="incoming-request-row" role="menuitem" key={referral.id}>
+        <div className="incoming-request-main">
+          <strong>{patientName(referral.patient_id)}</strong>
+          <span>From {PCP_NAME}</span>
+          <small>{referral.specialty} referral</small>
+        </div>
+        <p className="incoming-request-status"><span className="status-label resolved">Ready for review</span></p>
+        <p className="incoming-request-resolved">{resolvedSummary(resolvedCountFor(referral))}</p>
+        <button type="button" className="text-button" onClick={() => onReview(referral)}>Review <span>→</span></button>
+      </div>)}
+    </div>}
+  </div>
+}
+
+/**
+ * The focused clinical handoff surface (Part G-N): who, from whom, why, what
+ * was sent, whether it satisfies Dr. Chen's own referral requirements, and
+ * what the agents already resolved. Accept referral is the only functional
+ * decision here -- never navigates to Patient Detail itself (the parent does
+ * that after the brief success moment, see Part O).
+ */
+export function RequestReviewModal({
+  referral, receivingPhysicianName, onAccepted, onClose,
+}: { referral: Referral; receivingPhysicianName: string; onAccepted: (updated: Referral) => void; onClose: () => void }) {
+  const [coordinationOpen, setCoordinationOpen] = useState(false)
+  const [packetOpen, setPacketOpen] = useState(false)
+  const [accepting, setAccepting] = useState(false)
+  const [accepted, setAccepted] = useState(false)
+  const [error, setError] = useState('')
+  const cancelled = useRef(false)
+  useEffect(() => () => { cancelled.current = true }, [])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !accepting && !coordinationOpen && !packetOpen) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, accepting, coordinationOpen, packetOpen])
+
+  const patientLabel = patientName(referral.patient_id)
+  const ageLocation = patientAgeLocation(referral.patient_id)
+  const resolvedCount = resolvedCountFor(referral)
+
+  const accept = async () => {
+    if (referral.id == null) return
+    setAccepting(true); setError('')
+    try {
+      const updated = await acceptReferral(referral.id, referral.receiving_physician_id)
+      if (cancelled.current) return
+      setAccepted(true)
+      await new Promise<void>((resolve) => window.setTimeout(resolve, prefersReducedMotion() ? 400 : 1400))
+      if (cancelled.current) return
+      onAccepted(updated)
+    } catch (acceptError) {
+      if (cancelled.current) return
+      setError(acceptError instanceof Error ? acceptError.message : 'Could not accept this referral.')
+      setAccepting(false)
+    }
+  }
+
+  return <>
+    <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !accepting) onClose() }}>
+      <div className="post-flow-dialog request-review-dialog" role="dialog" aria-modal="true" aria-label="Incoming referral">
+        {!accepted && <button className="text-button post-flow-close" onClick={onClose} aria-label="Close" disabled={accepting}>×</button>}
+        {accepted
+          ? <div className="request-review-success" role="status">
+            <span className="referral-handoff-check" aria-hidden="true">✓</span>
+            <h2>Referral accepted</h2>
+            <p>{patientLabel} has been added to your care.</p>
+          </div>
+          : <>
+            <p className="eyebrow">Incoming referral</p>
+            <h2>{patientLabel}</h2>
+            {ageLocation && <p className="specialist-case-meta">{ageLocation}</p>}
+            <div className="request-review-parties">
+              <div><span className="section-label">From</span><strong>{PCP_NAME}</strong><small>Primary Care</small></div>
+              <div><span className="section-label">To</span><strong>{receivingPhysicianName}</strong><small>{referral.specialty}</small></div>
+            </div>
+            <p className="request-review-status"><span className="status-label resolved">Ready for your review</span></p>
+
+            <section className="packet-section">
+              <h3>Referral question</h3>
+              <p>{referral.referral_question}</p>
+            </section>
+
+            <section className="packet-section">
+              <h3>Clinical snapshot</h3>
+              <div className="packet-items">
+                {referral.packet.items.map((item) => <div className="packet-item" key={item.key}>
+                  <strong>{item.label}</strong>
+                  <p>{item.value}</p>
+                </div>)}
+              </div>
+            </section>
+
+            <section className="packet-section">
+              <h3>Referral readiness</h3>
+              <div className="requirement-checklist">
+                {referral.requirement_results.map((check) => {
+                  const item = referral.packet.items.find((packetItem) => packetItem.key === check.key)
+                  const provenance = item ? packetItemProvenanceLine(item) : null
+                  return <div className={`requirement-check ${check.status}`} key={check.key}>
+                    <span className="requirement-check-mark" aria-hidden="true">{check.status === 'satisfied' ? '✓' : check.status === 'optional_not_present' ? '○' : '✕'}</span>
+                    <div>
+                      <strong>{check.label}</strong>
+                      {item ? <p>{item.value}</p> : <p className="muted-note">Not included in packet.</p>}
+                      {provenance && <small className="packet-item-provenance">{provenance}</small>}
+                    </div>
+                  </div>
+                })}
+              </div>
+            </section>
+
+            <section className="packet-section agent-preflight-summary">
+              <p className="section-label">Agent preflight complete</p>
+              <p>{resolvedCount > 0
+                ? `${resolvedCount} missing requirement${resolvedCount === 1 ? '' : 's'} resolved before this reached you.`
+                : 'All required information was already included in the referral.'}</p>
+              <p>No physician interruption was required.</p>
+              <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination <span>→</span></button>
+            </section>
+
+            <button type="button" className="text-button request-review-packet-link" onClick={() => setPacketOpen(true)}>View full referral packet <span>→</span></button>
+
+            {error && <p className="demo-reset-error" role="alert">{error}</p>}
+            <div className="request-review-actions">
+              <button className="button-primary" disabled={accepting} onClick={accept}>{accepting ? 'Accepting…' : 'Accept referral'}</button>
+            </div>
+          </>}
+      </div>
+    </div></ModalPortal>
+    {coordinationOpen && <AgentCoordinationModal referral={referral} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+    {packetOpen && <ReferralPacketModal referral={referral} patientLabel={patientLabel} receivingPhysicianName={receivingPhysicianName} onClose={() => setPacketOpen(false)} />}
+  </>
+}
+
+/**
+ * Dr. Chen's Patients page (Part Q/P): before acceptance a referred patient
+ * is only an incoming request, never listed here as a patient. The accepted
+ * list is queried the same way the incoming popover is -- real persisted referrals
+ * filtered by status, never a frontend fixture (Part W: "accepted patient"
+ * simply means "a referral to me with status=accepted" -- no separate
+ * relationship table needed).
+ */
+export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
+  const [incoming, setIncoming] = useState<Referral[] | null>(null)
+  const [accepted, setAccepted] = useState<Referral[] | null>(null)
+  const [error, setError] = useState('')
+  const [requestsOpen, setRequestsOpen] = useState(false)
+  const [reviewing, setReviewing] = useState<Referral | null>(null)
+
+  const load = () => Promise.all([
+    getPhysicianReferrals(CHEN_ID, 'submitted'),
+    getPhysicianReferrals(CHEN_ID, 'accepted'),
+  ]).then(([submitted, acceptedReferrals]) => { setIncoming(submitted); setAccepted(acceptedReferrals) })
+    .catch((loadError: Error) => setError(loadError.message))
+
+  useEffect(() => { void load() }, [])
+
+  const handleAccepted = (updated: Referral) => {
+    setReviewing(null)
+    setIncoming((current) => current?.filter((item) => item.id !== updated.id) ?? current)
+    navigate(`/chen/patients/${updated.patient_id}`)
+  }
+
+  return <main className="page-shell selector-page">
+    <header className="selector-header">
+      <div><p className="eyebrow">Specialist patients</p><h1>Patients</h1><p>People accepted into your care.</p></div>
+      {incoming && incoming.length > 0 && <IncomingRequestsControl
+        referrals={incoming}
+        open={requestsOpen}
+        onToggle={() => setRequestsOpen((value) => !value)}
+        onReview={(referral) => { setRequestsOpen(false); setReviewing(referral) }}
+      />}
+    </header>
+    {error && <div className="error-banner" role="alert">{error}</div>}
+    {accepted && accepted.length === 0 && <div className="empty-state specialist-empty">
+      <LaminaMark />
+      <h2>No patients yet</h2>
+      <p>Patients appear here once you accept an incoming referral.</p>
+    </div>}
+    {accepted && accepted.length > 0 && <div className="lam-list patient-worklist">
+      {accepted.map((referral) => <button key={referral.id} className="lam-row worklist-row" onClick={() => navigate(`/chen/patients/${referral.patient_id}`)}>
+        <span className="lam-row-mark patient-row-avatar">{patientInitials(referral.patient_id)}</span>
+        <span className="lam-row-main"><strong>{patientName(referral.patient_id)}</strong><small>{referral.specialty} · Accepted referral</small></span>
+        <span className="lam-row-action">Open patient <b>→</b></span>
+      </button>)}
+    </div>}
+    {reviewing && <RequestReviewModal referral={reviewing} receivingPhysicianName={CHEN_NAME} onAccepted={handleAccepted} onClose={() => setReviewing(null)} />}
+  </main>
 }

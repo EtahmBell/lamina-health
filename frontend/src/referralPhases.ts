@@ -13,6 +13,7 @@ export type DisplayPhase =
   | { kind: 'found'; requirementLabel: string; value: string; observedDate: string | null }
   | { kind: 'ready'; resolvedCount: number }
   | { kind: 'sent'; resolvedCount: number; submittedAt: string | null }
+  | { kind: 'accepted'; acceptedAt: string | null }
   | { kind: 'unresolved'; requirementLabels: string[] }
 
 /**
@@ -56,6 +57,13 @@ export function derivePhases(referral: Referral): DisplayPhase[] {
       .map((event) => labelFor(String(event.metadata.requirement ?? '')))
     phases.push({ kind: 'unresolved', requirementLabels })
   }
+  // Acceptance is a real physician action on the RECEIVING side (Part B/C) --
+  // this referral object is shared, so once Dr. Chen accepts, Lucy's own
+  // hydration of the same referral derives this phase too (Part R). Never
+  // part of the live Start-referral animation: by the time that loop runs,
+  // no referral_accepted event can exist yet.
+  const acceptedEvent = events.find((event) => event.event_type === 'referral_accepted')
+  if (acceptedEvent) phases.push({ kind: 'accepted', acceptedAt: acceptedEvent.created_at })
   return phases
 }
 
@@ -82,7 +90,7 @@ export function restorePhase(referral: Referral): DisplayPhase | null {
  * (~1.9-2.1s for the substantive phases), not a snappy UI transition. Pure
  * frontend presentation pacing; the backend call itself is never delayed. */
 export const PHASE_HOLD_MS: Record<DisplayPhase['kind'], number> = {
-  preparing: 1900, checking: 1900, missing: 1900, found: 2100, ready: 1000, sent: 500, unresolved: 1300,
+  preparing: 1900, checking: 1900, missing: 1900, found: 2100, ready: 1000, sent: 500, accepted: 1000, unresolved: 1300,
 }
 
 /** How long the full-card success wash holds before fading away to reveal
@@ -128,9 +136,15 @@ export const EVENT_TYPE_TITLES: Record<string, string> = {
   referral_ready: 'Referral ready for review',
   physician_action_required: 'Physician action required',
   referral_submitted: 'Referral sent',
+  referral_accepted: 'Referral accepted',
 }
 
+/** `receiving_physician` is the one actor that is a real person, never an
+ * agent -- it resolves to the physician's own name, distinct from
+ * `receiving_agent`'s "{name}'s Agent" (Part Z: the audit trail must make
+ * clear the agents prepared the request, but Dr. Chen accepted it). */
 export function eventActorLabel(event: CoordinationEvent, referringLabel: string, receivingPhysicianName: string): string {
+  if (event.actor === 'receiving_physician') return receivingPhysicianName
   if (event.actor === 'receiving_agent') return `${receivingPhysicianName}'s Agent`
   if (event.actor === 'referring_agent') return referringLabel
   return 'Lamina'

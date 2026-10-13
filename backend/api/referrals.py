@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
-from backend.models import Referral, ReferralCreateRequest
-from backend.referrals import build_referral, run_preflight
+from backend.models import Referral, ReferralAcceptRequest, ReferralCreateRequest, ReferralStatus
+from backend.referrals import accept_referral, build_referral, run_preflight
 from backend.synthetic_data import ALL_PHYSICIANS
 from backend.workflow import workflow_store
 
@@ -54,3 +54,40 @@ def run_referral_preflight(referral_id: int, workspace_id: MutableDemoWorkspace)
     patient = load_patient(referral.patient_id)
     updated = run_preflight(patient, referral)
     return workflow_store.update_referral(workspace_id, updated)
+
+
+@router.post("/referrals/{referral_id}/accept", response_model=Referral)
+def accept_referral_endpoint(
+    referral_id: int, request: ReferralAcceptRequest, workspace_id: MutableDemoWorkspace
+) -> Referral:
+    """A real physician action (Part D/O) -- never implied by preflight
+    completing or by the referral merely being submitted. Only the physician
+    actually named as this referral's receiving_physician_id may accept it."""
+    referral = _load_referral(workspace_id, referral_id)
+    if referral.receiving_physician_id != request.receiving_physician_id:
+        raise HTTPException(status_code=403, detail="Only the receiving physician can accept this referral")
+    receiving_physician = _PHYSICIANS_BY_ID.get(request.receiving_physician_id)
+    if receiving_physician is None:
+        raise HTTPException(status_code=404, detail="Receiving physician not found")
+    try:
+        updated = accept_referral(
+            referral, receiving_physician.id, receiving_physician.name.replace(" (synthetic)", "")
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return workflow_store.update_referral(workspace_id, updated)
+
+
+@router.get("/physicians/{physician_id}/referrals", response_model=list[Referral])
+def list_physician_referrals(
+    physician_id: str, workspace_id: DemoWorkspace, status: ReferralStatus | None = None
+) -> list[Referral]:
+    """The receiving-physician query (Part V): ?status=submitted drives
+    Incoming requests, ?status=accepted drives the physician's accepted
+    patient list -- both are the same persisted referrals, filtered
+    differently, never a separate frontend fixture."""
+    return workflow_store.list_referrals(
+        workspace_id,
+        receiving_physician_id=physician_id,
+        status=status.value if status else None,
+    )

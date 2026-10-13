@@ -11,14 +11,14 @@ import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
 import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
-import { JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, TONJIT_ID, cleanName, patientName } from './demoIdentity.ts'
+import { CHEN_ID, CHEN_NAME, JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, TONJIT_ID, cleanName, patientName } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type DemoPatientSummary, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkPhysicianProfilePage, NetworkTabs, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, type NetworkTab } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ReferralCoordinationSurface } from './Referral.tsx'
+import { ChenPatientsPage, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -77,14 +77,23 @@ const SPECIALIST_NAV_ITEMS = [
   { id: 'specialist-network', title: 'Network', icon: <NetworkNavIcon />, path: '/specialist/network' },
 ]
 
+/** Chen is a minimal third demo persona (Part X) -- unlike Iain, he has no
+ * engagement/training/network backend wired up in this pass, only Patients
+ * (Incoming requests + accepted patients) and the reused Patient Detail
+ * shell, so this nav is deliberately a single item. */
+const CHEN_NAV_ITEMS = [
+  { id: 'chen-patients', title: 'Patients', icon: '✦', path: '/chen/patients' },
+]
+
 const DEMO_PERSPECTIVES = [
   { id: 'pcp' as const, name: PCP_NAME, role: 'Referring physician', initials: 'LS', path: '/home', profilePath: '/profile' },
   { id: 'specialist' as const, name: SPECIALIST_NAME, role: 'Specialist', initials: 'IJ', path: '/specialist/home', profilePath: '/specialist/profile' },
+  { id: 'chen' as const, name: CHEN_NAME, role: 'Receiving specialist', initials: 'NC', path: '/chen/patients', profilePath: '/chen/patients' },
 ]
 
 /** The top-right avatar/account control. Combines the demo perspective switch with
  * profile and settings access, now that Profile is no longer a primary-nav item. */
-function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; perspective: 'pcp' | 'specialist' }) {
+function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; perspective: 'pcp' | 'specialist' | 'chen' }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -117,8 +126,8 @@ function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; pers
  * top-level nav item — so the agent stays visible from every workspace screen. It
  * is a real nav target (keyboard-reachable button) and picks up an active state
  * on any agent-related route. */
-function ProductShell({ children, navigate, section, perspective = 'pcp' }: { children: React.ReactNode; navigate: Navigate; section: string; perspective?: 'pcp' | 'specialist' }) {
-  const items = perspective === 'specialist' ? SPECIALIST_NAV_ITEMS : navItems
+function ProductShell({ children, navigate, section, perspective = 'pcp' }: { children: React.ReactNode; navigate: Navigate; section: string; perspective?: 'pcp' | 'specialist' | 'chen' }) {
+  const items = perspective === 'specialist' ? SPECIALIST_NAV_ITEMS : perspective === 'chen' ? CHEN_NAV_ITEMS : navItems
   const onAgent = section === 'agent' || section === 'specialist-agent'
   return <div className="app-shell">
     <aside className="sidebar">
@@ -127,9 +136,13 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
           {items.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span className="nav-item-label">{item.title}</span></button>)}
         </nav>
       </div>
+      {/* Chen has no agent concept in this pass (Part X) -- acceptance is his
+       * own explicit action, not something his agent represents here. */}
       {perspective === 'specialist'
         ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><YouAvatar /><div><strong>{SPECIALIST_AGENT_NAME}</strong></div></button>
-        : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><AgentAvatar /><div><strong>{PCP_AGENT_NAME}</strong></div></button>}
+        : perspective === 'chen'
+          ? null
+          : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><AgentAvatar /><div><strong>{PCP_AGENT_NAME}</strong></div></button>}
     </aside>
     <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><PerspectiveSwitch navigate={navigate} perspective={perspective} /></div></header>{children}</div>
   </div>
@@ -701,7 +714,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   // exists so the physician never loses track of it while browsing options.
   return <section className="recommendations" aria-label="Specialist recommendations" tabIndex={-1}>
     {activeReferral && <div className="referral-active-notice">
-      <div><strong>Referral active with {activeReferralPhysicianLabel}</strong><span>Awaiting specialist review</span></div>
+      <div><strong>{activeReferral.status === 'accepted' ? `Referral accepted by ${activeReferralPhysicianLabel}` : `Referral active with ${activeReferralPhysicianLabel}`}</strong><span>{activeReferral.status === 'accepted' ? 'Added to their care' : 'Awaiting specialist review'}</span></div>
       <button type="button" className="text-button" onClick={() => setViewMode('referral')}>Return to active referral →</button>
     </div>}
     <div className={`next-step-card ready ${swapping ? 'swapping' : ''}`}>
@@ -721,7 +734,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
       <p className="fit-rationale">{selected.reason}</p>
       <div className="best-fit-actions">{referralQuestion
         ? activeReferral && activeReferral.receiving_physician_id === selected.physician_id
-          ? <p className="referral-already-selected" role="status"><span aria-hidden="true">✓</span> Selected for referral</p>
+          ? <p className="referral-already-selected" role="status"><span aria-hidden="true">✓</span> {activeReferral.status === 'accepted' ? 'Referral accepted' : 'Selected for referral'}</p>
           : activeReferral
             ? <p className="referral-locked-note">A referral is already active with {activeReferralPhysicianLabel}.</p>
             : <button className="button-primary" onClick={startReferral}>Start referral <span>→</span></button>
@@ -766,7 +779,23 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   </section>
 }
 
-function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate: Navigate }) {
+/**
+ * Dr. Chen's "Next step" rail content after accepting a referral (Part Q) --
+ * deliberately simple for this pass ("a simple appropriate accepted state is
+ * enough"; specialist treatment workflow is future work). Never shows
+ * "Find a specialist" -- Chen is the specialist who was found.
+ */
+function ReceivingReferralCard({ referral, referringLabel }: { referral: Referral | null; referringLabel: string }) {
+  if (!referral) return <div className="next-step-card idle"><p className="muted-note">Opening referral…</p></div>
+  return <div className="next-step-card ready">
+    <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Referral accepted</span>
+    <h3>Referred by {referringLabel}.</h3>
+    <p className="section-label">Referral question</p>
+    <p>{referral.referral_question}</p>
+  </div>
+}
+
+function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patientId: string; navigate: Navigate; perspective?: 'pcp' | 'receiving' }) {
   const [patient, setPatient] = useState<Patient | null>(null)
   const [consultation, setConsultation] = useState<Consultation | null>(null)
   const [recordId, setRecordId] = useState<number | undefined>(undefined)
@@ -777,18 +806,32 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const [activity, setActivity] = useState<PatientActivity | null>(null)
   const [reconsulting, setReconsulting] = useState(false)
   const [nextStepPinned, setNextStepPinned] = useState(false)
+  // Dr. Chen's side of an accepted referral (Part Q) -- the same persisted
+  // referral object Lucy sees, just a different viewer. Fetched only in
+  // 'receiving' mode; the PCP consult-network machinery below is entirely
+  // unused on this path.
+  const [receivingReferral, setReceivingReferral] = useState<Referral | null>(null)
   const demoPatient = DEMO_PATIENTS.find((item) => item.id === patientId)
+  const backPath = perspective === 'receiving' ? '/chen/patients' : '/patients'
   const refreshActivity = () => getPatientActivity()
     .then((records) => setActivity(records.find((item) => item.patient_id === patientId) ?? null))
     .catch(() => {})
   useEffect(() => { setLoading(true); getPatient(patientId).then(setPatient).catch((loadError: Error) => setError(loadError.message)).finally(() => setLoading(false)) }, [patientId])
+  useEffect(() => {
+    if (perspective !== 'receiving') return
+    let cancelled = false
+    getActiveReferral(patientId).then((referral) => { if (!cancelled) setReceivingReferral(referral) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [patientId, perspective])
   /**
    * On open, a patient who already has a completed consultation gets that
    * recommendation loaded directly -- the page reflects current care state, not
    * merely "a consultation exists somewhere" (see the idle-prior fallback below,
-   * used only if this fetch fails).
+   * used only if this fetch fails). Entirely a PCP-side concern -- Chen's
+   * perspective never runs the consult-network workflow.
    */
   useEffect(() => {
+    if (perspective !== 'pcp') return
     let cancelled = false
     setReconsulting(false); setActivity(null); setConsultation(null); setRecordId(undefined)
     getPatientActivity().then(async (records) => {
@@ -803,7 +846,7 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
       }
     }).catch(() => { if (!cancelled) setActivity(null) })
     return () => { cancelled = true }
-  }, [patientId])
+  }, [patientId, perspective])
   /**
    * The Next step rail stays sticky only while its own content (loading card,
    * compact result, or expanded disclosures) still fits the viewport below the
@@ -854,8 +897,10 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
       setConsulting(false)
     }
   }
-  if (loading) return <ProductShell navigate={navigate} section="patients"><div className="page-state embedded"><div className="loading-line" /><p>Opening patient workspace…</p></div></ProductShell>
-  if (!patient) return <ProductShell navigate={navigate} section="patients"><div className="page-state embedded error"><p>{error || 'Patient unavailable'}</p></div></ProductShell>
+  const shellSection = perspective === 'receiving' ? 'chen-patients' : 'patients'
+  const shellPerspective = perspective === 'receiving' ? 'chen' : 'pcp'
+  if (loading) return <ProductShell navigate={navigate} section={shellSection} perspective={shellPerspective}><div className="page-state embedded"><div className="loading-line" /><p>Opening patient workspace…</p></div></ProductShell>
+  if (!patient) return <ProductShell navigate={navigate} section={shellSection} perspective={shellPerspective}><div className="page-state embedded error"><p>{error || 'Patient unavailable'}</p></div></ProductShell>
   const trends = clinicalTrends(patient.labs)
   const flowsheet = labFlowsheet(patient.labs)
   const resultDates = new Set(trends.latest.map((item) => item.date))
@@ -892,8 +937,8 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
   const currentIssue = demoPatient?.reason ?? patient.diagnoses[0] ?? null
   const patientDisplayName = demoPatient?.name ?? cleanName(patient.display_name)
   const patientInitials = patientDisplayName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
-  return <ProductShell navigate={navigate} section="patients"><main className="page-shell patient-page">
-    <button className="text-button back-link" onClick={() => navigate('/patients')}>← All patients</button>
+  return <ProductShell navigate={navigate} section={shellSection} perspective={shellPerspective}><main className="page-shell patient-page">
+    <button className="text-button back-link" onClick={() => navigate(backPath)}>← All patients</button>
     <header className="patient-identity"><span className="patient-row-avatar large">{patientInitials}</span><div><h1>{patientDisplayName}</h1><p>{patient.age} years · {patient.location}</p></div></header>
     {currentIssue && <p className="patient-current-issue"><span className="section-label">Current issue</span>{currentIssue}</p>}
     <hr className="patient-header-divider" />
@@ -907,33 +952,37 @@ function PatientWorkspace({ patientId, navigate }: { patientId: string; navigate
      * grid-column flips the visual order on desktop. */}
     <div className="patient-detail-grid">
       <aside ref={nextStepRef} className={`patient-next-step patient-top-card ${nextStepPinned ? 'pinned' : ''}`}>
-        <h2>Next step</h2>
-        <p className="page-intro">Your agent helps with the follow-through.</p>
-        {nextStepState === 'consulting' && <div className="next-step-card consulting">
-          <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Consulting the network</span>
-          <h3>Your agent is finding a match.</h3>
-          <p>Comparing clinical fit, referral requirements, access, and your practice preferences…</p>
-        </div>}
-        {nextStepState === 'ready' && consultation && <>
-          <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} referralQuestion={patient.referral_question} />
-        </>}
-        {nextStepState === 'idle-prior' && <div className="next-step-card idle">
-          <h3>Previous network consultation available.</h3>
-          <p><strong>{cleanName(activity?.latest_recommended_physician || '')}</strong>{activity?.latest_recommended_specialty ? <><br />{activity.latest_recommended_specialty}</> : null}</p>
-          <small>{activity?.latest_consulted_at ? formatTime(activity.latest_consulted_at) : ''}</small>
-          <button className="button-primary" onClick={() => navigate(consultationPath(activity?.latest_consultation_id as number))}>View consultation <span>→</span></button>
-          {reconsulting
-            ? <>{optionalGuidance('Add what changed, if anything, since the last consultation.')}<button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button></>
-            : <button className="text-button" onClick={() => setReconsulting(true)}>Re-consult the network →</button>}
-        </div>}
-        {nextStepState === 'idle' && <div className="next-step-card idle">
-          <span className="status-label warning">Referral needed</span>
-          <h3>Find a specialist</h3>
-          <p>Let your agent consult the network and bring back referral options that fit this patient's needs.</p>
-          <button className="consult-button" disabled={consulting} onClick={runConsult}>Find specialist <span className="spark-icon" aria-hidden="true">✧</span></button>
-          {optionalGuidance('Add context only if you want to guide the network consultation.')}
-        </div>}
-        <p className="bottom-note">Simulated workflow · No referral is sent</p>
+        {perspective === 'receiving'
+          ? <ReceivingReferralCard referral={receivingReferral} referringLabel={PCP_NAME} />
+          : <>
+            <h2>Next step</h2>
+            <p className="page-intro">Your agent helps with the follow-through.</p>
+            {nextStepState === 'consulting' && <div className="next-step-card consulting">
+              <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Consulting the network</span>
+              <h3>Your agent is finding a match.</h3>
+              <p>Comparing clinical fit, referral requirements, access, and your practice preferences…</p>
+            </div>}
+            {nextStepState === 'ready' && consultation && <>
+              <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} referralQuestion={patient.referral_question} />
+            </>}
+            {nextStepState === 'idle-prior' && <div className="next-step-card idle">
+              <h3>Previous network consultation available.</h3>
+              <p><strong>{cleanName(activity?.latest_recommended_physician || '')}</strong>{activity?.latest_recommended_specialty ? <><br />{activity.latest_recommended_specialty}</> : null}</p>
+              <small>{activity?.latest_consulted_at ? formatTime(activity.latest_consulted_at) : ''}</small>
+              <button className="button-primary" onClick={() => navigate(consultationPath(activity?.latest_consultation_id as number))}>View consultation <span>→</span></button>
+              {reconsulting
+                ? <>{optionalGuidance('Add what changed, if anything, since the last consultation.')}<button className="consult-button" disabled={consulting} onClick={runConsult}><span>{consulting ? 'Consulting…' : 'Consult network for referral'}</span><span>→</span></button></>
+                : <button className="text-button" onClick={() => setReconsulting(true)}>Re-consult the network →</button>}
+            </div>}
+            {nextStepState === 'idle' && <div className="next-step-card idle">
+              <span className="status-label warning">Referral needed</span>
+              <h3>Find a specialist</h3>
+              <p>Let your agent consult the network and bring back referral options that fit this patient's needs.</p>
+              <button className="consult-button" disabled={consulting} onClick={runConsult}>Find specialist <span className="spark-icon" aria-hidden="true">✧</span></button>
+              {optionalGuidance('Add context only if you want to guide the network consultation.')}
+            </div>}
+            <p className="bottom-note">Simulated workflow · No referral is sent</p>
+          </>}
       </aside>
       <div className="patient-clinical-main">
         {(consultation || currentIssue) && <section className="patient-history-section patient-top-card" aria-labelledby="patient-history-heading">
@@ -1054,6 +1103,9 @@ export default function App() {
   if (path === '/specialist/network/updates') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
   const specialistNetworkProfileId = path.match(/^\/specialist\/network\/profile\/([^/]+)$/)?.[1]
   if (specialistNetworkProfileId) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkPhysicianProfilePage controlledId={specialistNetworkProfileId} navigate={navigate} backPath="/specialist/home" perspective="iain" params={params} /></ProductShell>
+  if (path === '/chen' || path === '/chen/patients') return <ProductShell navigate={navigate} section="chen-patients" perspective="chen"><ChenPatientsPage navigate={navigate} /></ProductShell>
+  const chenPatientId = path.match(/^\/chen\/patients\/([^/]+)$/)?.[1]
+  if (chenPatientId === TONJIT_ID) return <PatientWorkspace patientId={chenPatientId} navigate={navigate} perspective="receiving" />
   if (path === '/network') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={params} /></ProductShell>
   const networkNpi = path.match(/^\/network\/([^/]+)$/)?.[1]
   if (networkNpi) return <ProductShell navigate={navigate} section="network"><PhysicianProfilePage npi={networkNpi} navigate={navigate} /></ProductShell>

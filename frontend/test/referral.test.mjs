@@ -151,9 +151,10 @@ test('the legacy local "prepared for demo" referral path is preserved for patien
   assert.match(view, /No referral was transmitted\./)
 })
 
-test('no receiving-side accept/redirect/clarification UI exists yet', () => {
-  assert.doesNotMatch(app, /Accept referral|Decline referral|Redirect referral|Request clarification/i)
-  assert.doesNotMatch(referralSource, /Accept referral|Decline referral|Redirect referral|Request clarification/i)
+test('Accept referral is the only functional receiving-side decision -- no decline/redirect/clarification workflow exists', () => {
+  assert.match(referralSource, /Accept referral/)
+  assert.doesNotMatch(app, /Decline referral|Redirect referral|Request clarification/i)
+  assert.doesNotMatch(referralSource, /Decline referral|Redirect referral|Request clarification/i)
 })
 
 test('an unresolved workflow renders a truthful "needs your input" state, never a fabricated ready state', () => {
@@ -312,11 +313,12 @@ test('a Tonjit referral-demo reset endpoint exists and is wired through the gene
 
 /* ------------------------------------------------------ referral handoff (Part B-L) */
 
-test('the durable sent state renders "Awaiting Dr. X\'s review" as the primary headline -- no standalone "Referral sent." heading, never the word accepted', () => {
+test('the durable sent state renders "Awaiting Dr. X\'s review" as the primary headline -- no standalone "Referral sent." heading, and never claims acceptance itself', () => {
   assert.match(referralSource, /case 'sent':/)
-  assert.doesNotMatch(referralSource, /<h3>Referral sent\.<\/h3>/, 'the repetitive standalone heading was removed')
-  assert.match(referralSource, /<h3>Awaiting Dr\. \{who\}'s review<\/h3>/)
-  assert.doesNotMatch(referralSource, /accepted/i)
+  const sentCaseSource = referralSource.slice(referralSource.indexOf("case 'sent':"), referralSource.indexOf("case 'accepted':"))
+  assert.doesNotMatch(sentCaseSource, /<h3>Referral sent\.<\/h3>/, 'the repetitive standalone heading was removed')
+  assert.match(sentCaseSource, /<h3>Awaiting Dr\. \{who\}'s review<\/h3>/)
+  assert.doesNotMatch(sentCaseSource, /accepted/i, 'the sent/submitted phase never claims the referral has been accepted -- that is a separate, later, real physician action')
 })
 
 test('the brief completion overlay and the durable card both derive their copy from the same real phase data, never two conflicting claims', () => {
@@ -523,9 +525,16 @@ test('Back to match options only flips the frontend viewMode -- no referral-canc
 test('Discovery mode shows a quiet "referral active" notice and "Return to active referral" once a referral exists', () => {
   const discovery = discoveryModeBranch()
   assert.match(discovery, /\{activeReferral && <div className="referral-active-notice">/)
-  assert.match(discovery, /Referral active with \{activeReferralPhysicianLabel\}/)
+  assert.match(discovery, /Referral active with \$\{activeReferralPhysicianLabel\}/)
   assert.match(discovery, /Awaiting specialist review/)
   assert.match(discovery, /onClick=\{\(\) => setViewMode\('referral'\)\}>Return to active referral/)
+})
+
+test('Discovery mode\'s "referral active" notice shows an accepted-specific message once the referral is accepted, never the stale "awaiting review" wording', () => {
+  const discovery = discoveryModeBranch()
+  assert.match(discovery, /activeReferral\.status === 'accepted'/)
+  assert.match(discovery, /Referral accepted by \$\{activeReferralPhysicianLabel\}/)
+  assert.match(discovery, /Added to their care/)
 })
 
 test('Dr. Chen\'s card shows "Selected for referral" instead of "Start referral" once that physician is the active referral\'s destination', () => {
@@ -549,7 +558,7 @@ test('Review match details and Other referral options remain accessible in Disco
 
 test('"View referral packet" opens a ModalPortal-based modal rendering the real packet question and items', () => {
   assert.match(referralSource, /export function ReferralPacketModal/)
-  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'))
+  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'), referralSource.indexOf('RECEIVING SIDE'))
   assert.match(modalSource, /<ModalPortal>/)
   assert.match(modalSource, /role="dialog" aria-modal="true" aria-label="Referral packet"/)
   assert.match(modalSource, /\{referral\.referral_question\}/)
@@ -557,7 +566,7 @@ test('"View referral packet" opens a ModalPortal-based modal rendering the real 
 })
 
 test('the packet modal renders label/value/provenance generically from PacketItem data, never a hardcoded Tonjit string', () => {
-  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'))
+  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'), referralSource.indexOf('RECEIVING SIDE'))
   assert.match(modalSource, /<strong>\{item\.label\}<\/strong>/)
   assert.match(modalSource, /<p>\{item\.value\}<\/p>/)
   assert.doesNotMatch(modalSource, /Tonjit|recent_renal_function|Creatinine|HbA1c/i)
@@ -571,7 +580,7 @@ test('an item added during preflight shows generic provenance -- "added during p
 })
 
 test('the referral packet modal closes via the shared close button/Escape, consistent with the other activity modals', () => {
-  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'))
+  const modalSource = referralSource.slice(referralSource.indexOf('export function ReferralPacketModal'), referralSource.indexOf('RECEIVING SIDE'))
   assert.match(modalSource, /post-flow-close.*onClick=\{onClose\}/)
   assert.match(modalSource, /event\.key === 'Escape'/)
 })

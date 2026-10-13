@@ -2097,6 +2097,50 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-submission-meta { color: var(--text-secondary); font-size: .6rem; }
 @media (prefers-reduced-motion: reduce) { .best-fit-card.referral-card { transition: none; } }
 
+/* Receiving side (Part E/F): a lightweight intermittent inbox, not a
+   permanent right rail or a dense dashboard. */
+.selector-header { position: relative; }
+.incoming-requests { position: relative; }
+.incoming-requests-toggle { display: flex; align-items: center; gap: 7px; border: 1px solid var(--mineral-subtle); border-radius: 999px; background: var(--mineral-surface); padding: 8px 14px; color: var(--mineral-deep); font-size: .68rem; font-weight: 600; }
+.incoming-requests-toggle span { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; border-radius: 999px; background: var(--mineral-deep); padding: 0 5px; color: var(--surface); font-size: .6rem; font-weight: 700; }
+.incoming-requests-popover { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: min(360px, 90vw); border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 6px; box-shadow: 0 18px 40px rgb(36 52 71 / 16%); }
+.incoming-request-row { border-top: 1px solid var(--border); padding: 12px 10px; }
+.incoming-request-row:first-child { border-top: 0; }
+.incoming-request-main { display: flex; flex-direction: column; }
+.incoming-request-main strong { font-size: .78rem; }
+.incoming-request-main span { margin-top: 2px; color: var(--text-secondary); font-size: .66rem; }
+.incoming-request-main small { color: var(--text-secondary); font-size: .62rem; }
+.incoming-request-status { margin: 8px 0 0; }
+.incoming-request-resolved { margin: 4px 0 0; color: var(--text-secondary); font-size: .64rem; }
+.incoming-request-row .text-button { margin-top: 8px; font-size: .68rem; font-weight: 600; }
+
+/* Request Review modal (Part G-N): a focused clinical handoff, not a
+   developer inspector -- reuses .post-flow-dialog/.packet-section/
+   .packet-items wholesale rather than inventing a parallel style language. */
+.request-review-dialog { width: min(100%, 640px); }
+.request-review-parties { display: flex; gap: 28px; margin-top: 14px; }
+.request-review-parties > div { display: flex; flex-direction: column; }
+.request-review-parties strong { font-size: .8rem; }
+.request-review-parties small { color: var(--text-secondary); font-size: .64rem; }
+.request-review-status { margin: 14px 0 0; }
+.requirement-checklist { display: flex; flex-direction: column; gap: 12px; }
+.requirement-check { display: flex; gap: 10px; border-top: 1px solid var(--border); padding-top: 12px; }
+.requirement-check:first-child { border-top: 0; padding-top: 0; }
+.requirement-check-mark { flex: 0 0 auto; color: var(--mineral-deep); font-family: var(--font-display); }
+.requirement-check.missing_from_packet .requirement-check-mark { color: var(--danger); }
+.requirement-check strong { display: block; font-size: .76rem; font-weight: 600; }
+.requirement-check p { margin: 3px 0 0; color: var(--clinical); font-size: .72rem; line-height: 1.5; }
+.agent-preflight-summary { border: 1px solid var(--mineral-subtle); border-radius: 10px; background: var(--mineral-surface); padding: 14px; }
+.agent-preflight-summary p { margin: 6px 0 0; color: var(--mineral-deep); font-size: .74rem; }
+.agent-preflight-summary p:first-of-type { margin-top: 2px; }
+.agent-preflight-summary .text-button { margin-top: 8px; font-size: .68rem; font-weight: 600; }
+.request-review-packet-link { display: block; margin-top: 16px; font-size: .7rem; font-weight: 600; }
+.request-review-actions { margin-top: 24px; display: flex; justify-content: flex-end; }
+.request-review-success { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 20px; text-align: center; }
+.request-review-success .referral-handoff-check { font-size: 1.6rem; }
+.request-review-success h2 { margin: 0; font-size: 1.2rem; }
+.request-review-success p { margin: 0; color: var(--text-secondary); font-size: .8rem; }
+
 /* Recommendation card: compact by default (design_references/'s .specialist is
    the model -- name, specialty, one fit line, one metadata line, one rationale
    sentence, one action). Everything denser lives behind a disclosure. */

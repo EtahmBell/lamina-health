@@ -263,3 +263,39 @@ def submit_referral(referral: Referral) -> Referral:
         metadata=metadata,
     )
     return referral
+
+
+def accept_referral(
+    referral: Referral, receiving_physician_id: str, receiving_physician_name: str
+) -> Referral:
+    """The one receiving-side transition in this pass: a submitted referral
+    becomes accepted only through an explicit, named physician action -- the
+    receiving agent prepares and checks the packet (see run_preflight), but
+    it never decides to accept the patient itself (see Part B/C). Only the
+    physician actually named on the referral can accept it; calling this
+    again for an already-accepted referral is a safe no-op that never
+    appends a second referral_accepted event."""
+    if referral.receiving_physician_id != receiving_physician_id:
+        raise ValueError(
+            f"{receiving_physician_id!r} is not the receiving physician for this referral."
+        )
+    if referral.status == ReferralStatus.ACCEPTED:
+        return referral
+    if referral.status != ReferralStatus.SUBMITTED:
+        raise ValueError(
+            f"Cannot accept a referral in status {referral.status.value!r}; "
+            "it must first be submitted."
+        )
+    referral.status = ReferralStatus.ACCEPTED
+    metadata: dict[str, str | int | bool] = {"receiving_physician_id": receiving_physician_id}
+    if referral.id is not None:
+        metadata["referral_id"] = referral.id
+    _append_event(
+        referral,
+        event_type=CoordinationEventType.REFERRAL_ACCEPTED,
+        actor=CoordinationActor.RECEIVING_PHYSICIAN,
+        autonomy=AutonomyLevel.PHYSICIAN_REQUIRED,
+        summary=f"{receiving_physician_name} accepted the referral and added the patient to their care.",
+        metadata=metadata,
+    )
+    return referral

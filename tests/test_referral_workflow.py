@@ -7,8 +7,8 @@ from backend.api import workspace as workspace_api
 from backend.demo_identity import LUCY_AGENT_ID, PCP_AGENT_ID
 from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
-from backend.models import CoordinationEventType, ReferralStatus, RequirementStatus
-from backend.referrals import build_referral, run_preflight, submit_referral
+from backend.models import AutonomyLevel, CoordinationActor, CoordinationEventType, ReferralStatus, RequirementStatus
+from backend.referrals import accept_referral, build_referral, run_preflight, submit_referral
 from backend.synthetic_data import PATIENTS, PRIMARY_PATIENT_ID, TONJIT_PATIENT_ID
 from backend.workflow import WorkflowStore
 
@@ -18,6 +18,11 @@ CHEN_ID = "physician-chen"
 def tonjit_referral():
     patient = PATIENTS[TONJIT_PATIENT_ID]
     return patient, build_referral(patient, CHEN_ID, "Endocrinology")
+
+
+def submitted_tonjit_referral():
+    patient, referral = tonjit_referral()
+    return patient, run_preflight(patient, referral)
 
 
 @pytest.fixture
@@ -461,6 +466,140 @@ def test_reset_tonjit_clears_the_active_referral_so_start_referral_can_reappear(
 
     reset = api_client.post("/api/workspace/demo/reset/tonjit")
     assert reset.json()["removed_referrals"] == 1
+
+
+# --------------------------------------------------------------------- PART Z
+
+
+def test_submitted_referral_can_be_accepted_by_its_receiving_physician() -> None:
+    _, referral = submitted_tonjit_referral()
+    accepted = accept_referral(referral, CHEN_ID, "Dr. Noah Chen")
+    assert accepted.status == ReferralStatus.ACCEPTED
+
+
+def test_accepted_status_is_a_real_persisted_state(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    api_client.post(f"/api/referrals/{created['id']}/preflight")
+    accepted = api_client.post(
+        f"/api/referrals/{created['id']}/accept", json={"receiving_physician_id": CHEN_ID}
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "accepted"
+    fetched = api_client.get(f"/api/referrals/{created['id']}")
+    assert fetched.json()["status"] == "accepted"
+
+
+def test_referral_accepted_event_is_appended_exactly_once() -> None:
+    _, referral = submitted_tonjit_referral()
+    accepted = accept_referral(referral, CHEN_ID, "Dr. Noah Chen")
+    accepted_events = [
+        event for event in accepted.coordination_events if event.event_type == CoordinationEventType.REFERRAL_ACCEPTED
+    ]
+    assert len(accepted_events) == 1
+
+
+def test_referral_accepted_event_actor_is_the_receiving_physician_not_an_agent() -> None:
+    _, referral = submitted_tonjit_referral()
+    accepted = accept_referral(referral, CHEN_ID, "Dr. Noah Chen")
+    event = next(
+        item for item in accepted.coordination_events if item.event_type == CoordinationEventType.REFERRAL_ACCEPTED
+    )
+    assert event.actor == CoordinationActor.RECEIVING_PHYSICIAN
+    assert event.actor != CoordinationActor.RECEIVING_AGENT
+    assert event.autonomy == AutonomyLevel.PHYSICIAN_REQUIRED
+    assert "Dr. Noah Chen" in event.summary
+    assert event.metadata["receiving_physician_id"] == CHEN_ID
+
+
+def test_wrong_physician_cannot_accept_the_referral() -> None:
+    _, referral = submitted_tonjit_referral()
+    with pytest.raises(ValueError):
+        accept_referral(referral, "physician-jung", "Dr. Someone Else")
+
+
+def test_wrong_physician_cannot_accept_via_api(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    api_client.post(f"/api/referrals/{created['id']}/preflight")
+    response = api_client.post(
+        f"/api/referrals/{created['id']}/accept", json={"receiving_physician_id": "physician-jung"}
+    )
+    assert response.status_code == 403
+    assert api_client.get(f"/api/referrals/{created['id']}").json()["status"] == "submitted"
+
+
+def test_non_submitted_referral_cannot_be_accepted() -> None:
+    _, referral = tonjit_referral()  # still 'assembling'
+    with pytest.raises(ValueError):
+        accept_referral(referral, CHEN_ID, "Dr. Noah Chen")
+
+
+def test_repeat_acceptance_is_idempotent_and_safe() -> None:
+    _, referral = submitted_tonjit_referral()
+    once = accept_referral(referral, CHEN_ID, "Dr. Noah Chen")
+    twice = accept_referral(once, CHEN_ID, "Dr. Noah Chen")
+    assert twice.status == ReferralStatus.ACCEPTED
+    assert len(twice.coordination_events) == len(once.coordination_events)
+
+
+def test_accepted_referral_preserves_packet_requirements_events_and_provenance() -> None:
+    patient, referral = submitted_tonjit_referral()
+    events_before_acceptance = len(referral.coordination_events)
+    requirements_before_acceptance = len(referral.receiving_requirements)
+    accepted = accept_referral(referral, CHEN_ID, "Dr. Noah Chen")
+    renal_item = accepted.packet.item("recent_renal_function")
+    assert renal_item is not None
+    assert renal_item.provenance.observed_date == "2026-07-20"
+    assert len(accepted.requirement_results) == requirements_before_acceptance
+    assert len(accepted.coordination_events) == events_before_acceptance + 1
+
+
+def test_incoming_query_includes_tonjit_before_acceptance_and_excludes_after(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    api_client.post(f"/api/referrals/{created['id']}/preflight")
+
+    incoming = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "submitted"})
+    assert incoming.status_code == 200
+    assert [item["patient_id"] for item in incoming.json()] == [TONJIT_PATIENT_ID]
+
+    api_client.post(f"/api/referrals/{created['id']}/accept", json={"receiving_physician_id": CHEN_ID})
+
+    incoming_after = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "submitted"})
+    assert incoming_after.json() == []
+
+
+def test_accepted_referral_can_be_queried_afterward(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    api_client.post(f"/api/referrals/{created['id']}/preflight")
+    api_client.post(f"/api/referrals/{created['id']}/accept", json={"receiving_physician_id": CHEN_ID})
+
+    accepted_list = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "accepted"})
+    assert accepted_list.status_code == 200
+    assert [item["patient_id"] for item in accepted_list.json()] == [TONJIT_PATIENT_ID]
+
+
+def test_reset_removes_accepted_state_and_receiving_patient_relationship(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    api_client.post(f"/api/referrals/{created['id']}/preflight")
+    api_client.post(f"/api/referrals/{created['id']}/accept", json={"receiving_physician_id": CHEN_ID})
+
+    reset = api_client.post("/api/workspace/demo/reset/tonjit")
+    assert reset.json()["removed_referrals"] == 1
+
+    assert api_client.get(f"/api/referrals/{created['id']}").status_code == 404
+    accepted_after_reset = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "accepted"})
+    assert accepted_after_reset.json() == []
+    incoming_after_reset = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "submitted"})
+    assert incoming_after_reset.json() == []
 
     after_reset = api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active")
     assert after_reset.status_code == 200

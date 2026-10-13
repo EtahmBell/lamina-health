@@ -14,6 +14,7 @@ class ReferralStatus(StrEnum):
     RESOLVING = "resolving"
     READY_FOR_REVIEW = "ready_for_review"
     SUBMITTED = "submitted"
+    ACCEPTED = "accepted"
 
 
 class RequirementStatus(StrEnum):
@@ -37,12 +38,16 @@ class CoordinationEventType(StrEnum):
     REFERRAL_READY = "referral_ready"
     PHYSICIAN_ACTION_REQUIRED = "physician_action_required"
     REFERRAL_SUBMITTED = "referral_submitted"
+    REFERRAL_ACCEPTED = "referral_accepted"
 
 
 class CoordinationActor(StrEnum):
     REFERRING_AGENT = "referring_agent"
     RECEIVING_AGENT = "receiving_agent"
     SYSTEM = "system"
+    # The one actor that is never an agent (see Part C) -- acceptance is an
+    # explicit physician action, not something the receiving agent decides.
+    RECEIVING_PHYSICIAN = "receiving_physician"
 
 
 class AutonomyLevel(StrEnum):
@@ -100,6 +105,10 @@ class CoordinationEvent(StrictModel):
 
 
 class ReferralCreateRequest(StrictModel):
+    receiving_physician_id: str
+
+
+class ReferralAcceptRequest(StrictModel):
     receiving_physician_id: str
 
 

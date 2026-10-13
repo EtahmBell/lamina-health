@@ -7,7 +7,7 @@ const workspaceBootstrapToken = Array.from(
 ).join('')
 let workspaceProvisioned = false
 
-const isWorkspaceScopedPath = (path: string) => path.startsWith('/api/workspace') || path.startsWith('/api/patients')
+const isWorkspaceScopedPath = (path: string) => path.startsWith('/api/workspace') || path.startsWith('/api/patients') || path.startsWith('/api/referrals') || path.startsWith('/api/physicians')
 
 export type LabObservation = {
   date: string
@@ -47,14 +47,14 @@ export type PatientActivity = {
   latest_recommended_physician: string | null; latest_recommended_specialty: string | null
 }
 export type ConsultationRecord = { id: number; patient_id: string; completed_at: string; result: Consultation }
-export type ReferralStatus = 'draft' | 'assembling' | 'preflight' | 'resolving' | 'ready_for_review' | 'submitted'
+export type ReferralStatus = 'draft' | 'assembling' | 'preflight' | 'resolving' | 'ready_for_review' | 'submitted' | 'accepted'
 export type RequirementStatus = 'satisfied' | 'missing_from_packet' | 'optional_not_present'
 export type CoordinationEventType =
   | 'referral_created' | 'packet_assembled' | 'preflight_started' | 'requirement_checked'
   | 'information_requested' | 'record_search_started' | 'record_found' | 'record_not_found'
   | 'information_attached' | 'requirement_rechecked' | 'preflight_completed' | 'referral_ready'
-  | 'physician_action_required' | 'referral_submitted'
-export type CoordinationActor = 'referring_agent' | 'receiving_agent' | 'system'
+  | 'physician_action_required' | 'referral_submitted' | 'referral_accepted'
+export type CoordinationActor = 'referring_agent' | 'receiving_agent' | 'system' | 'receiving_physician'
 export type AutonomyLevel = 'automatic' | 'physician_required'
 export type PacketItemProvenance = { source: string; attached_by: string; attached_during: string; observed_date: string | null }
 export type PacketItem = { key: string; label: string; value: string; provenance: PacketItemProvenance }
@@ -512,6 +512,12 @@ export const createReferral = (patientId: string, receivingPhysicianId: string) 
 export const getReferral = (referralId: number) => request<Referral>(`/api/referrals/${referralId}`)
 export const runReferralPreflight = (referralId: number) => request<Referral>(`/api/referrals/${referralId}/preflight`, { method: 'POST' })
 export const getActiveReferral = (patientId: string) => request<Referral | null>(`/api/patients/${encodeURIComponent(patientId)}/referrals/active`)
+/** A real physician action (never implied by preflight completing) -- see Referral.tsx's RequestReviewModal. */
+export const acceptReferral = (referralId: number, receivingPhysicianId: string) => request<Referral>(`/api/referrals/${referralId}/accept`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
+})
+/** The receiving-physician query: status='submitted' for Incoming requests, status='accepted' for the physician's accepted-patient list. */
+export const getPhysicianReferrals = (physicianId: string, status?: ReferralStatus) => request<Referral[]>(`/api/physicians/${encodeURIComponent(physicianId)}/referrals${status ? `?status=${status}` : ''}`)
 export const getPatientActivity = () => request<PatientActivity[]>('/api/workspace/activity')
 export const getConsultationHistory = () => request<ConsultationRecord[]>('/api/workspace/consultations')
 export const getConsultationRecord = (id: number) => request<ConsultationRecord>(`/api/workspace/consultations/${id}`)
