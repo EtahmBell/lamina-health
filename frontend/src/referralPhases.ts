@@ -57,6 +57,22 @@ export function derivePhases(referral: Referral): DisplayPhase[] {
   return phases
 }
 
+/**
+ * The durable display phase for a referral that already existed before this
+ * page mounted (e.g. after a reload) -- the terminal state only, never the
+ * animated progression, and only for a referral whose preflight actually
+ * ran. draft/assembling/preflight are transient mid-flight statuses that
+ * should never be found at rest; if one is (e.g. the page reloaded mid-call),
+ * there's nothing real to restore, so the caller falls back to idle.
+ */
+export function restorePhase(referral: Referral): DisplayPhase | null {
+  if (referral.status !== 'ready_for_review' && referral.status !== 'submitted' && referral.status !== 'resolving') {
+    return null
+  }
+  const phases = derivePhases(referral)
+  return phases[phases.length - 1] ?? null
+}
+
 /** How long each phase stays on screen once revealed, in ms -- deliberately a
  * bit slower than a snappy UI transition so a viewer can actually read and
  * absorb each real step (Part 5 polish pass). Pure frontend presentation

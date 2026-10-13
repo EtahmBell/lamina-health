@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { derivePhases, PHASE_FADE_MS, PHASE_HOLD_MS } from '../src/referralPhases.ts'
+import { derivePhases, PHASE_FADE_MS, PHASE_HOLD_MS, restorePhase } from '../src/referralPhases.ts'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const referralSource = readFileSync(new URL('../src/Referral.tsx', import.meta.url), 'utf8')
@@ -328,4 +328,61 @@ test('the coordination modal footer reflects the real submitted status, derived 
 test('EVENT_TYPE_TITLES maps referral_submitted to a plain operational label, not fabricated reasoning', () => {
   const phasesSource = readFileSync(new URL('../src/referralPhases.ts', import.meta.url), 'utf8')
   assert.match(phasesSource, /referral_submitted: 'Referral sent'/)
+})
+
+/* ---------------------------------------------------------- hydration (reload fix) */
+
+test('restorePhase restores the real terminal phase for a submitted referral -- sent, not the animated sequence', () => {
+  const phase = restorePhase(READY_REFERRAL)
+  assert.deepEqual(phase, { kind: 'sent' })
+})
+
+test('restorePhase restores the real terminal phase for a stuck/unresolved referral honestly', () => {
+  const phase = restorePhase(UNRESOLVED_REFERRAL)
+  assert.deepEqual(phase, { kind: 'unresolved', requirementLabels: ['Recent renal function'] })
+})
+
+test('restorePhase returns null for transient mid-flight statuses -- nothing real to restore, caller falls back to idle (Start referral)', () => {
+  for (const status of ['draft', 'assembling', 'preflight']) {
+    assert.equal(restorePhase({ ...baseReferral, status, coordination_events: [] }), null)
+  }
+})
+
+test('ReferralCoordinationSurface hydrates from the backend on mount instead of assuming no referral exists', () => {
+  assert.match(referralSource, /import \{ createReferral, getActiveReferral, runReferralPreflight/)
+  assert.match(referralSource, /getActiveReferral\(patientId\)\.then/)
+  assert.match(referralSource, /useState<'hydrating' \| 'idle' \| 'running' \| 'done' \| 'error'>\('hydrating'\)/)
+})
+
+test('a restored referral is only honored when it targets the currently selected physician, not a stale referral to a different candidate', () => {
+  assert.match(referralSource, /existing\.receiving_physician_id === receivingPhysicianId/)
+})
+
+test('hydration never calls createReferral or runReferralPreflight -- it is a pure read, never a rerun/resubmit', () => {
+  const hydrationEffectStart = referralSource.indexOf('useEffect(() => {\n    let ignore = false')
+  const hydrationEffectEnd = referralSource.indexOf('}, [patientId, receivingPhysicianId])', hydrationEffectStart)
+  const hydrationEffect = referralSource.slice(hydrationEffectStart, hydrationEffectEnd)
+  assert.ok(hydrationEffect.length > 0, 'the hydration effect block should be found')
+  assert.doesNotMatch(hydrationEffect, /createReferral\(|runReferralPreflight\(/)
+  assert.match(hydrationEffect, /getActiveReferral/)
+})
+
+test('restoring a submitted referral still allows "See agent coordination" to open with the real restored events', () => {
+  assert.match(referralSource, /setReferral\(existing\)/)
+  assert.match(referralSource, /setStatus\('done'\)/)
+  assert.match(referralSource, /\{status === 'done' && referral && <button type="button" className="text-button" onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination/)
+})
+
+/* ------------------------------------------------------ patient-level referral lookup (backend) */
+
+test('a patient-level active-referral lookup helper exists on the frontend API, scoped by patient only (no frontend-guessed referral IDs)', () => {
+  const api = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
+  assert.match(api, /getActiveReferral = \(patientId: string\) => request<Referral \| null>\(`\/api\/patients\/\$\{encodeURIComponent\(patientId\)\}\/referrals\/active`\)/)
+})
+
+/* -------------------------------------------------------- Recommended Physician spacing */
+
+test('the Recommended Physician card has breathing room between the eyebrow and the physician identity row', () => {
+  assert.match(styles, /\.best-fit-card\.compact \.best-fit-physician \{ padding: 8px 0 0; gap: 12px; \}/)
+  assert.doesNotMatch(styles, /\.best-fit-card\.compact \.best-fit-physician \{ padding: 0; gap: 12px; \}/)
 })

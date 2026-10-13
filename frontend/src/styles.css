@@ -2058,7 +2058,7 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .best-fit-card.compact { margin-top: 18px; padding: 18px; transition: opacity 150ms ease; }
 .best-fit-card.compact.swapping { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .best-fit-card.compact { transition: none; } }
-.best-fit-card.compact .best-fit-physician { padding: 0; gap: 12px; }
+.best-fit-card.compact .best-fit-physician { padding: 8px 0 0; gap: 12px; }
 .best-fit-card.compact .best-fit-physician h2 { margin: 0; font-size: 1.15rem; }
 .best-fit-card.compact .best-fit-physician p { margin: 2px 0 0; }
 .fit-indicator { margin: 14px 0 0; color: var(--mineral-deep); font-size: .68rem; font-weight: 700; }

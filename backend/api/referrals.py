@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from backend.demo_workspace import MutableDemoWorkspace
+from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.models import Referral, ReferralCreateRequest
 from backend.referrals import build_referral, run_preflight
 from backend.synthetic_data import ALL_PHYSICIANS
@@ -34,6 +34,18 @@ def create_referral(
 @router.get("/referrals/{referral_id}", response_model=Referral)
 def get_referral(referral_id: int, workspace_id: MutableDemoWorkspace) -> Referral:
     return _load_referral(workspace_id, referral_id)
+
+
+@router.get("/patients/{patient_id}/referrals/active", response_model=Referral | None)
+def get_active_referral(patient_id: str, workspace_id: DemoWorkspace) -> Referral | None:
+    """The patient-level hydration lookup: "does this patient already have a
+    referral in flight (or completed)?" so Patient Detail can restore the
+    real persisted state after a reload instead of reverting to the
+    recommendation/Start-referral state. Returns the most recently created
+    referral for this patient, or null if none exists -- never a 404, since
+    "no referral yet" is the normal state for every patient."""
+    referrals = workflow_store.list_referrals(workspace_id, patient_id=patient_id)
+    return referrals[-1] if referrals else None
 
 
 @router.post("/referrals/{referral_id}/preflight", response_model=Referral)

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { createReferral, runReferralPreflight, type Referral } from './api.ts'
+import { createReferral, getActiveReferral, runReferralPreflight, type Referral } from './api.ts'
 import { PCP_NAME } from './demoIdentity.ts'
 import { ModalPortal } from './ModalPortal.tsx'
-import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
+import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, restorePhase, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
 export type { DisplayPhase } from './referralPhases.ts'
@@ -71,7 +71,7 @@ function PhaseContent({ phase, receivingPhysicianName }: { phase: DisplayPhase; 
 export function ReferralCoordinationSurface({
   patientId, patientLabel, receivingPhysicianId, receivingPhysicianName,
 }: { patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string }) {
-  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [status, setStatus] = useState<'hydrating' | 'idle' | 'running' | 'done' | 'error'>('hydrating')
   const [visiblePhase, setVisiblePhase] = useState<DisplayPhase | null>(null)
   const [fading, setFading] = useState(false)
   const [referral, setReferral] = useState<Referral | null>(null)
@@ -86,6 +86,31 @@ export function ReferralCoordinationSurface({
     timers.current.forEach((id) => window.clearTimeout(id))
     timers.current = []
   }, [])
+
+  /**
+   * Hydration: on mount, ask the backend whether this patient already has a
+   * referral (e.g. from before a page reload) rather than assuming none
+   * exists. Restores the real persisted terminal state directly -- no
+   * animation replay, no preflight re-run, no re-submission. The backend
+   * referral is the only source of truth; nothing is cached client-side.
+   */
+  useEffect(() => {
+    let ignore = false
+    getActiveReferral(patientId).then((existing) => {
+      if (ignore) return
+      if (existing && existing.receiving_physician_id === receivingPhysicianId) {
+        const phase = restorePhase(existing)
+        if (phase) {
+          setReferral(existing)
+          setVisiblePhase(phase)
+          setStatus('done')
+          return
+        }
+      }
+      setStatus('idle')
+    }).catch(() => { if (!ignore) setStatus('idle') })
+    return () => { ignore = true }
+  }, [patientId, receivingPhysicianId])
 
   const sleep = (ms: number) => new Promise<void>((resolve) => {
     const id = window.setTimeout(resolve, ms)

@@ -816,17 +816,23 @@ class WorkflowStore:
         self,
         workspace_id: str,
         *,
+        patient_id: str | None = None,
         receiving_physician_id: str | None = None,
         status: str | None = None,
     ) -> list[Referral]:
-        """Query persisted referrals, optionally filtered by receiving
-        physician and/or status. This is the lookup the receiving-side
-        "Incoming requests" feature (a later pass) will use to find
-        submitted referrals for a given physician -- e.g.
-        list_referrals(workspace_id, receiving_physician_id="physician-chen",
-        status="submitted")."""
+        """Query persisted referrals, optionally filtered by patient,
+        receiving physician, and/or status. `patient_id` and `status` are
+        indexed table columns and filtered in SQL; `receiving_physician_id`
+        lives only in the JSON blob and is filtered in Python. Ordered oldest
+        -> newest, so callers wanting "the active one" take the last item.
+        This is also the lookup the receiving-side "Incoming requests"
+        feature (a later pass) will use -- e.g. list_referrals(workspace_id,
+        receiving_physician_id="physician-chen", status="submitted")."""
         query = "SELECT referral_json FROM referrals WHERE workspace_id=?"
         params: list[str] = [workspace_id]
+        if patient_id is not None:
+            query += " AND patient_id=?"
+            params.append(patient_id)
         if status is not None:
             query += " AND status=?"
             params.append(status)

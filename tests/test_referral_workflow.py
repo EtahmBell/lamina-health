@@ -402,3 +402,66 @@ def test_receiving_physician_can_query_their_submitted_referrals(tmp_path) -> No
 
     all_submitted = store.list_referrals(workspace_id, status="submitted")
     assert len(all_submitted) == 1
+
+
+# --------------------------------------------------------- hydration / reload fix
+
+
+def test_active_referral_lookup_is_null_before_any_referral_exists(api_client: TestClient) -> None:
+    response = api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active")
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+def test_active_referral_lookup_returns_the_persisted_referral_without_needing_its_id(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    api_client.post(f"/api/referrals/{created['id']}/preflight")
+
+    active = api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active")
+    assert active.status_code == 200
+    payload = active.json()
+    assert payload["id"] == created["id"]
+    assert payload["status"] == "submitted"
+    assert payload["receiving_physician_id"] == CHEN_ID
+    assert len(payload["coordination_events"]) == 18
+
+
+def test_active_referral_lookup_is_a_pure_read_and_never_reruns_preflight_or_resubmits(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    api_client.post(f"/api/referrals/{created['id']}/preflight")
+    first_lookup = api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active").json()
+
+    for _ in range(3):
+        repeated_lookup = api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active").json()
+        assert repeated_lookup == first_lookup, "repeated GETs must not mutate state or duplicate events"
+
+    renal_items = [item for item in first_lookup["packet"]["items"] if item["key"] == "recent_renal_function"]
+    assert len(renal_items) == 1
+    submitted_events = [event for event in first_lookup["coordination_events"] if event["event_type"] == "referral_submitted"]
+    assert len(submitted_events) == 1
+
+
+def test_active_referral_lookup_only_returns_referrals_for_the_requested_patient(api_client: TestClient) -> None:
+    api_client.post(f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID})
+    jordan_active = api_client.get(f"/api/patients/{PRIMARY_PATIENT_ID}/referrals/active")
+    assert jordan_active.status_code == 200
+    assert jordan_active.json() is None
+
+
+def test_reset_tonjit_clears_the_active_referral_so_start_referral_can_reappear(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    api_client.post(f"/api/referrals/{created['id']}/preflight")
+    assert api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active").json()["status"] == "submitted"
+
+    reset = api_client.post("/api/workspace/demo/reset/tonjit")
+    assert reset.json()["removed_referrals"] == 1
+
+    after_reset = api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active")
+    assert after_reset.status_code == 200
+    assert after_reset.json() is None
