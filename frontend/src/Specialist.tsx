@@ -23,6 +23,7 @@ import {
   type TrainProjection,
 } from './api.ts'
 import { eventDomId } from './agentActivity.ts'
+import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
 import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkTabs, TrainTab, networkProfilePath, trainingPath, type AgentActivityRow, type NetworkTab } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -348,7 +349,7 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
     {error && <div className="error-banner" role="alert">{error}</div>}
     {!workspace && !error && <p className="muted-note">Opening your agent…</p>}
     {workspace && <>
-      <section className="agent-hero"><div className="agent-hero-mark"><NetworkMark /></div><div>
+      <section className="agent-hero"><div className="agent-hero-mark"><AgentAvatar tone={agentTone('iain')} /></div><div>
         <p className="eyebrow">Specialist agent</p>
         <h1>{workspace.physician.agent_name}</h1>
         <p>{workspace.physician.specialty} · Represents your practice when other physician agents consult the Lamina network.</p>

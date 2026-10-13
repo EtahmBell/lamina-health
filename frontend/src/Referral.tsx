@@ -4,6 +4,7 @@ import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
+import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
@@ -716,7 +717,7 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
     {error && <div className="error-banner" role="alert">{error}</div>}
     {!overview && !error && <p className="muted-note">Opening your agent…</p>}
     {overview && <>
-      <section className="agent-hero"><div className="agent-hero-mark"><LaminaMark /></div><div>
+      <section className="agent-hero"><div className="agent-hero-mark"><AgentAvatar tone={agentTone('chen')} /></div><div>
         <p className="eyebrow">Your physician agent</p>
         <h1>{agentName}</h1>
         <p>{CHEN_SPECIALTY} · Represents your practice to referring physician agents.</p>

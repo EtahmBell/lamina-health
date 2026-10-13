@@ -5,7 +5,7 @@ import { consultNetwork, getActiveReferral, getAgentOverview, getConsultationHis
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
-import { AgentAvatar } from './AgentAvatar.tsx'
+import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
 import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
@@ -30,19 +30,6 @@ function Brand() {
 
 function NetworkMark({ active = false, resolved = false }: { active?: boolean; resolved?: boolean }) {
   return <LaminaMark active={active} resolved={resolved} />
-}
-
-/** A warm, personal mark for the persistent bottom-left agent object — not the
- * abstract network glyph used elsewhere, and not animated. Simple enough to read as
- * "you" at 39px without feeling childish or visually dominant. */
-function YouAvatar() {
-  return <span className="you-avatar" aria-hidden="true">
-    <svg viewBox="0 0 32 32" width="20" height="20" fill="none">
-      <circle cx="11.5" cy="13.5" r="1.7" fill="currentColor" />
-      <circle cx="20.5" cy="13.5" r="1.7" fill="currentColor" />
-      <path d="M10.5 19.5c2.2 2.4 8.8 2.4 11 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  </span>
 }
 
 /** A simple thin-line people/group mark for the Network sidebar item -- replaces
@@ -154,9 +141,9 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
         </nav>
       </div>
       {perspective === 'specialist'
-        ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><YouAvatar /><div><strong>{SPECIALIST_AGENT_NAME}</strong></div></button>
+        ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><AgentAvatar tone={agentTone('iain')} /><div><strong>{SPECIALIST_AGENT_NAME}</strong></div></button>
         : perspective === 'chen'
-          ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/chen/agent')} aria-label={`Open ${CHEN_AGENT_NAME} overview`}><YouAvatar /><div><strong>{CHEN_AGENT_NAME}</strong></div></button>
+          ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/chen/agent')} aria-label={`Open ${CHEN_AGENT_NAME} overview`}><AgentAvatar tone={agentTone('chen')} /><div><strong>{CHEN_AGENT_NAME}</strong></div></button>
           : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><AgentAvatar /><div><strong>{PCP_AGENT_NAME}</strong></div></button>}
     </aside>
     <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><PerspectiveSwitch navigate={navigate} perspective={perspective} /></div></header>{children}</div>

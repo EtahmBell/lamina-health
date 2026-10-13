@@ -70,7 +70,7 @@ import {
 } from './api.ts'
 import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
-import { AgentAvatar, type AgentAvatarTone } from './AgentAvatar.tsx'
+import { AgentAvatar, agentTone, type AgentAvatarTone } from './AgentAvatar.tsx'
 
 type Navigate = (path: string) => void
 
@@ -544,7 +544,7 @@ const AGENT_FEED_POSTS: FeedListItem[] = [
     published_at: new Date(Date.now() - 3 * 86400000).toISOString(),
     physician: { id: 'iain', physician_id: 'physician-jung', npi: '9900000001', name: "Dr. Iain Jung's Agent", specialty: 'Nephrology', location: 'Oakland, CA', agent_id: 'agent-9900000001', agent_name: "Dr. Iain Jung's Agent", synthetic: true },
     relationship_basis: ['canonical_agent_interaction'],
-    isAgentAuthored: true, representedPhysicianName: 'Dr. Iain Jung', agentTone: 'blue',
+    isAgentAuthored: true, representedPhysicianName: 'Dr. Iain Jung', agentTone: 'copper',
   },
 ]
 
@@ -2044,8 +2044,8 @@ type ChatMessage = {
   focusedSeed?: FocusedTrainingSeed | null
 }
 
-function ChatMessageBubble({ message, agentName, onFeedback, onStartFocused, busy }: {
-  message: ChatMessage; agentName: string
+function ChatMessageBubble({ message, agentName, tone, onFeedback, onStartFocused, busy }: {
+  message: ChatMessage; agentName: string; tone: AgentAvatarTone
   onFeedback: (message: ChatMessage, value: 'reflects' | 'not_quite') => void
   onStartFocused: (seed: FocusedTrainingSeed) => void
   busy: boolean
@@ -2053,7 +2053,7 @@ function ChatMessageBubble({ message, agentName, onFeedback, onStartFocused, bus
   if (message.role === 'physician') return <p className="chat-message physician">{message.text}</p>
   const response = message.response
   return <div className="chat-message agent">
-    <span className="chat-agent-label"><AgentAvatar /> {agentName}</span>
+    <span className="chat-agent-label"><AgentAvatar tone={tone} /> {agentName}</span>
     <p>{message.text}</p>
     {response?.uncertainty && <p className="chat-uncertainty">{response.uncertainty}</p>}
     {response && (response.based_on.length > 0 || response.evidence_summary.length > 0) && <p className="chat-grounding">Based on: {response.based_on.length > 0 ? `${response.based_on.length} confirmed practice rule${response.based_on.length === 1 ? '' : 's'}` : response.evidence_summary.join(', ')}</p>}
@@ -2080,6 +2080,7 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [promptRotation, setPromptRotation] = useState(0)
+  const tone = agentTone(personaId)
   useEffect(() => { getAgentTestCases(personaId).then(setCases).catch(() => {}) }, [personaId])
   const visiblePrompts = Array.from(
     { length: Math.min(VISIBLE_STARTER_PROMPT_COUNT, CHAT_STARTER_PROMPTS.length) },
@@ -2133,8 +2134,8 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
       <p className="chat-boundary-note">Synthetic · no PHI. Use synthetic or hypothetical cases in this demo.</p>
       {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
         {activeCase && <div className="chat-case-context"><span className="section-label">Synthetic case</span><strong>{activeCase.title}</strong><ul className="clinical-list">{activeCase.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
-        {messages.map((message) => <ChatMessageBubble key={message.id} message={message} agentName={agentName} onFeedback={feedback} onStartFocused={startFocused} busy={busy} />)}
-        {busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar /> {agentName}</span><p className="chat-typing-dots" aria-label={`${agentName} is answering`}><span /><span /><span /></p></div>}
+        {messages.map((message) => <ChatMessageBubble key={message.id} message={message} agentName={agentName} tone={tone} onFeedback={feedback} onStartFocused={startFocused} busy={busy} />)}
+        {busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar tone={tone} /> {agentName}</span><p className="chat-typing-dots" aria-label={`${agentName} is answering`}><span /><span /><span /></p></div>}
       </div>}
       {error && <p className="demo-reset-error" role="alert">{error}</p>}
       <div className="chat-starter-prompts">{visiblePrompts.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" disabled={busy} onClick={() => sendStarterPrompt(prompt)}>{prompt}</button>)}</div>

@@ -979,7 +979,7 @@ test('AgentAvatar has a dark outline, white upper-left eyes/smile, and a perfect
 test('My Agent sidebar active state glows the avatar/label only -- no outline or fill around the whole tile', () => {
   assert.doesNotMatch(styles, /\.sidebar-clinician\.active \{[^}]*box-shadow/, 'the full row must not carry its own outline/glow')
   assert.doesNotMatch(styles, /\.sidebar-clinician\.active \{[^}]*border(?!-top-color: transparent)/, 'no border drawn around the whole tile')
-  assert.match(styles, /\.sidebar-clinician\.active \.agent-avatar, \.sidebar-clinician\.active \.you-avatar \{ box-shadow:/, 'the glow lives on the avatar')
+  assert.match(styles, /\.sidebar-clinician\.active \.agent-avatar \{ box-shadow:/, 'the glow lives on the avatar')
   assert.match(styles, /\.sidebar-clinician\.active strong \{[^}]*text-shadow:/, 'and on the label text')
 })
 
@@ -996,7 +996,7 @@ test('My Agent overview analytics reflect real network behavior (consultation re
 
 test('AgentAvatar\'s eyes sit on the same horizontal line -- no slant/rotation', () => {
   const avatar = readFileSync(new URL('../src/AgentAvatar.tsx', import.meta.url), 'utf8')
-  const eyeYs = [...avatar.matchAll(/<circle cx="[\d.]+" cy="([\d.]+)" r="1\.9" fill="#fff"/g)].map((m) => m[1])
+  const eyeYs = [...avatar.matchAll(/<circle cx="[\d.]+" cy="([\d.]+)" r="1\.7" fill="#fff"/g)].map((m) => m[1])
   assert.equal(eyeYs.length, 2, 'exactly two white eye dots')
   assert.equal(eyeYs[0], eyeYs[1], 'both eyes must share the same cy -- a slanted face is the exact bug being fixed')
   assert.doesNotMatch(avatar, /transform=/, 'no rotation transform anywhere in the mark')
@@ -1094,7 +1094,7 @@ test('Dashboard Recent activity / Recent network uses a 2fr/1fr split, consisten
 
 test('the sidebar My Agent avatar renders blue, not grey -- the generic text-label span rule must not override the avatar\'s own color', () => {
   assert.doesNotMatch(styles, /\.sidebar-clinician span \{[^}]*color: var\(--text-secondary\)/, 'the old unscoped rule caught the avatar span too (0,1,1 beats .agent-avatar-blue\'s 0,1,0) and painted it grey')
-  assert.match(styles, /\.sidebar-clinician span:not\(\.agent-avatar\):not\(\.you-avatar\) \{ color: var\(--text-secondary\)/, 'the text-label color rule now explicitly excludes both avatar components')
+  assert.match(styles, /\.sidebar-clinician span:not\(\.agent-avatar\) \{ color: var\(--text-secondary\)/, 'the text-label color rule explicitly excludes the one unified avatar component')
   assert.match(styles, /\.agent-avatar-blue \{ color: var\(--mineral\); \}/)
 })
 
@@ -1259,7 +1259,10 @@ test('agent-authored feed posts are clearly labeled AGENT and never presented as
 test('agent-authored posts use varied, restrained Lamina-palette avatar tones (not every agent painted identically), and the icon itself is sized down from the default, never visually dominant', () => {
   const avatar = readFileSync(new URL('../src/AgentAvatar.tsx', import.meta.url), 'utf8')
   assert.match(engagement, /agentTone: 'copper-light'/)
-  assert.match(engagement, /agentTone: 'blue'/)
+  // Both fixture posts are specialists (Chris/Iain), so both are copper-family --
+  // a distinct shade each (copper-light vs copper), never painted identically,
+  // and never blue (blue is reserved for the PCP/Lucy family, see agentTone()).
+  assert.match(engagement, /agentTone: 'copper'/)
   assert.match(styles, /\.feed-post-agent-avatar \{ display: block; width: 26px; height: 26px; flex: 0 0 26px; \}/, 'smaller than the 36px physician-initials avatar it stands beside')
   assert.match(avatar, /export type AgentAvatarTone = 'blue' \| 'blue-light' \| 'copper' \| 'copper-light'/)
   assert.match(styles, /\.agent-avatar-blue-light \{ color: var\(--mineral-subtle\); \}/)

@@ -48,8 +48,7 @@ strong, b { font-weight: 600; }
 .nav-item-label, .nav-item small { display: block; }.nav-item-label { font-size: .82rem; font-weight: 400; }.nav-item.active .nav-item-label { font-weight: 600; }.nav-item small { margin-top: 2px; font-size: .64rem; }
 .sidebar-clinician { display: flex; align-items: center; gap: 11px; border-top: 1px solid var(--border); padding: 18px 4px 0; }
 .clinician-avatar { width: 39px; height: 39px; display: grid; flex: 0 0 39px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--clinical); box-shadow: 0 0 0 1px var(--border); color: #fff; font-family: var(--font-display); font-size: .72rem; font-weight: 700; }
-.you-avatar { width: 39px; height: 39px; display: grid; flex: 0 0 39px; place-items: center; border-radius: 50%; background: var(--sand); color: var(--mineral-deep); }
-.sidebar-clinician span:not(.agent-avatar):not(.you-avatar), .sidebar-clinician strong, .sidebar-clinician small { display: block; }.sidebar-clinician span:not(.agent-avatar):not(.you-avatar) { color: var(--text-secondary); font-size: .58rem; text-transform: uppercase; }.sidebar-clinician strong { margin-top: 2px; font-family: var(--font-display); font-size: .9rem; font-weight: 500; }.sidebar-clinician small { color: var(--text-secondary); font-size: .66rem; }
+.sidebar-clinician span:not(.agent-avatar), .sidebar-clinician strong, .sidebar-clinician small { display: block; }.sidebar-clinician span:not(.agent-avatar) { color: var(--text-secondary); font-size: .58rem; text-transform: uppercase; }.sidebar-clinician strong { margin-top: 2px; font-family: var(--font-display); font-size: .9rem; font-weight: 500; }.sidebar-clinician small { color: var(--text-secondary); font-size: .66rem; }
 
 .workspace { min-width: 0; flex: 1; }.workspace-bar { height: 76px; display: flex; align-items: center; justify-content: flex-end; padding: 0 32px; border-bottom: 1px solid var(--border); background: rgb(255 254 250 / 82%); }
 .synthetic-status { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: .65rem; }.synthetic-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
@@ -1807,7 +1806,7 @@ button.lam-row:hover { background: #fff9f1; }
    immediately around it (agent identity is deliberately excluded from the copper
    theme) -- see design note on --agent-copper tokens in :root. */
 .sidebar-clinician.active strong { color: var(--agent-copper-ink); text-shadow: 0 0 12px rgb(182 106 69 / 35%); }
-.sidebar-clinician.active .agent-avatar, .sidebar-clinician.active .you-avatar { box-shadow: 0 0 0 3px rgb(83 110 125 / 16%), 0 0 12px rgb(83 110 125 / 45%); border-radius: 50%; }
+.sidebar-clinician.active .agent-avatar { box-shadow: 0 0 0 3px rgb(83 110 125 / 16%), 0 0 12px rgb(83 110 125 / 45%); border-radius: 50%; }
 
 /* One solid-color orb per agent (AgentAvatar.tsx) -- a simplified identity mark,
    distinct from the multi-orb Lamina network logo. Sized per context below. */
