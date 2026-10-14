@@ -18,9 +18,9 @@ test('the patients page frames itself as a referral worklist (post-8B: a worklis
   assert.doesNotMatch(patients(), /Specialty Care Consult/)
 })
 
-test('the worklist uses a small controlled status vocabulary tied to real consultation/implementation data, sorted physician-action-first', () => {
-  assert.match(app, /type WorklistStatus = 'Ready for your review' \| 'Not yet consulted'/)
-  assert.match(app, /WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = \{ 'Ready for your review': 0, 'Not yet consulted': 1 \}/)
+test('the worklist uses a small controlled status vocabulary tied to real consultation/implementation/referral data, sorted physician-action-first', () => {
+  assert.match(app, /type WorklistStatus =\s*\n\s*\| 'Ready for your review' \| 'Not yet consulted'\s*\n\s*\| 'Awaiting specialist review' \| 'Referral accepted' \| 'Consultation scheduled' \| 'Handoff received'/)
+  assert.match(app, /'Handoff received': -2, 'Consultation scheduled': -2, 'Referral accepted': -1,/)
   assert.match(app, /PATIENT_STAGE_META: Record<PatientStage,/, 'non-implemented patients get an honest stage label, not a blanket fallback')
   assert.doesNotMatch(patients(), /'Ready to consult'/)
 })

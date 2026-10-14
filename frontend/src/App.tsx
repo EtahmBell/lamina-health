@@ -226,15 +226,21 @@ function LucyNetworkPage({ navigate, params }: { navigate: Navigate; params: URL
  * focused worklist, not a miniature Patients directory (see buildWatchRows' filter). */
 type PatientWatchRow = { patient: DemoPatientSummary; status: WorklistStatus; detail: string; nextStep: string; action: string }
 
-function buildWatchRows(records: ConsultationRecord[]): PatientWatchRow[] {
+const WORKLIST_ACTION: Record<WorklistStatus, string> = {
+  'Ready for your review': 'Review', 'Not yet consulted': 'View patient info',
+  'Awaiting specialist review': 'View patient info', 'Referral accepted': 'View patient info',
+  'Consultation scheduled': 'View patient info', 'Handoff received': 'Review handoff',
+}
+
+function buildWatchRows(records: ConsultationRecord[], referralsByPatient: Map<string, Referral | null>): PatientWatchRow[] {
   return DEMO_PATIENTS.filter((patient) => patient.implemented && patient.owner !== 'chen').map((patient): PatientWatchRow => {
     const record = records.find((item) => item.patient_id === patient.id)
-    const status: WorklistStatus = record ? 'Ready for your review' : 'Not yet consulted'
+    const status = referralWorklistStatus(referralsByPatient.get(patient.id), Boolean(record))
     const detail = record ? `${record.result.recommended_physician.specialty} · ${cleanName(record.result.recommended_physician.physician_name)}` : patient.reason
     return {
       patient, status, detail,
       nextStep: status === 'Ready for your review' ? 'Review referral options' : WORKLIST_NEXT_STEP[status],
-      action: status === 'Ready for your review' ? 'Review' : 'View patient info',
+      action: WORKLIST_ACTION[status],
     }
   }).sort((a, b) => WORKLIST_STATUS_PRIORITY[a.status] - WORKLIST_STATUS_PRIORITY[b.status])
 }
@@ -265,18 +271,20 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   const [error, setError] = useState(false)
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
   const [overview, setOverview] = useState<AgentOverview | null>(null)
+  const [referralsByPatient, setReferralsByPatient] = useState<Map<string, Referral | null>>(new Map())
   useEffect(() => {
     getConsultationHistory()
       .then(setRecords)
       .catch(() => setError(true)).finally(() => setLoading(false))
     getNetworkFeed('lucy').then(setFeed).catch(() => {})
     getAgentOverview('lucy').then(setOverview).catch(() => {})
+    fetchReferralsByPatient().then(setReferralsByPatient).catch(() => {})
   }, [])
   const ordered = [...records].sort((a, b) => b.completed_at.localeCompare(a.completed_at))
   const latestByPatient = ordered.filter((record, index) => ordered.findIndex((item) => item.patient_id === record.patient_id) === index)
   const currentWork = latestByPatient.slice(0, 3)
   const activity = agentActivity(ordered).slice(0, 3)
-  const watchRows = buildWatchRows(latestByPatient)
+  const watchRows = buildWatchRows(latestByPatient, referralsByPatient)
   const greetingName = `Dr. ${PCP_NAME.split(' ').at(-1)}`
   return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page dashboard-page">
     <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1><p className="dashboard-situation">Here's what needs your attention today.</p></header>
@@ -296,11 +304,57 @@ function HomePage({ navigate }: { navigate: Navigate }) {
 /** A small controlled status vocabulary for the two patients with a wired
  * consult-engine case, derived only from real data (has_consultation / implemented)
  * — never invented. Every other patient gets a stage label from PATIENT_STAGE_META
- * below, which is honest cosmetic detail, not a claimed agent interaction. */
-type WorklistStatus = 'Ready for your review' | 'Not yet consulted'
-const WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = { 'Ready for your review': 0, 'Not yet consulted': 1 }
-const WORKLIST_NEXT_STEP: Record<WorklistStatus, string> = { 'Ready for your review': 'Review options', 'Not yet consulted': 'Consult network' }
-const WORKLIST_STATUS_TONE: Record<WorklistStatus, string> = { 'Ready for your review': 'copper', 'Not yet consulted': 'slate' }
+ * below, which is honest cosmetic detail, not a claimed agent interaction.
+ *
+ * Once a referral actually exists, its real persisted status always wins over
+ * "has_consultation" -- a completed network consultation stays a true historical
+ * fact forever, but that must never keep claiming "Ready for your review" once
+ * the physician has already acted on it and the workflow has moved on (to the
+ * receiving specialist's queue, then scheduling, then the returned handoff). */
+type WorklistStatus =
+  | 'Ready for your review' | 'Not yet consulted'
+  | 'Awaiting specialist review' | 'Referral accepted' | 'Consultation scheduled' | 'Handoff received'
+const WORKLIST_STATUS_PRIORITY: Record<WorklistStatus, number> = {
+  'Handoff received': -2, 'Consultation scheduled': -2, 'Referral accepted': -1,
+  'Awaiting specialist review': 0, 'Ready for your review': 0, 'Not yet consulted': 1,
+}
+const WORKLIST_NEXT_STEP: Record<WorklistStatus, string> = {
+  'Ready for your review': 'Review options', 'Not yet consulted': 'Consult network',
+  'Awaiting specialist review': 'Awaiting specialist review', 'Referral accepted': 'Awaiting scheduling',
+  'Consultation scheduled': 'Awaiting consultation', 'Handoff received': 'Consultation complete',
+}
+const WORKLIST_STATUS_TONE: Record<WorklistStatus, string> = {
+  'Ready for your review': 'copper', 'Not yet consulted': 'slate',
+  'Awaiting specialist review': 'slate', 'Referral accepted': 'success',
+  'Consultation scheduled': 'success', 'Handoff received': 'success',
+}
+
+/** The one place that decides "what does Lucy's worklist say about this
+ * patient" -- real referral state always takes precedence over the
+ * historical has_consultation fact, never the other way around. */
+function referralWorklistStatus(referral: Referral | null | undefined, hasConsultation: boolean): WorklistStatus {
+  if (referral) {
+    switch (referral.status) {
+      case 'consult_returned': return 'Handoff received'
+      case 'scheduled': return 'Consultation scheduled'
+      case 'accepted': return 'Referral accepted'
+      case 'submitted': return 'Awaiting specialist review'
+    }
+  }
+  return hasConsultation ? 'Ready for your review' : 'Not yet consulted'
+}
+
+const PCP_IMPLEMENTED_PATIENT_IDS = DEMO_PATIENTS.filter((patient) => patient.implemented && patient.owner !== 'chen').map((patient) => patient.id)
+
+/** The same real per-patient referral lookup already used elsewhere
+ * (RecommendationView's hydration, Chen's downstream card) -- never a
+ * frontend-only guess at referral state. Small, fixed patient set in this
+ * demo, so one call per patient is cheap; a null entry just means "no
+ * referral exists yet for this patient." */
+function fetchReferralsByPatient(): Promise<Map<string, Referral | null>> {
+  return Promise.all(PCP_IMPLEMENTED_PATIENT_IDS.map((id) => getActiveReferral(id).catch(() => null)))
+    .then((referrals) => new Map(PCP_IMPLEMENTED_PATIENT_IDS.map((id, index) => [id, referrals[index]])))
+}
 
 /** Cosmetic worklist stage for the patients who have no wired consult-engine case
  * (everyone but Jordan and Maria — see demoPatients.ts). These never claim a real
@@ -324,12 +378,16 @@ function PatientSelector({ navigate }: { navigate: Navigate }) {
   const [query, setQuery] = useState('')
   const [activity, setActivity] = useState<PatientActivity[]>([])
   const [activityError, setActivityError] = useState(false)
+  const [referralsByPatient, setReferralsByPatient] = useState<Map<string, Referral | null>>(new Map())
   useEffect(() => { getPatientActivity().then(setActivity).catch(() => setActivityError(true)) }, [])
+  useEffect(() => { fetchReferralsByPatient().then(setReferralsByPatient).catch(() => {}) }, [])
   const activityFor = (id: string) => activity.find((item) => item.patient_id === id)
   const visible = DEMO_PATIENTS.filter((patient) => patient.owner !== 'chen' && `${patient.name} ${patient.reason} ${patient.location}`.toLowerCase().includes(query.toLowerCase()))
   const rows = visible.map((patient) => {
     const record = activityFor(patient.id)
-    const implementedStatus: WorklistStatus | null = record?.has_consultation ? 'Ready for your review' : patient.implemented ? 'Not yet consulted' : null
+    const implementedStatus: WorklistStatus | null = record?.has_consultation || patient.implemented
+      ? referralWorklistStatus(referralsByPatient.get(patient.id), Boolean(record?.has_consultation))
+      : null
     const updated = record?.has_consultation && record.latest_consulted_at ? shortDate(record.latest_consulted_at) : record?.last_opened ? shortDate(record.last_opened) : null
     if (implementedStatus) {
       return { patient, label: implementedStatus, tone: WORKLIST_STATUS_TONE[implementedStatus], nextStep: WORKLIST_NEXT_STEP[implementedStatus], priority: WORKLIST_STATUS_PRIORITY[implementedStatus], updated }

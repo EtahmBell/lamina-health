@@ -87,9 +87,32 @@ test('the previous-consultation state reads as resolved, not as an alert', () =>
 })
 
 test('the patient worklist derives status from canonical consultation/implementation data, not an inferred counter', () => {
-  assert.match(patientsList(), /record\?\.has_consultation \? 'Ready for your review' : patient\.implemented \? 'Not yet consulted' : null/)
+  assert.match(patientsList(), /record\?\.has_consultation \|\| patient\.implemented\s*\n\s*\? referralWorklistStatus\(referralsByPatient\.get\(patient\.id\), Boolean\(record\?\.has_consultation\)\)\s*\n\s*: null/)
   assert.match(patientsList(), /record\?\.has_consultation && record\.latest_consulted_at \? shortDate\(record\.latest_consulted_at\)/)
   assert.doesNotMatch(patientsList(), /record\?\.last_consultation/)
+})
+
+/* -------------------------------------------- closed-loop referral follow-up pass, items 2-4 */
+
+test('once a referral exists, its real persisted status always wins over the historical has_consultation fact -- the worklist status is never stuck on "Ready for your review" after the physician has acted', () => {
+  assert.match(app, /function referralWorklistStatus\(referral: Referral \| null \| undefined, hasConsultation: boolean\): WorklistStatus \{/)
+  assert.match(app, /case 'consult_returned': return 'Handoff received'/)
+  assert.match(app, /case 'scheduled': return 'Consultation scheduled'/)
+  assert.match(app, /case 'accepted': return 'Referral accepted'/)
+  assert.match(app, /case 'submitted': return 'Awaiting specialist review'/)
+  assert.match(app, /return hasConsultation \? 'Ready for your review' : 'Not yet consulted'/)
+})
+
+test('both the Dashboard watchlist and the full Patients worklist fetch the patient\'s real active referral and feed it into the same status derivation, never a hardcoded per-page copy', () => {
+  assert.match(app, /function fetchReferralsByPatient\(\): Promise<Map<string, Referral \| null>> \{/)
+  assert.match(app, /fetchReferralsByPatient\(\)\.then\(setReferralsByPatient\)\.catch\(\(\) => \{\}\)/g)
+  assert.match(app, /buildWatchRows\(latestByPatient, referralsByPatient\)/)
+  assert.match(patientsList(), /referralWorklistStatus\(referralsByPatient\.get\(patient\.id\), Boolean\(record\?\.has_consultation\)\)/)
+})
+
+test('a "Referral accepted"/"Consultation scheduled"/"Handoff received" status gets the calm positive success tone, never the old copper "waiting on you" treatment', () => {
+  assert.match(app, /'Awaiting specialist review': 'slate', 'Referral accepted': 'success',\s*\n\s*'Consultation scheduled': 'success', 'Handoff received': 'success',/)
+  assert.match(styles, /\.worklist-status\.success \{ border: 1px solid rgb\(63 107 85 \/ 28%\); background: #edf3ee; color: var\(--success\); \}/)
 })
 
 test('non-implemented patients show a believable stage label, not a blanket "no action needed"', () => {

@@ -637,7 +637,30 @@ test('the overlay is a pure CSS opacity transition (no JS double-rAF needed for 
 test('the wash background lives on the card itself, not on a separately-positioned/radiused overlay -- the root cause of the corner mismatch', () => {
   assert.doesNotMatch(styles, /\.referral-handoff-overlay \{[^}]*background:/, 'the overlay must not carry its own background any more')
   assert.doesNotMatch(styles, /\.referral-handoff-overlay \{[^}]*border-radius: inherit/, 'border-radius: inherit against an inset box was the actual bug')
-  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash \{ background: rgb\(233 239 241 \/ 96%\); \}/)
+  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash \{ background: rgb\(52 79 93 \/ 95%\); \}/)
+})
+
+/* ========================================================================
+ * Closed-loop referral follow-up pass, item 1: the wash looked faint/
+ * translucent against a near-white card -- a pale tint at 96% opacity is
+ * still a pale tint. Fixed by switching to the same deep mineral blue used
+ * for primary actions elsewhere, kept mostly (not fully) opaque, with the
+ * overlay text recolored for contrast against the darker fill.
+ * ===================================================================== */
+
+test('the completion wash is a deliberately mostly-opaque, strongly-tinted confirmation, not a faint near-white overlay', () => {
+  const washMatch = styles.match(/\.best-fit-card\.referral-card\.handoff-wash \{ background: rgb\((\d+) (\d+) (\d+) \/ (\d+)%\); \}/)
+  assert.ok(washMatch, 'expected a single rgb(...) wash background declaration')
+  const [, r, g, b, alpha] = washMatch.map(Number)
+  assert.ok(Number(alpha) >= 90, 'the wash must be mostly opaque, not a faint translucent tint')
+  const isPaleNearWhite = r > 200 && g > 200 && b > 200
+  assert.ok(!isPaleNearWhite, 'the wash must be a real, saturated Lamina-palette color, not a near-white tint indistinguishable from the card\'s own background')
+})
+
+test('the overlay text recolors for contrast against the darker wash, rather than keeping colors tuned for the old near-white background', () => {
+  assert.match(styles, /\.referral-handoff-check \{ font-family: var\(--font-display\); font-size: 1\.4rem; color: #fffefa; \}/)
+  assert.match(styles, /\.referral-handoff-overlay h3 \{ margin: 2px 0 0; font-size: 1\.1rem; font-weight: 500; color: #fffefa; \}/)
+  assert.doesNotMatch(styles, /\.referral-handoff-check \{[^}]*color: var\(--mineral-deep\)/, 'the checkmark must not keep the old dark-on-light color, now illegible on a dark wash')
 })
 
 test('the wash transitions via background-color on the card, with a reduced-motion override, mirroring the overlay\'s own fade timing', () => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, createReferral, draftHandoff, findSchedulingOptions, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, ingestConsultationEncounter, routeSchedulingOptions, runReferralPreflight, sendHandoff, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type SchedulingCoordination, type TrainProjection } from './api.ts'
+import { acceptReferral, createReferral, draftHandoff, findSchedulingOptions, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, ingestConsultationEncounter, routeSchedulingOptions, runReferralPreflight, sendHandoff, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
@@ -930,6 +930,17 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
  * separate relationship table needed). A referred patient is NEVER part of
  * the static seeded roster above (Part E) -- only `accepted` ever adds one.
  */
+/** Everything past acceptance is still "in Chen's active care" for this pass
+ * (Part 2 fix) -- scheduling/encounter/handoff progress must never make a
+ * referred patient disappear from his patient list. There is no archival/
+ * completed state yet; when one is introduced later, it narrows this set,
+ * it does not reintroduce the bug by excluding 'scheduled'/'consult_returned'
+ * again. */
+const CHEN_ACTIVE_REFERRAL_STATUSES: ReferralStatus[] = ['accepted', 'scheduled', 'consult_returned']
+const CHEN_ACCEPTED_ROW_LABEL: Partial<Record<ReferralStatus, string>> = {
+  accepted: 'Accepted referral', scheduled: 'Consultation scheduled', consult_returned: 'Handoff sent',
+}
+
 export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
   const [query, setQuery] = useState('')
   const [incoming, setIncoming] = useState<Referral[] | null>(null)
@@ -938,11 +949,19 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [reviewing, setReviewing] = useState<Referral | null>(null)
 
+  /** A real backend query for "every referral in my care, however far along
+   * it is" -- never a single fixed status (Part 2 fix: ?status=accepted
+   * alone silently dropped a referral the moment it progressed past
+   * acceptance). Filtering down to the known active-care statuses, rather
+   * than just "not submitted," is deliberate: a future terminal/archival
+   * status is excluded by default instead of leaking in silently. */
   const load = () => Promise.all([
     getPhysicianReferrals(CHEN_ID, 'submitted'),
-    getPhysicianReferrals(CHEN_ID, 'accepted'),
-  ]).then(([submitted, acceptedReferrals]) => { setIncoming(submitted); setAccepted(acceptedReferrals) })
-    .catch((loadError: Error) => setError(loadError.message))
+    getPhysicianReferrals(CHEN_ID),
+  ]).then(([submitted, all]) => {
+    setIncoming(submitted)
+    setAccepted(all.filter((referral) => CHEN_ACTIVE_REFERRAL_STATUSES.includes(referral.status)))
+  }).catch((loadError: Error) => setError(loadError.message))
 
   useEffect(() => { void load() }, [])
 
@@ -961,7 +980,7 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
     .map((referral): WorklistRowData | null => {
       const patient = DEMO_PATIENTS.find((item) => item.id === referral.patient_id)
       if (!patient || `${patient.name} ${patient.reason}`.toLowerCase().includes(query.toLowerCase()) === false) return null
-      return { patient, label: 'Accepted referral', tone: 'copper', nextStep: 'Open patient', priority: -1, updated: null }
+      return { patient, label: CHEN_ACCEPTED_ROW_LABEL[referral.status] ?? 'Accepted referral', tone: 'copper', nextStep: 'Open patient', priority: -1, updated: null }
     })
     .filter((row): row is WorklistRowData => row !== null)
   const rows = [...acceptedRows, ...seededRows].sort((a, b) => a.priority - b.priority)

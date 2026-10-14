@@ -1958,6 +1958,7 @@ button.lam-row:hover { background: #fff9f1; }
 .worklist-status.copper { border: 1px solid rgb(182 106 69 / 28%); background: #f8ece3; color: var(--copper-hover); }
 .worklist-status.slate { border: 1px solid rgb(107 118 134 / 20%); background: var(--slate-surface); color: var(--slate); }
 .worklist-status.quiet { background: #f2f0eb; color: var(--text-secondary); }
+.worklist-status.success { border: 1px solid rgb(63 107 85 / 28%); background: #edf3ee; color: var(--success); }
 .worklist-next-step { color: var(--text-secondary); font-size: .72rem; font-weight: 400; white-space: nowrap; }
 .worklist-updated { color: var(--text-secondary); font-size: .62rem; white-space: nowrap; }
 @media (max-width: 760px) { .worklist-row { grid-template-columns: auto 1fr; grid-template-areas: "avatar main" "status status" "step updated"; row-gap: 6px; } .worklist-row .lam-row-mark { grid-area: avatar; } .worklist-row .lam-row-main { grid-area: main; } .worklist-row .worklist-status { grid-area: status; justify-self: start; } .worklist-row .worklist-next-step { grid-area: step; } .worklist-row .worklist-updated { grid-area: updated; justify-self: end; } }
@@ -2065,7 +2066,13 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
    accent border -- painted by the card itself, never covered by a child --
    stays visible throughout. */
 .best-fit-card.referral-card { transition: background-color 500ms ease-in-out; }
-.best-fit-card.referral-card.handoff-wash { background: rgb(233 239 241 / 96%); }
+/* A pale near-white tint here read as barely-there/"did something break?"
+ * rather than a deliberate completed-state confirmation -- switched to the
+ * same deep mineral blue used for primary actions elsewhere, mostly opaque
+ * so it reads as a clear takeover, not a faint wash (closed-loop referral
+ * follow-up pass, item 1). Overlay text below gets matching light-on-dark
+ * colors so it stays legible against the darker fill. */
+.best-fit-card.referral-card.handoff-wash { background: rgb(52 79 93 / 95%); }
 @media (prefers-reduced-motion: reduce) { .best-fit-card.referral-card { transition: none; } }
 
 /* Discovery-mode status strip, shown only once a referral is already
@@ -2107,10 +2114,13 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
    visually fade together even though they're now two separate elements. */
 .referral-handoff-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; opacity: 0; pointer-events: none; transition: opacity 500ms ease-in-out; }
 .referral-handoff-overlay.visible { opacity: 1; pointer-events: auto; }
-.referral-handoff-check { font-family: var(--font-display); font-size: 1.4rem; color: var(--mineral-deep); }
-.referral-handoff-overlay h3 { margin: 2px 0 0; font-size: 1.1rem; font-weight: 500; color: var(--clinical); }
-.referral-handoff-overlay p { margin: 0; color: var(--mineral-deep); font-size: .8rem; font-weight: 600; }
-.referral-handoff-overlay small { color: var(--text-secondary); font-size: .64rem; }
+/* Light-on-dark, matching the now-opaque mineral-blue wash (item 1) -- the
+ * original colors were tuned for a near-white background and went muddy
+ * against the darker fill. */
+.referral-handoff-check { font-family: var(--font-display); font-size: 1.4rem; color: #fffefa; }
+.referral-handoff-overlay h3 { margin: 2px 0 0; font-size: 1.1rem; font-weight: 500; color: #fffefa; }
+.referral-handoff-overlay p { margin: 0; color: var(--mineral-surface); font-size: .8rem; font-weight: 600; }
+.referral-handoff-overlay small { color: rgb(255 255 255 / 72%); font-size: .64rem; }
 @media (prefers-reduced-motion: reduce) { .referral-handoff-overlay { transition: none; } }
 .referral-submission-meta { color: var(--text-secondary); font-size: .6rem; }
 
