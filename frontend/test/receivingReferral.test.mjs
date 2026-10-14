@@ -144,16 +144,17 @@ test('ChenPatientsPage queries submitted referrals and ALL of Chen\'s own referr
 })
 
 test('closed-loop referral follow-up pass, item 2: a referral stays in Chen\'s accepted patient list through every downstream status, not just "accepted" -- the original bug was ?status=accepted alone silently dropping it once scheduling/encounter/handoff progress advanced the status', () => {
-  const module = slice(referralSource, 'const CHEN_ACTIVE_REFERRAL_STATUSES', 'export function ChenPatientsPage')
-  assert.match(module, /const CHEN_ACTIVE_REFERRAL_STATUSES: ReferralStatus\[\] = \['accepted', 'scheduled', 'consult_returned'\]/)
+  const module = slice(referralSource, 'export const ACCEPTED_OR_LATER_STATUSES', 'export function ChenPatientsPage')
+  assert.match(module, /export const ACCEPTED_OR_LATER_STATUSES: ReferralStatus\[\] = \['accepted', 'scheduled', 'consult_returned'\]/)
   const fn = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
-  assert.match(fn, /all\.filter\(\(referral\) => CHEN_ACTIVE_REFERRAL_STATUSES\.includes\(referral\.status\)\)/)
+  assert.match(fn, /all\.filter\(\(referral\) => ACCEPTED_OR_LATER_STATUSES\.includes\(referral\.status\)\)/)
   assert.doesNotMatch(fn, /getPhysicianReferrals\(CHEN_ID, 'accepted'\)/, 'must never go back to filtering by a single fixed status at the query level')
 })
 
-test('accepted referrals are merged into the shared WorklistRows rendering at the top (priority -1), with a status-accurate label, and an honest empty state exists when there are none', () => {
+test('accepted referrals are merged into the shared WorklistRows rendering at the top (priority -1), with a care-state-accurate label derived from the real artifacts, and an honest empty state exists when there are none', () => {
   const fn = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
-  assert.match(fn, /label: CHEN_ACCEPTED_ROW_LABEL\[referral\.status\] \?\? 'Accepted referral', tone: 'copper', nextStep: 'Open patient', priority: -1/)
+  assert.match(fn, /const \{ label, nextStep \} = chenPatientRowStatus\(referral, state\.encounter, state\.handoff\)/)
+  assert.match(fn, /return \{ patient, label, tone: 'copper', nextStep, priority: -1, updated: null \}/)
   assert.match(fn, /<WorklistRows rows=\{active\} navigate=\{navigate\} basePath="\/chen\/patients" \/>/)
   assert.match(fn, /No patients found/)
 })

@@ -359,10 +359,11 @@ test('the old bottom-right toast was removed -- the full-card success wash is no
   assert.doesNotMatch(styles, /\.lamina-toast/)
 })
 
-test('"See agent coordination" (and "View referral packet") remain available once submission completes, not just while ready -- but not during the brief completion wash itself', () => {
+test('"Back to referral details" remains available once submission completes, not just while ready -- but not during the brief completion wash itself; "See agent coordination"/"View referral packet" moved behind it (ongoing-coordination pass, Part D/E) rather than disappearing', () => {
   assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-mode-links">/)
-  assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination/)
-  assert.match(referralSource, /onClick=\{\(\) => setPacketOpen\(true\)\}>View referral packet/)
+  assert.match(referralSource, /onClick=\{\(\) => setDetailsOpen\(true\)\}>← Back to referral details/)
+  assert.match(referralSource, /onClick=\{onOpenCoordination\}>See agent coordination/)
+  assert.match(referralSource, /onClick=\{onOpenPacket\}>View referral packet/)
 })
 
 test('the success wash state appears only via the real "sent" phase reveal -- never from the error/unresolved paths', () => {

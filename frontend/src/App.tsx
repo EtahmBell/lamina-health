@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type TrainProjection } from './api.ts'
+import { consultNetwork, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralStatus, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -18,7 +18,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, ReferralCoordinationSurface } from './Referral.tsx'
+import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, chenSuggestedPrompts, CoordinationChatCard, lucySuggestedPrompts, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -811,6 +811,8 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   // hidden (Part F/M/N).
   if (referralQuestion && viewMode === 'referral') {
     return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
+      <h2>Current care state</h2>
+      <p className="page-intro">Your agent helps with the follow-through.</p>
       <article className={`best-fit-card compact referral-card ${swapping ? 'swapping' : ''} ${washActive ? 'handoff-wash' : ''}`}>
         <button type="button" className="text-button back-to-match" onClick={() => setViewMode('discovery')}>← Back to match options</button>
         <p className="best-fit-kicker">Referral to</p>
@@ -825,6 +827,27 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
           restoredReferral={activeReferral}
         />
       </article>
+      {/* Physician-agent-to-physician-agent coordination chat (ongoing-
+       * coordination pass, Part H-T) -- only once a real accepted referral
+       * exists, reusing the same component for both directions. */}
+      {activeReferral && ACCEPTED_OR_LATER_STATUSES.includes(activeReferral.status) && activeReferral.id && <CoordinationChatCard
+        referral={activeReferral}
+        patientLabel={patientName(consultation.patient_id)}
+        requestingPhysicianId={activeReferral.referring_physician_id}
+        representedPhysicianId={activeReferral.receiving_physician_id}
+        representedPhysicianName={cleanName(selected.physician_name)}
+        representedTone="copper"
+        suggestedPrompts={lucySuggestedPrompts(patientName(consultation.patient_id), cleanName(selected.physician_name), selected.specialty)}
+      />}
+      {/* Patient-level action (Part F/G) -- reopens the real existing
+       * Discovery/consult-network flow for the SAME patient, never a fake
+       * "send patient back" concept. Only once the original referral loop
+       * is actually done, since starting a genuinely new referral here
+       * would replace this one as the patient's "active referral" (see the
+       * backend-limitation note in the final report). */}
+      {activeReferral?.status === 'consult_returned' && <p className="patient-level-action">
+        <button type="button" className="text-button" onClick={() => setViewMode('discovery')}>Consult another specialist →</button>
+      </p>}
       <p className="disclaimer">{consultation.disclaimer}</p>
     </section>
   }
@@ -1108,8 +1131,12 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
         {perspective === 'receiving'
           ? <ReceivingReferralCard referral={receivingReferral} patientLabel={patientName(patientId)} demoPatient={demoPatient} />
           : <>
-            <h2>Next step</h2>
-            <p className="page-intro">Your agent helps with the follow-through.</p>
+            {/* The heading itself is state-aware (ongoing-coordination pass,
+             * Part B) -- RecommendationView renders its own heading once it
+             * mounts (Discovery: "Next step"; Referral: "Current care
+             * state"), so this generic one only covers the states where that
+             * component isn't mounted yet. */}
+            {nextStepState !== 'ready' && <><h2>Next step</h2><p className="page-intro">Your agent helps with the follow-through.</p></>}
             {nextStepState === 'hydrating' && <div className="next-step-card idle"><p className="muted-note">Checking patient status…</p></div>}
             {nextStepState === 'consulting' && <div className="next-step-card consulting">
               <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Consulting the network</span>
@@ -1135,7 +1162,7 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
               <button className="consult-button" disabled={consulting} onClick={runConsult}>Find specialist <span className="spark-icon" aria-hidden="true">✧</span></button>
               {optionalGuidance('Add context only if you want to guide the network consultation.')}
             </div>}
-            <p className="bottom-note">Simulated workflow · No referral is sent</p>
+            {nextStepState !== 'ready' && <p className="bottom-note">Simulated workflow · No referral is sent</p>}
           </>}
       </aside>
       <div className="patient-clinical-main">

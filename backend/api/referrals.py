@@ -1,8 +1,15 @@
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, HTTPException
 
+from backend.demo_identity import LUCY_AGENT_ID, PCP_NAME
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.models import (
+    AskPhysicianAgentRequest,
     ConsultationEncounter,
+    CoordinationChatExchange,
+    CoordinationChatMessage,
+    CoordinationChatRole,
     DraftHandoffRequest,
     EncounterIngestRequest,
     EncounterResult,
@@ -21,10 +28,13 @@ from backend.models import (
 )
 from backend.referrals import (
     accept_referral,
+    answer_coordination_question,
+    authorize_coordination_chat,
     build_referral,
     draft_handoff,
     find_scheduling_options,
     ingest_consultation_encounter,
+    represented_agent_id,
     route_options_to_scheduling,
     run_preflight,
     send_handoff,
@@ -36,6 +46,15 @@ from .consult import load_patient
 
 router = APIRouter(prefix="/api", tags=["referrals"])
 _PHYSICIANS_BY_ID = {physician.id: physician for physician in ALL_PHYSICIANS}
+
+
+def _referral_party_name(physician_id: str) -> str:
+    """Either referral party's display name -- Lucy has no `_PHYSICIANS_BY_ID`
+    entry (she is the demo PCP identity, not a directory specialist), so her
+    canonical agent id is checked first."""
+    if physician_id == LUCY_AGENT_ID:
+        return PCP_NAME
+    return _physician_display_name(physician_id)
 
 
 def _physician_or_404(physician_id: str):
@@ -303,3 +322,81 @@ def send_referral_handoff(
     updated_referral = workflow_store.update_referral(workspace_id, referral)
     sent = workflow_store.update_handoff(workspace_id, sent)
     return HandoffResult(referral=updated_referral, handoff=sent)
+
+
+# --------------------------------------------------------------------------
+# Physician-agent-to-physician-agent coordination chat (ongoing-coordination
+# pass, Part H-T): a patient-scoped channel between the two physicians on an
+# accepted referral, never a generic/open-ended chat surface.
+# --------------------------------------------------------------------------
+
+
+def _other_referral_party(referral: Referral, physician_id: str) -> str:
+    if physician_id == referral.referring_physician_id:
+        return referral.receiving_physician_id
+    if physician_id == referral.receiving_physician_id:
+        return referral.referring_physician_id
+    raise HTTPException(status_code=403, detail="Only the two physicians on this referral may use this channel")
+
+
+@router.post("/referrals/{referral_id}/coordination-chat", response_model=CoordinationChatExchange)
+def ask_physician_agent(
+    referral_id: int, request: AskPhysicianAgentRequest, workspace_id: MutableDemoWorkspace
+) -> CoordinationChatExchange:
+    referral = _load_referral(workspace_id, referral_id)
+    represented_physician_id = _other_referral_party(referral, request.requesting_physician_id)
+    try:
+        authorize_coordination_chat(referral, request.requesting_physician_id, represented_physician_id)
+    except ValueError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    scheduling = workflow_store.get_scheduling(workspace_id, referral_id)
+    encounter = workflow_store.get_encounter(workspace_id, referral_id)
+    handoff = workflow_store.get_handoff(workspace_id, referral_id)
+    represented_name = _referral_party_name(represented_physician_id)
+    represented_agent = represented_agent_id(represented_physician_id)
+    answer, based_on, requires_physician_input = answer_coordination_question(
+        referral, scheduling, encounter, handoff,
+        request.requesting_physician_id, represented_physician_id, represented_name, request.question,
+    )
+    now = datetime.now(UTC).isoformat()
+    physician_message = workflow_store.create_chat_message(
+        workspace_id, referral.patient_id,
+        CoordinationChatMessage(
+            referral_id=referral_id,
+            requesting_physician_id=request.requesting_physician_id,
+            represented_physician_id=represented_physician_id,
+            represented_agent_id=represented_agent,
+            role=CoordinationChatRole.PHYSICIAN,
+            content=request.question,
+            created_at=now,
+        ),
+    )
+    agent_message = workflow_store.create_chat_message(
+        workspace_id, referral.patient_id,
+        CoordinationChatMessage(
+            referral_id=referral_id,
+            requesting_physician_id=request.requesting_physician_id,
+            represented_physician_id=represented_physician_id,
+            represented_agent_id=represented_agent,
+            role=CoordinationChatRole.AGENT,
+            content=answer,
+            based_on=based_on,
+            requires_physician_input=requires_physician_input,
+            created_at=now,
+        ),
+    )
+    return CoordinationChatExchange(physician_message=physician_message, agent_message=agent_message)
+
+
+@router.get("/referrals/{referral_id}/coordination-chat", response_model=list[CoordinationChatMessage])
+def get_coordination_chat(
+    referral_id: int, workspace_id: DemoWorkspace, as_physician_id: str
+) -> list[CoordinationChatMessage]:
+    """Both physicians read the same persisted thread (Part S) -- the only
+    gate is that the requester must actually be one of the two referral
+    parties; there is no separate per-direction copy of the conversation."""
+    referral = _load_referral(workspace_id, referral_id)
+    _other_referral_party(referral, as_physician_id)
+    if referral.status not in ("accepted", "scheduled", "consult_returned"):
+        raise HTTPException(status_code=403, detail="This referral has not been accepted yet")
+    return workflow_store.list_chat_messages(workspace_id, referral_id)

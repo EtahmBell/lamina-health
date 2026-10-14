@@ -17,7 +17,11 @@ from .consultation import (
 )
 from .care_coordination import (
     AppointmentSlot,
+    AskPhysicianAgentRequest,
     ConsultationEncounter,
+    CoordinationChatExchange,
+    CoordinationChatMessage,
+    CoordinationChatRole,
     DraftHandoffRequest,
     EncounterIngestRequest,
     EncounterResult,

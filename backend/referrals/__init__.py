@@ -1,3 +1,4 @@
+from .coordination_chat import answer_coordination_question, authorize_coordination_chat, represented_agent_id
 from .packet import assemble_initial_packet
 from .requirements import evaluate_requirements, requirements_for
 from .resolver import resolve_missing_requirement
@@ -22,6 +23,9 @@ __all__ = [
     "resolve_missing_requirement",
     "synthetic_chen_availability",
     "accept_referral",
+    "answer_coordination_question",
+    "authorize_coordination_chat",
+    "represented_agent_id",
     "build_referral",
     "confirm_synthetic_appointment",
     "draft_handoff",

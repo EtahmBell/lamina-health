@@ -2047,6 +2047,24 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-coordination-surface > .text-button { margin-top: 10px; }
 .referral-mode-links { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 18px; }
 .referral-mode-links .text-button { margin-top: 0; }
+.referral-mode-links .button-primary { margin-bottom: 6px; }
+
+/* Physician-agent-to-physician-agent coordination chat card (ongoing-
+   coordination pass, Part H-T) -- a separate boxed card beneath the
+   current-state card, matching the same .patient-top-card visual language
+   used elsewhere on Patient Detail (e.g. Patient history), never a
+   dashboard-style panel. Compact by default; the thread only appears once
+   messages exist (Part K: "do not make the rail enormous by default"). */
+.coordination-chat-card { margin-top: 20px; }
+.coordination-chat-card > .eyebrow { margin-bottom: 10px; }
+.coordination-chat-card .chat-thread { margin-top: 14px; }
+.coordination-chat-prompts { margin-top: 14px; }
+.coordination-chat-prompts .chat-starter-prompts { margin-top: 10px; margin-bottom: 0; }
+
+/* Patient-level action (Part F/G) -- a quiet, single seam into the real
+   Discovery/consult-network flow, never a prominent competing CTA next to
+   the current-state card's own primary action. */
+.patient-level-action { margin-top: 16px; }
 .referral-phase { width: 100%; transition: opacity 500ms ease-in-out; }
 .referral-phase.phase-fading { opacity: 0; }
 .referral-found-value { font-family: var(--font-display); color: var(--clinical); }

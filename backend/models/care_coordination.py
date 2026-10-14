@@ -142,3 +142,44 @@ class EncounterResult(StrictModel):
 class HandoffResult(StrictModel):
     referral: Referral
     handoff: HandoffSummary
+
+
+class CoordinationChatRole(StrEnum):
+    PHYSICIAN = "physician"
+    AGENT = "agent"
+
+
+class CoordinationChatMessage(StrictModel):
+    """One turn in a patient-scoped coordination conversation between two
+    physicians' agents (ongoing-coordination pass, Part H-T) -- scoped to a
+    single referral, never a generic/permanent per-physician memory (Part M).
+    `requesting_physician_id`/`represented_physician_id` identify the same
+    two accepted-referral parties regardless of which direction asked; a
+    physician's own question and the agent's answer are each their own
+    message/row, so reconstructing the thread never requires anything
+    beyond this referral's own persisted messages."""
+
+    id: int | None = None
+    referral_id: int
+    requesting_physician_id: str
+    represented_physician_id: str
+    represented_agent_id: str
+    role: CoordinationChatRole
+    content: str
+    based_on: list[str] = Field(default_factory=list)
+    requires_physician_input: bool = False
+    created_at: str
+
+
+class AskPhysicianAgentRequest(StrictModel):
+    requesting_physician_id: str
+    question: str
+
+
+class CoordinationChatExchange(StrictModel):
+    """One POST's result: the physician's own question and the agent's
+    answer, both already persisted -- the frontend appends these directly
+    rather than guessing at ids/timestamps."""
+
+    physician_message: CoordinationChatMessage
+    agent_message: CoordinationChatMessage

@@ -8,7 +8,7 @@ const api = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 
 const slice = (source, from, to) => source.slice(source.indexOf(from), to !== undefined ? source.indexOf(to) : undefined)
-const handoffModal = () => slice(referralSource, 'export function HandoffModal', '/* ========')
+const handoffModal = () => slice(referralSource, 'export function HandoffModal', "/** Lucy's suggested prompts")
 const chenDownstreamCard = () => slice(referralSource, 'export function ChenDownstreamCard', 'export function ChenPatientsPage')
 const recommendationView = () => slice(app, 'function RecommendationView', 'function PatientWorkspace')
 const patientWorkspace = () => slice(app, 'function PatientWorkspace', 'export default function App')

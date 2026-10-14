@@ -98,6 +98,16 @@ export type HandoffSummary = {
 }
 export type EncounterResult = { referral: Referral; encounter: ConsultationEncounter }
 export type HandoffResult = { referral: Referral; handoff: HandoffSummary }
+
+/** Physician-agent-to-physician-agent coordination chat (ongoing-coordination
+ * pass, Part H-T) -- scoped to one referral, never a generic chat surface. */
+export type CoordinationChatRole = 'physician' | 'agent'
+export type CoordinationChatMessage = {
+  id: number | null; referral_id: number; requesting_physician_id: string; represented_physician_id: string
+  represented_agent_id: string
+  role: CoordinationChatRole; content: string; based_on: string[]; requires_physician_input: boolean; created_at: string
+}
+export type CoordinationChatExchange = { physician_message: CoordinationChatMessage; agent_message: CoordinationChatMessage }
 export type AgentLearning = { key: string; statement: string; provenance: string; status: 'suggested' | 'confirmed' | 'rejected'; updated_at: string | null }
 export type MyAgent = {
   id: string; physician: string; specialty: string; status: string; synthetic: boolean; location: string
@@ -563,6 +573,11 @@ export const getHandoff = (referralId: number, asPhysicianId?: string) => reques
 export const sendHandoff = (referralId: number, receivingPhysicianId: string) => request<HandoffResult>(`/api/referrals/${referralId}/handoff/send`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
 })
+export const askPhysicianAgent = (referralId: number, requestingPhysicianId: string, question: string) => request<CoordinationChatExchange>(`/api/referrals/${referralId}/coordination-chat`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requesting_physician_id: requestingPhysicianId, question }),
+})
+export const getCoordinationChat = (referralId: number, asPhysicianId: string) => request<CoordinationChatMessage[]>(`/api/referrals/${referralId}/coordination-chat?as_physician_id=${encodeURIComponent(asPhysicianId)}`)
+
 export const getPatientActivity = () => request<PatientActivity[]>('/api/workspace/activity')
 export const getConsultationHistory = () => request<ConsultationRecord[]>('/api/workspace/consultations')
 export const getConsultationRecord = (id: number) => request<ConsultationRecord>(`/api/workspace/consultations/${id}`)
