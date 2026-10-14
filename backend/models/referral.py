@@ -146,3 +146,10 @@ class Referral(StrictModel):
     receiving_requirements: list[ReferralRequirement] = Field(default_factory=list)
     requirement_results: list[RequirementCheck] = Field(default_factory=list)
     coordination_events: list[CoordinationEvent] = Field(default_factory=list)
+    # A referral IS a specialty-care episode (demo-consolidation pass, Part
+    # 5) -- a legitimate later re-referral to the same physician creates a
+    # new row/new id rather than reusing or overwriting the completed one;
+    # this is the only lineage pointer needed (no separate "episode" model),
+    # since referral ids already naturally represent episodes. Null for a
+    # patient's first referral to that physician.
+    previous_referral_id: int | None = None

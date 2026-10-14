@@ -86,7 +86,11 @@ class HandoffSummary(StrictModel):
     """The specialist-to-PCP handoff (Part X). `drafted_by_agent_id` records
     that the agent prepared the summary; `approved_by_physician_id` stays
     null until the physician explicitly sends it (Part AA) -- the draft is
-    never visible to the referring side, and never self-approving."""
+    never visible to the referring side, and never self-approving.
+    `viewed_by_referring_physician_at` (demo-consolidation pass, Part 8) is a
+    workflow/UI timestamp only -- it records that the referring physician
+    actually opened and loaded this handoff, never a claim that they
+    formally attested to every recommendation in it."""
 
     id: int | None = None
     referral_id: int
@@ -103,6 +107,7 @@ class HandoffSummary(StrictModel):
     approved_by_physician_id: str | None = None
     drafted_at: str
     sent_at: str | None = None
+    viewed_by_referring_physician_at: str | None = None
 
 
 class SchedulingOptionsRequest(StrictModel):
@@ -125,6 +130,10 @@ class SendHandoffRequest(StrictModel):
     receiving_physician_id: str
 
 
+class MarkHandoffViewedRequest(StrictModel):
+    referring_physician_id: str
+
+
 class SchedulingOptionsResult(StrictModel):
     """A single round-trip result carrying both the updated referral
     (coordination_events) and the scheduling artifact itself -- avoids a
@@ -144,42 +153,55 @@ class HandoffResult(StrictModel):
     handoff: HandoffSummary
 
 
-class CoordinationChatRole(StrEnum):
-    PHYSICIAN = "physician"
-    AGENT = "agent"
-
-
-class CoordinationChatMessage(StrictModel):
-    """One turn in a patient-scoped coordination conversation between two
-    physicians' agents (ongoing-coordination pass, Part H-T) -- scoped to a
-    single referral, never a generic/permanent per-physician memory (Part M).
-    `requesting_physician_id`/`represented_physician_id` identify the same
-    two accepted-referral parties regardless of which direction asked; a
-    physician's own question and the agent's answer are each their own
-    message/row, so reconstructing the thread never requires anything
-    beyond this referral's own persisted messages."""
-
-    id: int | None = None
-    referral_id: int
-    requesting_physician_id: str
-    represented_physician_id: str
-    represented_agent_id: str
-    role: CoordinationChatRole
-    content: str
-    based_on: list[str] = Field(default_factory=list)
-    requires_physician_input: bool = False
-    created_at: str
-
-
 class AskPhysicianAgentRequest(StrictModel):
+    """Patient-scoped physician-agent-to-physician-agent coordination chat
+    (demo-consolidation pass, Part 16-20) -- deliberately stateless/task-
+    scoped server-side: nothing about this question or answer is persisted.
+    Chat history, if the client wants multi-turn context while the page
+    stays open, lives only in the requesting physician's own frontend
+    session state -- never synced across physicians, never written to
+    shared backend state, and never fed into the represented physician's
+    permanent agent memory."""
+
     requesting_physician_id: str
     question: str
 
 
-class CoordinationChatExchange(StrictModel):
-    """One POST's result: the physician's own question and the agent's
-    answer, both already persisted -- the frontend appends these directly
-    rather than guessing at ids/timestamps."""
+class CoordinationChatAnswer(StrictModel):
+    answer: str
+    based_on: list[str] = Field(default_factory=list)
+    requires_physician_input: bool
+    represented_agent_id: str
+    created_at: str
 
-    physician_message: CoordinationChatMessage
-    agent_message: CoordinationChatMessage
+
+class AgentCorrection(StrictModel):
+    """A physician's explicit correction of their OWN agent's behavior
+    (demo-consolidation pass, Part 23-31) -- durable, and deliberately
+    separate from the immutable CoordinationEvent audit trail: the event
+    stays "this is what the agent did"; this is the attached, later fact
+    "the physician says this should change." `status` stays
+    `pending_training` in this pass -- turning a correction into a
+    confirmed physician-representation update is the next pass's NLP/quick-
+    training flow, never this artifact alone (Part 30). Only the physician
+    who owns `agent_id` may create one referencing their own agent (Part 28:
+    enforced by the API layer, never by this model)."""
+
+    id: int | None = None
+    physician_id: str
+    agent_id: str
+    patient_id: str
+    referral_id: int | None = None
+    source_event_sequence: int | None = None
+    selected_text: str | None = None
+    correction_text: str
+    status: Literal["pending_training"] = "pending_training"
+    created_at: str
+
+
+class CreateAgentCorrectionRequest(StrictModel):
+    physician_id: str
+    referral_id: int | None = None
+    source_event_sequence: int | None = None
+    selected_text: str | None = None
+    correction_text: str

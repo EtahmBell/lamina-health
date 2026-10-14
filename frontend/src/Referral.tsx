@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, askPhysicianAgent, createReferral, getAgentOverview, getCoordinationChat, getEncounter, getHandoff, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, runReferralPreflight, sendHandoff, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type CoordinationChatMessage, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
+import { acceptReferral, askPhysicianAgent, createAgentCorrection, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, markHandoffViewed, runReferralPreflight, sendHandoff, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type CoordinationEvent, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
@@ -120,7 +120,7 @@ function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling 
  *   presentation pacing -- the backend call itself is never delayed (Part E/F/Y).
  */
 export function ReferralCoordinationSurface({
-  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange,
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange, onReferralChange, onReviewedChange,
 }: {
   patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string
   restoredReferral: Referral | null
@@ -130,6 +130,24 @@ export function ReferralCoordinationSurface({
    * never mismatch the card's radius (Part H). Never called for a restored/
    * hydrated referral. */
   onWashChange?: (active: boolean) => void
+  /** Root-cause fix for the duplicate-referral navigation bug (demo-
+   * consolidation pass, Part 3): the parent's own `activeReferral` was only
+   * ever populated by the one-time mount hydration lookup, so a referral
+   * created LIVE within this same session (no reload) never propagated back
+   * up -- "Back to match options" then showed a stale Discovery view with
+   * no record of the referral that very session just created, allowing
+   * "Start referral" to be clicked again. Called with the real referral the
+   * moment it exists, so the parent is never out of sync with what this
+   * component itself already knows. */
+  onReferralChange?: (referral: Referral) => void
+  /** Once Lucy has reviewed the returned handoff, the episode recedes and
+   * the parent switches to rendering a generic current-care-state card
+   * instead of "Referral to Dr. X" (demo-consolidation pass, Part 7-10) --
+   * that framing lives one level up (RecommendationView owns the kicker/
+   * physician-row), so this component reports the real `reviewed` fact
+   * rather than deciding it unilaterally. Mirrors onReferralChange's same
+   * "never let the parent go stale" shape. */
+  onReviewedChange?: (reviewed: boolean) => void
 }) {
   const [status, setStatus] = useState<'running' | 'done' | 'error'>(restoredReferral ? 'done' : 'running')
   const [visiblePhase, setVisiblePhase] = useState<DisplayPhase | null>(restoredReferral ? restorePhase(restoredReferral) : null)
@@ -151,7 +169,8 @@ export function ReferralCoordinationSurface({
   const [handoff, setHandoff] = useState<HandoffSummary | null>(null)
   const [schedulingDetailsOpen, setSchedulingDetailsOpen] = useState(false)
   const [handoffOpen, setHandoffOpen] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
+  // Collapsed by default (Part 10) -- the physician explicitly expands it.
+  const [episodeOpen, setEpisodeOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const timers = useRef<number[]>([])
   const cancelled = useRef(false)
@@ -168,7 +187,35 @@ export function ReferralCoordinationSurface({
     return () => { ignore = true }
   }, [referral?.id, referral?.status])
 
+  // Keeps the parent informed of the real `reviewed` fact (never decided
+  // unilaterally) -- but deliberately withheld while the handoff modal is
+  // still open: the parent's "reviewed" vs "active" branches are
+  // structurally different trees (generic card vs. "Referral to Dr. X"),
+  // so flipping mid-render would remount this very component and silently
+  // close the modal out from under the physician still reading it. Reports
+  // once she actually closes it, by which point the remount is invisible.
+  useEffect(() => {
+    if (handoffOpen) return
+    onReviewedChange?.(Boolean(handoff?.viewed_by_referring_physician_at))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoff?.viewed_by_referring_physician_at, handoffOpen])
+
   const setWash = (active: boolean) => { setJustCompleted(active); onWashChange?.(active) }
+
+  /**
+   * Marks the handoff viewed the moment it is opened (demo-consolidation
+   * pass, Part 8) -- by this point `handoff` is already the real, fully-
+   * loaded object (never a placeholder), so "opens and loads" has already
+   * happened; this is a best-effort background call that never blocks or
+   * delays the modal itself from opening. A no-op once already viewed.
+   */
+  const openHandoff = () => {
+    setHandoffOpen(true)
+    if (!handoff || !referral?.id || handoff.viewed_by_referring_physician_at) return
+    markHandoffViewed(referral.id, referral.referring_physician_id).then((viewed) => {
+      if (!cancelled.current) setHandoff(viewed)
+    }).catch(() => {})
+  }
 
   useEffect(() => () => {
     cancelled.current = true
@@ -251,6 +298,7 @@ export function ReferralCoordinationSurface({
       await minimumPreparingDisplay
       if (cancelled.current) return
       setReferral(preflighted)
+      onReferralChange?.(preflighted)
       for (const phase of derivePhases(preflighted).slice(1)) {
         if (phase.kind === 'sent') await revealSentPhase(phase)
         else await revealPhase(phase)
@@ -269,35 +317,12 @@ export function ReferralCoordinationSurface({
   }
   if (!visiblePhase) return null
   const sentResolvedCount = visiblePhase.kind === 'sent' ? visiblePhase.resolvedCount : 0
-  return <div className="referral-coordination-surface" role="status">
-    <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
-      <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} scheduling={scheduling} />
-    </div>
-    {/* The current-state card stays focused on NOW (ongoing-coordination
-     * pass, Part D) -- a single primary action for whatever the CURRENT
-     * phase actually calls for, plus one quiet entry point into the
-     * historical detail view (Part E). The three old links (packet/
-     * coordination/scheduling) never appear here directly any more. */}
-    {status === 'done' && referral && !justCompleted && <div className="referral-mode-links">
-      {handoff && <button type="button" className="button-primary" onClick={() => setHandoffOpen(true)}>Review handoff →</button>}
-      <button type="button" className="text-button" onClick={() => setDetailsOpen(true)}>← Back to referral details</button>
-    </div>}
-    {/* Full-card completion takeover (Part 2-4): absolutely positioned over
-     * the whole .best-fit-card.referral-card (which is position: relative),
-     * so it covers the kicker/physician row/back-button too without any
-     * layout jump, and is trivially centered via flex. Its own CSS opacity
-     * transition drives the text fade -- no JS double-rAF needed here. The
-     * translucent wash itself lives on the card element (.handoff-wash, set
-     * by the parent via onWashChange), not here -- see Part H. */}
-    <div className={`referral-handoff-overlay ${justCompleted ? 'visible' : ''}`} aria-hidden={!justCompleted} role={justCompleted ? 'status' : undefined}>
-      <span className="referral-handoff-check" aria-hidden="true">✓</span>
-      <h3>Referral handoff complete</h3>
-      <p>Sent to {receivingPhysicianName}</p>
-      {sentResolvedCount > 0 && <small>{resolvedSummary(sentResolvedCount)} automatically.</small>}
-    </div>
+  const reviewed = Boolean(handoff?.viewed_by_referring_physician_at)
+  const modals = <>
     {coordinationOpen && referral && <AgentCoordinationModal
       referral={referral}
       receivingPhysicianName={receivingPhysicianName}
+      viewerPhysicianId={referral.referring_physician_id}
       onClose={() => setCoordinationOpen(false)}
     />}
     {packetOpen && referral && <ReferralPacketModal
@@ -317,16 +342,99 @@ export function ReferralCoordinationSurface({
       receivingPhysicianName={receivingPhysicianName}
       onClose={() => setHandoffOpen(false)}
     />}
-    {detailsOpen && referral && <ReferralDetailsModal
+  </>
+
+  // Once Lucy has reviewed the returned handoff, the episode recedes into a
+  // compact, collapsed-by-default history section (demo-consolidation pass,
+  // Part 7C/10/32) -- the "Referral to Dr. X" framing itself lives one
+  // level up and has already stopped rendering (see onReviewedChange), so
+  // this returns ONLY the collapsed episode, never the live phase content.
+  if (status === 'done' && referral && !justCompleted && reviewed) {
+    return <>
+      <div className="specialty-episode-section">
+        <p className="section-label">Recent specialty care</p>
+        <details className="specialty-episode" open={episodeOpen} onToggle={(event) => setEpisodeOpen(event.currentTarget.open)}>
+          <summary className="specialty-episode-summary">
+            <span className="specialty-episode-title">{referral.specialty} with {receivingPhysicianName}</span>
+            <span className="status-label success">✓ Consultation complete</span>
+            <span className="specialty-episode-chevron" aria-hidden="true">{episodeOpen ? '−' : '+'}</span>
+          </summary>
+          <div className="specialty-episode-detail">
+            {handoff?.sent_at && <p className="muted-note">Sent {formatSubmittedAt(handoff.sent_at)}</p>}
+            <div className="referral-artifact-links">
+              <button type="button" className="text-button" onClick={openHandoff}>View handoff →</button>
+              <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
+              <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>
+              {scheduling?.status === 'scheduled' && <button type="button" className="text-button" onClick={() => setSchedulingDetailsOpen(true)}>View scheduling details →</button>}
+            </div>
+            <CoordinationChatCard
+              referral={referral}
+              patientLabel={patientLabel}
+              requestingPhysicianId={referral.referring_physician_id}
+              representedPhysicianId={referral.receiving_physician_id}
+              representedPhysicianName={receivingPhysicianName}
+              representedTone="copper"
+              suggestedPrompts={lucySuggestedPrompts(patientLabel, receivingPhysicianName, referral.specialty)}
+            />
+          </div>
+        </details>
+      </div>
+      {modals}
+    </>
+  }
+
+  return <>
+    <div className="referral-coordination-surface" role="status">
+      <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
+        <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} scheduling={scheduling} />
+      </div>
+      {/* The current-state card stays focused on NOW (demo-consolidation
+       * pass, Part 1): a single primary action for whatever the CURRENT phase
+       * actually calls for. The historical artifact links live in their own
+       * quiet, always-visible section below -- never a generic "Referral
+       * details" modal (removed, Part 2): that added an unnecessary click and
+       * broken-feeling back/forward navigation. Direct access, no detour. */}
+      {status === 'done' && referral && !justCompleted && handoff && <div className="referral-mode-links">
+        <button type="button" className="button-primary" onClick={openHandoff}>Review handoff →</button>
+      </div>}
+      {status === 'done' && referral && !justCompleted && <div className="referral-artifact-links">
+        <p className="section-label">Referral details</p>
+        <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
+        <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>
+        {scheduling?.status === 'scheduled' && <button type="button" className="text-button" onClick={() => setSchedulingDetailsOpen(true)}>View scheduling details →</button>}
+      </div>}
+      {/* Full-card completion takeover (Part 2-4): absolutely positioned over
+       * the whole .best-fit-card.referral-card (which is position: relative),
+       * so it covers the kicker/physician row/back-button too without any
+       * layout jump, and is trivially centered via flex. Its own CSS opacity
+       * transition drives the text fade -- no JS double-rAF needed here. The
+       * translucent wash itself lives on the card element (.handoff-wash, set
+       * by the parent via onWashChange), not here -- see Part H. */}
+      <div className={`referral-handoff-overlay ${justCompleted ? 'visible' : ''}`} aria-hidden={!justCompleted} role={justCompleted ? 'status' : undefined}>
+        <span className="referral-handoff-check" aria-hidden="true">✓</span>
+        <h3>Referral handoff complete</h3>
+        <p>Sent to {receivingPhysicianName}</p>
+        {sentResolvedCount > 0 && <small>{resolvedSummary(sentResolvedCount)} automatically.</small>}
+      </div>
+    </div>
+    {/* Active-episode chat (Part 33): visible directly beneath the current-
+     * state card while the episode is still active/not yet reviewed; once
+     * reviewed, the SAME component moves inside the collapsed episode above
+     * instead (Part 32) -- never both at once. Still gated on real backend
+     * acceptance (Part Y, preserved from the previous pass), not merely on
+     * the local create+preflight+submit workflow finishing -- Lucy submitting
+     * a referral is not the same thing as Chen having accepted it yet. */}
+    {status === 'done' && referral && !justCompleted && ACCEPTED_OR_LATER_STATUSES.includes(referral.status) && <CoordinationChatCard
+      referral={referral}
       patientLabel={patientLabel}
-      receivingPhysicianName={receivingPhysicianName}
-      hasScheduling={scheduling?.status === 'scheduled'}
-      onOpenPacket={() => setPacketOpen(true)}
-      onOpenCoordination={() => setCoordinationOpen(true)}
-      onOpenScheduling={() => setSchedulingDetailsOpen(true)}
-      onClose={() => setDetailsOpen(false)}
+      requestingPhysicianId={referral.referring_physician_id}
+      representedPhysicianId={referral.receiving_physician_id}
+      representedPhysicianName={receivingPhysicianName}
+      representedTone="copper"
+      suggestedPrompts={lucySuggestedPrompts(patientLabel, receivingPhysicianName, referral.specialty)}
     />}
-  </div>
+    {modals}
+  </>
 }
 
 /**
@@ -335,9 +443,33 @@ export function ReferralCoordinationSurface({
  * operational facts (what was checked, requested, found, attached), never
  * hidden model chain-of-thought (see Part I).
  */
+/**
+ * Which physician's agent actually produced this event, if any -- mirrors
+ * the backend's own `_correctable_event_owner` (Part 23-28). System events
+ * (preflight_completed, referral_ready, ...) are never correctable: no
+ * single physician's agent authored them.
+ */
+function correctableEventOwner(referral: Referral, event: CoordinationEvent): string | null {
+  if (event.actor === 'referring_agent') return referral.referring_physician_id
+  if (event.actor === 'receiving_agent') return referral.receiving_physician_id
+  return null
+}
+
+/**
+ * A quiet, physician-owned correction mechanic (demo-consolidation pass,
+ * Part 23-28): a physician may correct only THEIR OWN agent's events here
+ * (Lucy corrects Lucy's agent, Chen corrects Chen's agent, never cross-
+ * physician -- enforced again server-side regardless). Saved as a
+ * pending_training AgentCorrection, a separate attached artifact -- the
+ * original CoordinationEvent audit trail is never mutated. This is
+ * intentionally the simple, quiet fallback ("Correct this" per event)
+ * rather than a bespoke text-selection popover; an active browser text
+ * selection inside the event is still opportunistically captured as
+ * `selected_text` when present.
+ */
 export function AgentCoordinationModal({
-  referral, receivingPhysicianName, patientLabel, onClose,
-}: { referral: Referral; receivingPhysicianName: string; patientLabel?: string; onClose: () => void }) {
+  referral, receivingPhysicianName, patientLabel, viewerPhysicianId, onClose,
+}: { referral: Referral; receivingPhysicianName: string; patientLabel?: string; viewerPhysicianId: string; onClose: () => void }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -346,6 +478,34 @@ export function AgentCoordinationModal({
   const resolvedCount = referral.coordination_events.filter((event) => event.event_type === 'information_attached').length
   const needsPhysician = referral.coordination_events.some((event) => event.event_type === 'physician_action_required')
   const referringLabel = `${PCP_NAME}'s Agent`
+
+  const [correctingSequence, setCorrectingSequence] = useState<number | null>(null)
+  const [correctionSelectedText, setCorrectionSelectedText] = useState('')
+  const [correctionText, setCorrectionText] = useState('')
+  const [savingCorrection, setSavingCorrection] = useState(false)
+  const [correctedSequences, setCorrectedSequences] = useState<Set<number>>(new Set())
+
+  const openCorrection = (sequence: number) => {
+    setCorrectionSelectedText(window.getSelection()?.toString().trim() ?? '')
+    setCorrectionText('')
+    setCorrectingSequence(sequence)
+  }
+  const saveCorrection = async () => {
+    if (correctingSequence == null || !correctionText.trim()) return
+    setSavingCorrection(true)
+    try {
+      await createAgentCorrection(referral.patient_id, viewerPhysicianId, correctionText.trim(), {
+        referralId: referral.id ?? undefined,
+        sourceEventSequence: correctingSequence,
+        selectedText: correctionSelectedText || undefined,
+      })
+      setCorrectedSequences((previous) => new Set(previous).add(correctingSequence))
+      setCorrectingSequence(null)
+    } finally {
+      setSavingCorrection(false)
+    }
+  }
+
   return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <div className="post-flow-dialog coordination-dialog" role="dialog" aria-modal="true" aria-label="Agent coordination">
       <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
@@ -357,11 +517,32 @@ export function AgentCoordinationModal({
         <p>{needsPhysician ? 'Physician action required' : 'No physician action required'}</p>
       </div>
       <div className="coordination-timeline">
-        {referral.coordination_events.map((event) => <div className={`coordination-event actor-${event.actor ?? 'system'}`} key={event.sequence}>
-          <span className="coordination-actor">{eventActorLabel(event, referringLabel, receivingPhysicianName)}</span>
-          <strong>{EVENT_TYPE_TITLES[event.event_type] ?? event.event_type}</strong>
-          <p>{event.summary}</p>
-        </div>)}
+        {referral.coordination_events.map((event) => {
+          const owner = correctableEventOwner(referral, event)
+          const correctable = owner != null && owner === viewerPhysicianId
+          const corrected = correctedSequences.has(event.sequence)
+          return <div className={`coordination-event actor-${event.actor ?? 'system'}`} key={event.sequence}>
+            <span className="coordination-actor">{eventActorLabel(event, referringLabel, receivingPhysicianName)}</span>
+            <strong>{EVENT_TYPE_TITLES[event.event_type] ?? event.event_type}</strong>
+            <p>{event.summary}</p>
+            {correctable && corrected && <p className="coordination-correction-saved">✓ Saved for your agent to review. Nothing was changed automatically.</p>}
+            {correctable && !corrected && correctingSequence !== event.sequence && <button type="button" className="text-button coordination-correct-trigger" onClick={() => openCorrection(event.sequence)}>Correct this</button>}
+            {correctingSequence === event.sequence && <div className="coordination-correction-form">
+              <p className="section-label">What should your agent have done or said instead?</p>
+              {correctionSelectedText && <p className="coordination-correction-selected">“{correctionSelectedText}”</p>}
+              <textarea
+                className="feedback-reason-text"
+                value={correctionText}
+                onChange={(textEvent) => setCorrectionText(textEvent.target.value)}
+                autoFocus
+              />
+              <div className="feedback-reason-actions">
+                <button type="button" className="text-button" onClick={() => setCorrectingSequence(null)}>Cancel</button>
+                <button type="button" className="button-secondary" disabled={savingCorrection || !correctionText.trim()} onClick={() => void saveCorrection()}>{savingCorrection ? 'Saving…' : 'Save correction'}</button>
+              </div>
+            </div>}
+          </div>
+        })}
       </div>
       <p className="coordination-footer">{referral.status === 'consult_returned' ? '✓ Specialist consultation handoff received' : referral.status === 'scheduled' ? '✓ Consultation scheduled' : referral.status === 'accepted' ? `✓ Referral accepted by ${receivingPhysicianName}` : referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
     </div>
@@ -447,42 +628,6 @@ export function SchedulingDetailsModal({
 }
 
 /**
- * The "how we got here" hub (ongoing-coordination pass, Part D/E) -- the
- * current-state card answers "what matters now"; this answers "how did we
- * get here." A lightweight menu, never a duplicate rendering of the
- * underlying data -- each item opens the SAME existing modal
- * (ReferralPacketModal/AgentCoordinationModal/SchedulingDetailsModal) that
- * already renders directly from the real persisted artifacts. Stays mounted
- * underneath whichever of those the physician opens, so closing one
- * returns here rather than losing the hub entirely.
- */
-function ReferralDetailsModal({
-  patientLabel, receivingPhysicianName, hasScheduling, onOpenPacket, onOpenCoordination, onOpenScheduling, onClose,
-}: {
-  patientLabel: string; receivingPhysicianName: string; hasScheduling: boolean
-  onOpenPacket: () => void; onOpenCoordination: () => void; onOpenScheduling: () => void; onClose: () => void
-}) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <div className="post-flow-dialog packet-dialog" role="dialog" aria-modal="true" aria-label="Referral details">
-      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
-      <p className="eyebrow">Referral details</p>
-      <h2>{patientLabel}</h2>
-      <p className="coordination-subhead">Referred to {receivingPhysicianName}</p>
-      <div className="referral-mode-links">
-        <button type="button" className="text-button" onClick={onOpenPacket}>View referral packet →</button>
-        <button type="button" className="text-button" onClick={onOpenCoordination}>See agent coordination →</button>
-        {hasScheduling && <button type="button" className="text-button" onClick={onOpenScheduling}>View scheduling details →</button>}
-      </div>
-    </div>
-  </div></ModalPortal>
-}
-
-/**
  * The specialist-to-PCP handoff (Part Z/AE) -- the SAME persisted
  * HandoffSummary rendered for both physicians, never a separate Lucy copy.
  * `onSend` is only ever provided by Chen's own draft-review flow; Lucy's
@@ -498,6 +643,8 @@ export function HandoffModal({
 }) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
+  const cancelledRef = useRef(false)
+  useEffect(() => () => { cancelledRef.current = true }, [])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !sending) onClose() }
     window.addEventListener('keydown', onKey)
@@ -508,20 +655,28 @@ export function HandoffModal({
    * `sending` also gates every close path below (X/backdrop/Escape), so a
    * physician can't dismiss the modal mid-request and lose track of whether
    * it went through. It must still clear once the request SETTLES, success
-   * or failure -- leaving it stuck `true` after a successful send (the
+   * or failure -- leaving it stuck `true` after a successful send (a
    * previous bug: only the catch branch reset it) permanently locks the
    * modal closed, since the Send button itself simply disappears once
    * `isDraft` flips to false and no longer offers any way to notice.
+   *
+   * On a SUCCESSFUL send (demo-consolidation pass, Part 15), the modal also
+   * closes itself automatically -- the parent's `onSend` already persisted
+   * the sent HandoffSummary and updated its own local state (so the durable
+   * "Handoff sent" card is already correct underneath by the time this
+   * closes); a FAILED send never closes, leaving the error and the Send
+   * button in place to retry.
    */
   const handleSend = async () => {
     if (!onSend) return
     setSending(true); setError('')
     try {
       await onSend()
+      if (!cancelledRef.current) onClose()
     } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : 'Could not send the handoff.')
+      if (!cancelledRef.current) setError(sendError instanceof Error ? sendError.message : 'Could not send the handoff.')
     } finally {
-      setSending(false)
+      if (!cancelledRef.current) setSending(false)
     }
   }
   return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !sending) onClose() }}>
@@ -576,14 +731,21 @@ export function chenSuggestedPrompts(patientLabel: string, referringPhysicianNam
   ]
 }
 
+type LocalChatMessage = { id: string; role: 'physician' | 'agent'; content: string; basedOn: string[]; requiresPhysicianInput: boolean }
+
 /**
  * Patient-scoped physician-agent-to-physician-agent coordination chat
- * (ongoing-coordination pass, Part H-T) -- a single shared component for
- * both directions (Part S), distinguished only by which physician id is
- * "requesting" vs "represented". Hydrates the real persisted thread on
- * mount (never replayed/re-asked), and reuses the existing ChatTab visual
- * language (.chat-thread/.chat-message/.chat-agent-label/.chat-composer)
- * rather than a parallel chat framework (Part O).
+ * (demo-consolidation pass, Part 16-21) -- a single shared component for
+ * both directions, distinguished only by which physician id is
+ * "requesting" vs "represented". Deliberately EPHEMERAL: `messages` is
+ * plain component state, never fetched from or written to the backend --
+ * the two physicians' interactions are entirely separate and private (Part
+ * 16), nothing persists across reload/navigation (Part 17/20), and nothing
+ * is stored in localStorage/sessionStorage either. Reuses the existing
+ * ChatTab visual language (.chat-thread/.chat-message/.chat-agent-label/
+ * .chat-composer) rather than a parallel chat framework (Part O), now in a
+ * bounded, scrollable viewport (Part 19) so the rail never grows
+ * indefinitely.
  */
 export function CoordinationChatCard({
   referral, patientLabel, requestingPhysicianId, representedPhysicianId, representedPhysicianName, representedTone, suggestedPrompts,
@@ -592,30 +754,32 @@ export function CoordinationChatCard({
   requestingPhysicianId: string; representedPhysicianId: string; representedPhysicianName: string
   representedTone: 'blue' | 'copper'; suggestedPrompts: string[]
 }) {
-  const [messages, setMessages] = useState<CoordinationChatMessage[] | null>(null)
+  const [messages, setMessages] = useState<LocalChatMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [promptsOpen, setPromptsOpen] = useState(false)
   const cancelled = useRef(false)
+  const threadRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => () => { cancelled.current = true }, [])
 
   useEffect(() => {
-    if (!referral.id) return
-    let ignore = false
-    getCoordinationChat(referral.id, requestingPhysicianId).then((value) => { if (!ignore) setMessages(value) }).catch(() => { if (!ignore) setMessages([]) })
-    return () => { ignore = true }
-  }, [referral.id, requestingPhysicianId])
+    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight
+  }, [messages, busy])
 
   const send = async (question: string) => {
     const trimmed = question.trim()
     if (!trimmed || busy || !referral.id) return
     setBusy(true); setError(''); setInput('')
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'physician', content: trimmed, basedOn: [], requiresPhysicianInput: false }])
     try {
       const result = await askPhysicianAgent(referral.id, requestingPhysicianId, trimmed)
       if (cancelled.current) return
-      setMessages((prev) => [...(prev ?? []), result.physician_message, result.agent_message])
+      setMessages((prev) => [...prev, {
+        id: crypto.randomUUID(), role: 'agent', content: result.answer,
+        basedOn: result.based_on, requiresPhysicianInput: result.requires_physician_input,
+      }])
     } catch (sendError) {
       if (!cancelled.current) setError(sendError instanceof Error ? sendError.message : 'Could not reach the agent.')
     } finally {
@@ -625,18 +789,18 @@ export function CoordinationChatCard({
 
   return <section className="coordination-chat-card patient-top-card" aria-label={`Ask ${representedPhysicianName}'s Agent`}>
     <p className="eyebrow">Ask {representedPhysicianName}'s Agent</p>
-    {messages && messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
+    {messages.length === 0 && <p className="panel-intro">Ask about {patientLabel}'s referral, consultation, or follow-up.</p>}
+    {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite" ref={threadRef}>
       {messages.map((message) => message.role === 'physician'
         ? <p className="chat-message physician" key={message.id}>{message.content}</p>
         : <div className="chat-message agent" key={message.id}>
           <span className="chat-agent-label"><AgentAvatar tone={representedTone} /> {representedPhysicianName}'s Agent</span>
           <p>{message.content}</p>
-          {message.requires_physician_input && <p className="chat-uncertainty">This requires {representedPhysicianName}'s input directly.</p>}
-          {message.based_on.length > 0 && <p className="chat-grounding">Based on: {message.based_on.join(', ')}</p>}
+          {message.requiresPhysicianInput && <p className="chat-uncertainty">This requires {representedPhysicianName}'s input directly.</p>}
+          {message.basedOn.length > 0 && <p className="chat-grounding">Based on: {message.basedOn.join(', ')}</p>}
         </div>)}
       {busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar tone={representedTone} /> {representedPhysicianName}'s Agent</span><p className="chat-typing-dots" aria-label={`${representedPhysicianName}'s Agent is answering`}><span /><span /><span /></p></div>}
     </div>}
-    {(!messages || messages.length === 0) && <p className="panel-intro">Ask about {patientLabel}'s referral, consultation, or follow-up.</p>}
     {error && <p className="demo-reset-error" role="alert">{error}</p>}
     <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input) }}>
       <label htmlFor={`coordination-chat-input-${referral.id}`} className="sr-only">Ask {representedPhysicianName}'s Agent</label>
@@ -812,7 +976,7 @@ export function RequestReviewModal({
           </>}
       </div>
     </div></ModalPortal>
-    {coordinationOpen && <AgentCoordinationModal referral={referral} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+    {coordinationOpen && <AgentCoordinationModal referral={referral} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} viewerPhysicianId={referral.receiving_physician_id} onClose={() => setCoordinationOpen(false)} />}
     {packetOpen && <ReferralPacketModal referral={referral} patientLabel={patientLabel} receivingPhysicianName={receivingPhysicianName} onClose={() => setPacketOpen(false)} />}
   </>
 }
@@ -976,7 +1140,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
     </div>
     {chatCard}
     {handoffOpen && <HandoffModal handoff={handoff} patientLabel={patientLabel} receivingPhysicianName={CHEN_NAME} onClose={() => setHandoffOpen(false)} />}
-    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} viewerPhysicianId={liveReferral.receiving_physician_id} onClose={() => setCoordinationOpen(false)} />}
   </>
 
   // Handoff drafting is itself automatic once a documented encounter exists
@@ -993,7 +1157,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
     </div>
     {chatCard}
     {handoffOpen && <HandoffModal handoff={handoff} patientLabel={patientLabel} receivingPhysicianName={CHEN_NAME} onClose={() => setHandoffOpen(false)} onSend={sendTheHandoff} />}
-    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} viewerPhysicianId={liveReferral.receiving_physician_id} onClose={() => setCoordinationOpen(false)} />}
   </>
 
   // Documented-but-not-yet-drafted is a defensive fallback only (Part I/K
@@ -1007,7 +1171,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
       {links}
     </div>
     {chatCard}
-    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} viewerPhysicianId={liveReferral.receiving_physician_id} onClose={() => setCoordinationOpen(false)} />}
   </>
 
   if (scheduling && scheduling.status === 'scheduled') {
@@ -1026,7 +1190,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
       </div>
       {chatCard}
       {schedulingDetailsOpen && <SchedulingDetailsModal scheduling={scheduling} receivingPhysicianName={CHEN_NAME} onClose={() => setSchedulingDetailsOpen(false)} />}
-      {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+      {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} viewerPhysicianId={liveReferral.receiving_physician_id} onClose={() => setCoordinationOpen(false)} />}
     </>
   }
 
@@ -1044,7 +1208,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
       <p>Scheduling administration is in progress.</p>
     </div>
     {chatCard}
-    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
+    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} viewerPhysicianId={liveReferral.receiving_physician_id} onClose={() => setCoordinationOpen(false)} />}
   </>
 }
 

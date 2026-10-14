@@ -205,19 +205,32 @@ test('agent activity reuses the one deep-link helper instead of a second impleme
 
 /* ------------------------------------------------------------- calibration */
 
-test('Not quite routes to the case-linked proposal without confirming anything', () => {
-  assert.match(recommendation(), /Does this reflect how you would practice\?/)
+/* (demo-consolidation pass, Part 29) "Not quite" no longer routes away to the
+ * older case-linked calibration proposal -- it opens a compact inline
+ * feedback surface right here (reason chips + a note), saved as a
+ * pending_training AgentCorrection instead of immediately confirming or
+ * editing an agent preference. */
+test('"Not quite" opens a compact inline feedback surface instead of navigating to the calibration page, and nothing is confirmed/edited automatically', () => {
+  assert.match(recommendation(), /Was this recommendation right\?/)
   assert.match(recommendation(), /Not quite/)
-  assert.match(recommendation(), /calibrationPath\(learningKeyForPatient\(consultation\.patient_id\), consultation\.patient_id, recordId\)/)
+  assert.doesNotMatch(recommendation(), /calibrationPath\(/, 'the older case-linked calibration navigation is gone')
   const feedback = recommendation().slice(
     recommendation().indexOf('recommendation-feedback'),
     recommendation().indexOf('options-section'),
   )
   assert.doesNotMatch(feedback, /updateAgentLearning|act\(/)
+  assert.match(feedback, /setFeedbackOpen\(true\)/)
+  assert.match(recommendation(), /createAgentCorrection\(consultation\.patient_id, PCP_AGENT_ID, correctionText\)/)
+  assert.match(feedback, /Wrong specialty.*Wrong physician fit.*Missed an important constraint.*Rationale is wrong.*Other/s)
+  assert.match(feedback, /Save feedback/)
   assert.match(styles, /\.recommendation-feedback \{[^}]*font-size: \.68rem/s, 'compact/quiet, matching surrounding metadata text scale, not an oversized paragraph')
   assert.match(styles, /\.recommendation-feedback \.text-button \{[^}]*font-weight: 600/s)
   assert.match(styles, /\.recommendation-feedback \{[^}]*display: flex[^}]*flex-wrap: wrap/s, 'one line at desktop widths, wraps gracefully on narrow mobile widths')
   assert.match(styles, /\.recommendation-feedback \{[^}]*gap: 6px 18px/s, 'enough separation that Yes and Not quite cannot be mis-clicked')
+})
+
+test('saved match-recommendation feedback is never immediately applied to the agent -- no act()/updateAgentLearning call anywhere near it, and the saved state is just a quiet confirmation', () => {
+  assert.match(recommendation(), /Noted\. Saved as feedback for your agent to review\./)
 })
 
 test('a proposed learning stays proposed until Confirm or Edit, and focus is visual only', () => {

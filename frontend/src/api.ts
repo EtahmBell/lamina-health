@@ -73,6 +73,10 @@ export type Referral = {
   created_at: string; updated_at: string; packet: ReferralPacket
   receiving_requirements: ReferralRequirement[]; requirement_results: RequirementCheck[]
   coordination_events: CoordinationEvent[]
+  /** A referral IS a specialty-care episode (demo-consolidation pass, Part
+   * 5) -- set only when this referral is a legitimate later re-referral to
+   * the same physician, linking back to the prior completed episode. */
+  previous_referral_id: number | null
 }
 
 /** Downstream closed-loop referral artifacts (Part AB) -- each its own small
@@ -95,19 +99,32 @@ export type HandoffSummary = {
   from_physician_id: string; to_physician_id: string; drafted_by_agent_id: string
   assessment: string; key_findings: string[]; recommendations: string; follow_up: string
   status: HandoffStatus; approved_by_physician_id: string | null; drafted_at: string; sent_at: string | null
+  /** Workflow/UI timestamp only (demo-consolidation pass, Part 8) -- records
+   * that the referring physician actually opened and loaded this handoff,
+   * never a claim that they formally attested to every recommendation. */
+  viewed_by_referring_physician_at: string | null
 }
 export type EncounterResult = { referral: Referral; encounter: ConsultationEncounter }
 export type HandoffResult = { referral: Referral; handoff: HandoffSummary }
 
-/** Physician-agent-to-physician-agent coordination chat (ongoing-coordination
- * pass, Part H-T) -- scoped to one referral, never a generic chat surface. */
-export type CoordinationChatRole = 'physician' | 'agent'
-export type CoordinationChatMessage = {
-  id: number | null; referral_id: number; requesting_physician_id: string; represented_physician_id: string
-  represented_agent_id: string
-  role: CoordinationChatRole; content: string; based_on: string[]; requires_physician_input: boolean; created_at: string
+/** Physician-agent-to-physician-agent coordination chat (demo-consolidation
+ * pass, Part 16-21) -- deliberately stateless server-side: nothing here is
+ * persisted, so there is no shared thread and no risk of one physician's
+ * questions leaking into the other's view. */
+export type CoordinationChatAnswer = {
+  answer: string; based_on: string[]; requires_physician_input: boolean
+  represented_agent_id: string; created_at: string
 }
-export type CoordinationChatExchange = { physician_message: CoordinationChatMessage; agent_message: CoordinationChatMessage }
+
+/** A physician's durable, explicit correction of their OWN agent's behavior
+ * (demo-consolidation pass, Part 23-31) -- separate from the ephemeral chat
+ * above and never mutating the immutable CoordinationEvent audit trail. */
+export type AgentCorrectionStatus = 'pending_training'
+export type AgentCorrection = {
+  id: number | null; physician_id: string; agent_id: string; patient_id: string
+  referral_id: number | null; source_event_sequence: number | null
+  selected_text: string | null; correction_text: string; status: AgentCorrectionStatus; created_at: string
+}
 export type AgentLearning = { key: string; statement: string; provenance: string; status: 'suggested' | 'confirmed' | 'rejected'; updated_at: string | null }
 export type MyAgent = {
   id: string; physician: string; specialty: string; status: string; synthetic: boolean; location: string
@@ -573,10 +590,29 @@ export const getHandoff = (referralId: number, asPhysicianId?: string) => reques
 export const sendHandoff = (referralId: number, receivingPhysicianId: string) => request<HandoffResult>(`/api/referrals/${referralId}/handoff/send`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
 })
-export const askPhysicianAgent = (referralId: number, requestingPhysicianId: string, question: string) => request<CoordinationChatExchange>(`/api/referrals/${referralId}/coordination-chat`, {
+/** Demo-consolidation pass, Part 8/9 -- a workflow/UI timestamp, set once the referring physician actually opens the returned handoff. */
+export const markHandoffViewed = (referralId: number, referringPhysicianId: string) => request<HandoffSummary>(`/api/referrals/${referralId}/handoff/viewed`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ referring_physician_id: referringPhysicianId }),
+})
+/** Stateless (Part 16-18): a single question in, a single grounded answer out -- nothing is persisted, so there is no companion GET. */
+export const askPhysicianAgent = (referralId: number, requestingPhysicianId: string, question: string) => request<CoordinationChatAnswer>(`/api/referrals/${referralId}/coordination-chat`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requesting_physician_id: requestingPhysicianId, question }),
 })
-export const getCoordinationChat = (referralId: number, asPhysicianId: string) => request<CoordinationChatMessage[]>(`/api/referrals/${referralId}/coordination-chat?as_physician_id=${encodeURIComponent(asPhysicianId)}`)
+
+export const createAgentCorrection = (
+  patientId: string,
+  physicianId: string,
+  correctionText: string,
+  options?: { referralId?: number; sourceEventSequence?: number; selectedText?: string },
+) => request<AgentCorrection>(`/api/patients/${encodeURIComponent(patientId)}/corrections`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    physician_id: physicianId, correction_text: correctionText,
+    referral_id: options?.referralId ?? null, source_event_sequence: options?.sourceEventSequence ?? null,
+    selected_text: options?.selectedText ?? null,
+  }),
+})
+export const getAgentCorrections = (patientId: string) => request<AgentCorrection[]>(`/api/patients/${encodeURIComponent(patientId)}/corrections`)
 
 export const getPatientActivity = () => request<PatientActivity[]>('/api/workspace/activity')
 export const getConsultationHistory = () => request<ConsultationRecord[]>('/api/workspace/consultations')

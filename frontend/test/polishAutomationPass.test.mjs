@@ -46,8 +46,35 @@ test('sidebar nav markup is shared (ProductShell), so Lucy, Chen, and Iain/any o
 test('handleSend resets `sending` in a finally block, not only in the catch branch -- the actual root cause of the close bug', () => {
   const fn = handoffModal()
   const handleSend = slice(fn, 'const handleSend = async', 'return <ModalPortal>')
-  assert.match(handleSend, /\} finally \{\s*setSending\(false\)\s*\}/)
+  assert.match(handleSend, /\} finally \{\s*if \(!cancelledRef\.current\) setSending\(false\)\s*\}/)
   assert.doesNotMatch(handleSend, /catch \(sendError\) \{\s*setError\([^)]*\)\s*setSending\(false\)\s*\}/, 'sending must not be reset only inside the catch branch any more')
+})
+
+/* ================================================================= Part 15
+ * (demo-consolidation pass) The modal must also close itself automatically
+ * on a successful send -- previously it stayed open after sending, relying
+ * on the physician to notice and dismiss it manually. Guarded by a
+ * cancelledRef so a successful send after unmount never sets state on a
+ * dead component.
+ * ===================================================================== */
+
+test('a successful send closes the modal automatically -- onClose is called right after onSend() resolves, not left to the physician to notice and dismiss', () => {
+  const fn = handoffModal()
+  const handleSend = slice(fn, 'const handleSend = async', 'return <ModalPortal>')
+  assert.match(handleSend, /await onSend\(\)\s*\n\s*if \(!cancelledRef\.current\) onClose\(\)/)
+})
+
+test('a failed send does NOT close the modal -- onClose is only reached inside the try, never in the catch branch', () => {
+  const fn = handoffModal()
+  const handleSend = slice(fn, 'const handleSend = async', 'return <ModalPortal>')
+  const catchBlock = slice(handleSend, 'catch (sendError)', 'finally')
+  assert.doesNotMatch(catchBlock, /onClose\(\)/)
+})
+
+test('cancelledRef prevents state updates after unmount -- set on an unmount cleanup effect, checked before every state setter in handleSend', () => {
+  const fn = handoffModal()
+  assert.match(fn, /const cancelledRef = useRef\(false\)/)
+  assert.match(fn, /useEffect\(\(\) => \(\) => \{ cancelledRef\.current = true \}, \[\]\)/)
 })
 
 test('the X button, backdrop click, and Escape key all gate on the same `sending` flag, so once it correctly resets, all three close paths work again', () => {

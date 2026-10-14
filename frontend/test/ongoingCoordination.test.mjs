@@ -89,23 +89,27 @@ test('specialist follow-up received uses the shared green success token, not min
   assert.doesNotMatch(fn, /<span className="status-label resolved">/)
 })
 
-test('"Review handoff" remains present as the primary action once a handoff exists', () => {
-  assert.match(referralSource, /\{handoff && <button type="button" className="button-primary" onClick=\{\(\) => setHandoffOpen\(true\)\}>Review handoff →<\/button>\}/)
+test('"Review handoff" remains present as the primary action once a handoff exists, and opening it marks it viewed in the background (demo-consolidation pass, Part 15/9)', () => {
+  assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && handoff && <div className="referral-mode-links">\s*\n\s*<button type="button" className="button-primary" onClick=\{openHandoff\}>Review handoff →<\/button>/)
+  assert.match(referralSource, /const openHandoff = \(\) => \{/)
+  assert.match(referralSource, /markHandoffViewed\(referral\.id, referral\.referring_physician_id\)/)
 })
 
-test('View referral packet / See agent coordination / Scheduling details are removed from the primary current-state card', () => {
-  const linksBlock = slice(referralSource, "{status === 'done' && referral && !justCompleted && <div className=\"referral-mode-links\">", '</div>}')
+test('View referral packet / See agent coordination / Scheduling details are removed from the primary "Review handoff" action block -- they live in their own direct-links section instead, never behind a modal (demo-consolidation pass, Part 1-2)', () => {
+  const linksBlock = slice(referralSource, "{status === 'done' && referral && !justCompleted && handoff && <div className=\"referral-mode-links\">", '</div>}')
   assert.doesNotMatch(linksBlock, /View referral packet/)
   assert.doesNotMatch(linksBlock, /See agent coordination/)
   assert.doesNotMatch(linksBlock, /View scheduling details/)
+  const artifactLinks = slice(referralSource, "{status === 'done' && referral && !justCompleted && <div className=\"referral-artifact-links\">", '</div>}')
+  assert.match(artifactLinks, /View referral packet/)
+  assert.match(artifactLinks, /See agent coordination/)
+  assert.match(artifactLinks, /View scheduling details/)
 })
 
-test('"Back to referral details" provides access to those three artifacts via ReferralDetailsModal, reusing the existing modals rather than duplicating their data', () => {
-  const fn = slice(referralSource, 'function ReferralDetailsModal', 'export function HandoffModal')
-  assert.match(fn, /<ReferralPacketModal|onOpenPacket/)
-  assert.match(fn, /onOpenCoordination/)
-  assert.match(fn, /onOpenScheduling/)
-  assert.doesNotMatch(fn, /referral\.packet\.items\.map/, 'must not re-render packet items itself -- that stays inside ReferralPacketModal')
+test('the old generic "Back to referral details" modal is gone entirely -- direct, always-visible artifact links replace it (demo-consolidation pass, Part 1-2)', () => {
+  assert.doesNotMatch(referralSource, /function ReferralDetailsModal/)
+  assert.doesNotMatch(referralSource, /Back to referral details/)
+  assert.match(referralSource, /className="referral-artifact-links"/)
 })
 
 test('no historical data is deleted -- ReferralPacketModal/AgentCoordinationModal/SchedulingDetailsModal all still exist unchanged', () => {
@@ -115,36 +119,50 @@ test('no historical data is deleted -- ReferralPacketModal/AgentCoordinationModa
 })
 
 /* ================================================================= Part Z
- * Consult another specialist: reopens the real existing discovery flow,
- * never a fake frontend-only second referral.
+ * (demo-consolidation pass, Part 6/9) Once Lucy has reviewed the returned
+ * handoff, the episode collapses and the primary card becomes a generic
+ * "Current care state" card with a "Consult network" action -- this re-runs
+ * the real consult-network pipeline for the SAME patient (never a fake
+ * frontend-only second referral), rather than just flipping back to a stale
+ * Discovery view.
  * ===================================================================== */
 
-test('"Consult another specialist" is visible once the original referral loop is complete (consult_returned)', () => {
-  assert.match(app, /\{activeReferral\?\.status === 'consult_returned' && <p className="patient-level-action">/)
-  assert.match(app, />Consult another specialist →<\/button>/)
+test('once the episode is reviewed, the primary card becomes a generic "Current care state" card offering "Consult network", not a Chen-specific card', () => {
+  const fn = recommendationView()
+  assert.match(fn, /if \(episodeReviewed\) \{/)
+  assert.match(fn, /No specialty action pending/)
+  assert.match(fn, />Consult network </)
+  assert.match(fn, /onClick=\{onReconsult\}/)
 })
 
-test('it reopens the real existing Discovery/consult-network flow for the same patient -- the exact same setViewMode call "Back to match options" already uses, never a fabricated second-referral UI', () => {
-  const button = slice(app, '<p className="patient-level-action">', '</p>}')
-  assert.match(button, /onClick=\{\(\) => setViewMode\('discovery'\)\}/)
-})
-
-test('starting a new referral still goes through the one real createReferral/accept pipeline -- no parallel frontend-only referral object is fabricated anywhere', () => {
+test('"Consult network" re-runs the real consult pipeline via onReconsult (runConsult), never a fabricated second-referral UI or a bare view-mode flip', () => {
   assert.doesNotMatch(app, /fakeReferral|localReferral|secondReferral/i)
+  assert.match(app, /onReconsult=\{runConsult\}/)
+  assert.match(app, /const \[justConsulted, setJustConsulted\] = useState\(false\)/)
+})
+
+test('episode-reviewed state is reported up from ReferralCoordinationSurface via onReviewedChange, mirroring the existing onReferralChange\/onWashChange pattern', () => {
+  assert.match(referralSource, /onReviewedChange\?: \(reviewed: boolean\) => void/)
+  assert.match(app, /onReviewedChange=\{setEpisodeReviewed\}/)
 })
 
 /* ================================================================= Part Y
- * Cross-physician agent-to-physician-agent coordination chat.
+ * (demo-consolidation pass, Part 16-22) Cross-physician agent-to-physician-
+ * agent coordination chat -- EPHEMERAL and perspective-isolated. These are
+ * private interactions with the other physician's representation, not a
+ * shared physician-to-physician message thread: nothing is persisted
+ * server-side, and each physician's chat history lives only in their own
+ * current frontend session state.
  * ===================================================================== */
 
-test('no cross-physician chat before referral acceptance -- gated on ACCEPTED_OR_LATER_STATUSES, same invariant as the patient-list fix', () => {
-  assert.match(app, /\{activeReferral && ACCEPTED_OR_LATER_STATUSES\.includes\(activeReferral\.status\) && activeReferral\.id && <CoordinationChatCard/)
+test('chat is rendered by ReferralCoordinationSurface itself -- gated on real backend acceptance (ACCEPTED_OR_LATER_STATUSES), not merely on the local create+preflight+submit workflow finishing', () => {
+  assert.match(referralSource, /status === 'done' && referral && !justCompleted && ACCEPTED_OR_LATER_STATUSES\.includes\(referral\.status\) && <CoordinationChatCard/)
 })
 
 test('Lucy gets "Ask Dr. Chen\'s Agent" after acceptance, with Chen as the represented physician', () => {
-  const fn = slice(app, '<CoordinationChatCard', '/>}')
-  assert.match(fn, /requestingPhysicianId=\{activeReferral\.referring_physician_id\}/)
-  assert.match(fn, /representedPhysicianId=\{activeReferral\.receiving_physician_id\}/)
+  const activeChat = slice(referralSource, "ACCEPTED_OR_LATER_STATUSES.includes(referral.status) && <CoordinationChatCard", '/>}')
+  assert.match(activeChat, /requestingPhysicianId=\{referral\.referring_physician_id\}/)
+  assert.match(activeChat, /representedPhysicianId=\{referral\.receiving_physician_id\}/)
 })
 
 test('Chen gets "Ask Dr. Saruhashi\'s Agent" after acceptance, with Lucy as the represented physician -- the SAME shared CoordinationChatCard component, just swapped requesting/represented props (Part S)', () => {
@@ -157,20 +175,26 @@ test('Chen gets "Ask Dr. Saruhashi\'s Agent" after acceptance, with Lucy as the 
 test('both directions reuse the exact same CoordinationChatCard component -- not two separate implementations', () => {
   const definitions = [...referralSource.matchAll(/export function CoordinationChatCard/g)]
   assert.equal(definitions.length, 1)
-  assert.match(app, /<CoordinationChatCard/)
-  assert.match(referralSource, /chatCard = referral\.id && <CoordinationChatCard/)
+  assert.doesNotMatch(app, /<CoordinationChatCard/, 'App.tsx no longer renders its own standalone chat card -- ReferralCoordinationSurface owns it now')
 })
 
-test('the chat card fetches the real authorized thread via getCoordinationChat, and sends via askPhysicianAgent -- never a client-only template', () => {
+test('the chat card is ephemeral -- no fetch of a persisted thread on mount, and no GET-chat API helper exists anymore', () => {
   const fn = coordinationChatCard()
-  assert.match(fn, /getCoordinationChat\(referral\.id, requestingPhysicianId\)/)
+  assert.doesNotMatch(fn, /getCoordinationChat/)
+  assert.match(fn, /useState<LocalChatMessage\[\]>\(\[\]\)/)
+  const api = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(api, /getCoordinationChat/)
+})
+
+test('sending a question calls askPhysicianAgent and renders the fresh CoordinationChatAnswer locally -- never a client-only fabricated template', () => {
+  const fn = coordinationChatCard()
   assert.match(fn, /askPhysicianAgent\(referral\.id, requestingPhysicianId, trimmed\)/)
 })
 
 test('agent answers render requires_physician_input as an escalation note and based_on as quiet grounding, never hidden chain-of-thought', () => {
   const fn = coordinationChatCard()
-  assert.match(fn, /message\.requires_physician_input && <p className="chat-uncertainty">/)
-  assert.match(fn, /message\.based_on\.length > 0 && <p className="chat-grounding">Based on: \{message\.based_on\.join\(', '\)\}<\/p>/)
+  assert.match(fn, /requiresPhysicianInput && <p className="chat-uncertainty">/)
+  assert.match(fn, /basedOn\.length > 0 && <p className="chat-grounding">Based on: \{.*basedOn\.join\(', '\)\}<\/p>/)
 })
 
 test('suggested prompts remain available after being used -- the dropdown is not a checklist, and sending a suggested prompt never removes it from the list', () => {
@@ -179,23 +203,24 @@ test('suggested prompts remain available after being used -- the dropdown is not
   assert.doesNotMatch(fn, /setSuggestedPrompts|filter\(\(p\) => p !== prompt\)/, 'the prompt list itself must never be mutated when a prompt is sent')
 })
 
-test('the suggested-prompts disclosure stays open across the conversation (controlled, not auto-closing after a send)', () => {
-  const fn = coordinationChatCard()
-  assert.match(fn, /<details className="network-optional coordination-chat-prompts" open=\{promptsOpen\} onToggle=\{\(event\) => setPromptsOpen\(event\.currentTarget\.open\)\}>/)
-  assert.doesNotMatch(fn, /setPromptsOpen\(false\)[\s\S]{0,40}send|send[\s\S]{0,80}setPromptsOpen\(false\)/)
-})
-
 test('chat remains available after scheduling and after consult_returned -- never hidden once the loop closes', () => {
   assert.match(referralSource, /export const ACCEPTED_OR_LATER_STATUSES: ReferralStatus\[\] = \['accepted', 'scheduled', 'consult_returned'\]/)
-  assert.match(app, /ACCEPTED_OR_LATER_STATUSES\.includes\(activeReferral\.status\)/)
 })
 
-test('reload hydrates the real persisted thread rather than starting empty or replaying -- fetched once on mount, keyed on the real referral/physician ids', () => {
+test('the chat thread is a bounded, scrollable viewport that auto-scrolls to the newest message on send, never an ever-growing rail (Part 19)', () => {
   const fn = coordinationChatCard()
-  assert.match(fn, /useEffect\(\(\) => \{\s*if \(!referral\.id\) return\s*let ignore = false\s*getCoordinationChat/)
+  assert.match(fn, /threadRef = useRef<HTMLDivElement>\(null\)/)
+  assert.match(fn, /threadRef\.current\.scrollTop = threadRef\.current\.scrollHeight/)
+  assert.match(styles, /\.coordination-chat-card \.chat-thread \{[^}]*max-height: 320px;[^}]*overflow-y: auto;/)
 })
 
-test('persistence is patient/referral scoped, not a generic physician agent memory table (Part M)', () => {
-  assert.match(referralSource, /CoordinationChatMessage/)
+test('reloading/navigating back to the page starts with an empty chat -- messages are local component state only, never backed by localStorage/sessionStorage', () => {
+  const fn = coordinationChatCard()
+  assert.doesNotMatch(fn, /localStorage|sessionStorage/)
+  assert.doesNotMatch(fn, /useEffect\(\(\) => \{[^}]*setMessages\(/, 'messages must never be populated from an effect on mount -- only via send()')
+})
+
+test('persistence is gone entirely -- no shared coordination_chat_messages table backs this feature anymore (Part 16-18)', () => {
+  assert.doesNotMatch(referralSource, /CoordinationChatMessage/)
   assert.doesNotMatch(referralSource, /localStorage\.setItem\(.*chat/i)
 })

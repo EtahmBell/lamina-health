@@ -69,8 +69,16 @@ def build_referral(
     *,
     referring_physician_id: str = LUCY_AGENT_ID,
     urgency: str = "Routine outpatient referral",
+    previous_referral_id: int | None = None,
 ) -> Referral:
-    """Create a new referral and assemble its initial packet. Does not persist."""
+    """Create a new referral and assemble its initial packet. Does not persist.
+
+    `previous_referral_id` (demo-consolidation pass, Part 5) links a
+    legitimate later re-referral to the same physician back to the prior
+    completed episode -- a referral IS a specialty-care episode, so this is
+    the only lineage pointer needed; the API layer is responsible for only
+    ever passing this when the prior episode actually reached a terminal
+    state (see find_active_referral_for_pair's duplicate-guard counterpart)."""
     context = build_patient_context(patient)
     referral_question = patient.referral_question or f"Please evaluate for {specialty.lower()} input."
     now = _now()
@@ -84,6 +92,7 @@ def build_referral(
         status=ReferralStatus.DRAFT,
         created_at=now,
         updated_at=now,
+        previous_referral_id=previous_referral_id,
     )
     _append_event(
         referral,
@@ -105,6 +114,55 @@ def build_referral(
         metadata={"item_count": len(referral.packet.items)},
     )
     return referral
+
+
+# A referral is "done, repeatable" only once it reaches consult_returned
+# (demo-consolidation pass, Part 4/5) -- every other status is still an
+# active, non-repeatable specialty-care episode for that patient+receiving-
+# physician pair. Deliberately the complement of _ACCEPTED_OR_LATER below
+# rather than the same set: accepted/scheduled ARE still "active" here even
+# though they're also "accepted or later" for other purposes.
+_ACTIVE_NON_REPEATABLE_STATUSES = (
+    ReferralStatus.DRAFT,
+    ReferralStatus.ASSEMBLING,
+    ReferralStatus.PREFLIGHT,
+    ReferralStatus.RESOLVING,
+    ReferralStatus.READY_FOR_REVIEW,
+    ReferralStatus.SUBMITTED,
+    ReferralStatus.ACCEPTED,
+    ReferralStatus.SCHEDULED,
+)
+
+
+def find_active_referral_for_pair(
+    existing_referrals_for_patient: list[Referral], receiving_physician_id: str
+) -> Referral | None:
+    """The backend duplicate-referral guard (Part 4) -- an accidental repeat
+    "Start referral" click (e.g. after browser back/forward, or a stale
+    frontend view) for the same patient+receiving-physician must never
+    create a second active row. Returns the existing active episode so the
+    caller can return it idempotently instead of creating a new one; returns
+    None when there is no active episode for this pair (either none exists
+    yet, or the prior one already reached consult_returned), which is
+    exactly when a legitimate new referral -- a new episode -- may be
+    created (Part 5)."""
+    for referral in reversed(existing_referrals_for_patient):
+        if referral.receiving_physician_id == receiving_physician_id and referral.status in _ACTIVE_NON_REPEATABLE_STATUSES:
+            return referral
+    return None
+
+
+def most_recent_referral_for_pair(
+    existing_referrals_for_patient: list[Referral], receiving_physician_id: str
+) -> Referral | None:
+    """The prior episode (if any) to link a legitimate new referral back to
+    via `previous_referral_id` (Part 5) -- regardless of its status, since
+    by the time this is consulted, find_active_referral_for_pair has
+    already confirmed there is no ACTIVE one blocking a new episode."""
+    for referral in reversed(existing_referrals_for_patient):
+        if referral.receiving_physician_id == receiving_physician_id:
+            return referral
+    return None
 
 
 def run_preflight(patient: PatientRecord, referral: Referral) -> Referral:

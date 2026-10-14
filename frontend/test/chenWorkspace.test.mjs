@@ -6,6 +6,7 @@ const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const referralSource = readFileSync(new URL('../src/Referral.tsx', import.meta.url), 'utf8')
 const engagement = readFileSync(new URL('../src/Engagement.tsx', import.meta.url), 'utf8')
 const demoPatients = readFileSync(new URL('../src/demoPatients.ts', import.meta.url), 'utf8')
+const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 
 const slice = (source, from, to) => source.slice(source.indexOf(from), to !== undefined ? source.indexOf(to) : undefined)
 const routing = () => slice(app, 'export default function App', app.length)
@@ -187,4 +188,21 @@ test('Chen has his own real PERSONAS/DEMO_ENRICHMENT/BASE_PROFILE_ITEMS/TRAINING
   assert.match(backendEngagement, /EDITABLE_PERSONAS = \{"lucy", "iain", "chen"\}/)
   assert.match(backendEngagement, /"chen": \[\],\s*\n\s*"iain": \[/, 'TRAINING_QUESTIONS has a real (empty, not missing) chen entry')
   assert.match(backendProfessionalServices, /"chen": \[\s*\n\s*\("training", "Synthetic endocrinology training background"\),/)
+})
+
+/* ================================================================= Part 12
+ * (demo-consolidation pass) Chen's Dashboard had the Patients section
+ * flush against the agent banner above it -- the adjacent-sibling margin
+ * rule (`.patient-worklist-section + .patient-worklist-section`) never
+ * applies to the FIRST such section on the page, only later ones. Fixed by
+ * a dashboard-page-scoped rule so Lucy's PatientSelector/ChenPatientsPage
+ * (which reuse the same class but are not `.dashboard-page`) are untouched.
+ * ===================================================================== */
+
+test('ChenHomePage\'s Patients section matches the same 36px section-spacing rhythm used elsewhere, via a .dashboard-page-scoped rule -- not a redesign', () => {
+  assert.match(styles, /\.dashboard-page \.patient-worklist-section \{ margin-top: var\(--section-space\); \}/)
+})
+
+test('the dashboard-page spacing fix is scoped narrowly -- it never touches PatientSelector/ChenPatientsPage, which reuse .patient-worklist-section but are not .dashboard-page', () => {
+  assert.doesNotMatch(app, /className="dashboard-page[^"]*"[\s\S]{0,4000}export function ChenPatientsPage/, 'ChenPatientsPage must not itself be wrapped in .dashboard-page')
 })

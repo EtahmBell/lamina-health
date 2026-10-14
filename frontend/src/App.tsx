@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralStatus, type TrainProjection } from './api.ts'
+import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralStatus, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
-import { activityPath, agentActivity, calibrationPath, consultationPath, eventDomId, learningKeyForPatient } from './agentActivity.ts'
+import { activityPath, agentActivity, consultationPath, eventDomId } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
 import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
@@ -18,7 +18,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, chenSuggestedPrompts, CoordinationChatCard, lucySuggestedPrompts, ReferralCoordinationSurface } from './Referral.tsx'
+import { ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -676,13 +676,33 @@ function ConsultationLog({ messages, focusEventId, highlight }: { messages: Cons
   return <div className="consult-record-stages"><header><strong>Structured consultation record</strong><small>{messages.length} backend events · original sequence preserved</small></header>{stages.map((stage) => <section className={`consult-record-stage ${stage.kind}`} key={stage.id}><div className="consult-record-stage-heading"><span>{stage.title}</span><small>{stage.messages.length} event{stage.messages.length === 1 ? '' : 's'}</small></div><div className="consult-record-events">{stage.messages.map((message) => <details className={`consult-record-event ${message.id === focusEventId ? 'targeted' : ''} ${message.id === focusEventId && highlight ? 'event-focus' : ''}`} id={eventDomId(message.id)} open={message.id === focusEventId} key={message.id}><summary><span>{message.sequence.toString().padStart(2, '0')}</span><div><strong>{messageSender(message)}</strong><small>{message.summary}</small></div><em>{messageLabel(message)}</em></summary><div className="consult-record-evidence"><p>{message.sender_role} → {message.recipient_agent_id === PCP_AGENT_ID ? PCP_AGENT_NAME : message.recipient_agent_id === 'network' ? 'Physician network' : 'Specialist agent'}</p>{message.related_patient_facts.map((fact) => <p key={fact}><b>Patient fact</b>{fact}</p>)}{message.evidence.map((item, index) => <p key={`${index}-${item.kind}`}><b>{item.kind.replaceAll('_', ' ')}</b>{item.detail}</p>)}{!message.evidence.length && !message.related_patient_facts.length && <p>No additional structured evidence on this event.</p>}</div></details>)}</div></section>)}</div>
 }
 
-function RecommendationView({ consultation, navigate, focusEventId = null, recordId, referralQuestion = null }: { consultation: Consultation; navigate: Navigate; focusEventId?: string | null; recordId?: number; referralQuestion?: string | null }) {
+function RecommendationView({
+  consultation, navigate, focusEventId = null, recordId, referralQuestion = null, justConsulted = false, onReconsult,
+}: {
+  consultation: Consultation; navigate: Navigate; focusEventId?: string | null; recordId?: number; referralQuestion?: string | null
+  /** Demo-consolidation pass, Part 6: true only for the single mount right
+   * after an explicit "Consult network" re-run produced THIS consultation
+   * -- read once via lazy useState init below (mirrors restoredReferral's
+   * own pattern), so a later reload of the same page never re-suppresses
+   * hydration's normal "restore the existing episode" behavior. */
+  justConsulted?: boolean
+  onReconsult?: () => void
+}) {
   const [networkOpen, setNetworkOpen] = useState(Boolean(focusEventId))
   const [highlight, setHighlight] = useState(Boolean(focusEventId))
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [alternativesOpen, setAlternativesOpen] = useState(false)
   const [referralStarted, setReferralStarted] = useState(false)
   const [affirmed, setAffirmed] = useState(false)
+  // Match-recommendation feedback (demo-consolidation pass, Part 29) -- a
+  // compact inline surface, not a navigation away to the older calibration
+  // flow. Saved as an AgentCorrection (pending_training), never applied to
+  // the agent immediately.
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackReason, setFeedbackReason] = useState<string | null>(null)
+  const [feedbackText, setFeedbackText] = useState('')
+  const [feedbackSaving, setFeedbackSaving] = useState(false)
+  const [feedbackSaved, setFeedbackSaved] = useState(false)
   const [selectedId, setSelectedId] = useState(consultation.recommended_physician.physician_id)
   const [swapping, setSwapping] = useState(false)
   // Mirrors ReferralCoordinationSurface's brief live completion moment -- the
@@ -690,6 +710,12 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   // on a separately-shaped overlay, so it can never mismatch the card's own
   // border-radius (Part H). Only ever true during a live Start-referral run.
   const [washActive, setWashActive] = useState(false)
+  // Reported up from ReferralCoordinationSurface the moment Lucy has
+  // actually reviewed the returned handoff (demo-consolidation pass, Part
+  // 7-10) -- once true, the specialty episode recedes and this component
+  // renders a generic current-care-state card instead of "Referral to Dr.
+  // X". Never decided here directly; always the child's own real fact.
+  const [episodeReviewed, setEpisodeReviewed] = useState(false)
   // Discovery vs. Referral are frontend presentation modes only -- never a
   // backend referral status, and never persisted client-side either. See
   // Part B. `activeReferral` is populated purely by asking the backend
@@ -734,14 +760,22 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
     setReferralHydrated(false)
     getActiveReferral(consultation.patient_id).then((existing) => {
       if (ignore || !existing) return
+      setActiveReferral(existing)
+      // Part 6: right after an explicit re-consult, stay in Discovery mode
+      // showing the NEW recommendation -- still track the prior episode (for
+      // the "already referred"/duplicate-guard notices) but don't snap back
+      // into it. `justConsulted` is intentionally NOT in this effect's own
+      // dependency array (see the prop's own doc comment): it is read once,
+      // from the closure captured at mount.
+      if (justConsulted) return
       const phase = restorePhase(existing)
       if (phase) {
-        setActiveReferral(existing)
         setSelectedId(existing.receiving_physician_id)
         setViewMode('referral')
       }
     }).catch(() => {}).finally(() => { if (!ignore) setReferralHydrated(true) })
     return () => { ignore = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [consultation.patient_id, referralQuestion])
   const primary = consultation.recommended_physician
   const historical = evidenceFor(primary, 'historical_practice_similarity')
@@ -791,6 +825,25 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   const activeReferralPhysician = activeReferral ? candidates.find((item) => item.physician_id === activeReferral.receiving_physician_id) : undefined
   const activeReferralPhysicianLabel = activeReferralPhysician ? cleanName(activeReferralPhysician.physician_name) : 'another specialist'
 
+  /**
+   * Save match-recommendation feedback as an AgentCorrection (Part 29) --
+   * a physician-owned, pending_training artifact, never applied to the
+   * agent immediately. Self-correction (no referral exists yet at this
+   * point), so physician_id is the physician's own agent id.
+   */
+  const saveRecommendationFeedback = async () => {
+    const reasonPrefix = feedbackReason ? `${feedbackReason}. ` : ''
+    const correctionText = `${reasonPrefix}${feedbackText}`.trim()
+    if (!correctionText) return
+    setFeedbackSaving(true)
+    try {
+      await createAgentCorrection(consultation.patient_id, PCP_AGENT_ID, correctionText)
+      setFeedbackSaved(true)
+    } finally {
+      setFeedbackSaving(false)
+    }
+  }
+
   // Hydration gate (Part D): render NEITHER Discovery's "best fit" framing
   // NOR a live phase-reveal animation until we authoritatively know whether
   // a referral already exists. A quiet neutral placeholder only -- never a
@@ -810,6 +863,38 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   // alternatives, consult detail) is not rendered at all here, not merely
   // hidden (Part F/M/N).
   if (referralQuestion && viewMode === 'referral') {
+    const coordinationSurface = <ReferralCoordinationSurface
+      key={selected.physician_id}
+      patientId={consultation.patient_id}
+      patientLabel={patientName(consultation.patient_id)}
+      receivingPhysicianId={selected.physician_id}
+      receivingPhysicianName={cleanName(selected.physician_name)}
+      onWashChange={setWashActive}
+      onReferralChange={setActiveReferral}
+      onReviewedChange={setEpisodeReviewed}
+      restoredReferral={activeReferral}
+    />
+    // Once Lucy has reviewed the returned handoff, Chen stops dominating the
+    // primary current-care state (demo-consolidation pass, Part 7C/9) --
+    // the episode itself (artifact links, chat, "View handoff") recedes
+    // into ReferralCoordinationSurface's own collapsed rendering below;
+    // this generic card is the only thing that was EVER Chen-specific here.
+    if (episodeReviewed) {
+      return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
+        <h2>Current care state</h2>
+        <p className="page-intro">Your agent helps with the follow-through.</p>
+        <article className="best-fit-card compact referral-card">
+          <div className="next-step-card idle">
+            <span className="status-label resolved"><span aria-hidden="true">✓</span>No specialty action pending</span>
+            <h3>{cleanName(selected.physician_name)}'s consultation has been reviewed.</h3>
+            <p>{patientName(consultation.patient_id)} is ready for whatever care need comes next.</p>
+            <button type="button" className="consult-button" onClick={onReconsult}>Consult network <span className="spark-icon" aria-hidden="true">✧</span></button>
+          </div>
+        </article>
+        {coordinationSurface}
+        <p className="disclaimer">{consultation.disclaimer}</p>
+      </section>
+    }
     return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
       <h2>Current care state</h2>
       <p className="page-intro">Your agent helps with the follow-through.</p>
@@ -817,37 +902,8 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
         <button type="button" className="text-button back-to-match" onClick={() => setViewMode('discovery')}>← Back to match options</button>
         <p className="best-fit-kicker">Referral to</p>
         <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(selected.physician_name)}</span><div><h2>{cleanName(selected.physician_name)}</h2><p>{selected.specialty}</p></div></div>
-        <ReferralCoordinationSurface
-          key={selected.physician_id}
-          patientId={consultation.patient_id}
-          patientLabel={patientName(consultation.patient_id)}
-          receivingPhysicianId={selected.physician_id}
-          receivingPhysicianName={cleanName(selected.physician_name)}
-          onWashChange={setWashActive}
-          restoredReferral={activeReferral}
-        />
+        {coordinationSurface}
       </article>
-      {/* Physician-agent-to-physician-agent coordination chat (ongoing-
-       * coordination pass, Part H-T) -- only once a real accepted referral
-       * exists, reusing the same component for both directions. */}
-      {activeReferral && ACCEPTED_OR_LATER_STATUSES.includes(activeReferral.status) && activeReferral.id && <CoordinationChatCard
-        referral={activeReferral}
-        patientLabel={patientName(consultation.patient_id)}
-        requestingPhysicianId={activeReferral.referring_physician_id}
-        representedPhysicianId={activeReferral.receiving_physician_id}
-        representedPhysicianName={cleanName(selected.physician_name)}
-        representedTone="copper"
-        suggestedPrompts={lucySuggestedPrompts(patientName(consultation.patient_id), cleanName(selected.physician_name), selected.specialty)}
-      />}
-      {/* Patient-level action (Part F/G) -- reopens the real existing
-       * Discovery/consult-network flow for the SAME patient, never a fake
-       * "send patient back" concept. Only once the original referral loop
-       * is actually done, since starting a genuinely new referral here
-       * would replace this one as the patient's "active referral" (see the
-       * backend-limitation note in the final report). */}
-      {activeReferral?.status === 'consult_returned' && <p className="patient-level-action">
-        <button type="button" className="text-button" onClick={() => setViewMode('discovery')}>Consult another specialist →</button>
-      </p>}
       <p className="disclaimer">{consultation.disclaimer}</p>
     </section>
   }
@@ -875,16 +931,61 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
       <p className="fit-indicator">{selected.clinical_fit === 'strong' ? 'Strong clinical fit' : selected.clinical_fit === 'moderate' ? 'Moderate clinical fit' : 'Limited clinical fit'}</p>
       <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selected.availability}</p>
       <p className="fit-rationale">{selected.reason}</p>
+      {/* Backend/view-mode navigation can never bypass real workflow state
+       * (demo-consolidation pass, Part 3): once a real referral already
+       * exists to THIS physician, "Start referral" never renders again here
+       * -- regardless of whether the physician reached this card by
+       * reloading, or by live-navigating "Back to match options" after just
+       * creating it this same session (see ReferralCoordinationSurface's
+       * onReferralChange, which keeps activeReferral from ever going stale
+       * mid-session). The backend's own duplicate-referral guard is a second,
+       * independent line of defense, not the only one. */}
       <div className="best-fit-actions">{referralQuestion
         ? activeReferral && activeReferral.receiving_physician_id === selected.physician_id
-          ? <p className="referral-already-selected" role="status"><span aria-hidden="true">✓</span> {activeReferral.status === 'accepted' ? 'Referral accepted' : 'Selected for referral'}</p>
+          ? <div className="referral-episode-status" role="status">
+              <span><span aria-hidden="true">✓</span> {activeReferral.status === 'consult_returned' ? 'Referral completed' : 'Referral active'}</span>
+              <button type="button" className="button-primary" onClick={() => setViewMode('referral')}>
+                {activeReferral.status === 'consult_returned' ? 'View specialty-care episode →' : 'Return to current referral →'}
+              </button>
+            </div>
           : activeReferral
             ? <p className="referral-locked-note">A referral is already active with {activeReferralPhysicianLabel}.</p>
             : <button className="button-primary" onClick={startReferral}>Start referral <span>→</span></button>
         : <><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(selected.physician_name)} · {selected.specialty}</span><span>Workup: {selected.required_workup.join(' · ') || 'None specified'}</span><span>No referral was transmitted.</span></div>}</>}</div>
     </article>
 
-    <div className="recommendation-feedback"><span>Does this reflect how you would practice?</span>{affirmed ? <em role="status">Noted. Nothing was changed on your agent.</em> : <><button className="text-button" onClick={() => setAffirmed(true)}>Yes</button><button className="text-button" onClick={() => navigate(calibrationPath(learningKeyForPatient(consultation.patient_id), consultation.patient_id, recordId))}>Not quite <b>→</b></button></>}</div>
+    {/* Part 29: a compact inline feedback surface, not a navigation away to
+     * the older calibration flow -- "Not quite" opens reason chips + a free-
+     * text note right here, saved as an AgentCorrection (pending_training),
+     * never immediately applied to the agent. */}
+    <div className="recommendation-feedback">
+      <span>Was this recommendation right?</span>
+      {affirmed
+        ? <em role="status">Noted. Nothing was changed on your agent.</em>
+        : feedbackSaved
+          ? <em role="status">Noted. Saved as feedback for your agent to review.</em>
+          : feedbackOpen
+            ? null
+            : <><button className="text-button" onClick={() => setAffirmed(true)}>Yes</button><button className="text-button" onClick={() => setFeedbackOpen(true)}>Not quite <b>→</b></button></>}
+    </div>
+    {!affirmed && !feedbackSaved && feedbackOpen && <div className="recommendation-feedback-panel">
+      <p className="section-label">What should your agent have considered?</p>
+      <div className="feedback-reason-chips">{['Wrong specialty', 'Wrong physician fit', 'Missed an important constraint', 'Rationale is wrong', 'Other'].map((reason) => <button
+        key={reason} type="button"
+        className={`feedback-reason-chip ${feedbackReason === reason ? 'selected' : ''}`}
+        onClick={() => setFeedbackReason(reason === feedbackReason ? null : reason)}
+      >{reason}</button>)}</div>
+      <textarea
+        className="feedback-reason-text"
+        placeholder="What should your agent have considered?"
+        value={feedbackText}
+        onChange={(event) => setFeedbackText(event.target.value)}
+      />
+      <div className="feedback-reason-actions">
+        <button type="button" className="text-button" onClick={() => setFeedbackOpen(false)}>Cancel</button>
+        <button type="button" className="button-secondary" disabled={feedbackSaving || (!feedbackReason && !feedbackText.trim())} onClick={() => void saveRecommendationFeedback()}>{feedbackSaving ? 'Saving…' : 'Save feedback'}</button>
+      </div>
+    </div>}
 
     {/* One open surface -- whitespace and hairline rules separate groups,
      * never a bordered/shaded box nested inside the already-boxed card. */}
@@ -956,6 +1057,7 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
   const [error, setError] = useState<string | null>(null)
   const [activity, setActivity] = useState<PatientActivity | null>(null)
   const [reconsulting, setReconsulting] = useState(false)
+  const [justConsulted, setJustConsulted] = useState(false)
   const [nextStepPinned, setNextStepPinned] = useState(false)
   // Dr. Chen's side of an accepted referral (Part Q) -- the same persisted
   // referral object Lucy sees, just a different viewer. Fetched only in
@@ -1063,6 +1165,14 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
     try {
       const [result] = await Promise.all([consultNetwork(patientId, context), minimumConsultingDisplay])
       setConsultation(result)
+      // Demo-consolidation pass, Part 6: a fresh network consultation, once
+      // it exists, must show its OWN new recommendation -- never snap back
+      // into whatever prior (possibly completed) referral episode this
+      // patient already has. RecommendationView fully unmounts/remounts
+      // between `consulting` states (see nextStepState), so this flag,
+      // consumed once at that next mount, reliably distinguishes "just
+      // re-consulted this session" from an ordinary reload.
+      setJustConsulted(true)
       void refreshActivity()
     } catch (consultError) {
       setError(consultError instanceof Error ? consultError.message : 'Consultation failed')
@@ -1144,7 +1254,7 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
               <p>Comparing clinical fit, referral requirements, access, and your practice preferences…</p>
             </div>}
             {nextStepState === 'ready' && consultation && <>
-              <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} referralQuestion={patient.referral_question} />
+              <RecommendationView consultation={consultation} navigate={navigate} recordId={recordId} referralQuestion={patient.referral_question} justConsulted={justConsulted} onReconsult={runConsult} />
             </>}
             {nextStepState === 'idle-prior' && <div className="next-step-card idle">
               <h3>Previous network consultation available.</h3>

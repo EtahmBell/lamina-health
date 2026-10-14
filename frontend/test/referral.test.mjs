@@ -359,11 +359,14 @@ test('the old bottom-right toast was removed -- the full-card success wash is no
   assert.doesNotMatch(styles, /\.lamina-toast/)
 })
 
-test('"Back to referral details" remains available once submission completes, not just while ready -- but not during the brief completion wash itself; "See agent coordination"/"View referral packet" moved behind it (ongoing-coordination pass, Part D/E) rather than disappearing', () => {
-  assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-mode-links">/)
-  assert.match(referralSource, /onClick=\{\(\) => setDetailsOpen\(true\)\}>← Back to referral details/)
-  assert.match(referralSource, /onClick=\{onOpenCoordination\}>See agent coordination/)
-  assert.match(referralSource, /onClick=\{onOpenPacket\}>View referral packet/)
+test('the active-episode card exposes "Review handoff" as the primary action and the three artifact links directly, with no "Back to referral details" modal in between (demo-consolidation pass, Part 1-2)', () => {
+  assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && handoff && <div className="referral-mode-links">/)
+  assert.match(referralSource, /onClick=\{openHandoff\}>Review handoff →<\/button>/)
+  assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-artifact-links">/)
+  assert.match(referralSource, /onClick=\{\(\) => setPacketOpen\(true\)\}>View referral packet →<\/button>/)
+  assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination →<\/button>/)
+  assert.doesNotMatch(referralSource, /function ReferralDetailsModal/, 'the modal was removed entirely -- direct links replace it')
+  assert.doesNotMatch(referralSource, /Back to referral details/)
 })
 
 test('the success wash state appears only via the real "sent" phase reveal -- never from the error/unresolved paths', () => {
@@ -446,7 +449,8 @@ test('ReferralCoordinationSurface accepts a restoredReferral prop and jumps stra
 
 test('restoring a submitted referral still allows "See agent coordination" to open with the real restored events', () => {
   assert.match(referralSource, /useState<Referral \| null>\(restoredReferral\)/)
-  assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-mode-links">/)
+  assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-artifact-links">/)
+  assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination →<\/button>/)
 })
 
 /* ------------------------------------------------------ patient-level referral lookup (backend) */
@@ -538,10 +542,12 @@ test('Discovery mode\'s "referral active" notice shows an accepted-specific mess
   assert.match(discovery, /Added to their care/)
 })
 
-test('Dr. Chen\'s card shows "Selected for referral" instead of "Start referral" once that physician is the active referral\'s destination', () => {
+test('Dr. Chen\'s card shows a real episode-status CTA ("Referral active"/"Referral completed") instead of "Start referral" once that physician is the active referral\'s destination -- never silently re-rendering Start referral and risking a second referral (demo-consolidation pass, Part 3/4)', () => {
   const discovery = discoveryModeBranch()
   assert.match(discovery, /activeReferral && activeReferral\.receiving_physician_id === selected\.physician_id/)
-  assert.match(discovery, /Selected for referral/)
+  assert.match(discovery, /className="referral-episode-status"/)
+  assert.match(discovery, /activeReferral\.status === 'consult_returned' \? 'Referral completed' : 'Referral active'/)
+  assert.match(discovery, /activeReferral\.status === 'consult_returned' \? 'View specialty-care episode →' : 'Return to current referral →'/)
 })
 
 test('selecting a different physician while a referral is active cannot silently start/replace it -- a quiet locked note appears instead of Start referral', () => {
@@ -597,7 +603,17 @@ test('switching back to the restored Referral mode via "Return to active referra
 test('hydration only switches to Referral mode when a real restorable phase exists -- otherwise Discovery (the default) is left untouched', () => {
   const view = recommendation()
   const hydrationBlock = view.slice(view.indexOf('if (!referralQuestion) return'), view.indexOf("}, [consultation.patient_id, referralQuestion])"))
-  assert.match(hydrationBlock, /if \(phase\) \{\s*\n\s*setActiveReferral\(existing\)\s*\n\s*setSelectedId\(existing\.receiving_physician_id\)\s*\n\s*setViewMode\('referral'\)\s*\n\s*\}/, 'setViewMode is only called inside the `if (phase)` branch, not unconditionally')
+  assert.match(hydrationBlock, /setActiveReferral\(existing\)/, 'the prior episode is always tracked, even if its view is not restored')
+  assert.match(hydrationBlock, /if \(phase\) \{\s*\n\s*setSelectedId\(existing\.receiving_physician_id\)\s*\n\s*setViewMode\('referral'\)\s*\n\s*\}/, 'setViewMode is only called inside the `if (phase)` branch, not unconditionally')
+})
+
+test('right after an explicit re-consult, hydration still tracks the prior episode (for duplicate-guard/CTA purposes) but does not snap the view back into it (demo-consolidation pass, Part 6)', () => {
+  const view = recommendation()
+  const hydrationBlock = view.slice(view.indexOf('if (!referralQuestion) return'), view.indexOf("}, [consultation.patient_id, referralQuestion])"))
+  assert.match(hydrationBlock, /setActiveReferral\(existing\)[\s\S]*?if \(justConsulted\) return/)
+  const justConsultedIndex = hydrationBlock.indexOf('if (justConsulted) return')
+  const phaseIndex = hydrationBlock.indexOf('const phase = restorePhase(existing)')
+  assert.ok(justConsultedIndex > -1 && phaseIndex > -1 && justConsultedIndex < phaseIndex, 'the early return must come before any view-mode-switching logic')
 })
 
 /* ========================================================================

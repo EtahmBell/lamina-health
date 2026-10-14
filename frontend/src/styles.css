@@ -562,6 +562,16 @@ button.lam-row:hover { background: #fff9f1; }
 .recommendation-feedback .text-button { border-radius: 5px; padding: 2px; color: var(--mineral-deep); font-size: .68rem; font-weight: 600; }
 .recommendation-feedback .text-button:hover { color: var(--clinical); }
 .recommendation-feedback em { color: var(--success); font-style: normal; }
+/* Compact inline match-recommendation feedback surface (demo-consolidation
+ * pass, Part 29) -- replaces navigation to the older calibration page with
+ * reason chips + a note, saved as a pending_training AgentCorrection. */
+.recommendation-feedback-panel { margin-top: 10px; border: 1px solid var(--border); border-radius: 7px; background: #f3f4ed; padding: 14px 16px; }
+.feedback-reason-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.feedback-reason-chip { border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 5px 10px; color: var(--clinical); cursor: pointer; font-size: .62rem; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
+.feedback-reason-chip:hover { border-color: var(--accent); background: #fff8f0; }
+.feedback-reason-chip.selected { border-color: var(--mineral); background: var(--mineral-surface); color: var(--mineral-deep); }
+.feedback-reason-text { width: 100%; min-height: 64px; margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 8px 10px; color: var(--text-primary); font-family: inherit; font-size: .7rem; line-height: 1.5; resize: vertical; }
+.feedback-reason-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
 
 /* Source clinical data: a readable record, not a wall of mini-cards. */
 .source-record > summary { padding-block: 20px; font-size: .78rem; }
@@ -1695,6 +1705,13 @@ button.lam-row:hover { background: #fff9f1; }
 .coordination-event strong { display: block; margin-top: 2px; font-size: .8rem; font-weight: 500; }
 .coordination-event p { margin: 4px 0 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
 .coordination-footer { margin-top: 18px; color: var(--mineral-deep); font-size: .74rem; font-weight: 600; }
+/* Quiet, physician-owned per-event correction mechanic (demo-consolidation
+ * pass, Part 23-28) -- a small text-button, not a button cluttering every
+ * row; only ever shown on the viewing physician's own agent's events. */
+.coordination-correct-trigger { margin-top: 6px; font-size: .62rem; }
+.coordination-correction-saved { margin-top: 6px; color: var(--success); font-size: .68rem; font-weight: 600; }
+.coordination-correction-form { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); padding: 10px 12px; }
+.coordination-correction-selected { margin: 6px 0 0; border-left: 2px solid var(--border); padding-left: 8px; color: var(--text-secondary); font-size: .68rem; font-style: italic; }
 .consult-detail-dialog .network-record { margin-top: 10px; }
 
 /* Add-colleague modal: a search-first colleague finder, not a cramped admin table. */
@@ -1835,6 +1852,15 @@ button.lam-row:hover { background: #fff9f1; }
  * use the same section gap, so the page feels deliberately paced rather than
  * compressed at the top and loose at the bottom (see --section-space). */
 .dashboard-watchlist { margin-top: var(--section-space); }
+/* Chen's Dashboard reuses the shared .patient-worklist-section block for its
+ * own "Patients" section (demo-consolidation pass, Part 12) -- that class's
+ * own spacing rule only fires between two ADJACENT worklist sections, so the
+ * very first one (right after the agent banner, or after Incoming requests)
+ * had no top margin at all and sat flush against it. Scoped to the dashboard
+ * page only -- the Patients list pages (PatientSelector/ChenPatientsPage),
+ * which also use .patient-worklist-section after a search bar, are
+ * unaffected and unchanged. */
+.dashboard-page .patient-worklist-section { margin-top: var(--section-space); }
 .dashboard-watchlist-sub { margin: 4px 0 0; color: var(--text-secondary); font-size: .72rem; }
 .lam-row-status.your-move { border: 1px solid rgb(182 106 69 / 28%); background: #f8ece3; color: var(--copper-hover); font-weight: 600; }
 .lam-row-mark.agent-row-avatar { display: grid; place-items: center; background: var(--sage-surface); color: var(--sage-ink); font-size: 1rem; }
@@ -2048,6 +2074,31 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-mode-links { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 18px; }
 .referral-mode-links .text-button { margin-top: 0; }
 .referral-mode-links .button-primary { margin-bottom: 6px; }
+/* Direct, always-visible artifact links (demo-consolidation pass, Part 1) --
+ * visually secondary (quiet label + plain text-buttons, no card/border of
+ * its own) but never behind a modal or an extra click, matching the same
+ * restrained "Review match details" visual weight used elsewhere on this
+ * page. A thin top rule separates it from the primary action above without
+ * boxing it in. */
+.referral-artifact-links { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.referral-artifact-links .section-label { margin-bottom: 2px; }
+.referral-artifact-links .text-button { margin-top: 0; }
+
+/* Collapsed historical episode (demo-consolidation pass, Part 7C/10/32) --
+ * once reviewed, the referral recedes to a quiet disclosure under the generic
+ * current-care-state card instead of continuing to dominate Patient Detail.
+ * Collapsed by default; no card border of its own at the summary level so it
+ * reads as secondary, matching .referral-artifact-links' restrained weight. */
+.specialty-episode-section { width: 100%; margin-top: 28px; }
+.specialty-episode-section > .section-label { margin-bottom: 8px; }
+.specialty-episode { border-top: 1px solid var(--border); padding-top: 12px; }
+.specialty-episode-summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
+.specialty-episode-summary::-webkit-details-marker { display: none; }
+.specialty-episode-title { font-size: .82rem; font-weight: 500; }
+.specialty-episode-chevron { margin-left: auto; color: var(--text-secondary); font-size: .9rem; }
+.specialty-episode-detail { margin-top: 14px; padding-left: 2px; }
+.specialty-episode-detail .muted-note { margin: 0 0 10px; color: var(--text-secondary); font-size: .68rem; }
+.specialty-episode-detail .referral-artifact-links { margin-top: 0; padding-top: 0; border-top: none; }
 
 /* Physician-agent-to-physician-agent coordination chat card (ongoing-
    coordination pass, Part H-T) -- a separate boxed card beneath the
@@ -2057,7 +2108,11 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
    messages exist (Part K: "do not make the rail enormous by default"). */
 .coordination-chat-card { margin-top: 20px; }
 .coordination-chat-card > .eyebrow { margin-bottom: 10px; }
-.coordination-chat-card .chat-thread { margin-top: 14px; }
+/* Bounded conversation viewport (demo-consolidation pass, Part 19) -- the
+ * rail must not keep growing with every message; newest stays at the
+ * bottom, scrolled into view automatically on send (see threadRef in
+ * CoordinationChatCard). */
+.coordination-chat-card .chat-thread { margin-top: 14px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
 .coordination-chat-prompts { margin-top: 14px; }
 .coordination-chat-prompts .chat-starter-prompts { margin-top: 10px; margin-bottom: 0; }
 
@@ -2128,6 +2183,11 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-active-notice .text-button { flex: 0 0 auto; }
 .referral-already-selected { margin: 0; color: var(--mineral-deep); font-size: .74rem; font-weight: 600; }
 .referral-locked-note { margin: 0; color: var(--text-secondary); font-size: .72rem; }
+/* Replaces "Start referral" once a real referral already exists to this
+ * physician (demo-consolidation pass, Part 3) -- a status line plus a real
+ * navigation action, never a dead-end label. */
+.referral-episode-status { display: flex; align-items: center; gap: 14px; }
+.referral-episode-status > span { color: var(--mineral-deep); font-size: .74rem; font-weight: 600; }
 
 /* Referral packet modal: a clinical handoff document, not a developer
    inspector -- plain labeled rows, not a JSON dump. */

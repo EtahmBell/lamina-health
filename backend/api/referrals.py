@@ -5,17 +5,19 @@ from fastapi import APIRouter, HTTPException
 from backend.demo_identity import LUCY_AGENT_ID, PCP_NAME
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.models import (
+    AgentCorrection,
     AskPhysicianAgentRequest,
     ConsultationEncounter,
-    CoordinationChatExchange,
-    CoordinationChatMessage,
-    CoordinationChatRole,
+    CoordinationActor,
+    CoordinationChatAnswer,
+    CreateAgentCorrectionRequest,
     DraftHandoffRequest,
     EncounterIngestRequest,
     EncounterResult,
     HandoffResult,
     HandoffStatus,
     HandoffSummary,
+    MarkHandoffViewedRequest,
     Referral,
     ReferralAcceptRequest,
     ReferralCreateRequest,
@@ -32,8 +34,10 @@ from backend.referrals import (
     authorize_coordination_chat,
     build_referral,
     draft_handoff,
+    find_active_referral_for_pair,
     find_scheduling_options,
     ingest_consultation_encounter,
+    most_recent_referral_for_pair,
     represented_agent_id,
     route_options_to_scheduling,
     run_preflight,
@@ -79,11 +83,26 @@ def _load_referral(workspace_id: str, referral_id: int) -> Referral:
 def create_referral(
     patient_id: str, request: ReferralCreateRequest, workspace_id: MutableDemoWorkspace
 ) -> Referral:
+    """Demo-consolidation pass, Part 4/5: an accidental repeat "Start
+    referral" for the same patient+receiving physician (e.g. browser back/
+    forward landing on a stale Discovery view) must never create a second
+    active row -- it idempotently returns the existing active episode
+    instead. A legitimate new referral (a new specialty-care episode) is
+    only ever created once the prior one for that exact pair has reached
+    `consult_returned`, and carries `previous_referral_id` back to it."""
     patient = load_patient(patient_id)
     receiving_physician = _PHYSICIANS_BY_ID.get(request.receiving_physician_id)
     if receiving_physician is None:
         raise HTTPException(status_code=404, detail="Receiving physician not found")
-    referral = build_referral(patient, receiving_physician.id, receiving_physician.specialty)
+    existing_for_patient = workflow_store.list_referrals(workspace_id, patient_id=patient_id)
+    active_existing = find_active_referral_for_pair(existing_for_patient, receiving_physician.id)
+    if active_existing is not None:
+        return active_existing
+    previous_episode = most_recent_referral_for_pair(existing_for_patient, receiving_physician.id)
+    referral = build_referral(
+        patient, receiving_physician.id, receiving_physician.specialty,
+        previous_referral_id=previous_episode.id if previous_episode else None,
+    )
     return workflow_store.create_referral(workspace_id, referral)
 
 
@@ -304,6 +323,29 @@ def get_referral_handoff(
     return None
 
 
+@router.post("/referrals/{referral_id}/handoff/viewed", response_model=HandoffSummary)
+def mark_referral_handoff_viewed(
+    referral_id: int, request: MarkHandoffViewedRequest, workspace_id: MutableDemoWorkspace
+) -> HandoffSummary:
+    """Demo-consolidation pass, Part 8/9: a workflow/UI timestamp only -- it
+    records that the referring physician actually opened and loaded the
+    returned handoff, never a claim that they formally attested to every
+    recommendation in it. Only ever set by the referring physician, only
+    once the handoff is actually visible to them (status=sent); idempotent
+    on an already-viewed handoff, so reopening it never resets the
+    timestamp."""
+    referral = _load_referral(workspace_id, referral_id)
+    if referral.referring_physician_id != request.referring_physician_id:
+        raise HTTPException(status_code=403, detail="Only the referring physician can mark this handoff viewed")
+    handoff = workflow_store.get_handoff(workspace_id, referral_id)
+    if handoff is None or handoff.status != HandoffStatus.SENT:
+        raise HTTPException(status_code=409, detail="No sent handoff exists yet for this referral")
+    if handoff.viewed_by_referring_physician_at is not None:
+        return handoff
+    viewed = handoff.model_copy(update={"viewed_by_referring_physician_at": datetime.now(UTC).isoformat()})
+    return workflow_store.update_handoff(workspace_id, viewed)
+
+
 @router.post("/referrals/{referral_id}/handoff/send", response_model=HandoffResult)
 def send_referral_handoff(
     referral_id: int, request: SendHandoffRequest, workspace_id: MutableDemoWorkspace
@@ -325,9 +367,13 @@ def send_referral_handoff(
 
 
 # --------------------------------------------------------------------------
-# Physician-agent-to-physician-agent coordination chat (ongoing-coordination
-# pass, Part H-T): a patient-scoped channel between the two physicians on an
-# accepted referral, never a generic/open-ended chat surface.
+# Physician-agent-to-physician-agent coordination chat (demo-consolidation
+# pass, Part 16-21): a patient-scoped channel between the two physicians on
+# an accepted referral. Deliberately stateless/task-scoped server-side --
+# nothing here is persisted, so there is no shared thread, no GET endpoint,
+# and no risk of one physician's questions leaking into the other's view
+# (the bug this pass fixes). Each request is answered fresh from the real
+# persisted referral/encounter/handoff/scheduling artifacts.
 # --------------------------------------------------------------------------
 
 
@@ -339,10 +385,10 @@ def _other_referral_party(referral: Referral, physician_id: str) -> str:
     raise HTTPException(status_code=403, detail="Only the two physicians on this referral may use this channel")
 
 
-@router.post("/referrals/{referral_id}/coordination-chat", response_model=CoordinationChatExchange)
+@router.post("/referrals/{referral_id}/coordination-chat", response_model=CoordinationChatAnswer)
 def ask_physician_agent(
     referral_id: int, request: AskPhysicianAgentRequest, workspace_id: MutableDemoWorkspace
-) -> CoordinationChatExchange:
+) -> CoordinationChatAnswer:
     referral = _load_referral(workspace_id, referral_id)
     represented_physician_id = _other_referral_party(referral, request.requesting_physician_id)
     try:
@@ -353,50 +399,71 @@ def ask_physician_agent(
     encounter = workflow_store.get_encounter(workspace_id, referral_id)
     handoff = workflow_store.get_handoff(workspace_id, referral_id)
     represented_name = _referral_party_name(represented_physician_id)
-    represented_agent = represented_agent_id(represented_physician_id)
     answer, based_on, requires_physician_input = answer_coordination_question(
         referral, scheduling, encounter, handoff,
         request.requesting_physician_id, represented_physician_id, represented_name, request.question,
     )
-    now = datetime.now(UTC).isoformat()
-    physician_message = workflow_store.create_chat_message(
-        workspace_id, referral.patient_id,
-        CoordinationChatMessage(
-            referral_id=referral_id,
-            requesting_physician_id=request.requesting_physician_id,
-            represented_physician_id=represented_physician_id,
-            represented_agent_id=represented_agent,
-            role=CoordinationChatRole.PHYSICIAN,
-            content=request.question,
-            created_at=now,
-        ),
+    return CoordinationChatAnswer(
+        answer=answer,
+        based_on=based_on,
+        requires_physician_input=requires_physician_input,
+        represented_agent_id=represented_agent_id(represented_physician_id),
+        created_at=datetime.now(UTC).isoformat(),
     )
-    agent_message = workflow_store.create_chat_message(
-        workspace_id, referral.patient_id,
-        CoordinationChatMessage(
-            referral_id=referral_id,
-            requesting_physician_id=request.requesting_physician_id,
-            represented_physician_id=represented_physician_id,
-            represented_agent_id=represented_agent,
-            role=CoordinationChatRole.AGENT,
-            content=answer,
-            based_on=based_on,
-            requires_physician_input=requires_physician_input,
-            created_at=now,
-        ),
-    )
-    return CoordinationChatExchange(physician_message=physician_message, agent_message=agent_message)
 
 
-@router.get("/referrals/{referral_id}/coordination-chat", response_model=list[CoordinationChatMessage])
-def get_coordination_chat(
-    referral_id: int, workspace_id: DemoWorkspace, as_physician_id: str
-) -> list[CoordinationChatMessage]:
-    """Both physicians read the same persisted thread (Part S) -- the only
-    gate is that the requester must actually be one of the two referral
-    parties; there is no separate per-direction copy of the conversation."""
-    referral = _load_referral(workspace_id, referral_id)
-    _other_referral_party(referral, as_physician_id)
-    if referral.status not in ("accepted", "scheduled", "consult_returned"):
-        raise HTTPException(status_code=403, detail="This referral has not been accepted yet")
-    return workflow_store.list_chat_messages(workspace_id, referral_id)
+# --------------------------------------------------------------------------
+# Agent corrections (demo-consolidation pass, Part 23-31): a durable,
+# physician-authored artifact, separate from the ephemeral chat above and
+# never mutating the immutable CoordinationEvent audit trail. A physician
+# may only correct an event generated by THEIR OWN agent (Part 28).
+# --------------------------------------------------------------------------
+
+
+def _correctable_event_owner(referral: Referral, sequence: int) -> str:
+    """Which physician owns the agent that generated this coordination
+    event -- only `referring_agent`/`receiving_agent` events are
+    correctable at all (system/receiving_physician/scheduling_workflow
+    events are not "an agent's" independent behavior)."""
+    event = next((item for item in referral.coordination_events if item.sequence == sequence), None)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Coordination event not found")
+    if event.actor == CoordinationActor.REFERRING_AGENT:
+        return referral.referring_physician_id
+    if event.actor == CoordinationActor.RECEIVING_AGENT:
+        return referral.receiving_physician_id
+    raise HTTPException(status_code=403, detail="This event was not generated by a correctable agent")
+
+
+@router.post("/patients/{patient_id}/corrections", response_model=AgentCorrection)
+def create_agent_correction(
+    patient_id: str, request: CreateAgentCorrectionRequest, workspace_id: MutableDemoWorkspace
+) -> AgentCorrection:
+    """Physicians train their own agents, never each other's (Part 28). When
+    `referral_id`/`source_event_sequence` are given, ownership is verified
+    against the real coordination event; a bare match-recommendation
+    correction (no referral/event yet) is inherently self-correction, so no
+    cross-physician check applies."""
+    if request.referral_id is not None and request.source_event_sequence is not None:
+        referral = _load_referral(workspace_id, request.referral_id)
+        if referral.patient_id != patient_id:
+            raise HTTPException(status_code=404, detail="Referral does not belong to this patient")
+        owner = _correctable_event_owner(referral, request.source_event_sequence)
+        if owner != request.physician_id:
+            raise HTTPException(status_code=403, detail="A physician may only correct their own agent")
+    correction = AgentCorrection(
+        physician_id=request.physician_id,
+        agent_id=represented_agent_id(request.physician_id),
+        patient_id=patient_id,
+        referral_id=request.referral_id,
+        source_event_sequence=request.source_event_sequence,
+        selected_text=request.selected_text,
+        correction_text=request.correction_text,
+        created_at=datetime.now(UTC).isoformat(),
+    )
+    return workflow_store.create_correction(workspace_id, patient_id, correction)
+
+
+@router.get("/patients/{patient_id}/corrections", response_model=list[AgentCorrection])
+def list_agent_corrections(patient_id: str, workspace_id: DemoWorkspace) -> list[AgentCorrection]:
+    return workflow_store.list_corrections(workspace_id, patient_id)

@@ -10,9 +10,9 @@ from pathlib import Path
 
 from backend.config import environment
 from backend.models import (
+    AgentCorrection,
     ConsultationEncounter,
     ConsultationResult,
-    CoordinationChatMessage,
     HandoffSummary,
     Referral,
     SchedulingCoordination,
@@ -98,10 +98,10 @@ class WorkflowStore:
                   handoff_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                   UNIQUE(workspace_id, referral_id)
                 );
-                CREATE TABLE IF NOT EXISTS coordination_chat_messages (
+                CREATE TABLE IF NOT EXISTS agent_corrections (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL,
-                  referral_id INTEGER NOT NULL, patient_id TEXT NOT NULL,
-                  message_json TEXT NOT NULL, created_at TEXT NOT NULL
+                  physician_id TEXT NOT NULL, patient_id TEXT NOT NULL,
+                  referral_id INTEGER, correction_json TEXT NOT NULL, created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS agent_preferences (
                   workspace_id TEXT NOT NULL, key TEXT NOT NULL, statement TEXT NOT NULL,
@@ -341,10 +341,10 @@ class WorkflowStore:
                   ON consultation_encounters(workspace_id, patient_id);
                 CREATE INDEX IF NOT EXISTS handoff_summaries_patient
                   ON handoff_summaries(workspace_id, patient_id);
-                CREATE INDEX IF NOT EXISTS coordination_chat_messages_referral
-                  ON coordination_chat_messages(workspace_id, referral_id);
-                CREATE INDEX IF NOT EXISTS coordination_chat_messages_patient
-                  ON coordination_chat_messages(workspace_id, patient_id);
+                CREATE INDEX IF NOT EXISTS agent_corrections_patient
+                  ON agent_corrections(workspace_id, patient_id);
+                CREATE INDEX IF NOT EXISTS agent_corrections_physician
+                  ON agent_corrections(workspace_id, physician_id);
                 CREATE INDEX IF NOT EXISTS demo_workspaces_expiry
                   ON demo_workspaces(expires_at);
                 CREATE INDEX IF NOT EXISTS demo_workspace_bootstraps_expiry
@@ -784,8 +784,13 @@ class WorkflowStore:
                 "DELETE FROM handoff_summaries WHERE workspace_id=? AND patient_id=?",
                 (workspace_id, patient_id),
             )
+            # Corrections are patient/referral-scoped audit-adjacent artifacts
+            # (Part 36) -- clearing them on a patient-scoped reset is correct;
+            # general physician training/preferences unrelated to this
+            # patient are untouched (they live in agent_preferences/
+            # specialist_calibrations, neither of which this reset touches).
             db.execute(
-                "DELETE FROM coordination_chat_messages WHERE workspace_id=? AND patient_id=?",
+                "DELETE FROM agent_corrections WHERE workspace_id=? AND patient_id=?",
                 (workspace_id, patient_id),
             )
             remaining = db.execute(
@@ -1002,38 +1007,38 @@ class WorkflowStore:
             ).fetchone()
         return HandoffSummary.model_validate_json(row["handoff_json"]) if row else None
 
-    # ------------------------------------------------- coordination chat
+    # ------------------------------------------------- agent corrections
 
-    def create_chat_message(
-        self, workspace_id: str, patient_id: str, message: CoordinationChatMessage
-    ) -> CoordinationChatMessage:
-        """One row per turn (a physician's question and the agent's answer
-        are each their own message) -- scoped to this referral only, never a
-        general-purpose per-physician memory table (ongoing-coordination
-        pass, Part M)."""
+    def create_correction(
+        self, workspace_id: str, patient_id: str, correction: AgentCorrection
+    ) -> AgentCorrection:
+        """A durable, physician-authored artifact (demo-consolidation pass,
+        Part 23-31) -- deliberately separate from the ephemeral chat above
+        (which is never persisted at all) and from the immutable
+        CoordinationEvent audit trail (never rewritten by a correction)."""
         with self._connect() as db:
             cursor = db.execute(
-                """INSERT INTO coordination_chat_messages(
-                     workspace_id, referral_id, patient_id, message_json, created_at
-                   ) VALUES (?, ?, ?, '', ?)""",
-                (workspace_id, message.referral_id, patient_id, message.created_at),
+                """INSERT INTO agent_corrections(
+                     workspace_id, physician_id, patient_id, referral_id, correction_json, created_at
+                   ) VALUES (?, ?, ?, ?, '', ?)""",
+                (workspace_id, correction.physician_id, patient_id, correction.referral_id, correction.created_at),
             )
-            message_id = int(cursor.lastrowid)
-            final = message.model_copy(update={"id": message_id})
+            correction_id = int(cursor.lastrowid)
+            final = correction.model_copy(update={"id": correction_id})
             db.execute(
-                "UPDATE coordination_chat_messages SET message_json=? WHERE workspace_id=? AND id=?",
-                (final.model_dump_json(), workspace_id, message_id),
+                "UPDATE agent_corrections SET correction_json=? WHERE workspace_id=? AND id=?",
+                (final.model_dump_json(), workspace_id, correction_id),
             )
         return final
 
-    def list_chat_messages(self, workspace_id: str, referral_id: int) -> list[CoordinationChatMessage]:
+    def list_corrections(self, workspace_id: str, patient_id: str) -> list[AgentCorrection]:
         with self._connect() as db:
             rows = db.execute(
-                """SELECT message_json FROM coordination_chat_messages
-                   WHERE workspace_id=? AND referral_id=? ORDER BY id ASC""",
-                (workspace_id, referral_id),
+                """SELECT correction_json FROM agent_corrections
+                   WHERE workspace_id=? AND patient_id=? ORDER BY id ASC""",
+                (workspace_id, patient_id),
             ).fetchall()
-        return [CoordinationChatMessage.model_validate_json(row["message_json"]) for row in rows]
+        return [AgentCorrection.model_validate_json(row["correction_json"]) for row in rows]
 
     def specialist_reviews(self, workspace_id: str, specialist_npi: str) -> dict[int, str]:
         with self._connect() as db:
