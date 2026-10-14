@@ -486,9 +486,12 @@ def test_accepted_status_is_a_real_persisted_state(api_client: TestClient) -> No
         f"/api/referrals/{created['id']}/accept", json={"receiving_physician_id": CHEN_ID}
     )
     assert accepted.status_code == 200
-    assert accepted.json()["status"] == "accepted"
+    # Acceptance automatically authorizes the scheduling administration chain
+    # (automation pass, Part E/F) -- a single /accept call carries the
+    # referral all the way to `scheduled`, not just `accepted`.
+    assert accepted.json()["status"] == "scheduled"
     fetched = api_client.get(f"/api/referrals/{created['id']}")
-    assert fetched.json()["status"] == "accepted"
+    assert fetched.json()["status"] == "scheduled"
 
 
 def test_referral_accepted_event_is_appended_exactly_once() -> None:
@@ -580,9 +583,13 @@ def test_accepted_referral_can_be_queried_afterward(api_client: TestClient) -> N
     api_client.post(f"/api/referrals/{created['id']}/preflight")
     api_client.post(f"/api/referrals/{created['id']}/accept", json={"receiving_physician_id": CHEN_ID})
 
-    accepted_list = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "accepted"})
-    assert accepted_list.status_code == 200
-    assert [item["patient_id"] for item in accepted_list.json()] == [TONJIT_PATIENT_ID]
+    # Acceptance now automatically advances the referral to `scheduled`
+    # (automation pass, Part E/F) -- the physician-scoped query that matters
+    # here is Chen's own patient-list query, which (post Tonjit-disappearance
+    # fix) spans every accepted-or-later status, not a single fixed one.
+    scheduled_list = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "scheduled"})
+    assert scheduled_list.status_code == 200
+    assert [item["patient_id"] for item in scheduled_list.json()] == [TONJIT_PATIENT_ID]
 
 
 def test_reset_removes_accepted_state_and_receiving_patient_relationship(api_client: TestClient) -> None:

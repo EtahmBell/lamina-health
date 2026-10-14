@@ -696,6 +696,14 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   // (hydration effect below); there is no local fabrication of referral state.
   const [viewMode, setViewMode] = useState<'discovery' | 'referral'>('discovery')
   const [activeReferral, setActiveReferral] = useState<Referral | null>(null)
+  // Hydration-flash fix (polish pass, Part D): `viewMode` defaults to
+  // 'discovery' and only flips to 'referral' once the hydration fetch below
+  // resolves -- without this flag, a patient who already has a referral
+  // briefly rendered in Discovery mode (or replayed the live phase-reveal
+  // animation) on every reload, before snapping to the real persisted state.
+  // Starts `true` when there's no referral question at all (nothing to
+  // hydrate), so patients who never have referrals render exactly as before.
+  const [referralHydrated, setReferralHydrated] = useState(!referralQuestion)
   useEffect(() => {
     if (!focusEventId) return
     setNetworkOpen(true); setHighlight(true)
@@ -723,6 +731,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   useEffect(() => {
     if (!referralQuestion) return
     let ignore = false
+    setReferralHydrated(false)
     getActiveReferral(consultation.patient_id).then((existing) => {
       if (ignore || !existing) return
       const phase = restorePhase(existing)
@@ -731,7 +740,7 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
         setSelectedId(existing.receiving_physician_id)
         setViewMode('referral')
       }
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => { if (!ignore) setReferralHydrated(true) })
     return () => { ignore = true }
   }, [consultation.patient_id, referralQuestion])
   const primary = consultation.recommended_physician
@@ -781,6 +790,19 @@ function RecommendationView({ consultation, navigate, focusEventId = null, recor
   }
   const activeReferralPhysician = activeReferral ? candidates.find((item) => item.physician_id === activeReferral.receiving_physician_id) : undefined
   const activeReferralPhysicianLabel = activeReferralPhysician ? cleanName(activeReferralPhysician.physician_name) : 'another specialist'
+
+  // Hydration gate (Part D): render NEITHER Discovery's "best fit" framing
+  // NOR a live phase-reveal animation until we authoritatively know whether
+  // a referral already exists. A quiet neutral placeholder only -- never a
+  // guessed historical state -- using the same card shell either real
+  // outcome will use, so there is no layout jump once hydration resolves.
+  if (referralQuestion && !referralHydrated) {
+    return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
+      <article className="best-fit-card compact referral-card">
+        <div className="next-step-card idle"><p className="muted-note">Opening referral…</p></div>
+      </article>
+    </section>
+  }
 
   // REFERRAL MODE -- "what is happening with this referral?" replaces
   // "who should I refer this patient to?" as the primary surface (Part A/B).
@@ -950,11 +972,18 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
    * merely "a consultation exists somewhere" (see the idle-prior fallback below,
    * used only if this fetch fails). Entirely a PCP-side concern -- Chen's
    * perspective never runs the consult-network workflow.
+   *
+   * `consultHydrated` (Part D hydration-flash fix) stays false across BOTH
+   * awaited steps -- `activity` resolves first, consultation potentially a
+   * moment later -- so the Next step rail never commits to a nextStepState
+   * derived from only half of this chain (e.g. flashing "Previous
+   * consultation available" for the instant between the two).
    */
+  const [consultHydrated, setConsultHydrated] = useState(perspective !== 'pcp')
   useEffect(() => {
     if (perspective !== 'pcp') return
     let cancelled = false
-    setReconsulting(false); setActivity(null); setConsultation(null); setRecordId(undefined)
+    setReconsulting(false); setActivity(null); setConsultation(null); setRecordId(undefined); setConsultHydrated(false)
     getPatientActivity().then(async (records) => {
       if (cancelled) return
       const found = records.find((item) => item.patient_id === patientId) ?? null
@@ -965,7 +994,7 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
           if (!cancelled) { setConsultation(record.result); setRecordId(record.id) }
         } catch { /* idle-prior fallback below still works from activity alone */ }
       }
-    }).catch(() => { if (!cancelled) setActivity(null) })
+    }).catch(() => { if (!cancelled) setActivity(null) }).finally(() => { if (!cancelled) setConsultHydrated(true) })
     return () => { cancelled = true }
   }, [patientId, perspective])
   /**
@@ -1054,7 +1083,10 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
     <div className="network-field"><label htmlFor="patient-context-input">{label}</label><input id="patient-context-input" value={context} onChange={(event) => setContext(event.target.value)} maxLength={500} placeholder="Add a referral question, specialty preference, or care constraint" /></div>
     {suggestionChips}
   </details>
-  const nextStepState: 'idle' | 'idle-prior' | 'consulting' | 'ready' = consulting ? 'consulting' : consultation ? 'ready' : priorConsultation ? 'idle-prior' : 'idle'
+  // 'hydrating' (Part D) always wins -- never derive idle/idle-prior/ready
+  // from a half-resolved activity/consultation chain (see consultHydrated above).
+  const nextStepState: 'hydrating' | 'idle' | 'idle-prior' | 'consulting' | 'ready' =
+    !consultHydrated ? 'hydrating' : consulting ? 'consulting' : consultation ? 'ready' : priorConsultation ? 'idle-prior' : 'idle'
   const currentIssue = demoPatient?.reason ?? patient.diagnoses[0] ?? null
   const patientDisplayName = demoPatient?.name ?? cleanName(patient.display_name)
   const patientInitials = patientDisplayName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('')
@@ -1078,6 +1110,7 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
           : <>
             <h2>Next step</h2>
             <p className="page-intro">Your agent helps with the follow-through.</p>
+            {nextStepState === 'hydrating' && <div className="next-step-card idle"><p className="muted-note">Checking patient status…</p></div>}
             {nextStepState === 'consulting' && <div className="next-step-card consulting">
               <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Consulting the network</span>
               <h3>Your agent is finding a match.</h3>

@@ -42,9 +42,15 @@ strong, b { font-weight: 600; }
 .wordmark { font-family: var(--font-display); font-size: 1.45rem; font-weight: 700; letter-spacing: .085em; }
 .brand-subtitle { margin: 7px 0 0 45px; color: var(--text-secondary); font-size: .61rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
 .sidebar nav { margin-top: 48px; display: flex; flex-direction: column; gap: 6px; }
-.nav-item { width: 100%; display: flex; align-items: center; gap: 11px; border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 11px; color: var(--text-secondary); text-align: left; }
+/* Sidebar nav text/icons read as dark charcoal in both active and inactive
+ * states (polish pass, Part A) -- the previous muted mineral-blue tone on
+ * icons (and muted grey on inactive labels) read as washed-out next to the
+ * rest of the app's near-black text. --text-primary is the existing dark
+ * Lamina text token, never a literal #000. Shared at the source so every
+ * physician workspace (Lucy/Chen/Iain/future) inherits it identically. */
+.nav-item { width: 100%; display: flex; align-items: center; gap: 11px; border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 11px; color: var(--text-primary); text-align: left; }
 .nav-item.active { border-color: rgb(83 110 125 / 22%); background: var(--mineral-surface); color: var(--text-primary); }
-.nav-item:disabled { opacity: .58; }.nav-icon { width: 24px; color: var(--mineral); font-size: 1.05rem; text-align: center; }
+.nav-item:disabled { opacity: .58; }.nav-icon { width: 24px; color: var(--text-primary); font-size: 1.05rem; text-align: center; }
 .nav-item-label, .nav-item small { display: block; }.nav-item-label { font-size: .82rem; font-weight: 400; }.nav-item.active .nav-item-label { font-weight: 600; }.nav-item small { margin-top: 2px; font-size: .64rem; }
 .sidebar-clinician { display: flex; align-items: center; gap: 11px; border-top: 1px solid var(--border); padding: 18px 4px 0; }
 .clinician-avatar { width: 39px; height: 39px; display: grid; flex: 0 0 39px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--clinical); box-shadow: 0 0 0 1px var(--border); color: #fff; font-family: var(--font-display); font-size: .72rem; font-weight: 700; }
@@ -2072,8 +2078,29 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
  * so it reads as a clear takeover, not a faint wash (closed-loop referral
  * follow-up pass, item 1). Overlay text below gets matching light-on-dark
  * colors so it stays legible against the darker fill. */
-.best-fit-card.referral-card.handoff-wash { background: rgb(52 79 93 / 95%); }
-@media (prefers-reduced-motion: reduce) { .best-fit-card.referral-card { transition: none; } }
+.best-fit-card.referral-card.handoff-wash { background: rgb(52 79 93 / 100%); }
+/* An opaque card BACKGROUND only ever hides what's behind the card (the page
+ * behind it) -- it can never hide the card's own foreground children, which
+ * always paint above their own background regardless of that background's
+ * opacity. That's why the physician avatar, the "Sent" pill, and the phase
+ * heading/body kept bleeding through even once the wash itself was opaque
+ * (polish pass, Part B). The fix is to explicitly fade out that foreground
+ * content in lockstep with the wash/overlay -- never a z-index-only trick,
+ * and never a second overlay box that could mismatch the card's rounded
+ * corners (see the corner-mismatch note above). */
+.best-fit-card.referral-card.handoff-wash > .back-to-match,
+.best-fit-card.referral-card.handoff-wash > .best-fit-kicker,
+.best-fit-card.referral-card.handoff-wash > .best-fit-physician,
+.best-fit-card.referral-card.handoff-wash .referral-phase {
+  opacity: 0; pointer-events: none; transition: opacity 500ms ease-in-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .best-fit-card.referral-card { transition: none; }
+  .best-fit-card.referral-card.handoff-wash > .back-to-match,
+  .best-fit-card.referral-card.handoff-wash > .best-fit-kicker,
+  .best-fit-card.referral-card.handoff-wash > .best-fit-physician,
+  .best-fit-card.referral-card.handoff-wash .referral-phase { transition: none; }
+}
 
 /* Discovery-mode status strip, shown only once a referral is already
    active -- visually secondary, never another primary action (Part J). */
@@ -2101,8 +2128,6 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .referral-next-step-note { margin: 8px 0 0; color: var(--text-secondary); font-size: .68rem; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .handoff-divider { margin: 20px 0 14px; border: none; border-top: 1px solid var(--border); }
 .handoff-provenance { margin: 0 0 4px; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
-.scheduling-delivery-note .clinical-list li { border-top: 1px solid var(--border); padding: 8px 0; font-size: .72rem; }
-.scheduling-delivery-note .clinical-list li:first-child { border-top: 0; }
 
 /* Full-card completion takeover (Part 2-4): absolutely positioned over the
    whole referral card (which is position: relative, above), so it covers

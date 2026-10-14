@@ -272,21 +272,30 @@ def submit_referral(referral: Referral) -> Referral:
     return referral
 
 
+_ACCEPTED_OR_LATER = (
+    ReferralStatus.ACCEPTED,
+    ReferralStatus.SCHEDULED,
+    ReferralStatus.CONSULT_RETURNED,
+)
+
+
 def accept_referral(
     referral: Referral, receiving_physician_id: str, receiving_physician_name: str
 ) -> Referral:
     """The one receiving-side transition in this pass: a submitted referral
     becomes accepted only through an explicit, named physician action -- the
     receiving agent prepares and checks the packet (see run_preflight), but
-    it never decides to accept the patient itself (see Part B/C). Only the
-    physician actually named on the referral can accept it; calling this
-    again for an already-accepted referral is a safe no-op that never
-    appends a second referral_accepted event."""
+    it never decides to accept the patient itself (see Part B/C). Idempotent
+    on anything already accepted OR further along the automated downstream
+    pipeline (scheduled/consult_returned) -- acceptance now automatically
+    authorizes that pipeline (see accept_referral_endpoint), so a repeat
+    call/rerun must never re-raise just because the referral has since moved
+    on, and must never append a second referral_accepted event."""
     if referral.receiving_physician_id != receiving_physician_id:
         raise ValueError(
             f"{receiving_physician_id!r} is not the receiving physician for this referral."
         )
-    if referral.status == ReferralStatus.ACCEPTED:
+    if referral.status in _ACCEPTED_OR_LATER:
         return referral
     if referral.status != ReferralStatus.SUBMITTED:
         raise ValueError(
@@ -364,12 +373,16 @@ def route_options_to_scheduling(
     receiving_physician_id: str,
     receiving_physician_name: str,
 ) -> SchedulingCoordination:
-    """A real physician action (Part L): Dr. Chen is authorizing the next
-    administrative handoff, never implied by the agent merely finding
-    options. For this synthetic demo only (Part M), routing also triggers
-    `confirm_synthetic_appointment` immediately afterward -- the one place
-    this demo simulates "the scheduling workflow/patient confirmed a time"
-    without claiming Lamina contacted anyone (Part N)."""
+    """Administrative agent-workflow work (automation pass, Part E/F/L) --
+    routing valid options into the scheduling workflow is purely
+    administrative, already authorized the moment Dr. Chen accepted the
+    referral, so it is never a second physician decision/click (contrast
+    with `send_handoff`, which IS a real decision gate). Actor is the
+    receiving agent/workflow, never the physician. For this synthetic demo
+    only (Part M), routing also triggers `confirm_synthetic_appointment`
+    immediately afterward -- the one place this demo simulates "the
+    scheduling workflow/patient confirmed a time" without claiming Lamina
+    contacted anyone (Part N)."""
     if referral.receiving_physician_id != receiving_physician_id:
         raise ValueError(
             f"{receiving_physician_id!r} is not the receiving physician for this referral."
@@ -388,9 +401,9 @@ def route_options_to_scheduling(
     _append_event(
         referral,
         event_type=CoordinationEventType.SCHEDULING_OPTIONS_SENT,
-        actor=CoordinationActor.RECEIVING_PHYSICIAN,
-        autonomy=AutonomyLevel.PHYSICIAN_REQUIRED,
-        summary=f"{receiving_physician_name} sent the available appointment options to the practice scheduling workflow.",
+        actor=CoordinationActor.RECEIVING_AGENT,
+        autonomy=AutonomyLevel.AUTOMATIC,
+        summary=f"{receiving_physician_name}'s Agent routed the available appointment options to the practice scheduling workflow.",
         metadata={"referral_id": referral.id or 0},
     )
     return confirm_synthetic_appointment(referral, routed)

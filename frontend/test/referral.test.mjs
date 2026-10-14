@@ -377,7 +377,7 @@ test('the success wash honors reduced motion -- a short static hold instead of a
 })
 
 test('the full-card success-wash background transition respects prefers-reduced-motion', () => {
-  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.best-fit-card\.referral-card \{ transition: none; \} \}/)
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*\.best-fit-card\.referral-card \{ transition: none; \}/)
 })
 
 test('the success wash makes no backend calls itself -- create+preflight already happened before any phase was revealed', () => {
@@ -637,7 +637,28 @@ test('the overlay is a pure CSS opacity transition (no JS double-rAF needed for 
 test('the wash background lives on the card itself, not on a separately-positioned/radiused overlay -- the root cause of the corner mismatch', () => {
   assert.doesNotMatch(styles, /\.referral-handoff-overlay \{[^}]*background:/, 'the overlay must not carry its own background any more')
   assert.doesNotMatch(styles, /\.referral-handoff-overlay \{[^}]*border-radius: inherit/, 'border-radius: inherit against an inset box was the actual bug')
-  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash \{ background: rgb\(52 79 93 \/ 95%\); \}/)
+  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash \{ background: rgb\(52 79 93 \/ 100%\); \}/)
+})
+
+/* ========================================================================
+ * Polish pass, Part B: an opaque card BACKGROUND alone cannot hide the
+ * card's own foreground children (avatar/kicker/"Sent" pill/phase text),
+ * since a background always paints beneath its own content regardless of
+ * that background's opacity. Fixed by explicitly fading the foreground
+ * content out in lockstep with the wash, never a z-index-only trick and
+ * never a second overlay box that could mismatch the card's corners.
+ * ===================================================================== */
+
+test('the wash is effectively fully opaque, not merely "mostly opaque"', () => {
+  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash \{ background: rgb\(52 79 93 \/ 100%\); \}/)
+})
+
+test('underlying card content (back-button, kicker, physician row, current phase content) is explicitly faded out during the wash, in lockstep with it -- never left to bleed through under a transparent overlay', () => {
+  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash > \.back-to-match,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-kicker,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-physician,\s*\.best-fit-card\.referral-card\.handoff-wash \.referral-phase \{\s*opacity: 0; pointer-events: none; transition: opacity 500ms ease-in-out;\s*\}/)
+})
+
+test('the hidden-during-wash content also gets a reduced-motion override, so it snaps instead of animating', () => {
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{\s*\.best-fit-card\.referral-card \{ transition: none; \}\s*\.best-fit-card\.referral-card\.handoff-wash > \.back-to-match,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-kicker,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-physician,\s*\.best-fit-card\.referral-card\.handoff-wash \.referral-phase \{ transition: none; \}/)
 })
 
 /* ========================================================================
@@ -665,7 +686,7 @@ test('the overlay text recolors for contrast against the darker wash, rather tha
 
 test('the wash transitions via background-color on the card, with a reduced-motion override, mirroring the overlay\'s own fade timing', () => {
   assert.match(styles, /\.best-fit-card\.referral-card \{ transition: background-color 500ms ease-in-out; \}/)
-  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.best-fit-card\.referral-card \{ transition: none; \} \}/)
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*\.best-fit-card\.referral-card \{ transition: none; \}/)
 })
 
 test('ReferralCoordinationSurface mirrors the wash state up to the parent via onWashChange, exactly in lockstep with its own local justCompleted', () => {

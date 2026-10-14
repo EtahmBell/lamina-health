@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, createReferral, draftHandoff, findSchedulingOptions, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, ingestConsultationEncounter, routeSchedulingOptions, runReferralPreflight, sendHandoff, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
+import { acceptReferral, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, runReferralPreflight, sendHandoff, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
@@ -450,6 +450,15 @@ export function HandoffModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, sending])
   const isDraft = handoff.status === 'draft'
+  /**
+   * `sending` also gates every close path below (X/backdrop/Escape), so a
+   * physician can't dismiss the modal mid-request and lose track of whether
+   * it went through. It must still clear once the request SETTLES, success
+   * or failure -- leaving it stuck `true` after a successful send (the
+   * previous bug: only the catch branch reset it) permanently locks the
+   * modal closed, since the Send button itself simply disappears once
+   * `isDraft` flips to false and no longer offers any way to notice.
+   */
   const handleSend = async () => {
     if (!onSend) return
     setSending(true); setError('')
@@ -457,6 +466,7 @@ export function HandoffModal({
       await onSend()
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : 'Could not send the handoff.')
+    } finally {
       setSending(false)
     }
   }
@@ -671,77 +681,54 @@ const CHEN_PATIENT_STAGE_META: Record<PatientStage, { label: string; tone: strin
 const CHEN_PREVIOUS_CARE_PRIORITY = CHEN_PATIENT_STAGE_META.followup.priority
 const CHEN_SEEDED_PATIENTS = DEMO_PATIENTS.filter((patient) => patient.owner === 'chen')
 
-/**
- * Appointment options (Part I/J): a focused list, not a calendar/date
- * picker. The quiet "how these are confirmed" note makes the product
- * boundary explicit without turning into marketing copy -- Lamina found the
- * times; a patient, outreach channel, or the scheduling team confirms one
- * (Part N: never claims Lamina contacted the patient).
- */
-function SchedulingOptionsModal({
-  scheduling, patientLabel, receivingPhysicianName, busy, error, onSend, onClose,
-}: {
-  scheduling: SchedulingCoordination; patientLabel: string; receivingPhysicianName: string
-  busy: boolean; error: string; onSend: () => void; onClose: () => void
-}) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, busy])
-  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
-    <div className="post-flow-dialog packet-dialog" role="dialog" aria-modal="true" aria-label="Appointment options">
-      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close" disabled={busy}>×</button>
-      <p className="eyebrow">Appointment options</p>
-      <h2>{patientLabel}</h2>
-      <p className="coordination-subhead">{receivingPhysicianName} · {CHEN_SPECIALTY}</p>
-      <div className="packet-section">
-        <h3>Available times</h3>
-        <div className="packet-items">
-          {scheduling.options.map((slot) => <div className="packet-item" key={slot.slot_id}>
-            <strong>{formatSubmittedAt(slot.starts_at)}</strong>
-            <p>{slot.appointment_type}</p>
-          </div>)}
-        </div>
-      </div>
-      <div className="packet-section scheduling-delivery-note">
-        <h3>How these options can be confirmed</h3>
-        <ul className="clinical-list">
-          <li>Patients using Lamina could choose directly.</li>
-          <li>Options could be sent through supported outreach channels.</li>
-          <li>Or the scheduling team can contact the patient with already-valid times.</li>
-        </ul>
-      </div>
-      {error && <p className="demo-reset-error" role="alert">{error}</p>}
-      <div className="request-review-actions">
-        <button className="button-primary" disabled={busy} onClick={onSend}>{busy ? 'Sending…' : 'Send options to scheduling →'}</button>
-      </div>
-    </div>
-  </div></ModalPortal>
+/** Set right before navigating away from a just-accepted referral (Part G),
+ * read and immediately cleared on the very next mount of ChenDownstreamCard
+ * for that same patient -- a pure "this session caused it" presentation
+ * signal, never persisted business state (Part N: a plain reload finds it
+ * already gone, so the intro sequence never replays). */
+const CHEN_JUST_ACCEPTED_KEY = 'lamina:chen:just-accepted-referral'
+
+export function markReferralJustAccepted(patientId: string) {
+  try { window.sessionStorage.setItem(CHEN_JUST_ACCEPTED_KEY, patientId) } catch { /* ignore */ }
 }
 
-type ChenDownstreamBusy = 'checking' | 'routing' | 'drafting' | null
+function consumeJustAcceptedFlag(patientId: string): boolean {
+  try {
+    const stored = window.sessionStorage.getItem(CHEN_JUST_ACCEPTED_KEY)
+    if (stored !== patientId) return false
+    window.sessionStorage.removeItem(CHEN_JUST_ACCEPTED_KEY)
+    return true
+  } catch {
+    return false
+  }
+}
+
+type ChenIntroPhase = 'accepted' | 'checking' | 'routing' | null
 
 /**
- * Dr. Chen's right-rail surface for an ACCEPTED referral (Parts D-AC): the
- * downstream scheduling -> encounter -> handoff flow. Entirely state-driven
- * from the real persisted artifacts (never a replayed animation on
- * hydration) -- each click is a real backend call with a brief, calm loading
- * pulse (Part AS), never a backend sleep. Exactly one current-state card at
- * a time, same "right rail: current state / next action" convention as
- * Lucy's own ReferralCoordinationSurface.
+ * Dr. Chen's right-rail surface for an ACCEPTED referral (automation pass,
+ * Parts E-L): entirely state-driven from the real persisted artifacts,
+ * never a replayed animation on hydration. Acceptance itself already
+ * authorizes everything through scheduling (Part E/F) -- the backend
+ * executes that chain synchronously inside /accept, so there is no manual
+ * "Find appointment options"/"Send to scheduling" step left here; the only
+ * remaining physician decision downstream of acceptance is reviewing and
+ * explicitly sending the (auto-drafted) clinical handoff (Part J/M). The
+ * brief "accepted -> checking -> routing -> scheduled" intro (Part G) is
+ * pure frontend presentation pacing played once, only in the same session
+ * that just performed the accept action (see consumeJustAcceptedFlag) --
+ * never replayed on reload, and skipped entirely under reduced motion.
  */
 export function ChenDownstreamCard({ referral, patientLabel }: { referral: Referral; patientLabel: string }) {
   const [scheduling, setScheduling] = useState<SchedulingCoordination | null | undefined>(undefined)
   const [encounter, setEncounter] = useState<ConsultationEncounter | null | undefined>(undefined)
   const [handoff, setHandoff] = useState<HandoffSummary | null | undefined>(undefined)
-  const [busy, setBusy] = useState<ChenDownstreamBusy>(null)
-  const [optionsOpen, setOptionsOpen] = useState(false)
   const [schedulingDetailsOpen, setSchedulingDetailsOpen] = useState(false)
   const [handoffOpen, setHandoffOpen] = useState(false)
   const [coordinationOpen, setCoordinationOpen] = useState(false)
   const [liveReferral, setLiveReferral] = useState(referral)
-  const [error, setError] = useState('')
+  const [introPhase, setIntroPhase] = useState<ChenIntroPhase>(null)
+  const [justAccepted] = useState(() => consumeJustAcceptedFlag(referral.patient_id))
   const cancelled = useRef(false)
 
   useEffect(() => () => { cancelled.current = true }, [])
@@ -757,53 +744,28 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
     return () => { ignore = true }
   }, [referral.id])
 
-  const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, prefersReducedMotion() ? 0 : ms))
+  const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms))
 
-  const findOptions = async () => {
-    if (!referral.id) return
-    setBusy('checking'); setError('')
-    try {
-      const [result] = await Promise.all([findSchedulingOptions(referral.id, CHEN_ID), sleep(3000)])
-      if (cancelled.current) return
-      setLiveReferral(result.referral)
-      setScheduling(result.scheduling)
-    } catch (findError) {
-      if (!cancelled.current) setError(findError instanceof Error ? findError.message : 'Could not find appointment options.')
-    } finally {
-      if (!cancelled.current) setBusy(null)
+  // Live-session-only presentation (Part G/N): once the real (already
+  // backend-complete) data has loaded, briefly narrate the administrative
+  // steps that already happened before landing on the durable state below.
+  // Never runs on a restored/hydrated view, and never under reduced motion.
+  useEffect(() => {
+    if (!justAccepted || scheduling === undefined || prefersReducedMotion()) return
+    let active = true
+    const play = async () => {
+      setIntroPhase('accepted'); await sleep(1100)
+      if (!active || cancelled.current) return
+      setIntroPhase('checking'); await sleep(1700)
+      if (!active || cancelled.current) return
+      setIntroPhase('routing'); await sleep(1300)
+      if (!active || cancelled.current) return
+      setIntroPhase(null)
     }
-  }
-
-  const sendToScheduling = async () => {
-    if (!referral.id) return
-    setBusy('routing'); setError('')
-    try {
-      const [result] = await Promise.all([routeSchedulingOptions(referral.id, CHEN_ID), sleep(1800)])
-      if (cancelled.current) return
-      setLiveReferral(result.referral)
-      setScheduling(result.scheduling)
-      setOptionsOpen(false)
-    } catch (routeError) {
-      if (!cancelled.current) setError(routeError instanceof Error ? routeError.message : 'Could not send options to scheduling.')
-    } finally {
-      if (!cancelled.current) setBusy(null)
-    }
-  }
-
-  const draftTheHandoff = async () => {
-    if (!referral.id) return
-    setBusy('drafting'); setError('')
-    try {
-      const [result] = await Promise.all([draftHandoff(referral.id, CHEN_ID), sleep(2500)])
-      if (cancelled.current) return
-      setLiveReferral(result.referral)
-      setHandoff(result.handoff)
-    } catch (draftError) {
-      if (!cancelled.current) setError(draftError instanceof Error ? draftError.message : 'Could not draft the handoff.')
-    } finally {
-      if (!cancelled.current) setBusy(null)
-    }
-  }
+    void play()
+    return () => { active = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [justAccepted, scheduling === undefined])
 
   const sendTheHandoff = async () => {
     if (!referral.id) return
@@ -816,21 +778,19 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
     return <div className="next-step-card idle"><p className="muted-note">Opening referral…</p></div>
   }
 
-  if (busy === 'checking') return <div className="next-step-card consulting">
-    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Checking availability</span>
-    <h3>Looking for appointment options.</h3>
-    <p>Your agent is looking for eligible new-patient Endocrinology appointments.</p>
+  if (introPhase === 'accepted') return <div className="next-step-card ready">
+    <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Referral accepted</span>
+    <h3>You accepted {patientLabel}'s referral.</h3>
   </div>
 
-  if (busy === 'routing') return <div className="next-step-card consulting">
-    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Routing to scheduling</span>
-    <h3>Sending options to the scheduling workflow.</h3>
+  if (introPhase === 'checking') return <div className="next-step-card consulting">
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Checking appointment availability</span>
+    <h3>Your agent is finding valid new-patient {CHEN_SPECIALTY} times.</h3>
   </div>
 
-  if (busy === 'drafting') return <div className="next-step-card consulting">
-    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Preparing handoff</span>
-    <h3>Preparing handoff.</h3>
-    <p>Your agent is summarizing the documented consultation for Dr. Saruhashi.</p>
+  if (introPhase === 'routing') return <div className="next-step-card consulting">
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Routing appointment options</span>
+    <h3>Valid times are being sent into the scheduling workflow.</h3>
   </div>
 
   const links = <div className="referral-mode-links">
@@ -851,24 +811,30 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
     {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
   </>
 
+  // Handoff drafting is itself automatic once a documented encounter exists
+  // (Part I/K) -- the clinical source already exists and the agent is only
+  // summarizing it, so there is no "Draft handoff" click here; the one
+  // remaining physician decision is reviewing and explicitly sending it
+  // (Part J/M), via HandoffModal's onSend.
   if (handoff && handoff.status === 'draft') return <>
     <div className="next-step-card ready">
-      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Draft ready</span>
-      <h3>A handoff draft is ready for your review.</h3>
-      <button type="button" className="button-primary" onClick={() => setHandoffOpen(true)}>Review handoff →</button>
+      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Handoff ready for review</span>
+      <h3>Your agent prepared an update for Dr. Saruhashi from the documented consultation.</h3>
+      <button type="button" className="button-primary" onClick={() => setHandoffOpen(true)}>Review &amp; send →</button>
       {links}
     </div>
     {handoffOpen && <HandoffModal handoff={handoff} patientLabel={patientLabel} receivingPhysicianName={CHEN_NAME} onClose={() => setHandoffOpen(false)} onSend={sendTheHandoff} />}
     {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
   </>
 
-  if (encounter) return <>
+  // Documented-but-not-yet-drafted is a defensive fallback only (Part I/K
+  // auto-drafts inside the same backend call that ingests the encounter) --
+  // never a manual "Draft handoff" button; informational text, no action.
+  if (encounter && !handoff) return <>
     <div className="next-step-card ready">
       <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Consultation documented</span>
       <h3>{patientLabel}'s {encounter.specialty} visit is available in the record.</h3>
-      <p>Your agent can prepare a concise update for Dr. Saruhashi from the documented consultation.</p>
-      {error && <p className="demo-reset-error" role="alert">{error}</p>}
-      <button type="button" className="button-primary" onClick={draftTheHandoff}>Draft handoff →</button>
+      <p>Your agent is preparing an update for Dr. Saruhashi.</p>
       {links}
     </div>
     {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
@@ -893,27 +859,18 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
     </>
   }
 
-  if (scheduling && scheduling.status === 'options_ready') return <>
-    <div className="next-step-card ready">
-      <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>{scheduling.options.length} appointment options found</span>
-      <h3>Your agent found valid new-patient times in your schedule.</h3>
-      <button type="button" className="button-primary" onClick={() => setOptionsOpen(true)}>View options →</button>
-      {links}
-    </div>
-    {optionsOpen && <SchedulingOptionsModal scheduling={scheduling} patientLabel={patientLabel} receivingPhysicianName={CHEN_NAME} busy={false} error={error} onSend={sendToScheduling} onClose={() => setOptionsOpen(false)} />}
-    {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
-  </>
-
+  // Everything past this point is a defensive fallback only -- under normal
+  // operation, acceptance's automatic chain (Part E/F) always reaches
+  // `scheduled` synchronously, so scheduling is never actually observed
+  // sitting at options_ready/sent_to_scheduling, or null, once Chen views
+  // this page. Informational only, never a manual trigger button.
   return <>
     <div className="next-step-card idle">
       <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Accepted</span>
       <h3>Referred by {PCP_NAME}.</h3>
       <p className="section-label">Referral question</p>
       <p>{referral.referral_question}</p>
-      <p className="referral-next-step-note">Find appointment options</p>
-      {error && <p className="demo-reset-error" role="alert">{error}</p>}
-      <button type="button" className="consult-button" onClick={findOptions}>Find appointment options <span className="spark-icon" aria-hidden="true">✧</span></button>
-      <p className="bottom-note">Your agent can check {CHEN_NAME}'s available new-patient {CHEN_SPECIALTY} slots.</p>
+      <p>Scheduling administration is in progress.</p>
     </div>
     {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} onClose={() => setCoordinationOpen(false)} />}
   </>
@@ -968,6 +925,7 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
   const handleAccepted = (updated: Referral) => {
     setReviewing(null)
     setIncoming((current) => current?.filter((item) => item.id !== updated.id) ?? current)
+    markReferralJustAccepted(updated.patient_id)
     navigate(`/chen/patients/${updated.patient_id}`)
   }
 
@@ -1041,6 +999,7 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
   const handleAccepted = (updated: Referral) => {
     setReviewing(null)
     setIncoming((current) => current?.filter((item) => item.id !== updated.id) ?? current)
+    markReferralJustAccepted(updated.patient_id)
     navigate(`/chen/patients/${updated.patient_id}`)
   }
 

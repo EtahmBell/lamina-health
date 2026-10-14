@@ -96,7 +96,6 @@ export type HandoffSummary = {
   assessment: string; key_findings: string[]; recommendations: string; follow_up: string
   status: HandoffStatus; approved_by_physician_id: string | null; drafted_at: string; sent_at: string | null
 }
-export type SchedulingOptionsResult = { referral: Referral; scheduling: SchedulingCoordination }
 export type EncounterResult = { referral: Referral; encounter: ConsultationEncounter }
 export type HandoffResult = { referral: Referral; handoff: HandoffSummary }
 export type AgentLearning = { key: string; statement: string; provenance: string; status: 'suggested' | 'confirmed' | 'rejected'; updated_at: string | null }
@@ -547,23 +546,18 @@ export const acceptReferral = (referralId: number, receivingPhysicianId: string)
 export const getPhysicianReferrals = (physicianId: string, status?: ReferralStatus) => request<Referral[]>(`/api/physicians/${encodeURIComponent(physicianId)}/referrals${status ? `?status=${status}` : ''}`)
 
 /** Downstream coordination (Part F/K/W/AA) -- scheduling, the externally-ingested
- * consultation encounter, and the specialist-to-PCP handoff. */
-export const findSchedulingOptions = (referralId: number, receivingPhysicianId: string) => request<SchedulingOptionsResult>(`/api/referrals/${referralId}/scheduling/options`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
-})
-/** Routing also triggers the synthetic demo's stand-in confirmation immediately (Part M) -- never a separate call. */
-export const routeSchedulingOptions = (referralId: number, receivingPhysicianId: string) => request<SchedulingOptionsResult>(`/api/referrals/${referralId}/scheduling/route`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
-})
+ * consultation encounter, and the specialist-to-PCP handoff. Finding/routing
+ * scheduling options and drafting the handoff are now fully automated on the
+ * backend (acceptance and encounter-ingestion respectively authorize them --
+ * automation pass, Parts E/F/I/K), so there are no frontend wrapper
+ * functions for those steps any more; only the real physician actions
+ * (reading state, and explicitly sending the handoff) remain below. */
 export const getScheduling = (referralId: number) => request<SchedulingCoordination | null>(`/api/referrals/${referralId}/scheduling`)
-/** Demo-only control (Settings & Demo) -- never a normal Chen clinical button (Part C/R). */
+/** Demo-only control (Settings & Demo) -- never a normal Chen clinical button (Part C/R). Also triggers automatic handoff drafting server-side on first ingestion. */
 export const ingestConsultationEncounter = (referralId: number, receivingPhysicianId: string) => request<EncounterResult>(`/api/referrals/${referralId}/encounter/ingest`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
 })
 export const getEncounter = (referralId: number) => request<ConsultationEncounter | null>(`/api/referrals/${referralId}/encounter`)
-export const draftHandoff = (referralId: number, receivingPhysicianId: string) => request<HandoffResult>(`/api/referrals/${referralId}/handoff/draft`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
-})
 /** `asPhysicianId` is the explicit "acting as" identity gating draft visibility (Part AP) -- omit it for the referring side, which only ever sees a sent handoff. */
 export const getHandoff = (referralId: number, asPhysicianId?: string) => request<HandoffSummary | null>(`/api/referrals/${referralId}/handoff${asPhysicianId ? `?as_physician_id=${encodeURIComponent(asPhysicianId)}` : ''}`)
 export const sendHandoff = (referralId: number, receivingPhysicianId: string) => request<HandoffResult>(`/api/referrals/${referralId}/handoff/send`, {

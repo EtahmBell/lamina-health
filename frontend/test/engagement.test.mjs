@@ -1100,9 +1100,10 @@ test('the sidebar My Agent avatar renders blue, not grey -- the generic text-lab
 
 /* -------------------------------------------------------- Network growth + Feed */
 
-test('main sidebar icons (Dashboard/Patients/Network) are mineral-blue again, not copper -- copper stays primarily My Agent', () => {
-  assert.match(styles, /\.nav-icon \{ width: 24px; color: var\(--mineral\); font-size: 1\.05rem; text-align: center; \}/)
+test('main sidebar icons (Dashboard/Patients/Network) are dark charcoal text, not mineral-blue or copper (polish pass, Part A: the muted mineral tone read as washed-out)', () => {
+  assert.match(styles, /\.nav-icon \{ width: 24px; color: var\(--text-primary\); font-size: 1\.05rem; text-align: center; \}/)
   assert.doesNotMatch(styles, /\.nav-icon \{ width: 24px; color: var\(--accent\)/)
+  assert.doesNotMatch(styles, /\.nav-icon \{ width: 24px; color: var\(--mineral\)/)
 })
 
 test('the Network sidebar icon is still the people/group mark, and inherits the restored mineral color via currentColor', () => {

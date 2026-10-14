@@ -99,20 +99,40 @@ def accept_referral_endpoint(
 ) -> Referral:
     """A real physician action (Part D/O) -- never implied by preflight
     completing or by the referral merely being submitted. Only the physician
-    actually named as this referral's receiving_physician_id may accept it."""
+    actually named as this referral's receiving_physician_id may accept it.
+
+    Acceptance also authorizes the automatic scheduling administration that
+    follows (automation pass, Part E/F): finding valid availability and
+    routing it into the scheduling workflow are purely administrative agent
+    work, already authorized the instant the physician accepts, so they run
+    immediately here rather than waiting on a second or third click. Both
+    steps are idempotent (see find_scheduling_options/route_options_to_
+    scheduling), so a rerun/retry of this same endpoint never duplicates
+    options or events -- it just confirms the already-persisted state."""
     referral = _load_referral(workspace_id, referral_id)
     if referral.receiving_physician_id != request.receiving_physician_id:
         raise HTTPException(status_code=403, detail="Only the receiving physician can accept this referral")
     receiving_physician = _PHYSICIANS_BY_ID.get(request.receiving_physician_id)
     if receiving_physician is None:
         raise HTTPException(status_code=404, detail="Receiving physician not found")
+    physician_name = receiving_physician.name.replace(" (synthetic)", "")
     try:
-        updated = accept_referral(
-            referral, receiving_physician.id, receiving_physician.name.replace(" (synthetic)", "")
-        )
+        updated = accept_referral(referral, receiving_physician.id, physician_name)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    return workflow_store.update_referral(workspace_id, updated)
+    existing_scheduling = workflow_store.get_scheduling(workspace_id, referral_id)
+    try:
+        scheduling = find_scheduling_options(updated, receiving_physician.id, physician_name, existing_scheduling)
+        routed = route_options_to_scheduling(updated, scheduling, receiving_physician.id, physician_name)
+    except ValueError:
+        # Defensive only -- should not happen immediately after a fresh
+        # acceptance; an unexpected scheduling error must never block the
+        # acceptance itself from being saved.
+        routed = existing_scheduling
+    updated = workflow_store.update_referral(workspace_id, updated)
+    if routed is not None and routed is not existing_scheduling:
+        workflow_store.upsert_scheduling(workspace_id, updated.patient_id, routed)
+    return updated
 
 
 @router.get("/physicians/{physician_id}/referrals", response_model=list[Referral])
@@ -188,18 +208,29 @@ def ingest_referral_encounter(
 ) -> EncounterResult:
     """Demo-only control (Settings & Demo), never a normal Chen clinical
     button (Part C/R) -- simulates a real EHR/Medplum encounter arriving in
-    the clinical record."""
+    the clinical record.
+
+    Once the encounter is documented, Chen's Agent automatically drafts the
+    PCP handoff from it (automation pass, Part I/K) -- the clinical source
+    already exists and the agent is only summarizing already-documented
+    information, so this is appropriate automation; only drafting (never
+    sending) happens without a physician click. Runs only on first ingestion
+    (`existing is None`), so a repeat ingest call never re-drafts."""
     referral = _load_referral(workspace_id, referral_id)
     if referral.receiving_physician_id != request.receiving_physician_id:
         raise HTTPException(status_code=403, detail="Only the receiving physician's encounter can be ingested")
     existing = workflow_store.get_encounter(workspace_id, referral_id)
+    is_new_encounter = existing is None
     try:
         encounter = ingest_consultation_encounter(referral, request.receiving_physician_id, existing)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    updated_referral = workflow_store.update_referral(workspace_id, referral)
-    if existing is None:
+    if is_new_encounter:
         encounter = workflow_store.create_encounter(workspace_id, encounter)
+        physician_name = _physician_display_name(request.receiving_physician_id)
+        handoff = draft_handoff(referral, encounter, request.receiving_physician_id, physician_name, None)
+        workflow_store.create_handoff(workspace_id, handoff)
+    updated_referral = workflow_store.update_referral(workspace_id, referral)
     return EncounterResult(referral=updated_referral, encounter=encounter)
 
 

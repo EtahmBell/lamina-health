@@ -15,12 +15,42 @@ from backend.api import workspace as workspace_api
 from backend.demo_identity import PCP_NAME
 from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
-from backend.models import CoordinationActor, CoordinationEventType, HandoffStatus, ReferralStatus, SchedulingStatus
-from backend.synthetic_data import TONJIT_PATIENT_ID
+from backend.models import (
+    AutonomyLevel,
+    CoordinationActor,
+    CoordinationEventType,
+    HandoffStatus,
+    ReferralStatus,
+    SchedulingStatus,
+)
+from backend.referrals import (
+    accept_referral,
+    build_referral,
+    find_scheduling_options,
+    ingest_consultation_encounter,
+    route_options_to_scheduling,
+    run_preflight,
+)
+from backend.synthetic_data import PATIENTS, TONJIT_PATIENT_ID
 from backend.workflow import WorkflowStore
 
 CHEN_ID = "physician-chen"
 OTHER_PHYSICIAN_ID = "physician-jung"
+
+
+def _accepted_tonjit_referral():
+    """Pure-domain accepted referral, stopped exactly at `accepted` -- the
+    HTTP /accept endpoint now auto-chains the scheduling administration
+    immediately (automation pass, Part E/F), so there is no longer a way to
+    observe an "accepted but not yet scheduled" referral through the public
+    API. This bypasses that endpoint to unit-test find_scheduling_options /
+    route_options_to_scheduling / ingest_consultation_encounter's OWN guards
+    and behavior in isolation; the endpoint's orchestration of them has its
+    own dedicated integration tests further down this file."""
+    patient = PATIENTS[TONJIT_PATIENT_ID]
+    referral = run_preflight(patient, build_referral(patient, CHEN_ID, "Endocrinology"))
+    accepted = accept_referral(referral, CHEN_ID, "Dr. Noah Chen")
+    return patient, accepted
 
 
 @pytest.fixture
@@ -72,10 +102,15 @@ def _drafted_referral_id(client: TestClient) -> int:
 def test_lucy_hydrates_the_same_accepted_referral_and_it_survives_reload(api_client: TestClient) -> None:
     referral_id = _accepted_referral_id(api_client)
     active = api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active").json()
-    assert active["status"] == "accepted"
+    # Acceptance automatically authorizes the scheduling administration chain
+    # (automation pass, Part E/F) -- by the time this is fetched, the SAME
+    # referral Lucy hydrates has already progressed to `scheduled`, not just
+    # `accepted`.
+    assert active["status"] == "scheduled"
     assert active["id"] == referral_id
     event_types = [event["event_type"] for event in active["coordination_events"]]
     assert "referral_accepted" in event_types
+    assert "appointment_scheduled" in event_types
     # Re-fetching must never replay/duplicate anything.
     again = api_client.get(f"/api/patients/{TONJIT_PATIENT_ID}/referrals/active").json()
     assert again == active
@@ -101,25 +136,25 @@ def test_only_the_receiving_physician_can_find_scheduling_options(api_client: Te
     assert response.status_code == 403
 
 
-def test_returned_options_are_structured_synthetic_availability(api_client: TestClient) -> None:
-    referral_id = _accepted_referral_id(api_client)
-    result = api_client.post(
-        f"/api/referrals/{referral_id}/scheduling/options", json={"receiving_physician_id": CHEN_ID}
-    ).json()
-    scheduling = result["scheduling"]
-    assert scheduling["status"] == "options_ready"
-    assert len(scheduling["options"]) == 3
-    for slot in scheduling["options"]:
-        assert slot["appointment_type"] == "New Endocrinology consultation"
-        assert slot["duration_minutes"] > 0
-        assert slot["location"]
-        assert slot["starts_at"]
+def test_returned_options_are_structured_synthetic_availability() -> None:
+    """Unit-level (Part AN): find_scheduling_options's own behavior, tested
+    against a pure accepted-but-not-yet-scheduled referral -- see
+    _accepted_tonjit_referral's docstring for why this bypasses HTTP."""
+    _, referral = _accepted_tonjit_referral()
+    scheduling = find_scheduling_options(referral, CHEN_ID, "Dr. Noah Chen", None)
+    assert scheduling.status == SchedulingStatus.OPTIONS_READY
+    assert len(scheduling.options) == 3
+    for slot in scheduling.options:
+        assert slot.appointment_type == "New Endocrinology consultation"
+        assert slot.duration_minutes > 0
+        assert slot.location
+        assert slot.starts_at
     event = next(
-        event for event in result["referral"]["coordination_events"]
-        if event["event_type"] == "scheduling_options_found"
+        event for event in referral.coordination_events
+        if event.event_type == CoordinationEventType.SCHEDULING_OPTIONS_FOUND
     )
-    assert event["actor"] == "receiving_agent"
-    assert event["autonomy"] == "automatic"
+    assert event.actor == CoordinationActor.RECEIVING_AGENT
+    assert event.autonomy == AutonomyLevel.AUTOMATIC
 
 
 def test_finding_options_twice_returns_the_same_options_never_regenerated(api_client: TestClient) -> None:
@@ -138,18 +173,20 @@ def test_finding_options_twice_returns_the_same_options_never_regenerated(api_cl
     assert len(found_events) == 1
 
 
-def test_sending_options_to_scheduling_persists_routing_state(api_client: TestClient) -> None:
-    referral_id = _accepted_referral_id(api_client)
-    api_client.post(f"/api/referrals/{referral_id}/scheduling/options", json={"receiving_physician_id": CHEN_ID})
-    result = api_client.post(
-        f"/api/referrals/{referral_id}/scheduling/route", json={"receiving_physician_id": CHEN_ID}
-    ).json()
+def test_sending_options_to_scheduling_persists_routing_state() -> None:
+    """Unit-level (Part AN): routing is now administrative agent-workflow
+    work, never a physician decision (automation pass, Part E/F/L) -- actor
+    changed from receiving_physician/physician_required to
+    receiving_agent/automatic."""
+    _, referral = _accepted_tonjit_referral()
+    scheduling = find_scheduling_options(referral, CHEN_ID, "Dr. Noah Chen", None)
+    route_options_to_scheduling(referral, scheduling, CHEN_ID, "Dr. Noah Chen")
     sent_event = next(
-        event for event in result["referral"]["coordination_events"]
-        if event["event_type"] == "scheduling_options_sent"
+        event for event in referral.coordination_events
+        if event.event_type == CoordinationEventType.SCHEDULING_OPTIONS_SENT
     )
-    assert sent_event["actor"] == "receiving_physician"
-    assert sent_event["autonomy"] == "physician_required"
+    assert sent_event.actor == CoordinationActor.RECEIVING_AGENT
+    assert sent_event.autonomy == AutonomyLevel.AUTOMATIC
 
 
 def test_appointment_scheduled_uses_one_of_the_returned_options_with_synthetic_source(
@@ -198,12 +235,14 @@ def test_reload_preserves_scheduled_state(api_client: TestClient) -> None:
 # --------------------------------------------------------------------- Part AO
 
 
-def test_encounter_cannot_be_ingested_before_scheduled(api_client: TestClient) -> None:
-    referral_id = _accepted_referral_id(api_client)
-    response = api_client.post(
-        f"/api/referrals/{referral_id}/encounter/ingest", json={"receiving_physician_id": CHEN_ID}
-    )
-    assert response.status_code == 409
+def test_encounter_cannot_be_ingested_before_scheduled() -> None:
+    """Unit-level (Part AO): ingest_consultation_encounter's own guard --
+    the HTTP /accept endpoint auto-schedules immediately now, so an
+    accepted-but-not-yet-scheduled referral can no longer be reached through
+    the public API; this still exercises the defensive guard directly."""
+    _, referral = _accepted_tonjit_referral()
+    with pytest.raises(ValueError):
+        ingest_consultation_encounter(referral, CHEN_ID, None)
 
 
 def test_demo_control_creates_one_synthetic_encounter(api_client: TestClient) -> None:
@@ -416,3 +455,181 @@ def test_scheduling_status_values_match_the_suggested_minimal_set() -> None:
 
 def test_handoff_status_values_are_minimal_draft_and_sent_only() -> None:
     assert {status.value for status in HandoffStatus} == {"draft", "sent"}
+
+
+# ------------------------------------------------------- Automation pass (Parts E-T)
+#
+# Product principle: automate coordination, preserve physician decisions.
+# Acceptance and encounter-ingestion each now authorize an automatic
+# administrative chain that used to require extra physician clicks (Part L:
+# the only remaining meaningful physician actions in this whole closed loop
+# are choosing/starting a referral, accepting it, and reviewing+sending the
+# clinical handoff).
+
+
+def test_accepting_a_referral_automatically_runs_the_entire_scheduling_chain_with_no_manual_clicks(
+    api_client: TestClient,
+) -> None:
+    """Part S: no manual "Find appointment options"/"Send to scheduling"
+    step is required -- a single POST /accept reaches `scheduled` directly."""
+    referral_id = _submitted_referral_id(api_client)
+    response = api_client.post(f"/api/referrals/{referral_id}/accept", json={"receiving_physician_id": CHEN_ID})
+    assert response.status_code == 200
+    referral = response.json()
+    assert referral["status"] == "scheduled"
+
+    scheduling = api_client.get(f"/api/referrals/{referral_id}/scheduling").json()
+    assert scheduling is not None
+    assert scheduling["status"] == "scheduled"
+    assert scheduling["selected_option"] is not None
+    assert scheduling["source"] == "synthetic_demo"
+
+    event_types = [event["event_type"] for event in referral["coordination_events"]]
+    assert event_types.index("referral_accepted") < event_types.index("scheduling_options_found")
+    assert event_types.index("scheduling_options_found") < event_types.index("scheduling_options_sent")
+    assert event_types.index("scheduling_options_sent") < event_types.index("appointment_scheduled")
+
+
+def test_automatic_scheduling_events_carry_the_correct_actor_and_autonomy_provenance(
+    api_client: TestClient,
+) -> None:
+    """Part F/S: finding and routing options are administrative agent
+    work, never attributed to the physician; confirmation is attributed to
+    the synthetic scheduling workflow, never the agent or physician."""
+    referral_id = _submitted_referral_id(api_client)
+    referral = api_client.post(
+        f"/api/referrals/{referral_id}/accept", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    events_by_type = {event["event_type"]: event for event in referral["coordination_events"]}
+
+    found = events_by_type["scheduling_options_found"]
+    assert found["actor"] == "receiving_agent"
+    assert found["autonomy"] == "automatic"
+
+    sent = events_by_type["scheduling_options_sent"]
+    assert sent["actor"] == "receiving_agent"
+    assert sent["autonomy"] == "automatic"
+
+    scheduled = events_by_type["appointment_scheduled"]
+    assert scheduled["actor"] == "scheduling_workflow"
+    assert scheduled["autonomy"] == "automatic"
+
+    accepted_event = events_by_type["referral_accepted"]
+    assert accepted_event["actor"] == "receiving_physician"
+    assert accepted_event["autonomy"] == "physician_required"
+
+
+def test_accepting_an_already_scheduled_referral_again_is_a_safe_no_op(api_client: TestClient) -> None:
+    """Part N/S: a rerun/retry of /accept (e.g. a reload racing a real
+    response, or a defensive client retry) must never duplicate scheduling
+    options or coordination events."""
+    referral_id = _submitted_referral_id(api_client)
+    first = api_client.post(f"/api/referrals/{referral_id}/accept", json={"receiving_physician_id": CHEN_ID}).json()
+    second = api_client.post(f"/api/referrals/{referral_id}/accept", json={"receiving_physician_id": CHEN_ID}).json()
+
+    assert second["status"] == "scheduled"
+    assert first["coordination_events"] == second["coordination_events"]
+
+    first_scheduling = api_client.get(f"/api/referrals/{referral_id}/scheduling").json()
+    second_scheduling = api_client.get(f"/api/referrals/{referral_id}/scheduling").json()
+    assert first_scheduling == second_scheduling
+    assert len(first_scheduling["options"]) == 3
+
+
+def test_chen_remains_in_his_active_patient_query_through_automatic_scheduling(api_client: TestClient) -> None:
+    """Part S: the Tonjit-disappearance fix and the scheduling automation
+    must compose correctly -- Chen's active-patient query still finds the
+    patient immediately after accept, now at `scheduled` rather than
+    `accepted`."""
+    referral_id = _submitted_referral_id(api_client)
+    api_client.post(f"/api/referrals/{referral_id}/accept", json={"receiving_physician_id": CHEN_ID})
+    all_referrals = api_client.get(f"/api/physicians/{CHEN_ID}/referrals").json()
+    assert [item["patient_id"] for item in all_referrals] == [TONJIT_PATIENT_ID]
+    assert all_referrals[0]["status"] == "scheduled"
+
+
+def test_encounter_ingestion_automatically_drafts_the_handoff_with_no_manual_click(
+    api_client: TestClient,
+) -> None:
+    """Part T: no manual "Draft handoff" step is required -- a single POST
+    /encounter/ingest produces both the encounter and a draft handoff."""
+    referral_id = _scheduled_referral_id(api_client)
+    assert api_client.get(f"/api/referrals/{referral_id}/handoff").status_code == 200
+    assert api_client.get(f"/api/referrals/{referral_id}/handoff").json() is None
+
+    result = api_client.post(
+        f"/api/referrals/{referral_id}/encounter/ingest", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    encounter = result["encounter"]
+
+    handoff = api_client.get(
+        f"/api/referrals/{referral_id}/handoff", params={"as_physician_id": CHEN_ID}
+    ).json()
+    assert handoff is not None
+    assert handoff["status"] == "draft"
+    assert handoff["encounter_id"] == encounter["id"]
+    assert handoff["drafted_by_agent_id"]
+
+    event_types = [event["event_type"] for event in result["referral"]["coordination_events"]]
+    assert "consultation_ingested" in event_types
+    assert "handoff_drafted" in event_types
+    assert event_types.index("consultation_ingested") < event_types.index("handoff_drafted")
+
+
+def test_auto_drafted_handoff_event_is_attributed_to_the_receiving_agent_automatically(
+    api_client: TestClient,
+) -> None:
+    """Part K: handoff_drafted is always actor=receiving agent,
+    autonomy=automatic -- never the physician, who has not reviewed
+    anything yet at this point."""
+    referral_id = _scheduled_referral_id(api_client)
+    result = api_client.post(
+        f"/api/referrals/{referral_id}/encounter/ingest", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    drafted_event = next(
+        event for event in result["referral"]["coordination_events"]
+        if event["event_type"] == "handoff_drafted"
+    )
+    assert drafted_event["actor"] == "receiving_agent"
+    assert drafted_event["autonomy"] == "automatic"
+
+
+def test_lucy_cannot_see_the_auto_drafted_handoff_before_chen_sends_it(api_client: TestClient) -> None:
+    """Part T: automatic drafting must never weaken the existing access
+    gate -- the referring side still cannot see a draft, only a sent one."""
+    referral_id = _scheduled_referral_id(api_client)
+    api_client.post(f"/api/referrals/{referral_id}/encounter/ingest", json={"receiving_physician_id": CHEN_ID})
+
+    as_nobody = api_client.get(f"/api/referrals/{referral_id}/handoff").json()
+    assert as_nobody is None
+    as_other_physician = api_client.get(
+        f"/api/referrals/{referral_id}/handoff", params={"as_physician_id": OTHER_PHYSICIAN_ID}
+    ).json()
+    assert as_other_physician is None
+
+    api_client.post(f"/api/referrals/{referral_id}/handoff/send", json={"receiving_physician_id": CHEN_ID})
+    now_visible = api_client.get(f"/api/referrals/{referral_id}/handoff").json()
+    assert now_visible is not None
+    assert now_visible["status"] == "sent"
+
+
+def test_re_ingesting_an_encounter_does_not_re_draft_the_handoff(api_client: TestClient) -> None:
+    """Part N/T: a reload/rerun of the encounter-ingest demo control must
+    never produce a second draft or a second handoff_drafted event."""
+    referral_id = _scheduled_referral_id(api_client)
+    first = api_client.post(
+        f"/api/referrals/{referral_id}/encounter/ingest", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    second = api_client.post(
+        f"/api/referrals/{referral_id}/encounter/ingest", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    assert first["encounter"] == second["encounter"]
+
+    drafted_events = [
+        event for event in second["referral"]["coordination_events"]
+        if event["event_type"] == "handoff_drafted"
+    ]
+    assert len(drafted_events) == 1
+
+    handoff = api_client.get(f"/api/referrals/{referral_id}/handoff", params={"as_physician_id": CHEN_ID}).json()
+    assert handoff is not None

@@ -153,7 +153,10 @@ def test_tonjit_accepted_patient_query_coexists_cleanly_with_the_seeded_panel(
     before_accept = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "accepted"})
     assert before_accept.json() == []
 
+    # Acceptance automatically advances the referral to `scheduled`
+    # (automation pass, Part E/F), so the post-accept query checks that
+    # status rather than `accepted` (which the referral no longer rests at).
     api_client.post(f"/api/referrals/{created['id']}/accept", json={"receiving_physician_id": CHEN_ID})
-    after_accept = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "accepted"})
+    after_accept = api_client.get(f"/api/physicians/{CHEN_ID}/referrals", params={"status": "scheduled"})
     assert [item["patient_id"] for item in after_accept.json()] == [TONJIT_PATIENT_ID]
     assert TONJIT_PATIENT_ID not in CHEN_SEEDED_PATIENT_IDS
