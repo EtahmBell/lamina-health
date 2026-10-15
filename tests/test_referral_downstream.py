@@ -215,6 +215,33 @@ def test_appointment_scheduled_uses_one_of_the_returned_options_with_synthetic_s
     assert scheduled_event["actor"] != "receiving_physician"
 
 
+def test_the_confirmed_synthetic_appointment_is_a_reasonable_daytime_clinic_hour(
+    api_client: TestClient,
+) -> None:
+    """Bug-fix pass, Part B/U: the confirmed appointment (always options[0],
+    see confirm_synthetic_appointment) must read as a normal outpatient
+    clinic hour everywhere it's displayed, not an unrealistic hour like
+    3:30 AM. The root cause was storing a clinic-local wall-clock time but
+    tagging it as UTC, which the frontend then silently shifted when
+    converting to the viewing browser's own local timezone. The fix stores a
+    naive (no UTC offset) datetime instead, so every consumer -- Lucy, Chen,
+    scheduling details, history -- parses and displays the exact same
+    structured hour/minute with no hidden conversion."""
+    referral_id = _accepted_referral_id(api_client)
+    api_client.post(f"/api/referrals/{referral_id}/scheduling/options", json={"receiving_physician_id": CHEN_ID})
+    routed = api_client.post(
+        f"/api/referrals/{referral_id}/scheduling/route", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    starts_at = routed["scheduling"]["selected_option"]["starts_at"]
+    assert starts_at.endswith("15:30"), f"expected a 3:30 PM clinic time, got {starts_at!r}"
+    assert "+" not in starts_at and "Z" not in starts_at, (
+        "starts_at must carry no UTC offset -- a naive clinic-local wall-clock time, "
+        "so the frontend never silently reinterprets it in the viewer's own timezone"
+    )
+    hour = int(starts_at.split("T")[1].split(":")[0])
+    assert 7 <= hour <= 18, f"expected a normal outpatient clinic hour, got hour={hour}"
+
+
 def test_chen_and_lucy_see_the_same_scheduled_appointment(api_client: TestClient) -> None:
     referral_id = _scheduled_referral_id(api_client)
     chen_view = api_client.get(f"/api/referrals/{referral_id}/scheduling").json()

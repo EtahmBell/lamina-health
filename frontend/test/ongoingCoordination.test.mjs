@@ -155,14 +155,23 @@ test('episode-reviewed state is reported up from ReferralCoordinationSurface via
  * current frontend session state.
  * ===================================================================== */
 
-test('chat is rendered by ReferralCoordinationSurface itself -- gated on real backend acceptance (ACCEPTED_OR_LATER_STATUSES), not merely on the local create+preflight+submit workflow finishing', () => {
-  assert.match(referralSource, /status === 'done' && referral && !justCompleted && ACCEPTED_OR_LATER_STATUSES\.includes\(referral\.status\) && <CoordinationChatCard/)
+/* (bug-fix pass, Part C) Active-episode chat moved from inside
+ * ReferralCoordinationSurface's own returned fragment to App.tsx, rendered
+ * as a true sibling of the "Referral to Dr. X" <article> -- not nested
+ * inside its border. ReferralCoordinationSurface still owns the chat for
+ * the COLLAPSED/reviewed episode (nested inside the expanded disclosure is
+ * correct there, per Part I/J), so the component still has one definition,
+ * just two different call sites now. */
+test('active-episode chat is rendered by the parent (App.tsx), gated on real backend acceptance (ACCEPTED_OR_LATER_STATUSES) read directly from activeReferral -- not duplicated local workflow state', () => {
+  assert.match(app, /activeReferral && activeReferral\.id && ACCEPTED_OR_LATER_STATUSES\.includes\(activeReferral\.status\) && <CoordinationChatCard/)
 })
 
-test('Lucy gets "Ask Dr. Chen\'s Agent" after acceptance, with Chen as the represented physician', () => {
-  const activeChat = slice(referralSource, "ACCEPTED_OR_LATER_STATUSES.includes(referral.status) && <CoordinationChatCard", '/>}')
-  assert.match(activeChat, /requestingPhysicianId=\{referral\.referring_physician_id\}/)
-  assert.match(activeChat, /representedPhysicianId=\{referral\.receiving_physician_id\}/)
+test('Lucy gets "Ask Dr. Chen\'s Agent" after acceptance, with Chen as the represented physician, as a sibling of the referral <article> -- never nested inside it', () => {
+  const activeChat = slice(app, 'const activeEpisodeChat =', 'return <section className="recommendations referral-mode"')
+  assert.match(activeChat, /requestingPhysicianId=\{activeReferral\.referring_physician_id\}/)
+  assert.match(activeChat, /representedPhysicianId=\{activeReferral\.receiving_physician_id\}/)
+  const activeBranch = slice(app, 'const activeEpisodeChat =', "return <section className=\"recommendations\" aria-label=\"Specialist recommendations\"")
+  assert.match(activeBranch, /<\/article>\s*\n\s*\{activeEpisodeChat\}/, 'the chat renders after </article> closes, as a sibling, not inside it')
 })
 
 test('Chen gets "Ask Dr. Saruhashi\'s Agent" after acceptance, with Lucy as the represented physician -- the SAME shared CoordinationChatCard component, just swapped requesting/represented props (Part S)', () => {
@@ -172,10 +181,11 @@ test('Chen gets "Ask Dr. Saruhashi\'s Agent" after acceptance, with Lucy as the 
   assert.match(fn, /representedPhysicianName=\{PCP_NAME\}/)
 })
 
-test('both directions reuse the exact same CoordinationChatCard component -- not two separate implementations', () => {
+test('both directions, and both the active and collapsed episode states, reuse the exact same CoordinationChatCard component -- not several separate implementations', () => {
   const definitions = [...referralSource.matchAll(/export function CoordinationChatCard/g)]
   assert.equal(definitions.length, 1)
-  assert.doesNotMatch(app, /<CoordinationChatCard/, 'App.tsx no longer renders its own standalone chat card -- ReferralCoordinationSurface owns it now')
+  assert.match(app, /<CoordinationChatCard/, 'App.tsx renders the active-episode instance directly, as a sibling card (Part C)')
+  assert.match(referralSource, /<CoordinationChatCard/, 'Referral.tsx still renders the collapsed-episode instance, nested inside the expanded disclosure (Part I/J)')
 })
 
 test('the chat card is ephemeral -- no fetch of a persisted thread on mount, and no GET-chat API helper exists anymore', () => {

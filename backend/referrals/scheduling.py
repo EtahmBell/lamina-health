@@ -20,7 +20,16 @@ _CHEN_LOCATION = "Oakland, CA"
 
 # (days from now, hour, minute) -- three plausible near-future weekday-ish
 # slots, spaced out the way a real new-patient specialist schedule would be.
-_CHEN_OFFSETS = ((15, 10, 30), (17, 14, 0), (20, 9, 0))
+# Hour/minute are Dr. Chen's own clinic wall-clock time (Oakland, CA), never
+# UTC (bug-fix pass, Part B) -- `starts_at` below is deliberately emitted
+# without a UTC offset so the frontend's `new Date(...)` parses it as local
+# time directly, displaying exactly this hour/minute everywhere (Lucy, Chen,
+# scheduling details, history) instead of silently shifting by the viewing
+# browser's own timezone (the actual cause of the old "3:30 AM" appointment
+# -- 10:30 tagged as UTC rendered several hours earlier in US local time).
+# No real timezone handling is introduced; this simply stops mislabeling a
+# clinic-local time as UTC.
+_CHEN_OFFSETS = ((15, 15, 30), (17, 14, 0), (20, 9, 0))
 
 
 def synthetic_chen_availability(now: datetime | None = None) -> list[AppointmentSlot]:
@@ -32,7 +41,7 @@ def synthetic_chen_availability(now: datetime | None = None) -> list[Appointment
     slots = []
     for index, (days, hour, minute) in enumerate(_CHEN_OFFSETS, start=1):
         starts_at = (reference + timedelta(days=days)).replace(
-            hour=hour, minute=minute, second=0, microsecond=0
+            hour=hour, minute=minute, second=0, microsecond=0, tzinfo=None
         )
         slots.append(
             AppointmentSlot(

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { derivePhases, PHASE_FADE_MS, PHASE_HOLD_MS, restorePhase, SUCCESS_WASH_HOLD_MS } from '../src/referralPhases.ts'
+import { derivePhases, formatSubmittedAt, PHASE_FADE_MS, PHASE_HOLD_MS, restorePhase, SUCCESS_WASH_HOLD_MS } from '../src/referralPhases.ts'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const referralSource = readFileSync(new URL('../src/Referral.tsx', import.meta.url), 'utf8')
@@ -724,4 +724,23 @@ test('no backend calls happen anywhere in start() other than the single create+p
   const preflightCalls = startSource.match(/runReferralPreflight\(/g) ?? []
   assert.equal(createCalls.length, 1)
   assert.equal(preflightCalls.length, 1)
+})
+
+/* ========================================================================
+ * Bug-fix pass, Part B/U: synthetic appointment time must read as a normal
+ * daytime clinic hour everywhere, via the SAME shared formatSubmittedAt
+ * used by every consumer (Lucy, Chen, scheduling details, history) -- never
+ * a per-view reformat. The backend now emits a naive (no UTC offset)
+ * clinic-local datetime string specifically so formatSubmittedAt's
+ * `new Date(value)` parses it as local time directly, with no hidden
+ * timezone conversion regardless of the viewing browser's own timezone.
+ * ===================================================================== */
+
+test('formatSubmittedAt renders a naive (no UTC offset) datetime string using its own literal hour/minute, never shifting it by the viewing environment\'s timezone', () => {
+  assert.match(formatSubmittedAt('2099-01-14T15:30'), /3:30\s*PM/)
+})
+
+test('formatSubmittedAt is the one shared formatter for every appointment-time display site -- Lucy\'s found-value, the scheduling details modal, and Chen\'s scheduled view all call it on the same slot.starts_at field, never a separate reformat', () => {
+  const occurrences = [...referralSource.matchAll(/\{formatSubmittedAt\(slot\.starts_at\)\}/g)]
+  assert.ok(occurrences.length >= 3, 'expected at least 3 call sites (Lucy, SchedulingDetailsModal, Chen) all using the same formatter on the same field')
 })

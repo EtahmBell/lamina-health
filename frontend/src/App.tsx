@@ -18,7 +18,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, ReferralCoordinationSurface } from './Referral.tsx'
+import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, CoordinationChatCard, lucySuggestedPrompts, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -715,7 +715,12 @@ function RecommendationView({
   // 7-10) -- once true, the specialty episode recedes and this component
   // renders a generic current-care-state card instead of "Referral to Dr.
   // X". Never decided here directly; always the child's own real fact.
-  const [episodeReviewed, setEpisodeReviewed] = useState(false)
+  // `null` means "not yet known" (bug-fix pass, Part Q) -- on a restored
+  // consult_returned referral, the child withholds its report until the
+  // real handoff has loaded, so this must NOT default to `false` (which
+  // would render the "Referral to Dr. X" framing immediately, then flash
+  // to the generic state once the real answer arrives a moment later).
+  const [episodeReviewed, setEpisodeReviewed] = useState<boolean | null>(null)
   // Discovery vs. Referral are frontend presentation modes only -- never a
   // backend referral status, and never persisted client-side either. See
   // Part B. `activeReferral` is populated purely by asking the backend
@@ -874,6 +879,22 @@ function RecommendationView({
       onReviewedChange={setEpisodeReviewed}
       restoredReferral={activeReferral}
     />
+    // Reload-flash fix (bug-fix pass, Part Q/O): on a restored consult_returned
+    // referral, the child withholds onReviewedChange until the real handoff
+    // has loaded, so `episodeReviewed` stays `null` ("not yet known") for a
+    // moment. Rendering NEITHER branch during that window -- just a neutral
+    // placeholder, reusing the same "Opening referral…" idle-card pattern as
+    // the outer hydration gate above -- is what actually prevents the
+    // "Referral to Dr. X" / "Specialist follow-up received" flash before
+    // snapping to the generic post-episode state.
+    if (activeReferral?.status === 'consult_returned' && episodeReviewed === null) {
+      return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
+        <h2>Current care state</h2>
+        <article className="best-fit-card compact referral-card">
+          {coordinationSurface}
+        </article>
+      </section>
+    }
     // Once Lucy has reviewed the returned handoff, Chen stops dominating the
     // primary current-care state (demo-consolidation pass, Part 7C/9) --
     // the episode itself (artifact links, chat, "View handoff") recedes
@@ -895,6 +916,21 @@ function RecommendationView({
         <p className="disclaimer">{consultation.disclaimer}</p>
       </section>
     }
+    // Chat is a sibling CARD of the "Referral to Dr. X" card, never nested
+    // inside its border (bug-fix pass, Part C) -- both belong to "Current
+    // care state", but neither contains the other. Gated on the same real
+    // backend fact (ACCEPTED_OR_LATER_STATUSES) ReferralCoordinationSurface
+    // used to gate this internally, now read directly from activeReferral
+    // (kept live via onReferralChange) rather than duplicated child state.
+    const activeEpisodeChat = activeReferral && activeReferral.id && ACCEPTED_OR_LATER_STATUSES.includes(activeReferral.status) && <CoordinationChatCard
+      referral={activeReferral}
+      patientLabel={patientName(consultation.patient_id)}
+      requestingPhysicianId={activeReferral.referring_physician_id}
+      representedPhysicianId={activeReferral.receiving_physician_id}
+      representedPhysicianName={cleanName(selected.physician_name)}
+      representedTone="copper"
+      suggestedPrompts={lucySuggestedPrompts(patientName(consultation.patient_id), cleanName(selected.physician_name), selected.specialty)}
+    />
     return <section className="recommendations referral-mode" aria-label="Referral status" tabIndex={-1}>
       <h2>Current care state</h2>
       <p className="page-intro">Your agent helps with the follow-through.</p>
@@ -904,6 +940,7 @@ function RecommendationView({
         <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(selected.physician_name)}</span><div><h2>{cleanName(selected.physician_name)}</h2><p>{selected.specialty}</p></div></div>
         {coordinationSurface}
       </article>
+      {activeEpisodeChat}
       <p className="disclaimer">{consultation.disclaimer}</p>
     </section>
   }

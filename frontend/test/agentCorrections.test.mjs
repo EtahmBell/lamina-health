@@ -32,7 +32,7 @@ test('AgentCoordinationModal requires a viewerPhysicianId prop and only shows "C
   assert.match(fn, /viewerPhysicianId: string/)
   assert.match(fn, /const owner = correctableEventOwner\(referral, event\)/)
   assert.match(fn, /const correctable = owner != null && owner === viewerPhysicianId/)
-  assert.match(fn, /\{correctable && !corrected && correctingSequence !== event\.sequence && <button type="button" className="text-button coordination-correct-trigger" onClick=\{\(\) => openCorrection\(event\.sequence\)\}>Correct this<\/button>\}/)
+  assert.match(fn, /\{correctable && !corrected && correctingSequence !== event\.sequence && <button type="button" className="coordination-correct-trigger" onClick=\{\(\) => openCorrection\(event\.sequence\)\}>Correct this<\/button>\}/)
 })
 
 test('a system event (no actor match) is never correctable, regardless of who is viewing', () => {
@@ -62,8 +62,18 @@ test('saving a correction never mutates the original event -- it only sets local
   assert.match(fn, /✓ Saved for your agent to review\. Nothing was changed automatically\./)
 })
 
-test('the correction mechanic is quiet -- a small text-button per event, not a button cluttering every row by default', () => {
-  assert.match(styles, /\.coordination-correct-trigger \{ margin-top: 6px; font-size: \.62rem; \}/)
+/* (bug-fix pass, Part A) The original plain text-link read as too subtle to
+ * notice/click -- now an obvious, compact copper secondary button, reusing
+ * the same --agent-copper-soft/-surface/-ink training/agent-language tokens
+ * used elsewhere (e.g. .practice-chip-group.prominent), never a large
+ * primary CTA. */
+test('"Correct this" is an obvious, compact copper secondary button -- not a quiet text-link, and not a large primary CTA', () => {
+  assert.match(styles, /\.coordination-correct-trigger \{[^}]*border: 1px solid var\(--agent-copper-soft\);[^}]*border-radius: 999px;[^}]*background: var\(--agent-copper-surface\);[^}]*color: var\(--agent-copper-ink\);/s)
+  assert.doesNotMatch(styles, /\.coordination-correct-trigger \{[^}]*border: 0;/s, 'must not keep the old borderless text-link treatment')
+})
+
+test('"Correct this" keeps a visible focus ring for keyboard users', () => {
+  assert.match(styles, /\.coordination-correct-trigger:focus-visible \{ outline: 2px solid var\(--agent-copper\);/)
 })
 
 test('Lucy\'s own coordination modal (inside ReferralCoordinationSurface) passes her own physician id as the viewer, never Chen\'s', () => {

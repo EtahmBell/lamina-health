@@ -166,7 +166,16 @@ export function ReferralCoordinationSurface({
   // animation (Lucy never creates these herself; they only ever appear via
   // hydration/polling of Chen's own actions).
   const [scheduling, setScheduling] = useState<SchedulingCoordination | null>(null)
-  const [handoff, setHandoff] = useState<HandoffSummary | null>(null)
+  // `undefined` means "a handoff should exist but hasn't loaded yet" --
+  // distinct from `null` ("no handoff, and none is expected"). A restored
+  // consult_returned referral always has a real handoff; starting this at
+  // `undefined` lets the render gate below show a neutral loading state
+  // instead of flashing the ACTIVE "Referral to Dr. X" structure first and
+  // then snapping to the generic/collapsed state once the fetch resolves
+  // (bug-fix pass, Part Q -- the reload-flash bug).
+  const [handoff, setHandoff] = useState<HandoffSummary | null | undefined>(
+    restoredReferral?.status === 'consult_returned' ? undefined : null
+  )
   const [schedulingDetailsOpen, setSchedulingDetailsOpen] = useState(false)
   const [handoffOpen, setHandoffOpen] = useState(false)
   // Collapsed by default (Part 10) -- the physician explicitly expands it.
@@ -194,8 +203,14 @@ export function ReferralCoordinationSurface({
   // so flipping mid-render would remount this very component and silently
   // close the modal out from under the physician still reading it. Reports
   // once she actually closes it, by which point the remount is invisible.
+  // Also withheld while `handoff === undefined` (bug-fix pass, Part Q) --
+  // on a restored consult_returned referral the real handoff hasn't loaded
+  // yet, so reporting a premature `false` here would briefly flash the
+  // parent into its "Referral to Dr. X" framing before snapping to the
+  // generic state once the fetch resolves. Silence until the real answer
+  // is known, exactly like this component's own render gate below.
   useEffect(() => {
-    if (handoffOpen) return
+    if (handoffOpen || handoff === undefined) return
     onReviewedChange?.(Boolean(handoff?.viewed_by_referring_physician_at))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handoff?.viewed_by_referring_physician_at, handoffOpen])
@@ -316,6 +331,13 @@ export function ReferralCoordinationSurface({
     return <div className="referral-coordination-surface error-banner" role="alert">{error}</div>
   }
   if (!visiblePhase) return null
+  // Mirrors the onReviewedChange withholding above (bug-fix pass, Part Q):
+  // the real handoff hasn't loaded yet for a restored consult_returned
+  // referral, so render neither the active nor the collapsed structure --
+  // just a neutral placeholder -- until it has.
+  if (handoff === undefined) {
+    return <div className="referral-coordination-surface" role="status"><div className="next-step-card idle"><p className="muted-note">Opening referral…</p></div></div>
+  }
   const sentResolvedCount = visiblePhase.kind === 'sent' ? visiblePhase.resolvedCount : 0
   const reviewed = Boolean(handoff?.viewed_by_referring_physician_at)
   const modals = <>
@@ -349,7 +371,19 @@ export function ReferralCoordinationSurface({
   // Part 7C/10/32) -- the "Referral to Dr. X" framing itself lives one
   // level up and has already stopped rendering (see onReviewedChange), so
   // this returns ONLY the collapsed episode, never the live phase content.
-  if (status === 'done' && referral && !justCompleted && reviewed) {
+  //
+  // Root-cause fix (bug-fix pass, Part D-G/O/P): `reviewed` flips true the
+  // instant the background `markHandoffViewed` call resolves -- which
+  // happens WHILE the modal is still open (openHandoff fires it immediately
+  // on open, not on close). Without `!handoffOpen` here, this branch (a
+  // structurally different tree from the "active" branch below) would swap
+  // out from under the open HandoffModal mid-read, remounting it and
+  // reading as a glitchy phase/flash. `!handoffOpen` is the single
+  // authoritative gate: the same fact `onReviewedChange` already withholds
+  // on above, now applied consistently to this component's OWN branch
+  // choice too, so the background stays completely stable until she
+  // actually closes the modal, and the transition happens exactly once.
+  if (status === 'done' && referral && !justCompleted && reviewed && !handoffOpen) {
     return <>
       <div className="specialty-episode-section">
         <p className="section-label">Recent specialty care</p>
@@ -417,22 +451,17 @@ export function ReferralCoordinationSurface({
         {sentResolvedCount > 0 && <small>{resolvedSummary(sentResolvedCount)} automatically.</small>}
       </div>
     </div>
-    {/* Active-episode chat (Part 33): visible directly beneath the current-
-     * state card while the episode is still active/not yet reviewed; once
-     * reviewed, the SAME component moves inside the collapsed episode above
-     * instead (Part 32) -- never both at once. Still gated on real backend
-     * acceptance (Part Y, preserved from the previous pass), not merely on
-     * the local create+preflight+submit workflow finishing -- Lucy submitting
-     * a referral is not the same thing as Chen having accepted it yet. */}
-    {status === 'done' && referral && !justCompleted && ACCEPTED_OR_LATER_STATUSES.includes(referral.status) && <CoordinationChatCard
-      referral={referral}
-      patientLabel={patientLabel}
-      requestingPhysicianId={referral.referring_physician_id}
-      representedPhysicianId={referral.receiving_physician_id}
-      representedPhysicianName={receivingPhysicianName}
-      representedTone="copper"
-      suggestedPrompts={lucySuggestedPrompts(patientLabel, receivingPhysicianName, referral.specialty)}
-    />}
+    {/* Active-episode chat is rendered by the PARENT, as a true sibling card
+     * of the "Referral to Dr. X" card -- not here (bug-fix pass, Part C).
+     * Rendering it inside this component's own returned fragment, even as a
+     * JSX sibling of .referral-coordination-surface, still ends up nested
+     * inside whatever single bordered wrapper the parent puts around this
+     * component's entire output (App.tsx's .best-fit-card.referral-card).
+     * The parent has everything it needs to gate this itself (activeReferral
+     * + ACCEPTED_OR_LATER_STATUSES, reported via onReferralChange) without
+     * duplicating this component's internal state. Once reviewed, chat moves
+     * inside the collapsed episode above instead (Part 32) -- never both at
+     * once. */}
     {modals}
   </>
 }
@@ -526,7 +555,7 @@ export function AgentCoordinationModal({
             <strong>{EVENT_TYPE_TITLES[event.event_type] ?? event.event_type}</strong>
             <p>{event.summary}</p>
             {correctable && corrected && <p className="coordination-correction-saved">✓ Saved for your agent to review. Nothing was changed automatically.</p>}
-            {correctable && !corrected && correctingSequence !== event.sequence && <button type="button" className="text-button coordination-correct-trigger" onClick={() => openCorrection(event.sequence)}>Correct this</button>}
+            {correctable && !corrected && correctingSequence !== event.sequence && <button type="button" className="coordination-correct-trigger" onClick={() => openCorrection(event.sequence)}>Correct this</button>}
             {correctingSequence === event.sequence && <div className="coordination-correction-form">
               <p className="section-label">What should your agent have done or said instead?</p>
               {correctionSelectedText && <p className="coordination-correction-selected">“{correctionSelectedText}”</p>}

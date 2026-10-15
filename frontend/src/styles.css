@@ -1705,10 +1705,21 @@ button.lam-row:hover { background: #fff9f1; }
 .coordination-event strong { display: block; margin-top: 2px; font-size: .8rem; font-weight: 500; }
 .coordination-event p { margin: 4px 0 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
 .coordination-footer { margin-top: 18px; color: var(--mineral-deep); font-size: .74rem; font-weight: 600; }
-/* Quiet, physician-owned per-event correction mechanic (demo-consolidation
- * pass, Part 23-28) -- a small text-button, not a button cluttering every
- * row; only ever shown on the viewing physician's own agent's events. */
-.coordination-correct-trigger { margin-top: 6px; font-size: .62rem; }
+/* Physician-owned per-event correction mechanic (demo-consolidation pass,
+ * Part 23-28; bug-fix pass Part A makes it an obvious compact button --
+ * the original plain text-link read as too subtle to notice/click). Copper/
+ * agent-training treatment (same --agent-copper-soft/-surface/-ink tokens as
+ * .practice-chip-group.prominent and .training-choice-plain.selected
+ * elsewhere), so it reads as "train your agent", not a primary CTA -- only
+ * ever shown on the viewing physician's own agent's events. */
+.coordination-correct-trigger {
+  margin-top: 8px; border: 1px solid var(--agent-copper-soft); border-radius: 999px;
+  background: var(--agent-copper-surface); padding: 5px 12px; color: var(--agent-copper-ink);
+  cursor: pointer; font-family: inherit; font-size: .64rem; font-weight: 600;
+  transition: border-color .15s, background .15s;
+}
+.coordination-correct-trigger:hover { border-color: var(--agent-copper); background: #f0ddd0; }
+.coordination-correct-trigger:focus-visible { outline: 2px solid var(--agent-copper); outline-offset: 2px; }
 .coordination-correction-saved { margin-top: 6px; color: var(--success); font-size: .68rem; font-weight: 600; }
 .coordination-correction-form { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); padding: 10px 12px; }
 .coordination-correction-selected { margin: 6px 0 0; border-left: 2px solid var(--border); padding-left: 8px; color: var(--text-secondary); font-size: .68rem; font-style: italic; }
