@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from .consultation import StrictModel
+from .consultation import MedicationChange, StrictModel
 from .referral import Referral
 
 
@@ -73,6 +73,7 @@ class ConsultationEncounter(StrictModel):
     assessment: str
     key_findings: list[str] = Field(default_factory=list)
     plan: str
+    medication_changes: list[MedicationChange] = Field(default_factory=list)
     follow_up: str
     created_at: str
 
@@ -102,6 +103,7 @@ class HandoffSummary(StrictModel):
     assessment: str
     key_findings: list[str] = Field(default_factory=list)
     recommendations: str
+    medication_changes: list[MedicationChange] = Field(default_factory=list)
     follow_up: str
     status: HandoffStatus
     approved_by_physician_id: str | None = None

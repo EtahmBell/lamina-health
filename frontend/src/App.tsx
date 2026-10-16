@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type Evaluation, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralStatus, type TrainProjection } from './api.ts'
+import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type Evaluation, type HandoffSummary, type MyAgent, type NetworkFeed, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralStatus, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -18,7 +18,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, CoordinationChatCard, lucySuggestedPrompts, ReferralCoordinationSurface } from './Referral.tsx'
+import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -1105,6 +1105,17 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
   // Medplum (Part U/AF) -- the same persisted artifact either physician
   // reads, never a per-perspective copy or a mutation of clinical_notes.
   const [recordEncounter, setRecordEncounter] = useState<ConsultationEncounter | null>(null)
+  // Lucy's own view of the same handoff ReferralCoordinationSurface tracks
+  // internally (demo-story pass, Part J) -- used only to know whether she
+  // has reviewed it yet, to bound the post-consult medication-change
+  // highlight window; never fetched/used on the receiving (Chen) side.
+  const [recordHandoff, setRecordHandoff] = useState<HandoffSummary | null>(null)
+  // Plays exactly once per newly-documented encounter, only while Lucy has
+  // not yet reviewed the returned handoff (Part J/M) -- consumeMedication-
+  // HighlightFlag (same established one-shot-per-session pattern as
+  // markReferralJustAccepted, see Referral.tsx) decides whether to ANIMATE,
+  // never what the clinical data itself is.
+  const [medicationHighlight, setMedicationHighlight] = useState(false)
   const demoPatient = DEMO_PATIENTS.find((item) => item.id === patientId)
   const backPath = perspective === 'receiving' ? '/chen/patients' : '/patients'
   const refreshActivity = () => getPatientActivity()
@@ -1121,13 +1132,36 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
   useEffect(() => {
     let cancelled = false
     setRecordEncounter(null)
+    setRecordHandoff(null)
     const referral$ = perspective === 'receiving' ? Promise.resolve(receivingReferral ?? null) : getActiveReferral(patientId).catch(() => null)
     referral$.then((referral) => {
       if (cancelled || !referral?.id) return
       getEncounter(referral.id).then((found) => { if (!cancelled) setRecordEncounter(found) }).catch(() => {})
+      if (perspective !== 'receiving') {
+        getHandoff(referral.id).then((found) => { if (!cancelled) setRecordHandoff(found) }).catch(() => {})
+      }
     })
     return () => { cancelled = true }
   }, [patientId, perspective, receivingReferral])
+  /**
+   * Post-consult medication-change highlight (demo-story pass, Part J-M) --
+   * plays once, only in the meaningful live/demo window: a documented
+   * encounter changed something, AND Lucy has not yet reviewed the handoff
+   * that will supersede this moment. Reduced motion skips the animation
+   * entirely (the updated state is already visible immediately,
+   * unconditionally, via patient.medications itself); the one-shot flag
+   * only ever decides whether to animate, never what the clinical record
+   * says.
+   */
+  useEffect(() => {
+    if (perspective === 'receiving' || prefersReducedMotion()) return
+    if (!patient || patient.recent_medication_changes.length === 0) return
+    if (!recordHandoff || recordHandoff.viewed_by_referring_physician_at) return
+    if (!consumeMedicationHighlightFlag(recordHandoff.encounter_id)) return
+    setMedicationHighlight(true)
+    const timer = window.setTimeout(() => setMedicationHighlight(false), 2500)
+    return () => window.clearTimeout(timer)
+  }, [perspective, patient, recordHandoff])
   /**
    * On open, a patient who already has a completed consultation gets that
    * recommendation loaded directly -- the page reflects current care state, not
@@ -1318,9 +1352,19 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
           <div className="clinical-timeline">
             {recordEncounter && <div className="timeline-event">
               <time>{formatTime(recordEncounter.occurred_at)}</time>
-              <h4>{recordEncounter.specialty} consultation documented</h4>
+              <h4>{recordEncounter.specialty} consultation</h4>
+              {recordEncounter.physician_id === CHEN_ID && <p className="timeline-event-clinician">{CHEN_NAME}</p>}
               <p>{recordEncounter.assessment}</p>
               {recordEncounter.key_findings.length > 0 && <ul className="clinical-list">{recordEncounter.key_findings.map((item) => <li key={item}>{item}</li>)}</ul>}
+              {/* Concise, structured -- never the full handoff re-rendered
+               * here (Part P): just the treatment-change facts, read
+               * straight from medication_changes, never parsed from `plan`. */}
+              {recordEncounter.medication_changes.length > 0 && <p className="timeline-event-medication-change">
+                Treatment intensified: {recordEncounter.medication_changes
+                  .filter((change) => change.action !== 'continue')
+                  .map((change) => `${change.medication} ${change.action === 'start' ? 'started' : 'discontinued'}`)
+                  .join(' · ')}
+              </p>}
               <small className="packet-item-provenance">{recordEncounter.source === 'medplum' ? 'Synthetic FHIR via Medplum' : 'Synthetic demo encounter'}</small>
             </div>}
             {consultation && <div className="timeline-event">
@@ -1338,7 +1382,38 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
           <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
           <div className="clinical-columns">
             <section><h3>Problems</h3><ul className="clinical-list">{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section>
-            <section><h3>Current medications</h3><ul className="clinical-list">{patient.medications.map((item) => <li key={item}>{item}</li>)}</ul></section>
+            {/* Tonjit demo-story pass, Part F/I/J-L: patient.medications is
+             * already the derived CURRENT list (discontinued items are
+             * never in it -- see apply_medication_changes on the backend);
+             * this section only adds provenance/highlight presentation on
+             * top of that real clinical-record fact, never a second source
+             * of truth. medicationHighlight briefly washes the whole
+             * section (~2.5s, reduced-motion-safe); the "Updated by X" label
+             * itself is allowed to remain after the wash fades (Part L). */}
+            <section className={medicationHighlight ? 'medication-highlight' : ''}>
+              <h3>Current medications</h3>
+              <ul className="clinical-list">{patient.medications.map((item) => {
+                const change = patient.recent_medication_changes.find((entry) => entry.medication === item && entry.action === 'start')
+                return <li key={item}>
+                  {item}{change?.medication_class && <small className="medication-class"> · {change.medication_class}</small>}
+                  {change && <span className="medication-provenance">Updated by {change.specialty}</span>}
+                </li>
+              })}</ul>
+              {patient.recent_medication_changes.length > 0 && (() => {
+                const started = patient.recent_medication_changes.filter((entry) => entry.action === 'start').map((entry) => entry.medication)
+                const discontinued = patient.recent_medication_changes.filter((entry) => entry.action === 'discontinue').map((entry) => entry.medication)
+                const parts = [
+                  started.length > 0 ? `${started.join(', ')} started` : null,
+                  discontinued.length > 0 ? `${discontinued.join(', ')} discontinued` : null,
+                ].filter(Boolean)
+                if (parts.length === 0) return null
+                return <p className="medication-change-note">
+                  Updated after {patient.recent_medication_changes[0].specialty} consultation
+                  <br />
+                  {parts.join(' · ')}
+                </p>
+              })()}
+            </section>
           </div>
           {trends.domain && trends.series.length > 0 && <section className="clinical-block">
             <h3>Clinical trajectory</h3>

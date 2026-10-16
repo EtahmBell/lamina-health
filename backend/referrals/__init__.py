@@ -5,6 +5,7 @@ from .resolver import resolve_missing_requirement
 from .scheduling import synthetic_chen_availability
 from .service import (
     accept_referral,
+    apply_medication_changes,
     build_referral,
     confirm_synthetic_appointment,
     draft_handoff,
@@ -28,6 +29,7 @@ __all__ = [
     "answer_coordination_question",
     "authorize_coordination_chat",
     "represented_agent_id",
+    "apply_medication_changes",
     "build_referral",
     "confirm_synthetic_appointment",
     "draft_handoff",

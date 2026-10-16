@@ -517,6 +517,20 @@ button.lam-row:hover { background: #fff9f1; }
 .clinical-list li::marker { color: var(--accent); }
 .clinical-block { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 20px; }
 
+/* Post-consult medication-change presentation (Tonjit demo-story pass, Part
+ * I-L): "Updated by X" is a permanent, quiet provenance label (not a loud
+ * NEW badge) -- it may outlive the brief highlight wash. The wash itself is
+ * a soft mineral background + border on just this ONE section (never the
+ * whole page), fading back to transparent over ~600ms; reduced motion snaps
+ * both edges instead of transitioning, but never suppresses the fact that
+ * something changed (medication-provenance/medication-change-note render
+ * unconditionally, regardless of motion preference or highlight state). */
+.medication-class { color: var(--text-secondary); font-weight: 400; }
+.medication-provenance { display: inline-block; margin-left: 8px; border-radius: 999px; background: var(--mineral-surface); padding: 2px 8px; color: var(--mineral-deep); font-family: var(--font-ui); font-size: .56rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; vertical-align: middle; }
+.medication-change-note { margin: 10px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.medication-highlight { border-radius: 8px; background: var(--mineral-surface); padding: 10px 12px; margin: -10px -12px 0; transition: background-color 600ms ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .medication-highlight { transition: none; } }
+
 /* Latest values read as clinical numbers, not fine print. */
 .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 16px 22px; }
 .result-grid > div { min-width: 0; border-left: 2px solid rgb(184 92 50 / 28%); padding-left: 12px; }
@@ -2326,6 +2340,8 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .timeline-event time { display: block; margin-bottom: 4px; color: var(--text-secondary); font-size: .6rem; }
 .timeline-event h4 { margin: 0; color: var(--clinical); font-family: var(--font-display); font-size: .85rem; font-weight: 500; }
 .timeline-event p { margin: 5px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.6; }
+.timeline-event-clinician { color: var(--clinical); font-weight: 600; }
+.timeline-event-medication-change { color: var(--mineral-deep); font-weight: 600; }
 
 @media (max-width: 900px) {
   .patient-detail-grid { grid-template-columns: 1fr; }

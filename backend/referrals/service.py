@@ -20,6 +20,8 @@ from backend.models import (
     CoordinationEventType,
     HandoffStatus,
     HandoffSummary,
+    MedicationChange,
+    MedicationChangeRecord,
     PatientRecord,
     Referral,
     ReferralStatus,
@@ -530,13 +532,24 @@ def ingest_consultation_encounter(
         occurred_at=now,
         source="synthetic_demo",
         status="completed",
-        assessment="Type 2 diabetes with worsening glycemic control despite current oral therapy.",
+        assessment="Type 2 diabetes with persistent poor glycemic control despite current therapy.",
         key_findings=["HbA1c 9.6%"],
         plan=(
-            "Treatment intensification per specialist assessment, with ongoing monitoring "
-            "coordinated between endocrinology and primary care."
+            "Continue metformin. Discontinue sitagliptin. Start semaglutide (GLP-1 receptor "
+            "agonist). Closer glucose monitoring."
         ),
-        follow_up="Follow-up endocrinology visit in 3 months to reassess glycemic control.",
+        # Tonjit demo-story pass, Part D/H: the same structured facts the
+        # prose `plan` above describes in words -- this is what the patient's
+        # derived current-medication state and the handoff actually read,
+        # never a parse of that prose.
+        medication_changes=[
+            MedicationChange(medication="Metformin", action="continue"),
+            MedicationChange(medication="Sitagliptin", action="discontinue"),
+            MedicationChange(
+                medication="Semaglutide", action="start", medication_class="GLP-1 receptor agonist"
+            ),
+        ],
+        follow_up="Closer glucose monitoring. Endocrinology follow-up in approximately 3 months.",
         created_at=now,
     )
     _append_event(
@@ -548,6 +561,40 @@ def ingest_consultation_encounter(
         metadata={"referral_id": referral.id or 0, "source": "synthetic_demo"},
     )
     return encounter
+
+
+def apply_medication_changes(
+    base_medications: list[str], encounters: list[ConsultationEncounter]
+) -> tuple[list[str], list[MedicationChangeRecord]]:
+    """Derive the patient's CURRENT medication list from their static base
+    regimen plus every documented encounter's structured medication_changes,
+    applied in chronological order (Tonjit demo-story pass, Part F/G/H) --
+    the base fixture itself is never mutated; this is a pure, request-time
+    derivation. `start` adds a medication if not already present, `discontinue`
+    removes it if present, `continue` is a no-op on the list (it only exists
+    so the full regimen can be documented/surfaced with provenance). Also
+    returns a flat, chronological provenance log for `PatientRecord.
+    recent_medication_changes` -- every change, from every encounter, so a
+    patient with more than one documented encounter in the future still gets
+    a complete history, not just the latest one."""
+    current = list(base_medications)
+    changes: list[MedicationChangeRecord] = []
+    for encounter in encounters:
+        for change in encounter.medication_changes:
+            if change.action == "start" and change.medication not in current:
+                current.append(change.medication)
+            elif change.action == "discontinue" and change.medication in current:
+                current.remove(change.medication)
+            changes.append(
+                MedicationChangeRecord(
+                    medication=change.medication,
+                    action=change.action,
+                    medication_class=change.medication_class,
+                    specialty=encounter.specialty,
+                    occurred_at=encounter.occurred_at,
+                )
+            )
+    return current, changes
 
 
 def draft_handoff(
@@ -581,6 +628,7 @@ def draft_handoff(
         assessment=encounter.assessment,
         key_findings=encounter.key_findings,
         recommendations=encounter.plan,
+        medication_changes=encounter.medication_changes,
         follow_up=encounter.follow_up,
         status=HandoffStatus.DRAFT,
         drafted_at=now,

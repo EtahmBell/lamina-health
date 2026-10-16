@@ -968,6 +968,19 @@ class WorkflowStore:
             ).fetchone()
         return ConsultationEncounter.model_validate_json(row["encounter_json"]) if row else None
 
+    def list_encounters_for_patient(self, workspace_id: str, patient_id: str) -> list[ConsultationEncounter]:
+        """Every documented encounter for this patient, chronologically
+        (Tonjit demo-story pass, Part F) -- the request-time source for
+        deriving current medications; never mutates the static clinical
+        fixture itself."""
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT encounter_json FROM consultation_encounters
+                   WHERE workspace_id=? AND patient_id=? ORDER BY id ASC""",
+                (workspace_id, patient_id),
+            ).fetchall()
+        return [ConsultationEncounter.model_validate_json(row["encounter_json"]) for row in rows]
+
     # ------------------------------------------------------------ handoffs
 
     def create_handoff(self, workspace_id: str, handoff: HandoffSummary) -> HandoffSummary:

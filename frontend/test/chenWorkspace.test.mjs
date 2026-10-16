@@ -65,10 +65,37 @@ test('ChenHomePage mirrors Lucy\'s HomePage architecture: greeting, agent banner
 
 test('ChenHomePage\'s incoming-request row reuses the exact same submitted-referral data and RequestReviewModal as Patients -> Incoming requests -- never a duplicate fixture', () => {
   const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /getPhysicianReferrals\(CHEN_ID, 'submitted'\)\.then\(setIncoming\)/)
+  assert.match(fn, /getPhysicianReferrals\(CHEN_ID, 'submitted'\)/)
+  assert.match(fn, /setIncoming\(submitted\)/)
   assert.match(fn, /resolvedSummary\(resolvedCountFor\(referral\)\)/)
   assert.match(fn, /<RequestReviewModal referral=\{reviewing\} receivingPhysicianName=\{CHEN_NAME\} onAccepted=\{handleAccepted\} onClose=\{\(\) => setReviewing\(null\)\} \/>/)
   assert.doesNotMatch(fn, /submitted-fixture|fakeReferral|mockReferral/i)
+})
+
+/* ============================================================= Tonjit demo-
+ * story / bug-fix pass, Part A-C: the Dashboard worklist must also surface
+ * an accepted referral with an outstanding action, ranked above the static
+ * seeded roster while a handoff review is pending, but demoted back to
+ * ordinary priority once sent -- never a permanent-residency guarantee.
+ * =========================================================================== */
+
+test('ChenHomePage merges accepted-or-later referrals into its Patients worklist, reusing the exact same chenPatientRowStatus/careState logic ChenPatientsPage already uses -- not a separate, divergent implementation', () => {
+  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
+  assert.match(fn, /getPhysicianReferrals\(CHEN_ID\)/)
+  assert.match(fn, /ACCEPTED_OR_LATER_STATUSES\.includes\(referral\.status\)/)
+  assert.match(fn, /getEncounter\(referral\.id\), getHandoff\(referral\.id, CHEN_ID\)/)
+  assert.match(fn, /chenPatientRowStatus\(referral, state\.encounter, state\.handoff\)/)
+})
+
+test('a pending "Review handoff" referral-derived row outranks every other row, including the static seeded roster -- priority -2, below the seeded roster\'s 0-6 range and below the ordinary -1 given to any other accepted referral', () => {
+  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
+  assert.match(fn, /priority: nextStep === 'Review handoff' \? -2 : -1/)
+})
+
+test('once a handoff is sent (or there is nothing to review yet), the referral-derived row returns to ordinary priority and can be pushed off the top-3 Dashboard slice by other patients -- the Dashboard never hard-codes "this patient always appears"', () => {
+  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
+  assert.doesNotMatch(fn, /patient\.id === TONJIT_ID|patient_id === TONJIT_ID/, 'no patient-id special-casing keeps a referral pinned to the Dashboard')
+  assert.match(fn, /\[\.\.\.actionableRows, \.\.\.seededRows\]\s*\n\s*\.sort\(\(a, b\) => a\.priority - b\.priority\)\s*\n\s*\.slice\(0, 3\)/)
 })
 
 test('ChenHomePage never shows fake requests when there are none', () => {

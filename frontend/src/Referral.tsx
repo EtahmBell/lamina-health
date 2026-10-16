@@ -1039,6 +1039,27 @@ export function markReferralJustAccepted(patientId: string) {
   try { window.sessionStorage.setItem(CHEN_JUST_ACCEPTED_KEY, patientId) } catch { /* ignore */ }
 }
 
+/** The same established one-shot-per-session presentation pattern as
+ * markReferralJustAccepted/consumeJustAcceptedFlag above, reused for Lucy's
+ * post-consult medication-change highlight (demo-story pass, Part J-M) --
+ * keyed by encounter id so a later, different documented encounter would
+ * highlight again. Lives here (not in App.tsx) because this file already
+ * owns the one place sessionStorage is used for ephemeral presentation
+ * state; App.tsx itself must never read/write browser storage directly
+ * (membership and every other real workspace fact stays canonical backend
+ * state -- see the network-membership invariant this mirrors). Returns
+ * `true` exactly once per encounter id per session. */
+export function consumeMedicationHighlightFlag(encounterId: number): boolean {
+  const key = `lamina:lucy:medication-highlight:${encounterId}`
+  try {
+    if (window.sessionStorage.getItem(key)) return false
+    window.sessionStorage.setItem(key, '1')
+    return true
+  } catch {
+    return false
+  }
+}
+
 function consumeJustAcceptedFlag(patientId: string): boolean {
   try {
     const stored = window.sessionStorage.getItem(CHEN_JUST_ACCEPTED_KEY)
@@ -1375,16 +1396,45 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
  * Incoming requests reuse the exact same submitted-referral data (and the
  * same RequestReviewModal) as Patients -> Incoming requests, never a
  * duplicate referral fixture (Part B1).
+ *
+ * Bug-fix pass (demo-story pass, Part A/B/C): the Dashboard's "Patients"
+ * worklist used to be built ONLY from the static seeded roster
+ * (CHEN_SEEDED_PATIENTS) -- it had no idea an accepted referral existed at
+ * all, so a patient with a documented consultation and a draft handoff
+ * still awaiting review (one of the most important outstanding actions in
+ * the whole demo) never appeared here, even though the full Patients page
+ * already modeled this correctly via chenPatientRowStatus/careState. This
+ * now merges in every accepted-or-later referral the exact same way
+ * ChenPatientsPage does, and ranks a pending "Review handoff" above
+ * everything else -- but once it's sent, that referral-derived row returns
+ * to ordinary priority and can fall off the top-3 Dashboard slice just like
+ * any other patient (Part C: Dashboard presence is driven by outstanding
+ * action/relevance, never a permanent-residency guarantee).
  */
 export function ChenHomePage({ navigate }: { navigate: Navigate }) {
   const [incoming, setIncoming] = useState<Referral[] | null>(null)
+  const [accepted, setAccepted] = useState<Referral[] | null>(null)
+  const [careState, setCareState] = useState<Map<number, { encounter: ConsultationEncounter | null; handoff: HandoffSummary | null }>>(new Map())
   const [overview, setOverview] = useState<AgentOverview | null>(null)
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
   const [reviewing, setReviewing] = useState<Referral | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    getPhysicianReferrals(CHEN_ID, 'submitted').then(setIncoming).catch((err: Error) => setError(err.message))
+    Promise.all([
+      getPhysicianReferrals(CHEN_ID, 'submitted'),
+      getPhysicianReferrals(CHEN_ID),
+    ]).then(async ([submitted, all]) => {
+      setIncoming(submitted)
+      const activeReferrals = all.filter((referral) => ACCEPTED_OR_LATER_STATUSES.includes(referral.status))
+      setAccepted(activeReferrals)
+      const entries = await Promise.all(activeReferrals.map(async (referral) => {
+        if (!referral.id) return null
+        const [encounter, handoff] = await Promise.all([getEncounter(referral.id), getHandoff(referral.id, CHEN_ID)])
+        return [referral.id, { encounter, handoff }] as const
+      }))
+      setCareState(new Map(entries.filter((entry): entry is readonly [number, { encounter: ConsultationEncounter | null; handoff: HandoffSummary | null }] => entry !== null)))
+    }).catch((err: Error) => setError(err.message))
     getAgentOverview('chen').then(setOverview).catch(() => {})
     getNetworkFeed('chen').then(setFeed).catch(() => {})
   }, [])
@@ -1397,11 +1447,25 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
   }
 
   const greetingName = `Dr. ${CHEN_NAME.split(' ').at(-1)}`
-  const topPatients: WorklistRowData[] = CHEN_SEEDED_PATIENTS
+  const seededRows: WorklistRowData[] = CHEN_SEEDED_PATIENTS
     .map((patient): WorklistRowData => {
       const meta = CHEN_PATIENT_STAGE_META[patient.stage]
       return { patient, label: meta.label, tone: meta.tone, nextStep: meta.nextStep, priority: meta.priority, updated: null }
     })
+  const actionableRows: WorklistRowData[] = (accepted ?? [])
+    .map((referral): WorklistRowData | null => {
+      const patient = DEMO_PATIENTS.find((item) => item.id === referral.patient_id)
+      if (!patient) return null
+      const state = (referral.id && careState.get(referral.id)) || { encounter: null, handoff: null }
+      const { label, nextStep } = chenPatientRowStatus(referral, state.encounter, state.handoff)
+      // A pending handoff review outranks everything else on the Dashboard
+      // (Part B); once sent (or if there's simply nothing to review yet),
+      // this row is no more urgent than any other accepted patient and
+      // competes for the top-3 slice on equal footing (Part C).
+      return { patient, label, tone: 'copper', nextStep, priority: nextStep === 'Review handoff' ? -2 : -1, updated: null }
+    })
+    .filter((row): row is WorklistRowData => row !== null)
+  const topPatients = [...actionableRows, ...seededRows]
     .sort((a, b) => a.priority - b.priority)
     .slice(0, 3)
   const situationSummary = incoming && incoming.length > 0

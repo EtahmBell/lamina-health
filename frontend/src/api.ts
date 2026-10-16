@@ -15,11 +15,21 @@ export type LabObservation = {
   value: number
   unit: string
 }
+export type MedicationAction = 'continue' | 'discontinue' | 'start'
+export type MedicationChange = { medication: string; action: MedicationAction; medication_class: string | null }
+/** Tonjit demo-story pass, Part F/I: provenance for a medication change
+ * already reflected in `Patient.medications` -- which specialty/when, so
+ * the UI can say "Updated by Endocrinology" without a second lookup. */
+export type MedicationChangeRecord = MedicationChange & { specialty: string; occurred_at: string }
 export type Patient = {
   id: string; display_name: string; synthetic: true; age: number; diagnoses: string[]
   medications: string[]; labs: LabObservation[]; clinical_notes: string[]; insurance: string; location: string
   clinical_data_source: 'synthetic_fixture' | 'medplum_fhir'
   referral_question?: string | null
+  /** Derived server-side from the base fixture plus any documented
+   * encounter's medication_changes (never a frontend parse of plan prose)
+   * -- empty for every patient with no such encounter. */
+  recent_medication_changes: MedicationChangeRecord[]
 }
 export type Evidence = { kind: string; detail: string }
 export type ConsultationMessage = {
@@ -91,13 +101,15 @@ export type SchedulingCoordination = {
 export type ConsultationEncounter = {
   id: number | null; referral_id: number; patient_id: string; physician_id: string; specialty: string
   occurred_at: string; source: 'synthetic_demo' | 'medplum'; status: 'completed'
-  assessment: string; key_findings: string[]; plan: string; follow_up: string; created_at: string
+  assessment: string; key_findings: string[]; plan: string; medication_changes: MedicationChange[]
+  follow_up: string; created_at: string
 }
 export type HandoffStatus = 'draft' | 'sent'
 export type HandoffSummary = {
   id: number | null; referral_id: number; encounter_id: number; patient_id: string
   from_physician_id: string; to_physician_id: string; drafted_by_agent_id: string
-  assessment: string; key_findings: string[]; recommendations: string; follow_up: string
+  assessment: string; key_findings: string[]; recommendations: string; medication_changes: MedicationChange[]
+  follow_up: string
   status: HandoffStatus; approved_by_physician_id: string | null; drafted_at: string; sent_at: string | null
   /** Workflow/UI timestamp only (demo-consolidation pass, Part 8) -- records
    * that the referring physician actually opened and loaded this handoff,

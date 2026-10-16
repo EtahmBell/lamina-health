@@ -105,7 +105,7 @@ test('Patient history has no subtitle -- the heading leads straight into the tim
 test('Patient history surfaces the documented consultation encounter as a real timeline milestone, sourced from the persisted artifact and never from mutated clinical_notes', () => {
   const page = patientPage()
   assert.match(page, /\{recordEncounter && <div className="timeline-event">/)
-  assert.match(page, /\{recordEncounter\.specialty\} consultation documented/)
+  assert.match(page, /\{recordEncounter\.specialty\} consultation</)
   assert.match(page, /\{recordEncounter\.assessment\}/)
   assert.match(page, /recordEncounter\.key_findings/)
   assert.match(page, /recordEncounter\.source === 'medplum' \? 'Synthetic FHIR via Medplum' : 'Synthetic demo encounter'/)

@@ -56,6 +56,34 @@ class LabObservation(StrictModel):
     unit: str
 
 
+MedicationAction = Literal["continue", "discontinue", "start"]
+
+
+class MedicationChange(StrictModel):
+    """One structured treatment-plan line item (Tonjit demo-story pass, Part
+    H) -- deliberately narrow, never a real prescribing/dosing model. Exists
+    so the patient's derived current-medication state and the handoff can
+    both read the SAME structured fact, instead of either side (or the
+    frontend) parsing the free-text `plan`/`recommendations` prose. Defined
+    here (not in care_coordination.py, which imports StrictModel FROM this
+    module) so both ConsultationEncounter/HandoffSummary and PatientRecord
+    can share the one definition without a circular import."""
+
+    medication: str
+    action: MedicationAction
+    medication_class: str | None = None
+
+
+class MedicationChangeRecord(MedicationChange):
+    """A MedicationChange with the provenance PatientRecord.recent_medication_
+    changes needs once it's detached from the ConsultationEncounter that
+    produced it -- which specialty/when, so the UI can say "Updated by
+    Endocrinology" without a second round-trip to find out."""
+
+    specialty: str
+    occurred_at: str
+
+
 class PatientRecord(StrictModel):
     id: str
     display_name: str
@@ -69,6 +97,12 @@ class PatientRecord(StrictModel):
     location: str
     clinical_data_source: Literal["synthetic_fixture", "medplum_fhir"] = "synthetic_fixture"
     referral_question: str | None = None
+    # Derived, request-time-only overlay (never part of the static fixture
+    # itself -- see apply_medication_changes in referrals/service.py): which
+    # of `medications` above changed because of a documented specialty-care
+    # encounter, and which specialty/when. Empty for every patient with no
+    # such encounter, exactly reproducing today's behavior.
+    recent_medication_changes: list[MedicationChangeRecord] = Field(default_factory=list)
 
 
 class ClinicalRepresentation(StrictModel):
