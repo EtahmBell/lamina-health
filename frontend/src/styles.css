@@ -518,18 +518,37 @@ button.lam-row:hover { background: #fff9f1; }
 .clinical-block { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 20px; }
 
 /* Post-consult medication-change presentation (Tonjit demo-story pass, Part
- * I-L): "Updated by X" is a permanent, quiet provenance label (not a loud
- * NEW badge) -- it may outlive the brief highlight wash. The wash itself is
- * a soft mineral background + border on just this ONE section (never the
- * whole page), fading back to transparent over ~600ms; reduced motion snaps
- * both edges instead of transitioning, but never suppresses the fact that
- * something changed (medication-provenance/medication-change-note render
- * unconditionally, regardless of motion preference or highlight state). */
+ * I-L; bug-fix pass Part C/D/E/F/G corrects the original treatment). "Started
+ * by X" is restrained secondary text -- never a pill/badge/button (the
+ * original uppercase filled-pill treatment is gone entirely); it is a
+ * permanent label that may outlive the brief highlight. Only the specific
+ * medication row animates (never the whole section, never Metformin, never
+ * the heading) -- a single keyframe eases a soft mineral wash in, holds
+ * briefly at peak, then eases back out over ~2.5s total, with the
+ * provenance text fading in alongside it. Reduced motion disables both
+ * animations entirely; the real medication/provenance state is always
+ * rendered regardless of motion preference or highlight timing. */
 .medication-class { color: var(--text-secondary); font-weight: 400; }
-.medication-provenance { display: inline-block; margin-left: 8px; border-radius: 999px; background: var(--mineral-surface); padding: 2px 8px; color: var(--mineral-deep); font-family: var(--font-ui); font-size: .56rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; vertical-align: middle; }
+.medication-provenance { margin-left: 4px; color: var(--mineral-deep); font-family: var(--font-ui); font-size: .64rem; font-weight: 500; white-space: nowrap; }
+.medication-provenance::before { content: '· '; color: var(--text-secondary); }
 .medication-change-note { margin: 10px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
-.medication-highlight { border-radius: 8px; background: var(--mineral-surface); padding: 10px 12px; margin: -10px -12px 0; transition: background-color 600ms ease-in-out; }
-@media (prefers-reduced-motion: reduce) { .medication-highlight { transition: none; } }
+@keyframes medication-row-wash {
+  0% { background-color: transparent; box-shadow: none; }
+  16% { background-color: var(--mineral-surface); box-shadow: 0 0 0 1px var(--mineral-subtle) inset; }
+  48% { background-color: var(--mineral-surface); box-shadow: 0 0 0 1px var(--mineral-subtle) inset; }
+  100% { background-color: transparent; box-shadow: none; }
+}
+@keyframes medication-provenance-fade-in {
+  0% { opacity: 0; }
+  16% { opacity: 1; }
+  100% { opacity: 1; }
+}
+.medication-row-highlight { border-radius: 4px; animation: medication-row-wash 2500ms ease-in-out; }
+.medication-provenance-enter { animation: medication-provenance-fade-in 2500ms ease-in-out; }
+@media (prefers-reduced-motion: reduce) {
+  .medication-row-highlight { animation: none; }
+  .medication-provenance-enter { animation: none; }
+}
 
 /* Latest values read as clinical numbers, not fine print. */
 .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 16px 22px; }

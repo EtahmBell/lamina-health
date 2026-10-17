@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from backend.agents import consult_network
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.fhir import MedplumError, create_clinical_data_source
-from backend.models import ConsultationRequest, ConsultationResult, PatientRecord
+from backend.models import ConsultationEncounter, ConsultationRequest, ConsultationResult, HandoffStatus, PatientRecord
 from backend.referrals import apply_medication_changes
 from backend.synthetic_data import PATIENTS, PHYSICIANS_BY_PATIENT
 from backend.workflow import workflow_store
@@ -25,17 +25,41 @@ def load_patient(patient_id: str) -> PatientRecord:
     return patient
 
 
-def _with_derived_medications(patient: PatientRecord, workspace_id: str) -> PatientRecord:
-    """Overlays any documented-encounter medication changes onto the static
-    fixture's base regimen (Tonjit demo-story pass, Part F/G) -- a pure,
-    request-time read; `patient` itself (and the fixture it came from) is
-    never mutated, so a patient with no encounters renders exactly as
-    before. The patient's own clinical record, not the handoff, is the
-    source of truth for the current medication list."""
+def _encounter_visible_to(
+    encounter: ConsultationEncounter, workspace_id: str, as_physician_id: str | None
+) -> bool:
+    """The PCP-visibility gate (bug-fix pass, Part A/B): the receiving
+    physician who authored an encounter sees its treatment change the
+    moment it's documented -- the SAME physician/workspace-scoped
+    convention `GET /referrals/{id}/handoff`'s `as_physician_id` already
+    uses for gating a draft handoff. Anyone else (including the referring
+    physician, and the default "no identity given" case) only sees it once
+    the associated handoff has actually been SENT -- an information-
+    visibility boundary, never a second source of clinical truth; the
+    encounter itself is unchanged either way."""
+    if as_physician_id is not None and as_physician_id == encounter.physician_id:
+        return True
+    handoff = workflow_store.get_handoff(workspace_id, encounter.referral_id)
+    return handoff is not None and handoff.status == HandoffStatus.SENT
+
+
+def _with_derived_medications(
+    patient: PatientRecord, workspace_id: str, as_physician_id: str | None = None
+) -> PatientRecord:
+    """Overlays any VISIBLE documented-encounter medication changes onto the
+    static fixture's base regimen (Tonjit demo-story pass, Part F/G, bug-fix
+    pass Part A/B) -- a pure, request-time read; `patient` itself (and the
+    fixture it came from) is never mutated, so a patient with no visible
+    encounters renders exactly as before. The patient's own clinical
+    record (ConsultationEncounter), not the handoff, remains the single
+    source of truth for the current medication list -- `as_physician_id`
+    only ever changes which encounters are visible to THIS reader, never
+    what the record itself says."""
     encounters = workflow_store.list_encounters_for_patient(workspace_id, patient.id)
-    if not encounters:
+    visible = [e for e in encounters if _encounter_visible_to(e, workspace_id, as_physician_id)]
+    if not visible:
         return patient
-    current_medications, changes = apply_medication_changes(patient.medications, encounters)
+    current_medications, changes = apply_medication_changes(patient.medications, visible)
     return patient.model_copy(update={"medications": current_medications, "recent_medication_changes": changes})
 
 
@@ -45,10 +69,12 @@ def list_patients(workspace_id: DemoWorkspace) -> list[PatientRecord]:
 
 
 @router.get("/patients/{patient_id}", response_model=PatientRecord)
-def get_patient(patient_id: str, workspace_id: MutableDemoWorkspace) -> PatientRecord:
+def get_patient(
+    patient_id: str, workspace_id: MutableDemoWorkspace, as_physician_id: str | None = None
+) -> PatientRecord:
     patient = load_patient(patient_id)
     workflow_store.opened(workspace_id, patient_id)
-    return _with_derived_medications(patient, workspace_id)
+    return _with_derived_medications(patient, workspace_id, as_physician_id)
 
 
 @router.post("/patients/{patient_id}/consultations", response_model=ConsultationResult)
@@ -58,7 +84,9 @@ def create_consultation(
     # Tonjit demo-story pass, Part S/T: a future network consultation must see
     # the patient's CURRENT clinical record -- including any medication
     # change from a prior documented encounter -- never the frozen base
-    # fixture. Same derivation GET /api/patients/{id} already applies.
+    # fixture. Never passes as_physician_id: this is always run as/for the
+    # referring physician, so it must see exactly what Lucy herself would
+    # see (gated on handoff-sent, bug-fix pass Part A).
     patient = _with_derived_medications(load_patient(patient_id), workspace_id)
     workflow_store.started(workspace_id, patient_id)
     result = consult_network(patient, PHYSICIANS_BY_PATIENT[patient_id], request.pcp_guidance)

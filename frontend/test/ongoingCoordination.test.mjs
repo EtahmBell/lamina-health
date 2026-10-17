@@ -127,12 +127,13 @@ test('no historical data is deleted -- ReferralPacketModal/AgentCoordinationModa
  * Discovery view.
  * ===================================================================== */
 
-test('once the episode is reviewed, the primary card becomes a generic "Current care state" card offering "Consult network", not a Chen-specific card', () => {
+test('once the episode is reviewed, the primary card becomes a generic "Current care state" card offering "Consult network", not a Chen-specific card -- no status pill (bug-fix pass, Part J)', () => {
   const fn = recommendationView()
   assert.match(fn, /if \(episodeReviewed\) \{/)
-  assert.match(fn, /No specialty action pending/)
+  assert.match(fn, /consultation has been reviewed\./)
   assert.match(fn, />Consult network </)
   assert.match(fn, /onClick=\{onReconsult\}/)
+  assert.doesNotMatch(fn, /No specialty action pending/)
 })
 
 test('"Consult network" re-runs the real consult pipeline via onReconsult (runConsult), never a fabricated second-referral UI or a bare view-mode flip', () => {

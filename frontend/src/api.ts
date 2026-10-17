@@ -567,7 +567,13 @@ function normalizeOwnedOverview(owned: OwnedAgentOverview): AgentOverview {
   return { ...owned, physician: controlledIdentityFromOwned(owned.physician) }
 }
 
-export const getPatient = (id: string) => request<Patient>(`/api/patients/${encodeURIComponent(id)}`)
+/** `asPhysicianId` gates which documented-encounter medication changes are
+ * visible (bug-fix pass, Part A/B): the receiving physician who authored an
+ * encounter sees it immediately; anyone else only once the associated
+ * handoff has been sent. Omit it for the referring physician's own (safely
+ * gated) view -- never pass a referring physician's own id here, it has no
+ * special-case effect and is treated the same as omitting it. */
+export const getPatient = (id: string, asPhysicianId?: string) => request<Patient>(`/api/patients/${encodeURIComponent(id)}${asPhysicianId ? `?as_physician_id=${encodeURIComponent(asPhysicianId)}` : ''}`)
 export const consultNetwork = (id: string, pcpGuidance?: string) => request<Consultation>(`/api/patients/${encodeURIComponent(id)}/consultations`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pcp_guidance: pcpGuidance?.trim() || null }),
 })

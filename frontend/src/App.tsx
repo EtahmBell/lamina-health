@@ -905,8 +905,11 @@ function RecommendationView({
         <h2>Current care state</h2>
         <p className="page-intro">Your agent helps with the follow-through.</p>
         <article className="best-fit-card compact referral-card">
+          {/* Bug-fix pass, Part J: no status pill here -- the previous
+           * resolved-status badge made this card feel overly
+           * state-machine-like. A plain, calm headline + one action is the
+           * whole card now; Chen's identity/referral framing stays gone. */}
           <div className="next-step-card idle">
-            <span className="status-label resolved"><span aria-hidden="true">✓</span>No specialty action pending</span>
             <h3>{cleanName(selected.physician_name)}'s consultation has been reviewed.</h3>
             <p>{patientName(consultation.patient_id)} is ready for whatever care need comes next.</p>
             <button type="button" className="consult-button" onClick={onReconsult}>Consult network <span className="spark-icon" aria-hidden="true">✧</span></button>
@@ -1121,7 +1124,7 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
   const refreshActivity = () => getPatientActivity()
     .then((records) => setActivity(records.find((item) => item.patient_id === patientId) ?? null))
     .catch(() => {})
-  useEffect(() => { setLoading(true); getPatient(patientId).then(setPatient).catch((loadError: Error) => setError(loadError.message)).finally(() => setLoading(false)) }, [patientId])
+  useEffect(() => { setLoading(true); getPatient(patientId, perspective === 'receiving' ? CHEN_ID : undefined).then(setPatient).catch((loadError: Error) => setError(loadError.message)).finally(() => setLoading(false)) }, [patientId, perspective])
   useEffect(() => {
     if (perspective !== 'receiving') return
     let cancelled = false
@@ -1382,37 +1385,34 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
           <header className="clinical-overview-head"><h2 id="clinical-overview-heading">Clinical overview</h2><p>Bounded synthetic context available to your agent. Not a complete medical record.</p></header>
           <div className="clinical-columns">
             <section><h3>Problems</h3><ul className="clinical-list">{patient.diagnoses.map((item) => <li key={item}>{item}</li>)}</ul></section>
-            {/* Tonjit demo-story pass, Part F/I/J-L: patient.medications is
-             * already the derived CURRENT list (discontinued items are
-             * never in it -- see apply_medication_changes on the backend);
-             * this section only adds provenance/highlight presentation on
-             * top of that real clinical-record fact, never a second source
-             * of truth. medicationHighlight briefly washes the whole
-             * section (~2.5s, reduced-motion-safe); the "Updated by X" label
-             * itself is allowed to remain after the wash fades (Part L). */}
-            <section className={medicationHighlight ? 'medication-highlight' : ''}>
+            {/* patient.medications is already the derived CURRENT list,
+             * already gated server-side to what THIS physician is allowed
+             * to see (bug-fix pass, Part A/B) -- discontinued items are
+             * never in it, and Lucy never receives a started item at all
+             * before Chen sends the handoff. This section only adds
+             * provenance/highlight presentation on top of that real
+             * clinical-record fact, never a second source of truth. Only
+             * the specific row for a newly-started medication animates
+             * (Part E) -- never the whole section, never Metformin. */}
+            <section>
               <h3>Current medications</h3>
               <ul className="clinical-list">{patient.medications.map((item) => {
                 const change = patient.recent_medication_changes.find((entry) => entry.medication === item && entry.action === 'start')
-                return <li key={item}>
-                  {item}{change?.medication_class && <small className="medication-class"> · {change.medication_class}</small>}
-                  {change && <span className="medication-provenance">Updated by {change.specialty}</span>}
+                return <li key={item} className={change && medicationHighlight ? 'medication-row-highlight' : ''}>
+                  {item}
+                  {change?.medication_class && <small className="medication-class"> · {change.medication_class}</small>}
+                  {change && <small className={`medication-provenance ${medicationHighlight ? 'medication-provenance-enter' : ''}`}>Started by {change.specialty}</small>}
                 </li>
               })}</ul>
-              {patient.recent_medication_changes.length > 0 && (() => {
-                const started = patient.recent_medication_changes.filter((entry) => entry.action === 'start').map((entry) => entry.medication)
-                const discontinued = patient.recent_medication_changes.filter((entry) => entry.action === 'discontinue').map((entry) => entry.medication)
-                const parts = [
-                  started.length > 0 ? `${started.join(', ')} started` : null,
-                  discontinued.length > 0 ? `${discontinued.join(', ')} discontinued` : null,
-                ].filter(Boolean)
-                if (parts.length === 0) return null
-                return <p className="medication-change-note">
-                  Updated after {patient.recent_medication_changes[0].specialty} consultation
-                  <br />
-                  {parts.join(' · ')}
-                </p>
-              })()}
+              {/* A discontinuation never appears in the list above at all
+               * (it's simply absent from the derived current-medication
+               * list), so this one quiet line is the only place it's
+               * surfaced -- deliberately not repeating "Endocrinology"
+               * again, since the row above already carries that
+               * provenance (Part D). */}
+              {patient.recent_medication_changes.some((entry) => entry.action === 'discontinue') && <p className="medication-change-note">
+                {patient.recent_medication_changes.filter((entry) => entry.action === 'discontinue').map((entry) => entry.medication).join(', ')} discontinued
+              </p>}
             </section>
           </div>
           {trends.domain && trends.series.length > 0 && <section className="clinical-block">
