@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, askPhysicianAgent, createAgentCorrection, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, markHandoffViewed, runReferralPreflight, sendHandoff, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type CoordinationEvent, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
+import { acceptReferral, askPhysicianAgent, createAgentCorrection, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type CoordinationEvent, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
@@ -15,6 +15,12 @@ export type { DisplayPhase } from './referralPhases.ts'
 type Navigate = (path: string) => void
 
 const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+/** Care-routing demo pass, Part E/F/Q: the one shared label for the
+ * structured priority, Routine/Soon/Urgent -- never a numeric score (Part
+ * W), reused wherever priority is shown (Lucy's editor, the referral-mode
+ * surface, Chen's Incoming Requests). */
+export const priorityLabel = (priority: ReferralPriority) => priority === 'urgent' ? 'Urgent' : priority === 'soon' ? 'Soon' : 'Routine'
 
 function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling }: { phase: DisplayPhase; receivingPhysicianName: string; patientLabel: string; scheduling?: SchedulingCoordination | null }) {
   const who = lastName(receivingPhysicianName)
@@ -120,10 +126,16 @@ function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling 
  *   presentation pacing -- the backend call itself is never delayed (Part E/F/Y).
  */
 export function ReferralCoordinationSurface({
-  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange, onReferralChange, onReviewedChange,
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange, onReferralChange, onReviewedChange, priority,
 }: {
   patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string
   restoredReferral: Referral | null
+  /** Care-routing demo pass, Part E: the physician-confirmed priority at the
+   * moment "Start referral" is clicked -- read once here (a brand-new
+   * referral is only ever created once, in the mount effect below), never
+   * re-read afterward. Omitted entirely for a restored referral, which
+   * already carries its own real persisted `priority`. */
+  priority?: ReferralPriority
   /** Mirrors justCompleted up to the parent, which owns the actual card
    * element -- the wash background lives there (see .handoff-wash), not on
    * this overlay, so its visible edge is the card's own border-box and can
@@ -308,7 +320,7 @@ export function ReferralCoordinationSurface({
     setStatus('running'); setError(null); setVisiblePhase({ kind: 'preparing' })
     const minimumPreparingDisplay = sleep(PHASE_HOLD_MS.preparing)
     try {
-      const created = await createReferral(patientId, receivingPhysicianId)
+      const created = await createReferral(patientId, receivingPhysicianId, priority)
       const preflighted = await runReferralPreflight(created.id as number)
       await minimumPreparingDisplay
       if (cancelled.current) return
@@ -422,6 +434,12 @@ export function ReferralCoordinationSurface({
       <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
         <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} scheduling={scheduling} />
       </div>
+      {/* Care-routing demo pass, Part F: clinical priority and referral
+       * readiness are deliberately shown as two separate labeled values,
+       * never combined into one status -- readiness still drives the phase
+       * content above on its own; a missing requirement never makes this
+       * "Routine", and resolving one never touches priority either. */}
+      {referral && <p className="referral-priority-line"><span className="section-label">Clinical priority</span> <strong>{priorityLabel(referral.priority)}</strong></p>}
       {/* The current-state card stays focused on NOW (demo-consolidation
        * pass, Part 1): a single primary action for whatever the CURRENT phase
        * actually calls for. The historical artifact links live in their own
@@ -882,6 +900,11 @@ function IncomingRequestsControl({
           <span>From {PCP_NAME}</span>
           <small>{referral.specialty} referral</small>
         </div>
+        {/* Care-routing demo pass, Part Q: the specialist-side/worklist
+         * priority presentation -- Routine/Soon/Urgent, never a numeric
+         * acuity score, and never something this view can silently change
+         * (it only ever reads the referring physician's own selection). */}
+        <p className="incoming-request-priority"><span className={`priority-tag priority-${referral.priority}`}>{priorityLabel(referral.priority)}</span></p>
         <p className="incoming-request-status"><span className="status-label resolved">Ready for review</span></p>
         <p className="incoming-request-resolved">{resolvedSummary(resolvedCountFor(referral))}</p>
         <button type="button" className="text-button" onClick={() => onReview(referral)}>Review <span>→</span></button>
@@ -1411,6 +1434,28 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
  * any other patient (Part C: Dashboard presence is driven by outstanding
  * action/relevance, never a permanent-residency guarantee).
  */
+/**
+ * Care-routing demo pass, Part R/T: a restrained, read-only capacity strip
+ * -- two capacity LANES (in-person visits, e-consults), never three equal
+ * queues, and never a full e-consult workflow (Part S). Reuses the exact
+ * same structured AccessProfile the routing/match-details UI already reads
+ * (Part B/K) -- no second, independently-maintained source. Currently only
+ * meaningful for Chen; renders nothing if no capacity profile exists.
+ */
+function ChenCapacityStrip() {
+  const [capacity, setCapacity] = useState<AccessProfile | null>(null)
+  useEffect(() => { getPhysicianCapacity(CHEN_ID).then(setCapacity).catch(() => {}) }, [])
+  if (!capacity) return null
+  return <section className="care-capacity-strip">
+    <p className="section-label">Care capacity</p>
+    <div className="care-capacity-row">
+      <div><span className="care-capacity-label">Visits</span><span>Next appropriate opening {capacity.in_person_wait_label.toLowerCase()}</span></div>
+      <div><span className="care-capacity-label">E-consults</span><span>{capacity.econsult_available ? `Enabled · typical response ${(capacity.econsult_response_label ?? '').toLowerCase()}` : 'Not enabled'}</span></div>
+      <div><span className="care-capacity-label">Urgent cases</span><span>Escalated for physician review</span></div>
+    </div>
+  </section>
+}
+
 export function ChenHomePage({ navigate }: { navigate: Navigate }) {
   const [incoming, setIncoming] = useState<Referral[] | null>(null)
   const [accepted, setAccepted] = useState<Referral[] | null>(null)
@@ -1483,13 +1528,14 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
           <span className="lam-row-mark patient-row-avatar">{patientInitials(referral.patient_id)}</span>
           <span className="lam-row-main">
             <strong>{patientName(referral.patient_id)}</strong>
-            <span>Incoming referral ready for review</span>
+            <span>Incoming referral ready for review · <span className={`priority-tag priority-${referral.priority}`}>{priorityLabel(referral.priority)}</span></span>
             <small>{resolvedSummary(resolvedCountFor(referral))}</small>
           </span>
           <span className="lam-row-action">Review <b>→</b></span>
         </button>)}
       </div>
     </section>}
+    <ChenCapacityStrip />
     {topPatients.length > 0 && <section className="patient-worklist-section">
       <div className="home-section-heading"><div><h2>Patients</h2></div><button className="text-button" onClick={() => navigate('/chen/patients')}>View all patients →</button></div>
       <WorklistRows rows={topPatients} navigate={navigate} basePath="/chen/patients" />

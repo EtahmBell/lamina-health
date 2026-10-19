@@ -24,6 +24,7 @@ from backend.models import (
     MedicationChangeRecord,
     PatientRecord,
     Referral,
+    ReferralPriority,
     ReferralStatus,
     RequirementStatus,
     SchedulingCoordination,
@@ -64,13 +65,20 @@ def _append_event(
     )
 
 
+_PRIORITY_URGENCY_TEXT: dict[ReferralPriority, str] = {
+    "routine": "Routine outpatient referral",
+    "soon": "Soon outpatient referral",
+    "urgent": "Urgent outpatient referral",
+}
+
+
 def build_referral(
     patient: PatientRecord,
     receiving_physician_id: str,
     specialty: str,
     *,
     referring_physician_id: str = LUCY_AGENT_ID,
-    urgency: str = "Routine outpatient referral",
+    priority: ReferralPriority = "routine",
     previous_referral_id: int | None = None,
 ) -> Referral:
     """Create a new referral and assemble its initial packet. Does not persist.
@@ -80,7 +88,13 @@ def build_referral(
     completed episode -- a referral IS a specialty-care episode, so this is
     the only lineage pointer needed; the API layer is responsible for only
     ever passing this when the prior episode actually reached a terminal
-    state (see find_active_referral_for_pair's duplicate-guard counterpart)."""
+    state (see find_active_referral_for_pair's duplicate-guard counterpart).
+
+    `priority` (care-routing demo pass, Part E) is whatever the referring
+    physician explicitly confirmed/edited before creating this referral --
+    never silently upgraded here. `urgency` (pre-existing, otherwise unused
+    free text) is derived from it only for a readable referral_question
+    companion string; readiness/packet assembly below never reads either."""
     context = build_patient_context(patient)
     referral_question = patient.referral_question or f"Please evaluate for {specialty.lower()} input."
     now = _now()
@@ -90,7 +104,8 @@ def build_referral(
         receiving_physician_id=receiving_physician_id,
         specialty=specialty,
         referral_question=referral_question,
-        urgency=urgency,
+        urgency=_PRIORITY_URGENCY_TEXT[priority],
+        priority=priority,
         status=ReferralStatus.DRAFT,
         created_at=now,
         updated_at=now,

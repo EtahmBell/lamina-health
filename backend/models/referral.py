@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
-from .consultation import StrictModel
+from .consultation import ReferralPriority, StrictModel
 
 
 class ReferralStatus(StrEnum):
@@ -125,6 +125,11 @@ class CoordinationEvent(StrictModel):
 
 class ReferralCreateRequest(StrictModel):
     receiving_physician_id: str
+    # Care-routing demo pass, Part E: the physician-confirmable clinical
+    # priority (suggested by the agent, editable before the referral is
+    # created) -- `None` defers to build_referral's own "routine" default,
+    # never silently upgraded by the backend.
+    priority: ReferralPriority | None = None
 
 
 class ReferralAcceptRequest(StrictModel):
@@ -139,6 +144,12 @@ class Referral(StrictModel):
     specialty: str
     referral_question: str
     urgency: str
+    # Care-routing demo pass, Part E/F: the physician-confirmed structured
+    # priority, kept deliberately separate from `urgency` (free-text, pre-
+    # existing, otherwise unused) and from referral READINESS -- resolving a
+    # missing requirement never changes this, and this never changes
+    # readiness (Part F/U/V).
+    priority: ReferralPriority = "routine"
     status: ReferralStatus
     created_at: str
     updated_at: str

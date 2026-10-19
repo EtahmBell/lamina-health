@@ -6,6 +6,7 @@ from backend.models import (
     PhysicianProfile,
 )
 
+from .care_routing import build_candidate_routes, build_care_routing
 from .conversation import build_consultation_messages
 from .physician_agent import evaluate_physician
 
@@ -74,4 +75,6 @@ def consult_network(
         alternatives=alternatives,
         consultation=evaluations,
         disclaimer="Synthetic demonstration only. This record supports referral orchestration and is not medical advice or a quality ranking.",
+        care_routing=build_care_routing(context),
+        candidate_routes=build_candidate_routes(context),
     )

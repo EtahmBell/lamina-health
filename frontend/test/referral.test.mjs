@@ -140,7 +140,7 @@ test('ReferralCoordinationSurface renders in Referral mode, gated on the real re
 })
 
 test('ReferralCoordinationSurface calls the real referral API helpers, never a local fabrication', () => {
-  assert.match(referralSource, /createReferral\(patientId, receivingPhysicianId\)/)
+  assert.match(referralSource, /createReferral\(patientId, receivingPhysicianId, priority\)/)
   assert.match(referralSource, /runReferralPreflight\(created\.id/)
   assert.doesNotMatch(referralSource, /setTimeout\(\s*\(\)\s*=>\s*show/i, 'no setTimeout(showFakeEvent) pattern')
 })

@@ -45,10 +45,42 @@ export type Evaluation = {
   evidence: Evidence[]; required_workup: string[]; urgency: string
   availability: string; insurance_status: string; confidence: string
 }
+/** Care-routing demo pass, Part A/B: the CARE NEED, decided before any
+ * physician is ranked -- specialty/modality/priority/in-person-need/
+ * e-consult-suitability, never a numeric score. `null` for any case this
+ * pass doesn't populate (e.g. Jordan/Maria), rendering exactly as before. */
+export type ReferralPriority = 'routine' | 'soon' | 'urgent'
+export type CareModality = 'in_person' | 'econsult'
+export type EconsultSuitability = 'suitable' | 'possible_not_preferred' | 'not_suitable'
+export type InPersonNeed = 'preferred' | 'optional' | 'not_needed'
+export type CandidateFitLabel = 'strong' | 'moderate' | 'poor' | 'potential'
+export type EvidenceConfidence = 'high' | 'medium' | 'low' | 'unverified'
+export type CareRoutingAssessment = {
+  specialty: string; recommended_modality: CareModality; suggested_priority: ReferralPriority
+  in_person_need: InPersonNeed; econsult_suitability: EconsultSuitability; rationale: string
+}
+/** Evidence-confidence/connectivity labels, never physician-quality tiers
+ * (Part J) -- deliberately not "Tier 1/2/3". */
+export type NetworkParticipation = 'integrated_network' | 'lamina_physician' | 'external_directory'
+export type AccessProfile = {
+  in_person_wait_days: number | null; in_person_wait_label: string
+  econsult_available: boolean | null; econsult_response_days: number | null; econsult_response_label: string | null
+  access_confidence: EvidenceConfidence
+}
+/** physician + modality + expected access = ROUTE (Part A). The same
+ * physician may appear more than once (one route per modality). */
+export type CandidateRoute = {
+  physician_id: string; physician_name: string; specialty: string; modality: CareModality
+  fit_label: CandidateFitLabel; evidence_confidence: EvidenceConfidence
+  network_participation: NetworkParticipation; access: AccessProfile
+  recommended: boolean; rationale: string | null
+}
 export type Consultation = {
   consultation_id: string; patient_id: string; patient_facts_used: string[]; recommended_physician: Evaluation
   why: string; before_referral: string[]; availability: string; insurance: string
   alternatives: Evaluation[]; consultation: Evaluation[]; messages: ConsultationMessage[]; disclaimer: string
+  care_routing: CareRoutingAssessment | null
+  candidate_routes: CandidateRoute[]
 }
 export type PatientActivity = {
   patient_id: string; last_opened: string | null; last_started: string | null
@@ -79,7 +111,13 @@ export type CoordinationEvent = {
 }
 export type Referral = {
   id: number | null; patient_id: string; referring_physician_id: string; receiving_physician_id: string
-  specialty: string; referral_question: string; urgency: string; status: ReferralStatus
+  specialty: string; referral_question: string; urgency: string
+  /** Care-routing demo pass, Part E/F: the physician-confirmed structured
+   * priority -- deliberately separate from referral READINESS (status/
+   * requirement_results below); resolving a missing requirement never
+   * changes this, and this never changes readiness. */
+  priority: ReferralPriority
+  status: ReferralStatus
   created_at: string; updated_at: string; packet: ReferralPacket
   receiving_requirements: ReferralRequirement[]; requirement_results: RequirementCheck[]
   coordination_events: CoordinationEvent[]
@@ -577,9 +615,17 @@ export const getPatient = (id: string, asPhysicianId?: string) => request<Patien
 export const consultNetwork = (id: string, pcpGuidance?: string) => request<Consultation>(`/api/patients/${encodeURIComponent(id)}/consultations`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pcp_guidance: pcpGuidance?.trim() || null }),
 })
-export const createReferral = (patientId: string, receivingPhysicianId: string) => request<Referral>(`/api/patients/${encodeURIComponent(patientId)}/referrals`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId }),
+/** `priority` (care-routing demo pass, Part E) is whatever the referring
+ * physician explicitly confirmed/edited before clicking "Start referral" --
+ * omit it to accept the backend's own "routine" default, never silently
+ * upgraded. */
+export const createReferral = (patientId: string, receivingPhysicianId: string, priority?: ReferralPriority) => request<Referral>(`/api/patients/${encodeURIComponent(patientId)}/referrals`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId, priority: priority ?? null }),
 })
+/** Care-routing demo pass, Part R: the SAME structured access data the
+ * routing/match-details UI reads, exposed narrowly for the specialist-side
+ * capacity strip -- never a second, independently-maintained source. */
+export const getPhysicianCapacity = (physicianId: string) => request<AccessProfile>(`/api/physicians/${encodeURIComponent(physicianId)}/capacity`)
 export const getReferral = (referralId: number) => request<Referral>(`/api/referrals/${referralId}`)
 export const runReferralPreflight = (referralId: number) => request<Referral>(`/api/referrals/${referralId}/preflight`, { method: 'POST' })
 export const getActiveReferral = (patientId: string) => request<Referral | null>(`/api/patients/${encodeURIComponent(patientId)}/referrals/active`)

@@ -190,6 +190,74 @@ class PhysicianEvaluation(StrictModel):
     confidence: Literal["high", "medium", "low"]
 
 
+ReferralPriority = Literal["routine", "soon", "urgent"]
+CareModality = Literal["in_person", "econsult"]
+EconsultSuitability = Literal["suitable", "possible_not_preferred", "not_suitable"]
+InPersonNeed = Literal["preferred", "optional", "not_needed"]
+CandidateFitLabel = Literal["strong", "moderate", "poor", "potential"]
+EvidenceConfidence = Literal["high", "medium", "low", "unverified"]
+
+
+class NetworkParticipation(StrEnum):
+    """Evidence-confidence/connectivity, never a physician-quality tier (care-
+    routing demo pass, Part J) -- deliberately NOT named "tier 1/2/3"."""
+
+    INTEGRATED_NETWORK = "integrated_network"
+    LAMINA_PHYSICIAN = "lamina_physician"
+    EXTERNAL_DIRECTORY = "external_directory"
+
+
+class CareRoutingAssessment(StrictModel):
+    """What kind of care this patient needs, BEFORE any physician is ranked
+    (care-routing demo pass, Part A/B) -- specialty + modality + priority +
+    whether in-person is actually needed, never a giant numeric score.
+    Deterministic synthetic routing for this demo, never presented as an
+    autonomously-validated clinical urgency determination."""
+
+    specialty: str
+    recommended_modality: CareModality
+    suggested_priority: ReferralPriority
+    in_person_need: InPersonNeed
+    econsult_suitability: EconsultSuitability
+    rationale: str
+
+
+class AccessProfile(StrictModel):
+    """Modality-specific expected access (care-routing demo pass, Part B/K) --
+    in-person and e-consult are separate capacity channels, one shared
+    structured source, never one derived from the other. `econsult_available
+    = None` means policy is genuinely unknown (Part P) -- never defaulted to
+    True."""
+
+    in_person_wait_days: int | None = None
+    in_person_wait_label: str
+    econsult_available: bool | None = None
+    econsult_response_days: int | None = None
+    econsult_response_label: str | None = None
+    access_confidence: EvidenceConfidence
+
+
+class CandidateRoute(StrictModel):
+    """physician + modality + expected access = ROUTE (care-routing demo
+    pass, Part A). The same physician may appear more than once (e.g. Dr.
+    Chen in-person AND Dr. Chen e-consult) -- each is its own route, with its
+    own `recommended` flag; `fit_label` never changes between a physician's
+    own routes (Part V: access must never mutate fit). `rationale` is `None`
+    for a lower-information external-directory candidate (Part I) -- never a
+    fabricated agent-derived explanation."""
+
+    physician_id: str
+    physician_name: str
+    specialty: str
+    modality: CareModality
+    fit_label: CandidateFitLabel
+    evidence_confidence: EvidenceConfidence
+    network_participation: NetworkParticipation
+    access: AccessProfile
+    recommended: bool
+    rationale: str | None = None
+
+
 class ConsultationRequest(StrictModel):
     pcp_guidance: str | None = Field(default=None, max_length=500)
 
@@ -224,3 +292,9 @@ class ConsultationResult(StrictModel):
     alternatives: list[PhysicianEvaluation]
     consultation: list[PhysicianEvaluation]
     disclaimer: str
+    # Care-routing demo pass, Part B/X: purely additive -- every existing
+    # field above is untouched, so a patient/case with no routing data
+    # (care_routing=None, candidate_routes=[]) renders exactly as before
+    # this pass. Populated only for the Tonjit/diabetes demo case for now.
+    care_routing: CareRoutingAssessment | None = None
+    candidate_routes: list[CandidateRoute] = Field(default_factory=list)

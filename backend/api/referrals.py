@@ -2,9 +2,11 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 
+from backend.agents import PHYSICIAN_ACCESS_PROFILES
 from backend.demo_identity import LUCY_AGENT_ID, PCP_NAME
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.models import (
+    AccessProfile,
     AgentCorrection,
     AskPhysicianAgentRequest,
     ConsultationEncounter,
@@ -72,6 +74,21 @@ def _physician_display_name(physician_id: str) -> str:
     return _physician_or_404(physician_id).name.replace(" (synthetic)", "")
 
 
+@router.get("/physicians/{physician_id}/capacity", response_model=AccessProfile)
+def get_physician_capacity(physician_id: str, _workspace_id: DemoWorkspace) -> AccessProfile:
+    """Care-routing demo pass, Part R: a restrained capacity summary (visit
+    vs. e-consult channels) for the specialist-side Incoming Requests
+    experience -- reads the SAME structured access data the routing/match-
+    details UI uses (Part B/K), never a second, independently-maintained
+    source. 404 for any physician without a known capacity profile -- never
+    a fabricated default."""
+    _physician_or_404(physician_id)
+    profile = PHYSICIAN_ACCESS_PROFILES.get(physician_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No capacity profile for this physician")
+    return profile
+
+
 def _load_referral(workspace_id: str, referral_id: int) -> Referral:
     referral = workflow_store.get_referral(workspace_id, referral_id)
     if referral is None:
@@ -101,6 +118,7 @@ def create_referral(
     previous_episode = most_recent_referral_for_pair(existing_for_patient, receiving_physician.id)
     referral = build_referral(
         patient, receiving_physician.id, receiving_physician.specialty,
+        priority=request.priority or "routine",
         previous_referral_id=previous_episode.id if previous_episode else None,
     )
     return workflow_store.create_referral(workspace_id, referral)
