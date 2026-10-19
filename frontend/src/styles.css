@@ -2284,25 +2284,30 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .incoming-request-main strong { font-size: .78rem; }
 .incoming-request-main span { margin-top: 2px; color: var(--text-secondary); font-size: .66rem; }
 .incoming-request-main small { color: var(--text-secondary); font-size: .62rem; }
-.incoming-request-priority { margin: 6px 0 0; }
-.incoming-request-status { margin: 8px 0 0; }
+.incoming-request-priority { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; }
 .incoming-request-resolved { margin: 4px 0 0; color: var(--text-secondary); font-size: .64rem; }
 .incoming-request-row .text-button { margin-top: 8px; font-size: .68rem; font-weight: 600; }
+/* Quiet modality label (routing/triage UX pass, Part S) -- never a second
+ * competing status badge. Reused alongside PriorityChip wherever a
+ * modality needs a one-word companion label. */
+.incoming-request-modality { color: var(--text-secondary); font-size: .64rem; }
 
-/* Care-routing demo pass, Part Q: Routine/Soon/Urgent, never a numeric
- * acuity score -- a quiet tag, not an alarm. */
-.priority-tag { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
-.priority-tag.priority-routine { background: var(--sand); color: var(--text-secondary); }
-.priority-tag.priority-soon { background: var(--mineral-surface); color: var(--mineral-deep); }
-.priority-tag.priority-urgent { background: #fdf3e8; color: var(--accent-hover); }
+/* Routing/triage UX pass, Part X/Y: three small, calm, read-only capacity
+ * cards -- two real capacity LANES (visits, e-consults) plus urgent review
+ * as the exceptional escalation path, never a third equal queue. No
+ * shadows, no KPI/metric-SaaS styling. */
+.care-capacity-cards { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
+.care-capacity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 10px; }
+.care-capacity-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.care-capacity-card-label { margin: 0; color: var(--text-secondary); font-size: .56rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.care-capacity-card-value { margin: 8px 0 0; color: var(--clinical); font-size: .72rem; }
+.care-capacity-card-detail { margin: 2px 0 0; color: var(--clinical); font-size: .9rem; font-weight: 600; }
 
-/* Two capacity LANES, never three equal queues (Part R/T) -- a restrained
- * strip, not a new dashboard section. */
-.care-capacity-strip { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
-.care-capacity-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 20px; margin-top: 8px; }
-.care-capacity-row > div { display: flex; flex-direction: column; gap: 2px; }
-.care-capacity-label { color: var(--text-secondary); font-size: .56rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
-.care-capacity-row > div > span:last-child { color: var(--clinical); font-size: .7rem; }
+/* Routing/triage UX pass, Part Z: a small, understated "routine demand
+ * moves in the background" surface -- never a large dashboard feed. */
+.routing-activity-note { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
+.routing-activity-summary { margin: 8px 0 0; color: var(--clinical); font-size: .74rem; font-weight: 600; }
+.routing-activity-detail { margin: 2px 0 0; color: var(--text-secondary); font-size: .66rem; }
 
 /* Request Review modal (Part G-N): a focused clinical handoff, not a
    developer inspector -- reuses .post-flow-dialog/.packet-section/
@@ -2356,42 +2361,69 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .match-details-group:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .before-visit-plain, .access-coverage-line { margin: 0; color: var(--clinical); font-size: .72rem; font-weight: 600; }
 
-/* Care routing / match explainability demo pass -- a compact block above
- * the physician match (Part D), never another giant card. Reuses the same
- * restrained visual language as the surrounding card (quiet labels, hairline
- * rules), explainable categories only (Part W): no numeric score anywhere. */
+/* Recommended care path (routing/triage UX pass, Part A-D) -- a compact
+ * block above the physician match, never another giant card. Specialty and
+ * modality render as two separate lines (Part B); priority is ALWAYS the
+ * directly-editable chip row, never a separate edit-mode (Part C).
+ * Explainable categories only (Part W): no numeric score anywhere. */
 .care-routing-block { margin-top: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); padding: 14px 16px; }
 .care-routing-block h3 { margin: 4px 0 0; font-size: .92rem; font-weight: 500; }
-.care-routing-priority { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-.care-routing-priority-value { display: flex; align-items: center; gap: 8px; }
-.care-routing-priority-value strong { font-size: .76rem; }
-.care-routing-priority-value small { color: var(--text-secondary); font-size: .6rem; }
-.care-routing-priority-value .text-button { margin: 0; font-size: .62rem; }
-.priority-chip-row { display: flex; gap: 6px; }
-.priority-chip { border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 4px 11px; color: var(--clinical); cursor: pointer; font-size: .64rem; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
-.priority-chip:hover { border-color: var(--mineral); }
-.priority-chip.selected { border-color: var(--mineral); background: var(--mineral-surface); color: var(--mineral-deep); }
+.care-routing-modality { margin: 2px 0 0; color: var(--text-secondary); font-size: .72rem; }
+.care-routing-priority { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.care-routing-priority-note { color: var(--text-secondary); font-size: .6rem; }
 .care-routing-rationale { margin: 10px 0 0; color: var(--clinical); font-size: .72rem; line-height: 1.6; }
 .care-routing-footnote { margin: 6px 0 0; color: var(--text-secondary); font-size: .62rem; }
 
-/* "Why this route"/"Why Dr. X" structured match-details groups -- a plain
- * definition list of labeled values, never a numeric score (Part M/W). */
-.route-modality-line { margin: 0; color: var(--clinical); font-size: .76rem; font-weight: 600; }
-.route-modality-line span { color: var(--text-secondary); font-weight: 400; }
-.route-fact-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; margin: 10px 0 0; }
-.route-fact-list dt { color: var(--text-secondary); font-size: .52rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.route-fact-list dd { margin: 4px 0 0; color: var(--clinical); font-size: .72rem; font-weight: 600; }
-.other-routes-list { display: flex; flex-direction: column; gap: 2px; margin: 10px 0 0; padding: 0; list-style: none; }
-.other-routes-list li { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-top: 1px solid var(--border); }
-.other-routes-list li:first-child { border-top: 0; padding-top: 0; }
-.other-routes-list li > strong { font-size: .76rem; }
-.other-routes-list li > span { color: var(--text-secondary); font-size: .62rem; }
-.other-route-note { font-style: italic; }
+/* Routing/triage UX pass, Part E: the ONE shared priority chip, used
+ * identically everywhere -- the directly-editable row (button form) and
+ * the read-only display form share the same base look, so "Soon" never
+ * reads as plain bold text in one place and a pill elsewhere. */
+.priority-chip-row { display: flex; gap: 6px; }
+.priority-chip { display: inline-block; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 4px 11px; color: var(--clinical); font-size: .64rem; font-weight: 600; }
+button.priority-chip { cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
+button.priority-chip:hover { border-color: var(--mineral); }
+.priority-chip.selected, .priority-chip-display { border-color: var(--mineral); background: var(--mineral-surface); color: var(--mineral-deep); }
+.priority-chip-display.priority-urgent { border-color: rgb(184 92 50 / 40%); background: #fdf3e8; color: var(--accent-hover); }
+.priority-chip-display.priority-routine { border-color: var(--border); background: var(--sand); color: var(--text-secondary); }
+
+/* "Why this care path"/"Why Dr. X" structured match-details groups -- a
+ * plain definition list of labeled values, never a numeric score (Part
+ * F-I/W). Values read visually stronger than labels (Part I). */
+.route-fact-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 18px; margin: 10px 0 0; }
+.route-fact-list dt { color: var(--text-secondary); font-size: .58rem; font-weight: 600; letter-spacing: .03em; }
+.route-fact-list dd { margin: 4px 0 0; color: var(--clinical); font-size: .78rem; font-weight: 600; }
+/* Part H: a small supporting line, never giant headline typography -- the
+ * old oversized "Why this option won" section is gone. */
+.route-why-recommended { margin: 12px 0 0; color: var(--text-secondary); font-size: .7rem; line-height: 1.6; }
+.route-why-recommended-label { color: var(--clinical); font-weight: 600; }
+/* Part J/K: ONE unified "Other options" list -- merges the pre-existing
+ * real alternatives with the routing model's other routes, each row
+ * selectable only where the existing referral flow can safely support it
+ * (Part K) -- never a fake dead CTA. */
+.other-options-list { display: flex; flex-direction: column; gap: 2px; margin: 10px 0 0; padding: 0; list-style: none; }
+.other-options-list li { padding: 12px 0; border-top: 1px solid var(--border); }
+.other-options-list li:first-child { border-top: 0; padding-top: 0; }
+.other-option-head { display: flex; align-items: baseline; gap: 8px; }
+.other-option-head strong { font-size: .78rem; }
+.other-option-specialty { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .64rem; }
+.other-option-facts { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; }
+.other-option-facts span { color: var(--clinical); font-size: .68rem; }
+.other-option-rationale { margin: 6px 0 0; color: var(--text-secondary); font-size: .7rem; line-height: 1.5; }
+.other-options-list .text-button { margin-top: 8px; }
 
 /* Referral-mode surface: clinical priority stays a separate labeled value
- * from referral readiness (Part F) -- never combined into one status. */
-.referral-priority-line { margin: 10px 0 0; color: var(--clinical); font-size: .7rem; }
-.referral-priority-line strong { margin-left: 4px; }
+ * from referral readiness (Part F/N) -- never combined into one status,
+ * and visually secondary to the actual workflow status above it. */
+.referral-priority-line { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; color: var(--text-secondary); font-size: .68rem; }
+
+/* Routing/triage UX pass, Part T: the referral-review "Recommended
+ * handling" triage summary -- compact, structured, never a numeric score. */
+.recommended-handling { border: 1px solid var(--mineral-subtle); border-radius: 10px; background: var(--mineral-surface); padding: 14px; }
+.recommended-handling .section-label { color: var(--mineral-deep); }
+.recommended-handling-line { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; }
+.recommended-handling-fact { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: .72rem; }
+.recommended-handling-fact strong { color: var(--mineral-deep); }
+.recommended-handling .muted-note { margin-top: 8px; }
 .alternatives-list { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
 .alternative-row { padding: 10px 0; border-top: 1px solid var(--border); }
 .alternative-row:first-child { border-top: 0; }

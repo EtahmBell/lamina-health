@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type Evaluation, type EvidenceConfidence, type HandoffSummary, type InPersonNeed, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
+import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -18,7 +18,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { MyNetworkTab, PhysicianProfilePage } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
+import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -671,7 +671,6 @@ const fitLabelText = (fit: CandidateFitLabel) => fit === 'strong' ? 'Strong' : f
 const confidenceLabelText = (confidence: EvidenceConfidence) => confidence === 'high' ? 'High' : confidence === 'medium' ? 'Medium' : confidence === 'low' ? 'Low' : 'Unverified'
 /** Evidence-confidence/connectivity, never a physician-quality tier (Part J). */
 const networkParticipationLabel = (participation: NetworkParticipation) => participation === 'integrated_network' ? 'Integrated network' : participation === 'lamina_physician' ? 'Lamina physician' : 'External directory'
-const inPersonNeedLabel = (need: InPersonNeed) => need === 'preferred' ? 'Preferred' : need === 'optional' ? 'Optional' : 'Not needed'
 const econsultSuitabilityLabel = (suitability: EconsultSuitability) => suitability === 'suitable' ? 'Suitable' : suitability === 'possible_not_preferred' ? 'Possible, not preferred' : 'Not suitable'
 const messageSender = (message: ConsultationMessage) => message.sender_agent_id === PCP_AGENT_ID ? `${PCP_NAME} Agent` : message.sender_name
 
@@ -721,7 +720,6 @@ function RecommendationView({
   // behaves exactly as before this pass. Edited here, then sent once at
   // referral-creation time; never silently upgraded afterward.
   const [priority, setPriority] = useState<ReferralPriority>(consultation.care_routing?.suggested_priority ?? 'routine')
-  const [priorityEditing, setPriorityEditing] = useState(false)
   // Mirrors ReferralCoordinationSurface's brief live completion moment -- the
   // wash background lives on this card (see .handoff-wash in styles.css), not
   // on a separately-shaped overlay, so it can never mismatch the card's own
@@ -805,8 +803,67 @@ function RecommendationView({
   // Agent recommendation vs. physician selection are deliberately never
   // conflated: `selected` drives every visible field, but `primary` (the
   // agent's own top pick) is always known separately -- see isAgentPick.
-  const candidates = [primary, ...consultation.alternatives]
+  /** Routing/triage UX pass, Part K: a route presented only via the new
+   * routing model (never the real evaluate_physician pipeline) is made
+   * genuinely selectable -- never a fake dead CTA -- by synthesizing a
+   * minimal, compatible Evaluation so the EXACT SAME selectCandidate/
+   * candidates mechanism Dr. Okonkwo already uses just works for it too.
+   * Only in-person, non-external-directory routes qualify: e-consult has
+   * no real workflow yet (Part L), and an external-directory candidate was
+   * never actually verified to exist in Lamina's own systems (Part I) --
+   * selecting either would be unsafe/broken. */
+  const routeToEvaluation = (route: CandidateRoute): Evaluation => ({
+    physician_id: route.physician_id,
+    physician_name: route.physician_name,
+    specialty: route.specialty,
+    clinical_fit: route.fit_label === 'strong' ? 'strong' : route.fit_label === 'moderate' ? 'moderate' : 'poor',
+    accepts_case: true,
+    reason: route.rationale ?? '',
+    evidence: [],
+    required_workup: [],
+    urgency: '',
+    availability: route.access.in_person_wait_label,
+    insurance_status: 'Not independently verified for this option (synthetic demo).',
+    confidence: route.evidence_confidence === 'unverified' ? 'low' : route.evidence_confidence,
+  })
+  const selectableRoutes = consultation.candidate_routes.filter((route) => !route.recommended && route.modality === 'in_person' && route.network_participation !== 'external_directory')
+  const candidates = [primary, ...consultation.alternatives, ...selectableRoutes.map(routeToEvaluation)]
   const selected = candidates.find((item) => item.physician_id === selectedId) ?? primary
+  /** Routing/triage UX pass, Part J/K: ONE canonical "Other options" list,
+   * merging the pre-existing real alternatives (Okonkwo, via consultation.
+   * alternatives) with the new routing model's non-recommended routes
+   * (Maya, Chen's e-consult route, the external-directory candidate) --
+   * never two out-of-sync surfaces. Empty when there's no routing data,
+   * since that case keeps the pre-existing "Other referral options"
+   * disclosure entirely unchanged. */
+  const otherOptionRows = consultation.care_routing ? [
+    ...consultation.alternatives.map((option) => ({
+      key: option.physician_id,
+      physicianId: option.physician_id,
+      name: cleanName(option.physician_name),
+      specialty: option.specialty,
+      modality: 'in_person' as const,
+      fitText: `${option.clinical_fit === 'strong' ? 'Strong' : option.clinical_fit === 'moderate' ? 'Moderate' : 'Limited'} fit`,
+      networkText: null as string | null,
+      accessText: option.availability.replace('Approximately ', '~'),
+      rationale: option.reason as string | null,
+      selectable: true,
+      isAgentPick: option.physician_id === primary.physician_id,
+    })),
+    ...consultation.candidate_routes.filter((route) => !route.recommended).map((route) => ({
+      key: `${route.physician_id}-${route.modality}`,
+      physicianId: route.physician_id,
+      name: cleanName(route.physician_name),
+      specialty: route.specialty,
+      modality: route.modality,
+      fitText: `${fitLabelText(route.fit_label)} fit`,
+      networkText: networkParticipationLabel(route.network_participation) as string | null,
+      accessText: (route.modality === 'in_person' ? route.access.in_person_wait_label : (route.access.econsult_response_label ?? 'Unverified')).replace('Approximately ', '~'),
+      rationale: route.rationale,
+      selectable: route.modality === 'in_person' && route.network_participation !== 'external_directory',
+      isAgentPick: false,
+    })),
+  ] : []
   const isAgentPick = selected.physician_id === primary.physician_id
   const explicitRule = evidenceFor(selected, 'explicit_physician_rule')
   const supportingFacts = selected.evidence.filter((item) => item.kind === 'patient_fact').map((item) => item.detail).slice(0, 2)
@@ -979,28 +1036,24 @@ function RecommendationView({
       <h3>A specialist is ready for your review.</h3>
       <p>Review the match below, then choose how to move care forward.</p>
     </div>
-    {/* Care-routing demo pass, Part D: Lamina decides the appropriate
+    {/* Routing/triage UX pass, Part A-D: renamed from "Care routing" (too
+     * abstract/internal-sounding) to "Recommended care path" -- the compact
+     * block above the physician match where Lamina decides the appropriate
      * specialty-care ROUTE (specialty + modality + priority) before merely
-     * ranking doctors -- a compact block above the physician match, never
-     * another giant card. Absent entirely for any case this pass doesn't
+     * ranking doctors. Specialty and modality are deliberately two separate
+     * lines, never combined into one opaque phrase. Priority is ALWAYS the
+     * directly-editable chip row -- there is no separate edit-mode/Edit
+     * button (Part C). Absent entirely for any case this pass doesn't
      * populate (care_routing === null), so every other patient's Discovery
      * mode renders exactly as before. */}
     {consultation.care_routing && <section className="care-routing-block">
-      <p className="section-label">Care routing</p>
-      <h3>{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person' : 'E-consult'} {consultation.care_routing.specialty}</h3>
+      <p className="section-label">Recommended care path</p>
+      <h3>{consultation.care_routing.specialty}</h3>
+      <p className="care-routing-modality">{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person evaluation recommended' : 'E-consult recommended'}</p>
       <div className="care-routing-priority">
         <span className="section-label">Priority</span>
-        {priorityEditing
-          ? <div className="priority-chip-row">{(['routine', 'soon', 'urgent'] as const).map((value) => <button
-              key={value} type="button"
-              className={`priority-chip ${priority === value ? 'selected' : ''}`}
-              onClick={() => { setPriority(value); setPriorityEditing(false) }}
-            >{priorityLabel(value)}</button>)}</div>
-          : <span className="care-routing-priority-value">
-              <strong>{priorityLabel(priority)}</strong>
-              {priority === consultation.care_routing.suggested_priority && <small>Suggested by your agent</small>}
-              <button type="button" className="text-button" onClick={() => setPriorityEditing(true)}>Edit</button>
-            </span>}
+        <PriorityChipRow priority={priority} onChange={setPriority} />
+        {priority === consultation.care_routing.suggested_priority && <small className="care-routing-priority-note">Suggested by your agent</small>}
       </div>
       <p className="care-routing-rationale">{consultation.care_routing.rationale}</p>
       <p className="care-routing-footnote">Access and alternative care routes considered.</p>
@@ -1074,45 +1127,54 @@ function RecommendationView({
     {/* One open surface -- whitespace and hairline rules separate groups,
      * never a bordered/shaded box nested inside the already-boxed card. */}
     <section className="options-section"><button className="options-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Review match details <span>{detailsOpen ? '−' : '+'}</span></button>
-      {/* Care-routing demo pass, Part M: when routing data exists, Review
-       * match details explains the actual ROUTE decision -- modality,
-       * priority, fit, network/evidence confidence, and access, each its
-       * own labeled value, never one opaque score. Every other patient (no
-       * care_routing) keeps the pre-existing structure, unchanged. */}
+      {/* Routing/triage UX pass, Part F-M: reduced to THREE primary
+       * sections -- Why this care path / Why Dr. X / Other options -- never
+       * one opaque score, and never a separately-standing "Other referral
+       * options" disclosure (merged below, Part J). The oversized "Why this
+       * option won" block is gone; a small supporting line ("Why
+       * recommended: ...") replaces it, visually subordinate to the
+       * structured facts above it. Every other patient (no care_routing)
+       * keeps the pre-existing structure, unchanged. */}
       {detailsOpen && <div className="match-details">{consultation.care_routing ? <>
         <div className="match-details-group">
-          <p className="section-label">Why this route</p>
-          <p className="route-modality-line"><strong>{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person' : 'E-consult'} {consultation.care_routing.specialty}</strong><span> · Priority: {priorityLabel(consultation.care_routing.suggested_priority)}</span></p>
+          <p className="section-label">Why this care path</p>
           <dl className="route-fact-list">
-            <div><dt>In-person need</dt><dd>{inPersonNeedLabel(consultation.care_routing.in_person_need)}</dd></div>
+            <div><dt>Specialty</dt><dd>{consultation.care_routing.specialty}</dd></div>
+            <div><dt>Modality</dt><dd>{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person evaluation' : 'E-consult'}</dd></div>
+            <div><dt>Priority</dt><dd><PriorityChip priority={consultation.care_routing.suggested_priority} /></dd></div>
             <div><dt>E-consult</dt><dd>{econsultSuitabilityLabel(consultation.care_routing.econsult_suitability)}</dd></div>
           </dl>
         </div>
         {(() => {
           const recommendedRoute = consultation.candidate_routes.find((route) => route.recommended)
           if (!recommendedRoute) return null
-          return <>
-            <div className="match-details-group">
-              <p className="section-label">Why {cleanName(recommendedRoute.physician_name)}</p>
-              <dl className="route-fact-list">
-                <div><dt>Practice fit</dt><dd>{fitLabelText(recommendedRoute.fit_label)}</dd></div>
-                <div><dt>Network</dt><dd>{networkParticipationLabel(recommendedRoute.network_participation)}</dd></div>
-                <div><dt>Evidence confidence</dt><dd>{confidenceLabelText(recommendedRoute.evidence_confidence)}</dd></div>
-                <div><dt>In-person access</dt><dd>{recommendedRoute.access.in_person_wait_label}</dd></div>
-                {recommendedRoute.access.econsult_response_label && <div><dt>E-consult response</dt><dd>{recommendedRoute.access.econsult_response_label}</dd></div>}
-              </dl>
-            </div>
-            {recommendedRoute.rationale && <div className="match-details-group"><p className="section-label">Why this option won</p><p>{recommendedRoute.rationale}</p></div>}
-          </>
+          return <div className="match-details-group">
+            <p className="section-label">Why {cleanName(recommendedRoute.physician_name)}</p>
+            <dl className="route-fact-list">
+              <div><dt>Practice fit</dt><dd>{fitLabelText(recommendedRoute.fit_label)}</dd></div>
+              <div><dt>Network</dt><dd>{networkParticipationLabel(recommendedRoute.network_participation)}</dd></div>
+              <div><dt>Evidence confidence</dt><dd>{confidenceLabelText(recommendedRoute.evidence_confidence)}</dd></div>
+              <div><dt>In-person access</dt><dd>{recommendedRoute.access.in_person_wait_label}</dd></div>
+              {recommendedRoute.access.econsult_response_label && <div><dt>E-consult response</dt><dd>{recommendedRoute.access.econsult_response_label}</dd></div>}
+            </dl>
+            {recommendedRoute.rationale && <p className="route-why-recommended"><span className="route-why-recommended-label">Why recommended:</span> {recommendedRoute.rationale}</p>}
+          </div>
         })()}
         <div className="match-details-group">
-          <p className="section-label">Other routes considered</p>
-          <ul className="other-routes-list">{consultation.candidate_routes.filter((route) => !route.recommended).map((route) => <li key={`${route.physician_id}-${route.modality}`}>
-            <strong>{cleanName(route.physician_name)}{route.modality === 'econsult' ? ' — E-consult' : ''}</strong>
-            <span>{fitLabelText(route.fit_label)} fit</span>
-            <span>{networkParticipationLabel(route.network_participation)}</span>
-            <span>{route.modality === 'in_person' ? route.access.in_person_wait_label : (route.access.econsult_response_label ?? 'Unverified')}</span>
-            {route.rationale && <span className="other-route-note">{route.rationale}</span>}
+          <p className="section-label">Other options</p>
+          <ul className="other-options-list">{otherOptionRows.map((row) => <li key={row.key}>
+            <div className="other-option-head">
+              <strong>{row.name}{row.modality === 'econsult' ? ' — E-consult' : ''}</strong>
+              {row.isAgentPick && <span className="agent-pick-tag">Agent's top recommendation</span>}
+            </div>
+            <span className="other-option-specialty">{row.specialty}</span>
+            <div className="other-option-facts">
+              <span>{row.fitText}</span>
+              {row.networkText && <span>{row.networkText}</span>}
+              <span>{row.accessText}</span>
+            </div>
+            {row.rationale && <p className="other-option-rationale">{row.rationale}</p>}
+            {row.selectable && <button type="button" className="text-button" onClick={() => selectCandidate(row.physicianId)}>Select this specialist <span>→</span></button>}
           </li>)}</ul>
         </div>
       </> : <>
@@ -1122,13 +1184,18 @@ function RecommendationView({
       </>}</div>}
     </section>
 
-    <section className="options-section"><button className="options-toggle" aria-expanded={alternativesOpen} onClick={() => setAlternativesOpen(!alternativesOpen)}>Other referral options <span>{alternativesOpen ? '−' : '+'}</span></button>
+    {/* Routing/triage UX pass, Part J: the standalone "Other referral
+     * options" disclosure is gone when routing data exists -- its content
+     * now lives inside Review match details' unified "Other options"
+     * group above. Every other patient (no care_routing) keeps this
+     * disclosure exactly as before. */}
+    {!consultation.care_routing && <section className="options-section"><button className="options-toggle" aria-expanded={alternativesOpen} onClick={() => setAlternativesOpen(!alternativesOpen)}>Other referral options <span>{alternativesOpen ? '−' : '+'}</span></button>
       {alternativesOpen && <div className="alternatives-list">{candidates.filter((item) => item.physician_id !== selectedId).map((option) => <div className="alternative-row" key={option.physician_id}>
         <div><strong>{cleanName(option.physician_name)}</strong><span>{option.specialty}</span>{option.physician_id === primary.physician_id && <span className="agent-pick-tag">Agent's top recommendation</span>}</div>
         <p>{option.reason}{option.availability ? ` · ${option.availability.replace('Approximately ', '~')}` : ''}</p>
         <button type="button" className="text-button" onClick={() => selectCandidate(option.physician_id)}>Select this specialist <span>→</span></button>
       </div>)}</div>}
-    </section>
+    </section>}
 
     <section className="network-transparency"><button className="network-transparency-toggle" onClick={() => setNetworkOpen(true)} aria-expanded={networkOpen}><span><b>How your agent handled this</b></span><em>View consultation details <i>⌄</i></em></button></section>
     <p className="disclaimer">{consultation.disclaimer}</p>

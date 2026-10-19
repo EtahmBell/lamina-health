@@ -122,7 +122,7 @@ test('the recommendation-ready default card is compact -- one fit indicator, one
 test('selecting an alternative crossfades the primary card, relabels provenance, and never leaves one physician\'s reasoning under another', () => {
   const view = recommendation()
   assert.match(view, /const \[selectedId, setSelectedId\] = useState\(consultation\.recommended_physician\.physician_id\)/)
-  assert.match(view, /const candidates = \[primary, \.\.\.consultation\.alternatives\]/)
+  assert.match(view, /const candidates = \[primary, \.\.\.consultation\.alternatives, \.\.\.selectableRoutes\.map\(routeToEvaluation\)\]/)
   assert.match(view, /const selected = candidates\.find\(\(item\) => item\.physician_id === selectedId\) \?\? primary/)
   assert.match(view, /const isAgentPick = selected\.physician_id === primary\.physician_id/)
   assert.match(view, /\{isAgentPick \? 'Recommended physician' : 'Selected specialist'\}/)

@@ -48,7 +48,10 @@ PHYSICIAN_ACCESS_PROFILES: dict[str, AccessProfile] = {
 
 _EXTERNAL_DIRECTORY_CANDIDATE = {
     "physician_id": "external-directory-endocrinology-1",
-    "physician_name": "Dr. Renata Okafor (external directory, synthetic)",
+    # No "(external directory, synthetic)" suffix (bug-fix/UX pass, Part M)
+    # -- that read like fixture/debug metadata; the global "Synthetic
+    # demonstration only" disclaimer already covers demo provenance.
+    "physician_name": "Dr. Renata Okafor",
 }
 
 

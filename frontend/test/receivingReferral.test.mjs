@@ -114,16 +114,16 @@ test('a real accept-referral API call and a physician-scoped referrals query exi
 
 test('IncomingRequestsControl renders the real referral count, never a hardcoded number', () => {
   const fn = slice(referralSource, 'function IncomingRequestsControl', 'export function RequestReviewModal')
-  assert.match(fn, /Incoming requests <span>\{referrals\.length\}<\/span>/)
+  assert.match(fn, /Needs your review <span>\{referrals\.length\}<\/span>/)
   assert.doesNotMatch(fn, />\s*1\s*<\/span>/, 'the count must come from referrals.length, not a literal 1')
 })
 
-test('the incoming popover shows patient name, the real referring physician (Lucy), specialty, and a real resolved-count summary', () => {
+test('the incoming popover shows patient name, the real referring physician (Lucy), specialty, priority, and a real resolved-count summary -- no redundant second status badge (routing/triage UX pass, Part S)', () => {
   const fn = slice(referralSource, 'function IncomingRequestsControl', 'export function RequestReviewModal')
   assert.match(fn, /patientName\(referral\.patient_id\)/)
-  assert.match(fn, /From \{PCP_NAME\}/)
-  assert.match(fn, /\{referral\.specialty\} referral/)
-  assert.match(fn, /Ready for review/)
+  assert.match(fn, /\{referral\.specialty\} referral from \{PCP_NAME\}/)
+  assert.match(fn, /<PriorityChip priority=\{referral\.priority\} \/>/)
+  assert.doesNotMatch(fn, /Ready for review/, 'the redundant status badge was removed -- the whole section is already called Needs your review')
   assert.match(fn, /resolvedSummary\(resolvedCountFor\(referral\)\)/)
   assert.match(fn, /onClick=\{\(\) => onReview\(referral\)\}>Review/)
 })

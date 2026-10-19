@@ -217,6 +217,26 @@ def test_referral_readiness_progressing_through_preflight_never_changes_priority
     assert after_preflight["status"] != before_preflight["status"], "preflight should have actually advanced readiness"
 
 
+# ------------------------------------------------------- Part W/AK: triage
+# vs. scheduling -- scheduling resolves the exact slot, it never recalculates
+# clinical priority.
+
+
+def test_scheduling_never_touches_referral_priority(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID, "priority": "soon"}
+    ).json()
+    referral_id = created["id"]
+    api_client.post(f"/api/referrals/{referral_id}/preflight")
+    api_client.post(f"/api/referrals/{referral_id}/accept", json={"receiving_physician_id": CHEN_ID})
+    api_client.post(f"/api/referrals/{referral_id}/scheduling/options", json={"receiving_physician_id": CHEN_ID})
+    routed = api_client.post(
+        f"/api/referrals/{referral_id}/scheduling/route", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    assert routed["scheduling"]["status"] == "scheduled"
+    assert routed["referral"]["priority"] == "soon", "scheduling an appointment must never recalculate clinical priority"
+
+
 # -------------------------------------------------------------- Part R
 
 

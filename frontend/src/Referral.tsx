@@ -22,6 +22,25 @@ const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion:
  * surface, Chen's Incoming Requests). */
 export const priorityLabel = (priority: ReferralPriority) => priority === 'urgent' ? 'Urgent' : priority === 'soon' ? 'Soon' : 'Routine'
 
+/** Routing/triage UX pass, Part E: ONE shared chip treatment for priority
+ * everywhere it appears -- never plain bold text in one place and a pill
+ * elsewhere. Read-only display chip; `PriorityChipRow` below is the only
+ * editable form. */
+export function PriorityChip({ priority }: { priority: ReferralPriority }) {
+  return <span className={`priority-chip priority-chip-display priority-${priority}`}>{priorityLabel(priority)}</span>
+}
+
+/** Routing/triage UX pass, Part C: priority is ALWAYS shown as this
+ * directly-editable chip row -- there is no separate "Edit" affordance or
+ * edit-mode toggle. */
+export function PriorityChipRow({ priority, onChange }: { priority: ReferralPriority; onChange: (value: ReferralPriority) => void }) {
+  return <div className="priority-chip-row">{(['routine', 'soon', 'urgent'] as const).map((value) => <button
+    key={value} type="button"
+    className={`priority-chip ${priority === value ? 'selected' : ''}`}
+    onClick={() => onChange(value)}
+  >{priorityLabel(value)}</button>)}</div>
+}
+
 function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling }: { phase: DisplayPhase; receivingPhysicianName: string; patientLabel: string; scheduling?: SchedulingCoordination | null }) {
   const who = lastName(receivingPhysicianName)
   switch (phase.kind) {
@@ -439,7 +458,7 @@ export function ReferralCoordinationSurface({
        * never combined into one status -- readiness still drives the phase
        * content above on its own; a missing requirement never makes this
        * "Routine", and resolving one never touches priority either. */}
-      {referral && <p className="referral-priority-line"><span className="section-label">Clinical priority</span> <strong>{priorityLabel(referral.priority)}</strong></p>}
+      {referral && <p className="referral-priority-line"><span className="section-label">Clinical priority</span> <PriorityChip priority={referral.priority} /></p>}
       {/* The current-state card stays focused on NOW (demo-consolidation
        * pass, Part 1): a single primary action for whatever the CURRENT phase
        * actually calls for. The historical artifact links live in their own
@@ -891,21 +910,19 @@ function IncomingRequestsControl({
   }, [open, onToggle])
   return <div className="incoming-requests" ref={containerRef}>
     <button type="button" className="incoming-requests-toggle" onClick={onToggle} aria-haspopup="menu" aria-expanded={open}>
-      Incoming requests <span>{referrals.length}</span>
+      Needs your review <span>{referrals.length}</span>
     </button>
-    {open && <div className="incoming-requests-popover" role="menu" aria-label="Incoming requests">
+    {open && <div className="incoming-requests-popover" role="menu" aria-label="Needs your review">
       {referrals.map((referral) => <div className="incoming-request-row" role="menuitem" key={referral.id}>
         <div className="incoming-request-main">
           <strong>{patientName(referral.patient_id)}</strong>
-          <span>From {PCP_NAME}</span>
-          <small>{referral.specialty} referral</small>
+          <span>{referral.specialty} referral from {PCP_NAME}</span>
         </div>
-        {/* Care-routing demo pass, Part Q: the specialist-side/worklist
-         * priority presentation -- Routine/Soon/Urgent, never a numeric
-         * acuity score, and never something this view can silently change
-         * (it only ever reads the referring physician's own selection). */}
-        <p className="incoming-request-priority"><span className={`priority-tag priority-${referral.priority}`}>{priorityLabel(referral.priority)}</span></p>
-        <p className="incoming-request-status"><span className="status-label resolved">Ready for review</span></p>
+        {/* Routing/triage UX pass, Part S: ONE status chip (priority), never
+         * a redundant second status badge -- the whole section is already
+         * called Needs your review. "Visit" is a quiet modality label, not
+         * a competing status. */}
+        <p className="incoming-request-priority"><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· Visit</span></p>
         <p className="incoming-request-resolved">{resolvedSummary(resolvedCountFor(referral))}</p>
         <button type="button" className="text-button" onClick={() => onReview(referral)}>Review <span>→</span></button>
       </div>)}
@@ -928,8 +945,14 @@ export function RequestReviewModal({
   const [accepting, setAccepting] = useState(false)
   const [accepted, setAccepted] = useState(false)
   const [error, setError] = useState('')
+  const [capacity, setCapacity] = useState<AccessProfile | null>(null)
   const cancelled = useRef(false)
   useEffect(() => () => { cancelled.current = true }, [])
+  // Routing/triage UX pass, Part T: makes visible that Lamina already
+  // triaged this request before Chen ever opens it -- never a numeric
+  // acuity score, just the same structured facts the routing UI uses
+  // elsewhere. Best-effort/silent if no capacity profile exists.
+  useEffect(() => { getPhysicianCapacity(referral.receiving_physician_id).then(setCapacity).catch(() => {}) }, [referral.receiving_physician_id])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !accepting && !coordinationOpen && !packetOpen) onClose() }
     window.addEventListener('keydown', onKey)
@@ -976,6 +999,17 @@ export function RequestReviewModal({
               <div><span className="section-label">To</span><strong>{receivingPhysicianName}</strong><small>{referral.specialty}</small></div>
             </div>
             <p className="request-review-status"><span className="status-label resolved">Ready for your review</span></p>
+
+            {/* Routing/triage UX pass, Part T: a compact triage summary --
+             * Lamina already decided priority/modality/access before Chen
+             * ever opened this, never a numeric acuity score. */}
+            <section className="recommended-handling">
+              <p className="section-label">Recommended handling</p>
+              <p className="recommended-handling-line"><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· In-person visit</span></p>
+              {capacity && <p className="recommended-handling-fact"><span className="section-label">Expected access</span> <strong>{capacity.in_person_wait_label.replace('Approximately ', '~')}</strong></p>}
+              <p className="recommended-handling-fact"><span className="section-label">Referral packet</span> <strong>Complete</strong></p>
+              {resolvedCount > 0 && <p className="muted-note">{resolvedSummary(resolvedCount)}</p>}
+            </section>
 
             <section className="packet-section">
               <h3>Referral question</h3>
@@ -1120,9 +1154,16 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
   const [liveReferral, setLiveReferral] = useState(referral)
   const [introPhase, setIntroPhase] = useState<ChenIntroPhase>(null)
   const [justAccepted] = useState(() => consumeJustAcceptedFlag(referral.patient_id))
+  const [capacity, setCapacity] = useState<AccessProfile | null>(null)
   const cancelled = useRef(false)
 
   useEffect(() => () => { cancelled.current = true }, [])
+  // Routing/triage UX pass, Part U/V: the "finding an appointment" intro
+  // phases below surface the SAME expected-access fact the routing UI uses
+  // elsewhere -- triage already decided priority/modality/access band;
+  // scheduling only ever resolves the exact slot, never recalculates
+  // priority (Part W). Best-effort/silent if no capacity profile exists.
+  useEffect(() => { getPhysicianCapacity(referral.receiving_physician_id).then(setCapacity).catch(() => {}) }, [referral.receiving_physician_id])
 
   useEffect(() => {
     if (!referral.id) return
@@ -1175,13 +1216,15 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
   </div>
 
   if (introPhase === 'checking') return <div className="next-step-card consulting">
-    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Checking appointment availability</span>
-    <h3>Your agent is finding valid new-patient {CHEN_SPECIALTY} times.</h3>
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Finding an appointment</span>
+    <h3>Looking for the earliest appropriate {CHEN_SPECIALTY} visit.</h3>
+    <p className="recommended-handling-line"><PriorityChip priority={referral.priority} />{capacity?.in_person_wait_label && <span className="incoming-request-modality">· Expected within {capacity.in_person_wait_label.replace('Approximately ', '~')}</span>}</p>
   </div>
 
   if (introPhase === 'routing') return <div className="next-step-card consulting">
-    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Routing appointment options</span>
-    <h3>Valid times are being sent into the scheduling workflow.</h3>
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Finding an appointment</span>
+    <h3>Confirming the visit with the scheduling workflow.</h3>
+    <p className="recommended-handling-line"><PriorityChip priority={referral.priority} />{capacity?.in_person_wait_label && <span className="incoming-request-modality">· Expected within {capacity.in_person_wait_label.replace('Approximately ', '~')}</span>}</p>
   </div>
 
   const links = <div className="referral-mode-links">
@@ -1435,24 +1478,52 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
  * action/relevance, never a permanent-residency guarantee).
  */
 /**
- * Care-routing demo pass, Part R/T: a restrained, read-only capacity strip
- * -- two capacity LANES (in-person visits, e-consults), never three equal
- * queues, and never a full e-consult workflow (Part S). Reuses the exact
- * same structured AccessProfile the routing/match-details UI already reads
- * (Part B/K) -- no second, independently-maintained source. Currently only
- * meaningful for Chen; renders nothing if no capacity profile exists.
+ * Routing/triage UX pass, Part X/Y: three restrained, read-only capacity
+ * cards -- two real capacity LANES (in-person visits, e-consults) plus
+ * urgent review shown as the exceptional escalation path, never a third
+ * equal queue. Reuses the exact same structured AccessProfile the routing/
+ * match-details UI already reads (Part B/K) -- no second, independently-
+ * maintained source. Currently only meaningful for Chen; renders nothing if
+ * no capacity profile exists. No shadows, no KPI/metric-dashboard styling.
  */
-function ChenCapacityStrip() {
+function ChenCapacityCards() {
   const [capacity, setCapacity] = useState<AccessProfile | null>(null)
   useEffect(() => { getPhysicianCapacity(CHEN_ID).then(setCapacity).catch(() => {}) }, [])
   if (!capacity) return null
-  return <section className="care-capacity-strip">
+  return <section className="care-capacity-cards">
     <p className="section-label">Care capacity</p>
-    <div className="care-capacity-row">
-      <div><span className="care-capacity-label">Visits</span><span>Next appropriate opening {capacity.in_person_wait_label.toLowerCase()}</span></div>
-      <div><span className="care-capacity-label">E-consults</span><span>{capacity.econsult_available ? `Enabled · typical response ${(capacity.econsult_response_label ?? '').toLowerCase()}` : 'Not enabled'}</span></div>
-      <div><span className="care-capacity-label">Urgent cases</span><span>Escalated for physician review</span></div>
+    <div className="care-capacity-grid">
+      <div className="care-capacity-card">
+        <p className="care-capacity-card-label">Visits</p>
+        <p className="care-capacity-card-value">Next appropriate opening</p>
+        <p className="care-capacity-card-detail">{capacity.in_person_wait_label.replace('Approximately ', '~')}</p>
+      </div>
+      <div className="care-capacity-card">
+        <p className="care-capacity-card-label">E-consults</p>
+        <p className="care-capacity-card-value">Typical response</p>
+        <p className="care-capacity-card-detail">{capacity.econsult_available ? (capacity.econsult_response_label ?? 'Available').replace('Approximately ', '~') : 'Not enabled'}</p>
+      </div>
+      <div className="care-capacity-card">
+        <p className="care-capacity-card-label">Urgent review</p>
+        <p className="care-capacity-card-value">Escalated for physician review</p>
+      </div>
     </div>
+  </section>
+}
+
+/**
+ * Routing/triage UX pass, Part Z: a small, understated surface showing that
+ * routine demand moves in the background -- agents triage everything, and
+ * only decisions that actually require Chen land in Needs your review.
+ * Deliberately static/synthetic demo activity (no backing workflow for
+ * these three requests is needed, Part Z) -- never a large dashboard
+ * feed, never implying Chen manually sorts every referral.
+ */
+function ChenRoutingActivity() {
+  return <section className="routing-activity-note">
+    <p className="section-label">Recent routing activity</p>
+    <p className="routing-activity-summary">3 requests routed automatically</p>
+    <p className="routing-activity-detail">2 visits · 1 e-consult</p>
   </section>
 }
 
@@ -1521,21 +1592,25 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
     <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1>{situationSummary && <p className="dashboard-situation">{situationSummary}</p>}</header>
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('chen')} viewAgentPath="/chen/agent?tab=overview" personaId="chen" />
+    {/* Routing/triage UX pass, Part Q/R: renamed from "Incoming requests" --
+     * agents triage all incoming specialty demand; this surface only ever
+     * holds the requests where Chen's own decision is actually required. */}
     {incoming && incoming.length > 0 && <section className="dashboard-needs-you">
-      <div className="home-section-heading"><div><h2>Incoming requests</h2></div><span>{incoming.length}</span></div>
+      <div className="home-section-heading"><div><h2>Needs your review</h2></div><span>{incoming.length}</span></div>
       <div className="lam-list needs-attention">
         {incoming.map((referral) => <button key={referral.id} className="lam-row" onClick={() => setReviewing(referral)}>
           <span className="lam-row-mark patient-row-avatar">{patientInitials(referral.patient_id)}</span>
           <span className="lam-row-main">
             <strong>{patientName(referral.patient_id)}</strong>
-            <span>Incoming referral ready for review · <span className={`priority-tag priority-${referral.priority}`}>{priorityLabel(referral.priority)}</span></span>
-            <small>{resolvedSummary(resolvedCountFor(referral))}</small>
+            <span>{referral.specialty} referral from {PCP_NAME}</span>
+            <small><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· Visit</span> · {resolvedSummary(resolvedCountFor(referral))}</small>
           </span>
           <span className="lam-row-action">Review <b>→</b></span>
         </button>)}
       </div>
     </section>}
-    <ChenCapacityStrip />
+    <ChenCapacityCards />
+    <ChenRoutingActivity />
     {topPatients.length > 0 && <section className="patient-worklist-section">
       <div className="home-section-heading"><div><h2>Patients</h2></div><button className="text-button" onClick={() => navigate('/chen/patients')}>View all patients →</button></div>
       <WorklistRows rows={topPatients} navigate={navigate} basePath="/chen/patients" />
