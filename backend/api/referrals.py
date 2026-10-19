@@ -119,6 +119,7 @@ def create_referral(
     referral = build_referral(
         patient, receiving_physician.id, receiving_physician.specialty,
         priority=request.priority or "routine",
+        modality=request.modality or "in_person",
         previous_referral_id=previous_episode.id if previous_episode else None,
     )
     return workflow_store.create_referral(workspace_id, referral)

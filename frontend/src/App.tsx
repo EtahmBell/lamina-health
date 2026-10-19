@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
+import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type CareModality, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -679,6 +679,32 @@ const messageLabel = (message: ConsultationMessage) => {
   return message.message_type.replaceAll('_', ' ')
 }
 
+/** UX polish pass, Part 3B: every physician shown in routing/options should
+ * feel inspectable by clicking their avatar or name. Lamina/integrated
+ * physicians reuse their existing profile surfaces -- Chen and Maya both
+ * already have a full engagement-persona profile (see PERSONAS in
+ * backend/engagement.py), and Dr. Okonkwo is a real synthetic physician
+ * with an NPI directory entry even though she has no engagement persona.
+ * The external-directory candidate (Okafor) has no real Lamina identity at
+ * all -- there is nowhere real to navigate -- so `onUnclaimed` opens a
+ * small local unclaimed-profile panel instead. This is a small, closed,
+ * known set of physicians (this demo's routing surface), so it is mapped
+ * directly rather than threading a new lookup through the backend. */
+const ROUTING_PHYSICIAN_PERSONA: Record<string, string> = { [CHEN_ID]: 'chen', 'physician-ramanathan': 'maya' }
+const ROUTING_PHYSICIAN_NPI: Record<string, string> = { 'physician-okonkwo': '9900000029' }
+
+function PhysicianProfileLink({ physicianId, navigate, onUnclaimed, children, className }: {
+  physicianId: string; navigate: Navigate; onUnclaimed: () => void; children: ReactNode; className?: string
+}) {
+  const persona = ROUTING_PHYSICIAN_PERSONA[physicianId]
+  const npi = ROUTING_PHYSICIAN_NPI[physicianId]
+  return <button
+    type="button"
+    className={`physician-profile-link ${className ?? ''}`}
+    onClick={() => { if (persona) navigate(networkProfilePath('lucy', persona)); else if (npi) navigate(`/network/${npi}`); else onUnclaimed() }}
+  >{children}</button>
+}
+
 function ConsultationLog({ messages, focusEventId, highlight }: { messages: ConsultationMessage[]; focusEventId?: string | null; highlight?: boolean }) {
   const stages = groupConsultationMessages(messages)
   return <div className="consult-record-stages"><header><strong>Structured consultation record</strong><small>{messages.length} backend events · original sequence preserved</small></header>{stages.map((stage) => <section className={`consult-record-stage ${stage.kind}`} key={stage.id}><div className="consult-record-stage-heading"><span>{stage.title}</span><small>{stage.messages.length} event{stage.messages.length === 1 ? '' : 's'}</small></div><div className="consult-record-events">{stage.messages.map((message) => <details className={`consult-record-event ${message.id === focusEventId ? 'targeted' : ''} ${message.id === focusEventId && highlight ? 'event-focus' : ''}`} id={eventDomId(message.id)} open={message.id === focusEventId} key={message.id}><summary><span>{message.sequence.toString().padStart(2, '0')}</span><div><strong>{messageSender(message)}</strong><small>{message.summary}</small></div><em>{messageLabel(message)}</em></summary><div className="consult-record-evidence"><p>{message.sender_role} → {message.recipient_agent_id === PCP_AGENT_ID ? PCP_AGENT_NAME : message.recipient_agent_id === 'network' ? 'Physician network' : 'Specialist agent'}</p>{message.related_patient_facts.map((fact) => <p key={fact}><b>Patient fact</b>{fact}</p>)}{message.evidence.map((item, index) => <p key={`${index}-${item.kind}`}><b>{item.kind.replaceAll('_', ' ')}</b>{item.detail}</p>)}{!message.evidence.length && !message.related_patient_facts.length && <p>No additional structured evidence on this event.</p>}</div></details>)}</div></section>)}</div>
@@ -712,7 +738,16 @@ function RecommendationView({
   const [feedbackSaving, setFeedbackSaving] = useState(false)
   const [feedbackSaved, setFeedbackSaved] = useState(false)
   const [selectedId, setSelectedId] = useState(consultation.recommended_physician.physician_id)
+  // UX polish pass, Part 3A: Dr. Chen's e-consult route is now a real
+  // selectable alternative, kept orthogonal to `selectedId` (he's the same
+  // physician either way) rather than encoded into a synthetic second id --
+  // resets to 'in_person' whenever a different route is picked.
+  const [selectedModality, setSelectedModality] = useState<CareModality>('in_person')
   const [swapping, setSwapping] = useState(false)
+  // UX polish pass, Part 3B: a tiny local panel for a physician with no
+  // real Lamina identity to navigate to (the external-directory candidate)
+  // -- never a dead click, but never a fabricated profile page either.
+  const [unclaimedProfile, setUnclaimedProfile] = useState<{ name: string; specialty: string } | null>(null)
   // Care-routing demo pass, Part E: physician-confirmable, agent-suggested
   // priority. Defaults to the agent's own suggestion when a CareRoutingAssessment
   // exists (e.g. "soon" for Tonjit); otherwise "routine", matching the
@@ -808,10 +843,13 @@ function RecommendationView({
    * genuinely selectable -- never a fake dead CTA -- by synthesizing a
    * minimal, compatible Evaluation so the EXACT SAME selectCandidate/
    * candidates mechanism Dr. Okonkwo already uses just works for it too.
-   * Only in-person, non-external-directory routes qualify: e-consult has
-   * no real workflow yet (Part L), and an external-directory candidate was
-   * never actually verified to exist in Lamina's own systems (Part I) --
-   * selecting either would be unsafe/broken. */
+   * Only in-person, non-external-directory routes qualify here: this
+   * mechanism is for a DIFFERENT physician being added to `candidates` --
+   * Chen's own e-consult route (UX polish pass, Part 3A) doesn't need it at
+   * all, since it's the same physician/Evaluation already in `candidates`,
+   * just a different `selectedModality` (see below); an external-directory
+   * candidate was never actually verified to exist in Lamina's own systems
+   * (Part I) -- selecting her via THIS path would be unsafe/broken. */
   const routeToEvaluation = (route: CandidateRoute): Evaluation => ({
     physician_id: route.physician_id,
     physician_name: route.physician_name,
@@ -829,40 +867,72 @@ function RecommendationView({
   const selectableRoutes = consultation.candidate_routes.filter((route) => !route.recommended && route.modality === 'in_person' && route.network_participation !== 'external_directory')
   const candidates = [primary, ...consultation.alternatives, ...selectableRoutes.map(routeToEvaluation)]
   const selected = candidates.find((item) => item.physician_id === selectedId) ?? primary
-  /** Routing/triage UX pass, Part J/K: ONE canonical "Other options" list,
-   * merging the pre-existing real alternatives (Okonkwo, via consultation.
-   * alternatives) with the new routing model's non-recommended routes
-   * (Maya, Chen's e-consult route, the external-directory candidate) --
-   * never two out-of-sync surfaces. Empty when there's no routing data,
-   * since that case keeps the pre-existing "Other referral options"
-   * disclosure entirely unchanged. */
+  // UX polish pass, Part 3A: when the physician actually selected Dr.
+  // Chen's e-consult route, the e-consult-specific access fact (not his
+  // in-person wait label) is what should display -- `selected` itself
+  // stays the same Evaluation either way (same physician).
+  const selectedEconsultRoute = selectedModality === 'econsult'
+    ? consultation.candidate_routes.find((route) => route.physician_id === selectedId && route.modality === 'econsult')
+    : undefined
+  /** Routing/triage UX pass, Part J/K (polish pass, Part 1): ONE canonical
+   * "Other options" list, merging the pre-existing real alternatives
+   * (Okonkwo, via consultation.alternatives) with the new routing model's
+   * non-recommended routes (Maya, Chen's e-consult route, the
+   * external-directory candidate) -- never two out-of-sync surfaces. Empty
+   * when there's no routing data, since that case keeps the pre-existing
+   * "Other referral options" disclosure entirely unchanged. */
+  const routeRow = (route: CandidateRoute) => ({
+    key: `${route.physician_id}-${route.modality}`,
+    physicianId: route.physician_id,
+    name: cleanName(route.physician_name),
+    specialty: route.specialty,
+    modality: route.modality,
+    fitText: `${fitLabelText(route.fit_label)} fit`,
+    networkText: networkParticipationLabel(route.network_participation) as string | null,
+    accessText: (route.modality === 'in_person' ? route.access.in_person_wait_label : (route.access.econsult_response_label ?? 'Unverified')).replace('Approximately ', '~'),
+    rationale: route.rationale,
+    // UX polish pass, Part 3A: Chen's e-consult route is now a real
+    // selectable alternative too -- only the external-directory candidate
+    // (no verified Lamina identity to refer to) stays informational-only.
+    selectable: route.network_participation !== 'external_directory',
+    isAgentPick: false,
+  })
+  const alternativeRow = (option: Evaluation) => ({
+    key: option.physician_id,
+    physicianId: option.physician_id,
+    name: cleanName(option.physician_name),
+    specialty: option.specialty,
+    modality: 'in_person' as const,
+    fitText: `${option.clinical_fit === 'strong' ? 'Strong' : option.clinical_fit === 'moderate' ? 'Moderate' : 'Limited'} fit`,
+    networkText: null as string | null,
+    accessText: option.availability.replace('Approximately ', '~'),
+    rationale: option.reason as string | null,
+    selectable: true,
+    isAgentPick: option.physician_id === primary.physician_id,
+  })
+  /** UX polish pass, Part 1: an explicit, deliberate order -- Maya (the
+   * stronger alternative to Chen) first, then Chen's own e-consult route
+   * (a real alternative route to the SAME strong-fit physician, not a
+   * competing physician), then Dr. Okonkwo (clinically appropriate but
+   * materially worse access, so ranked below the Lamina-network options
+   * rather than beside them), then the external-directory candidate last
+   * (unverified). Never left to incidental concatenation order, which
+   * previously let Okonkwo's ~30-day access read as competitively placed
+   * against Chen/Maya. Any future route/alternative this demo doesn't
+   * explicitly name still appears, appended after -- never silently
+   * dropped. */
+  const mayaRoute = consultation.candidate_routes.find((route) => route.physician_id === 'physician-ramanathan')
+  const chenEconsultRoute = consultation.candidate_routes.find((route) => route.physician_id === CHEN_ID && route.modality === 'econsult')
+  const okonkwoAlternative = consultation.alternatives.find((option) => option.physician_id === 'physician-okonkwo')
+  const externalDirectoryRoute = consultation.candidate_routes.find((route) => route.network_participation === 'external_directory')
+  const namedRouteKeys = new Set([mayaRoute, chenEconsultRoute, externalDirectoryRoute].filter((route): route is CandidateRoute => Boolean(route)).map((route) => `${route.physician_id}-${route.modality}`))
   const otherOptionRows = consultation.care_routing ? [
-    ...consultation.alternatives.map((option) => ({
-      key: option.physician_id,
-      physicianId: option.physician_id,
-      name: cleanName(option.physician_name),
-      specialty: option.specialty,
-      modality: 'in_person' as const,
-      fitText: `${option.clinical_fit === 'strong' ? 'Strong' : option.clinical_fit === 'moderate' ? 'Moderate' : 'Limited'} fit`,
-      networkText: null as string | null,
-      accessText: option.availability.replace('Approximately ', '~'),
-      rationale: option.reason as string | null,
-      selectable: true,
-      isAgentPick: option.physician_id === primary.physician_id,
-    })),
-    ...consultation.candidate_routes.filter((route) => !route.recommended).map((route) => ({
-      key: `${route.physician_id}-${route.modality}`,
-      physicianId: route.physician_id,
-      name: cleanName(route.physician_name),
-      specialty: route.specialty,
-      modality: route.modality,
-      fitText: `${fitLabelText(route.fit_label)} fit`,
-      networkText: networkParticipationLabel(route.network_participation) as string | null,
-      accessText: (route.modality === 'in_person' ? route.access.in_person_wait_label : (route.access.econsult_response_label ?? 'Unverified')).replace('Approximately ', '~'),
-      rationale: route.rationale,
-      selectable: route.modality === 'in_person' && route.network_participation !== 'external_directory',
-      isAgentPick: false,
-    })),
+    ...(mayaRoute ? [routeRow(mayaRoute)] : []),
+    ...(chenEconsultRoute ? [routeRow(chenEconsultRoute)] : []),
+    ...(okonkwoAlternative ? [alternativeRow(okonkwoAlternative)] : []),
+    ...(externalDirectoryRoute ? [routeRow(externalDirectoryRoute)] : []),
+    ...consultation.alternatives.filter((option) => option.physician_id !== 'physician-okonkwo').map(alternativeRow),
+    ...consultation.candidate_routes.filter((route) => !route.recommended && !namedRouteKeys.has(`${route.physician_id}-${route.modality}`)).map(routeRow),
   ] : []
   const isAgentPick = selected.physician_id === primary.physician_id
   const explicitRule = evidenceFor(selected, 'explicit_physician_rule')
@@ -877,12 +947,13 @@ function RecommendationView({
    * session only (see PatientWorkspace/runConsult's docs): there is no
    * backend concept of a "selected candidate" to persist it against.
    */
-  const selectCandidate = (physicianId: string) => {
-    if (physicianId === selectedId || swapping) return
-    if (prefersReducedMotion()) { setSelectedId(physicianId); setReferralStarted(false); return }
+  const selectCandidate = (physicianId: string, modality: CareModality = 'in_person') => {
+    if (physicianId === selectedId && modality === selectedModality) return
+    if (swapping) return
+    if (prefersReducedMotion()) { setSelectedId(physicianId); setSelectedModality(modality); setReferralStarted(false); return }
     setSwapping(true)
     window.setTimeout(() => {
-      setSelectedId(physicianId); setReferralStarted(false)
+      setSelectedId(physicianId); setSelectedModality(modality); setReferralStarted(false)
       requestAnimationFrame(() => requestAnimationFrame(() => setSwapping(false)))
     }, 150)
   }
@@ -953,6 +1024,7 @@ function RecommendationView({
       onReviewedChange={setEpisodeReviewed}
       restoredReferral={activeReferral}
       priority={priority}
+      modality={selectedModality}
     />
     // Reload-flash fix (bug-fix pass, Part Q/O): on a restored consult_returned
     // referral, the child withholds onReviewedChange until the real handoff
@@ -1063,10 +1135,18 @@ function RecommendationView({
      * Everything denser lives behind "Review match details" below. */}
     <article className={`best-fit-card compact ${swapping ? 'swapping' : ''}`}>
       <p className="best-fit-kicker">{isAgentPick ? 'Recommended physician' : 'Selected specialist'}</p>
-      <div className="best-fit-physician"><span className="physician-avatar">{physicianInitials(selected.physician_name)}</span><div><h2>{cleanName(selected.physician_name)}</h2><p>{selected.specialty}</p></div></div>
+      {/* UX polish pass, Part 3B: the avatar and name are both clickable --
+       * every physician shown here should feel inspectable. */}
+      <div className="best-fit-physician">
+        <PhysicianProfileLink physicianId={selected.physician_id} navigate={navigate} onUnclaimed={() => setUnclaimedProfile({ name: cleanName(selected.physician_name), specialty: selected.specialty })} className="physician-avatar-link">
+          <span className="physician-avatar">{physicianInitials(selected.physician_name)}</span>
+        </PhysicianProfileLink>
+        <div><h2><PhysicianProfileLink physicianId={selected.physician_id} navigate={navigate} onUnclaimed={() => setUnclaimedProfile({ name: cleanName(selected.physician_name), specialty: selected.specialty })}>{cleanName(selected.physician_name)}</PhysicianProfileLink></h2><p>{selected.specialty}</p></div>
+      </div>
       {!isAgentPick && <p className="selection-provenance">Selected by you</p>}
+      {selectedModality === 'econsult' && <p className="selection-provenance">E-consult request</p>}
       <p className="fit-indicator">{selected.clinical_fit === 'strong' ? 'Strong clinical fit' : selected.clinical_fit === 'moderate' ? 'Moderate clinical fit' : 'Limited clinical fit'}</p>
-      <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selected.availability}</p>
+      <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selectedEconsultRoute ? (selectedEconsultRoute.access.econsult_response_label ?? 'Response time unverified') : selected.availability}</p>
       <p className="fit-rationale">{selected.reason}</p>
       {/* Backend/view-mode navigation can never bypass real workflow state
        * (demo-consolidation pass, Part 3): once a real referral already
@@ -1087,7 +1167,7 @@ function RecommendationView({
             </div>
           : activeReferral
             ? <p className="referral-locked-note">A referral is already active with {activeReferralPhysicianLabel}.</p>
-            : <button className="button-primary" onClick={startReferral}>Start referral <span>→</span></button>
+            : <button className="button-primary" onClick={startReferral}>{selectedModality === 'econsult' ? 'Start e-consult request' : 'Start referral'} <span>→</span></button>
         : <><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(selected.physician_name)} · {selected.specialty}</span><span>Workup: {selected.required_workup.join(' · ') || 'None specified'}</span><span>No referral was transmitted.</span></div>}</>}</div>
     </article>
 
@@ -1164,7 +1244,7 @@ function RecommendationView({
           <p className="section-label">Other options</p>
           <ul className="other-options-list">{otherOptionRows.map((row) => <li key={row.key}>
             <div className="other-option-head">
-              <strong>{row.name}{row.modality === 'econsult' ? ' — E-consult' : ''}</strong>
+              <strong><PhysicianProfileLink physicianId={row.physicianId} navigate={navigate} onUnclaimed={() => setUnclaimedProfile({ name: row.name, specialty: row.specialty })}>{row.name}</PhysicianProfileLink>{row.modality === 'econsult' ? ' — E-consult' : ''}</strong>
               {row.isAgentPick && <span className="agent-pick-tag">Agent's top recommendation</span>}
             </div>
             <span className="other-option-specialty">{row.specialty}</span>
@@ -1174,7 +1254,12 @@ function RecommendationView({
               <span>{row.accessText}</span>
             </div>
             {row.rationale && <p className="other-option-rationale">{row.rationale}</p>}
-            {row.selectable && <button type="button" className="text-button" onClick={() => selectCandidate(row.physicianId)}>Select this specialist <span>→</span></button>}
+            {/* UX polish pass, Part 3A: Chen's e-consult route is a real
+             * selectable alternative now, reusing the same destination-
+             * selection mechanism as every other selectable row here --
+             * it just also carries its own modality, since it's the same
+             * physician as the in-person recommendation above. */}
+            {row.selectable && <button type="button" className="text-button" onClick={() => selectCandidate(row.physicianId, row.modality)}>{row.modality === 'econsult' ? 'Request e-consult' : 'Select this specialist'} <span>→</span></button>}
           </li>)}</ul>
         </div>
       </> : <>
@@ -1206,10 +1291,30 @@ function RecommendationView({
         <h2>How your agent handled this</h2>
         <div className="network-record">
           <p className="agent-consult-count">{consultation.consultation.length} physician agent{consultation.consultation.length === 1 ? '' : 's'} consulted</p>
-          <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}</div>
+          <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}
+          {/* UX polish pass, Part 2B: brings this content up to date with the
+           * newer routing model -- access and modality were weighed
+           * alongside clinical fit for every option, not fit alone, and
+           * Chen's e-consult route was a real alternative considered, not
+           * an afterthought. Structured facts only, same as everything
+           * else in this modal -- nothing beyond these same structured facts. */}
+          {consultation.care_routing && <div><span>Access &amp; modality considered</span><p>{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person evaluation' : 'E-consult'} was recommended for this presentation; expected access and e-consult suitability were weighed for every option below alongside clinical fit, not fit alone.</p><ul>{otherOptionRows.map((row) => <li key={row.key}><b>{row.name}{row.modality === 'econsult' ? ' — E-consult' : ''}:</b> {row.fitText} · {row.accessText}</li>)}</ul></div>}</div>
           <div className="record-note">Deliberate structured messages and evidence only. Hidden model chain-of-thought is not stored or shown.</div><ConsultationLog messages={consultation.messages} focusEventId={focusEventId} highlight={highlight} /><div className="evaluation-record-heading">Physician evaluation records</div>{consultation.consultation.map((agent) => { const rule = evidenceFor(agent, 'explicit_physician_rule'); const history = evidenceFor(agent, 'historical_practice_similarity'); return <details key={agent.physician_id} open={agent.physician_id === primary.physician_id}><summary><span className="mini-avatar">{physicianInitials(agent.physician_name)}</span><span className="agent-name"><b>{cleanName(agent.physician_name)}</b><small>{agent.specialty}</small></span><span className={`decision-badge ${agent.clinical_fit}`}>{agent.accepts_case ? agent.clinical_fit === 'strong' ? 'Strong fit' : 'Accepts' : 'Redirect'}</span><span className="chevron">⌄</span></summary><div className="structured-evidence"><p>{agent.reason}</p><div className="evidence-grid"><div><span>Decision</span><strong>{agent.accepts_case ? 'Accepts case' : 'Redirects / does not accept'}</strong></div><div><span>Availability</span><strong>{agent.availability}</strong></div><div><span>Insurance</span><strong>{insuranceLabel(agent.insurance_status)}</strong></div><div><span>Required workup</span><strong>{agent.required_workup.join(' · ')}</strong></div>{rule && <div className="wide"><span>Relevant physician rule</span><strong>{rule}</strong></div>}{history && <div className="wide"><span>Historical-practice signal</span><strong>{history}</strong></div>}</div></div></details> })}
           <p>These are structured inputs and recorded conclusions, not private model reasoning.</p>
         </div>
+      </div>
+    </div></ModalPortal>}
+    {/* UX polish pass, Part 3B: the external-directory candidate has no
+     * real Lamina identity to navigate to -- this small local panel keeps
+     * her inspectable without fabricating a profile page or a backend
+     * lookup that would 404. */}
+    {unclaimedProfile && <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setUnclaimedProfile(null) }}>
+      <div className="post-flow-dialog unclaimed-profile-dialog" role="dialog" aria-modal="true" aria-label="Unclaimed physician profile">
+        <button className="text-button post-flow-close" onClick={() => setUnclaimedProfile(null)} aria-label="Close">×</button>
+        <span className="directory-avatar large">{physicianInitials(unclaimedProfile.name)}</span>
+        <h2>{unclaimedProfile.name}</h2>
+        <p className="profile-role">{unclaimedProfile.specialty}</p>
+        <div className="profile-provenance"><strong>Unclaimed Lamina profile</strong><p>This physician has not created a Lamina account. Practice details and availability shown elsewhere in this referral are from an external directory listing only and have not been independently verified.</p></div>
       </div>
     </div></ModalPortal>}
   </section>
@@ -1666,7 +1771,7 @@ export default function App() {
   const specialistNetworkProfileId = path.match(/^\/specialist\/network\/profile\/([^/]+)$/)?.[1]
   if (specialistNetworkProfileId) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkPhysicianProfilePage controlledId={specialistNetworkProfileId} navigate={navigate} backPath="/specialist/home" perspective="iain" params={params} /></ProductShell>
   if (path === '/chen' || path === '/chen/home') return <ProductShell navigate={navigate} section="chen-home" perspective="chen"><ChenHomePage navigate={navigate} /></ProductShell>
-  if (path === '/chen/patients') return <ProductShell navigate={navigate} section="chen-patients" perspective="chen"><ChenPatientsPage navigate={navigate} /></ProductShell>
+  if (path === '/chen/patients') return <ProductShell navigate={navigate} section="chen-patients" perspective="chen"><ChenPatientsPage navigate={navigate} params={params} /></ProductShell>
   const chenPatientId = path.match(/^\/chen\/patients\/([^/]+)$/)?.[1]
   if (chenPatientId === TONJIT_ID || (chenPatientId && CHEN_PATIENT_IDS.includes(chenPatientId))) return <PatientWorkspace patientId={chenPatientId} navigate={navigate} perspective="receiving" />
   if (path === '/chen/profile') return <ProductShell navigate={navigate} section="chen-profile" perspective="chen"><ProfessionalProfilePage personaId="chen" navigate={navigate} params={params} /></ProductShell>

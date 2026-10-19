@@ -66,8 +66,8 @@ test('a quiet "Suggested by your agent" note appears only while the current sele
 
 test('the selected priority is threaded into referral creation, never silently upgraded by the frontend', () => {
   assert.match(app, /priority=\{priority\}/)
-  assert.match(referralSource, /createReferral\(patientId, receivingPhysicianId, priority\)/)
-  assert.match(api, /export const createReferral = \(patientId: string, receivingPhysicianId: string, priority\?: ReferralPriority\)/)
+  assert.match(referralSource, /createReferral\(patientId, receivingPhysicianId, priority, modality\)/)
+  assert.match(api, /export const createReferral = \(patientId: string, receivingPhysicianId: string, priority\?: ReferralPriority, modality\?: CareModality\)/)
 })
 
 /* -------------------------------------------- Part E: one shared chip */
@@ -80,7 +80,7 @@ test('PriorityChip/PriorityChipRow are the ONE shared component used everywhere 
   // Chen's Needs your review row
   assert.match(referralSource, /<PriorityChip priority=\{referral\.priority\} \/><span className="incoming-request-modality">/)
   // referral review modal
-  assert.match(referralSource, /<PriorityChip priority=\{referral\.priority\} \/><span className="incoming-request-modality">· In-person visit<\/span>/)
+  assert.match(referralSource, /<PriorityChip priority=\{referral\.priority\} \/><span className="incoming-request-modality">· \{referral\.modality === 'econsult' \? 'E-consult' : 'In-person visit'\}<\/span>/)
   // match-details "Why this care path"
   assert.match(app, /<dt>Priority<\/dt><dd><PriorityChip priority=\{consultation\.care_routing\.suggested_priority\} \/><\/dd>/)
   assert.doesNotMatch(app, /<strong>\{priorityLabel\(/, 'priority must never render as plain bold text anywhere')
@@ -159,21 +159,42 @@ test('the standalone "Other referral options" disclosure is removed entirely whe
 
 test('Other options merges the real pre-existing alternatives (Okonkwo) with the new routing model\'s non-recommended routes (Maya, Chen e-consult, external directory)', () => {
   const fn = recommendationView()
-  assert.match(fn, /\.\.\.consultation\.alternatives\.map\(\(option\) => \(\{/)
-  assert.match(fn, /\.\.\.consultation\.candidate_routes\.filter\(\(route\) => !route\.recommended\)\.map\(\(route\) => \(\{/)
+  assert.match(fn, /const mayaRoute = consultation\.candidate_routes\.find\(\(route\) => route\.physician_id === 'physician-ramanathan'\)/)
+  assert.match(fn, /const chenEconsultRoute = consultation\.candidate_routes\.find\(\(route\) => route\.physician_id === CHEN_ID && route\.modality === 'econsult'\)/)
+  assert.match(fn, /const okonkwoAlternative = consultation\.alternatives\.find\(\(option\) => option\.physician_id === 'physician-okonkwo'\)/)
+  assert.match(fn, /const externalDirectoryRoute = consultation\.candidate_routes\.find\(\(route\) => route\.network_participation === 'external_directory'\)/)
+})
+
+/* --------------------------------------------------------------- Part 1 */
+
+test('Other options is explicitly ordered: Maya first (stronger alternative), then Chen e-consult, then Okonkwo (worse access), then the external directory last', () => {
+  const fn = recommendationView()
+  const built = slice(fn, 'const otherOptionRows = consultation.care_routing ? [', 'const isAgentPick = selected.physician_id')
+  const mayaIndex = built.indexOf('mayaRoute ? [routeRow(mayaRoute)]')
+  const chenIndex = built.indexOf('chenEconsultRoute ? [routeRow(chenEconsultRoute)]')
+  const okonkwoIndex = built.indexOf('okonkwoAlternative ? [alternativeRow(okonkwoAlternative)]')
+  const externalIndex = built.indexOf('externalDirectoryRoute ? [routeRow(externalDirectoryRoute)]')
+  assert.ok(mayaIndex >= 0 && chenIndex > mayaIndex && okonkwoIndex > chenIndex && externalIndex > okonkwoIndex, 'the four known options must appear in this exact deliberate order')
 })
 
 test('Maya Ramanathan is made genuinely selectable via a synthesized Evaluation, reusing the exact same selectCandidate mechanism Okonkwo already uses -- never a fake dead CTA', () => {
   const fn = recommendationView()
   assert.match(fn, /const routeToEvaluation = \(route: CandidateRoute\): Evaluation => \(\{/)
   assert.match(fn, /const selectableRoutes = consultation\.candidate_routes\.filter\(\(route\) => !route\.recommended && route\.modality === 'in_person' && route\.network_participation !== 'external_directory'\)/)
-  assert.match(fn, /\{row\.selectable && <button type="button" className="text-button" onClick=\{\(\) => selectCandidate\(row\.physicianId\)\}>Select this specialist/)
+  assert.match(fn, /\{row\.selectable && <button type="button" className="text-button" onClick=\{\(\) => selectCandidate\(row\.physicianId, row\.modality\)\}>/)
 })
 
-test('Chen\'s e-consult route is informational only -- no "Select this specialist"/Start e-consult CTA, never a dead-end button', () => {
+/* --------------------------------------------------------------- Part 3A */
+
+test('UX polish pass: Dr. Chen\'s e-consult route is now a real selectable alternative -- never a dead CTA -- and transitions into a coherent e-consult-specific downstream state', () => {
   const fn = recommendationView()
-  // selectableRoutes excludes e-consult modality entirely
-  assert.doesNotMatch(fn, /Start e-consult/i)
+  const routeRowFn = slice(fn, 'const routeRow = (route: CandidateRoute) => ({', '})')
+  assert.match(routeRowFn, /selectable: route\.network_participation !== 'external_directory'/, 'only the external-directory candidate stays informational-only now')
+  assert.match(fn, /Request e-consult/, 'the e-consult row has its own selection CTA copy, distinct from "Select this specialist"')
+  assert.match(fn, /const \[selectedModality, setSelectedModality\] = useState<CareModality>\('in_person'\)/)
+  const downstream = slice(referralSource, 'export function ChenDownstreamCard', 'export function chenPatientRowStatus')
+  assert.match(downstream, /E-consult request sent/, 'a coherent downstream state exists once an e-consult referral is scheduled')
+  assert.doesNotMatch(downstream.replace(/\/\/[^\n]*/g, ''), /Start e-consult/i, 'no literal "Start e-consult" CTA copy -- the real button text is "Request e-consult"')
 })
 
 test('the external-directory candidate is never made selectable -- selecting it would 404 (she is not in the backend\'s physician directory)', () => {
@@ -191,6 +212,18 @@ test('the external-directory candidate\'s display name carries no fixture/debug 
   assert.match(careRoutingSource, /"physician_name": "Dr\. Renata Okafor",/)
 })
 
+/* --------------------------------------------------------------- Part 3B */
+
+test('every physician shown in routing/options is inspectable by clicking their avatar or name -- Lamina physicians open a real profile, the external-directory candidate opens a small unclaimed-profile panel instead of a dead/404 link', () => {
+  assert.match(app, /function PhysicianProfileLink\(\{ physicianId, navigate, onUnclaimed, children, className \}: \{/)
+  assert.match(app, /const ROUTING_PHYSICIAN_PERSONA: Record<string, string> = \{ \[CHEN_ID\]: 'chen', 'physician-ramanathan': 'maya' \}/)
+  assert.match(app, /const ROUTING_PHYSICIAN_NPI: Record<string, string> = \{ 'physician-okonkwo': '9900000029' \}/)
+  const fn = recommendationView()
+  assert.match(fn, /<PhysicianProfileLink physicianId=\{selected\.physician_id\}/, 'the primary match card avatar/name are clickable')
+  assert.match(fn, /<PhysicianProfileLink physicianId=\{row\.physicianId\}/, 'each Other options row name is clickable')
+  assert.match(fn, /setUnclaimedProfile/, 'the external-directory candidate opens a local panel, never a navigation that would 404')
+})
+
 /* --------------------------------------------------------------- Part Q */
 
 test('Chen\'s review surface is renamed "Needs your review" -- never "Incoming requests"', () => {
@@ -206,31 +239,49 @@ test('Chen\'s Needs your review shows the shared priority chip per row, reading 
 
 /* --------------------------------------------------------------- Part S */
 
-test('the Tonjit row in Needs your review shows exactly ONE status chip (priority), a quiet "Visit" modality label, and the resolved-item summary -- the redundant "Ready for review" badge is gone', () => {
+test('the Tonjit row in Needs your review shows exactly ONE status chip (priority), a quiet modality label, and the resolved-item summary -- the redundant "Ready for review" badge is gone', () => {
   const fn = slice(referralSource, 'return <div className="incoming-requests"', 'export function RequestReviewModal')
   assert.doesNotMatch(fn, /Ready for review/)
-  assert.match(fn, /<span className="incoming-request-modality">· Visit<\/span>/)
+  assert.match(fn, /<span className="incoming-request-modality">· \{referral\.modality === 'econsult' \? 'E-consult' : 'Visit'\}<\/span>/)
 })
 
-/* --------------------------------------------------------------- Part T */
+/* --------------------------------------------------------- Part 6 (polish) */
 
-test('the referral review modal shows a compact "Recommended handling" triage summary: priority chip, modality, expected access, and packet completeness -- never a numeric acuity score', () => {
+test('UX polish pass, Part 6: a bit more horizontal breathing room between the priority chip and the bullet-separated modality text in Needs your review', () => {
+  const rule = slice(styles, '.incoming-request-priority {', '}')
+  assert.match(rule, /gap: 10px/)
+})
+
+/* ------------------------------------------------- Part T (polish, 7A-D) */
+
+test('the referral review modal\'s "Ready for your review" badge is gone -- the whole modal already IS the review', () => {
   const fn = slice(referralSource, 'export function RequestReviewModal', 'export function markReferralJustAccepted')
-  assert.match(fn, /<p className="section-label">Recommended handling<\/p>/)
-  assert.match(fn, /<PriorityChip priority=\{referral\.priority\} \/><span className="incoming-request-modality">· In-person visit<\/span>/)
+  assert.doesNotMatch(fn, /Ready for your review/)
+})
+
+test('the referral review modal shows a compact "Routing summary" (renamed from "Recommended handling") -- priority chip, modality, expected access, and packet completeness -- never a numeric acuity score, never a heavy blue-boxed treatment', () => {
+  const fn = slice(referralSource, 'export function RequestReviewModal', 'export function markReferralJustAccepted')
+  assert.match(fn, /<p className="section-label">Routing summary<\/p>/)
+  assert.doesNotMatch(fn, /Recommended handling/, 'the old section label is gone, renamed to something physician-friendly and not backend-ish')
+  assert.match(fn, /<PriorityChip priority=\{referral\.priority\} \/><span className="incoming-request-modality">· \{referral\.modality === 'econsult' \? 'E-consult' : 'In-person visit'\}<\/span>/)
   assert.match(fn, /<span className="section-label">Expected access<\/span>/)
   assert.match(fn, /<span className="section-label">Referral packet<\/span> <strong>Complete<\/strong>/)
+  const sectionRule = slice(styles, '.routing-summary {', '}')
+  assert.doesNotMatch(sectionRule, /border:|background:/, 'the blue-boxed/filled-card treatment is gone -- calm hairline-rule structure instead')
 })
 
-/* --------------------------------------------------------------- Part R/T/X/Y */
+test('the Routing summary\'s facts align cleanly -- the label/value flex row never off-kilters from a stray block-layout bottom margin', () => {
+  assert.match(styles, /\.recommended-handling-fact > \.section-label \{ margin: 0; \}/)
+})
 
-test('Chen exposes three small read-only capacity cards -- Visits, E-consults, Urgent review -- never a KPI-dashboard strip, never fake buttons', () => {
-  const fn = slice(referralSource, 'function ChenCapacityCards', 'export function ChenHomePage')
+/* --------------------------------------------------------------- Part R/T/X/Y (polish, 5D) */
+
+test('Chen exposes two small read-only capacity cards -- Visits and E-consults -- Urgent review was removed as a third card (it read as a third equal queue, not an escalation path), never a KPI-dashboard strip, never fake buttons', () => {
+  const fn = slice(referralSource, 'function ChenCapacityCards', 'export const CHEN_AUTO_ROUTED_PATIENT_IDS')
   assert.match(fn, /getPhysicianCapacity\(CHEN_ID\)/)
   assert.match(fn, /<p className="care-capacity-card-label">Visits<\/p>/)
   assert.match(fn, /<p className="care-capacity-card-label">E-consults<\/p>/)
-  assert.match(fn, /<p className="care-capacity-card-label">Urgent review<\/p>/)
-  assert.match(fn, /Escalated for physician review/)
+  assert.doesNotMatch(fn, /Urgent review/, 'Urgent review is no longer a third capacity card')
   assert.doesNotMatch(fn, /<button|onClick/, 'the capacity cards must be read-only -- no fake e-consult request affordance (Part S)')
 })
 
@@ -246,25 +297,38 @@ test('the capacity cards reuse the SAME structured access endpoint the routing U
 /* --------------------------------------------------------------- Part P */
 
 test('the capacity cards never assume unknown e-consult availability is "enabled"', () => {
-  const fn = slice(referralSource, 'function ChenCapacityCards', 'export function ChenHomePage')
+  const fn = slice(referralSource, 'function ChenCapacityCards', 'export const CHEN_AUTO_ROUTED_PATIENT_IDS')
   assert.match(fn, /\{capacity\.econsult_available \? \(capacity\.econsult_response_label \?\? 'Available'\)/)
   assert.match(fn, /: 'Not enabled'/)
 })
 
-/* --------------------------------------------------------------- Part Z */
+/* ------------------------------------------------- Part Z (polish, 5A-C) */
 
-test('a small, understated "Recent routing activity" surface exists near Needs your review -- static/synthetic, never a large new dashboard feed', () => {
-  const fn = slice(referralSource, 'function ChenRoutingActivity', 'export function ChenHomePage')
-  assert.match(fn, /Recent routing activity/)
-  assert.match(fn, /3 requests routed automatically/)
-  assert.match(fn, /2 visits · 1 e-consult/)
-  assert.doesNotMatch(fn, /<button|onClick|useEffect|fetch/, 'this must be static, understated copy -- not a real workflow/feed')
+test('UX polish pass, Part 5A/B: the synthetic auto-routed demand no longer has its own standalone "Recent routing activity" block in the dashboard middle -- it is folded into the ordinary Recent activity feed instead, at ordinary visual weight', () => {
+  assert.doesNotMatch(referralSource, /function ChenRoutingActivity/, 'the old standalone component is gone entirely')
+  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
+  assert.doesNotMatch(home, /<ChenRoutingActivity/)
+  assert.match(home, /Your agent coordinated with Dr\. Saruhashi's agent/)
+  assert.match(home, /Endocrinology referral routed automatically · 2 visits · 1 e-consult/)
 })
 
-test('ChenHomePage renders the capacity cards and routing activity surface near Needs your review', () => {
-  const fn = slice(referralSource, 'export function ChenHomePage', 'export function markReferralJustAccepted')
+test('UX polish pass, Part 5C: clicking the auto-routing activity item navigates to Patients and briefly highlights the affected patients -- the Witness-style cross-agent boundary means it cannot open a detail view of the coordination itself', () => {
+  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
+  assert.match(home, /onClick=\{\(\) => navigate\(`\/chen\/patients\?highlight=\$\{CHEN_AUTO_ROUTED_PATIENT_IDS\.join\(','\)\}`\)\}/)
+  const patientsPage = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
+  assert.match(patientsPage, /const ids = \(params\?\.get\('highlight'\) \?\? ''\)\.split\(','\)\.filter\(Boolean\)/)
+  assert.match(patientsPage, /highlightIds=\{highlighted\}/)
+})
+
+test('the highlight is purely presentational and briefly-applied -- never changes which patients are shown or how long the highlight persists beyond a short demo-friendly window', () => {
+  const patientsPage = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
+  assert.match(patientsPage, /window\.setTimeout\(\(\) => setHighlighted\(new Set\(\)\), 2600\)/)
+  assert.match(styles, /\.worklist-row-highlight \{ animation: medication-row-wash 2600ms ease-in-out; \}/)
+})
+
+test('ChenHomePage renders the two capacity cards near Needs your review', () => {
+  const fn = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
   assert.match(fn, /<ChenCapacityCards \/>/)
-  assert.match(fn, /<ChenRoutingActivity \/>/)
 })
 
 /* --------------------------------------------------------------- Part U/V */
@@ -272,8 +336,14 @@ test('ChenHomePage renders the capacity cards and routing activity surface near 
 test('scheduling-in-progress copy reads "Finding an appointment" / "Looking for the earliest appropriate visit" -- never backend-sounding phrases like "Scheduling to Soon access target" or "Executing triage decision"', () => {
   const fn = slice(referralSource, 'export function ChenDownstreamCard', 'const links =')
   assert.match(fn, /Finding an appointment/)
-  assert.match(fn, /Looking for the earliest appropriate \{CHEN_SPECIALTY\} visit\./)
+  assert.match(fn, /Looking for the earliest appropriate \$\{CHEN_SPECIALTY\} visit\./)
   assert.doesNotMatch(fn, /Scheduling to|Executing triage|Queue optimization/i)
+})
+
+test('UX polish pass, Part 3A/W: an e-consult referral gets its own coherent "finding" copy -- never the in-person visit phrasing, and the scheduling/triage distinction is preserved (scheduling never recalculates priority, whatever the modality)', () => {
+  const fn = slice(referralSource, 'export function ChenDownstreamCard', 'const links =')
+  assert.match(fn, /Preparing e-consult response/)
+  assert.match(fn, /Preparing an e-consult response\./)
 })
 
 test('the finding-an-appointment phases show the same shared priority chip and the real expected-access fact, never a queue position/rank score', () => {
@@ -284,8 +354,8 @@ test('the finding-an-appointment phases show the same shared priority chip and t
 
 /* --------------------------------------------------------------- Part X */
 
-test('existing Tonjit flow is preserved -- createReferral/preflight/duplicate-guard call sites are unchanged beyond the new trailing priority arg', () => {
-  assert.match(referralSource, /const created = await createReferral\(patientId, receivingPhysicianId, priority\)/)
+test('existing Tonjit flow is preserved -- createReferral/preflight/duplicate-guard call sites are unchanged beyond the new trailing priority/modality args', () => {
+  assert.match(referralSource, /const created = await createReferral\(patientId, receivingPhysicianId, priority, modality\)/)
   assert.match(referralSource, /const preflighted = await runReferralPreflight\(created\.id as number\)/)
 })
 
@@ -294,4 +364,55 @@ test('existing Tonjit flow is preserved -- createReferral/preflight/duplicate-gu
 test('the word "triage" is not plastered throughout user-facing copy -- physician-friendly terms are used instead', () => {
   const fn = recommendationView()
   assert.doesNotMatch(fn, />\s*[Tt]riage\s*</, 'no visible UI text should be the bare word "triage"')
+})
+
+/* =====================================================================
+ * UX + triage consolidation pass, item 2: "ROUTING + TRIAGE UX
+ * CONSOLIDATION" polish pass. Rebalances perceived ranking, polishes the
+ * consultation-details disclosure, makes Chen's e-consult route
+ * selectable, makes every routing/options physician inspectable, fixes
+ * clinical-priority/wash alignment bugs, and reshapes Chen's dashboard.
+ * ===================================================================== */
+
+/* --------------------------------------------------------------- Part 1 */
+
+test('Okonkwo\'s own clinical-fit rationale no longer leaks backend/fixture language ("synthetic access interval") into physician-facing copy', () => {
+  const agentSource = readFileSync(new URL('../../backend/agents/physician_agent.py', import.meta.url), 'utf8')
+  assert.doesNotMatch(agentSource.match(/physician-okonkwo[\s\S]{0,400}/)[0], /synthetic access interval/)
+})
+
+test('Chen\'s e-consult rationale reads as a real alternative (fast response) rather than a generic "considered" dismissal', () => {
+  const careRoutingSource = readFileSync(new URL('../../backend/agents/care_routing.py', import.meta.url), 'utf8')
+  assert.match(careRoutingSource, /Fast response \(about 2 business days\), but direct in-person evaluation is/)
+})
+
+/* --------------------------------------------------------------- Part 2 */
+
+test('the "How your agent handled this" caret is a real flex-aligned icon, not a floating inline character', () => {
+  const rule = slice(styles, '.network-transparency-toggle em {', '}')
+  assert.match(rule, /display: inline-flex/)
+  const iconRule = slice(styles, '.network-transparency-toggle em i {', '}')
+  assert.match(iconRule, /line-height: 1/)
+})
+
+test('Consultation details content is brought up to date with the newer routing model -- Maya, Chen e-consult, and the fact that access/modality were weighed, not just fit', () => {
+  const fn = recommendationView()
+  const modal = slice(fn, 'aria-label="Consultation details"', '</div></ModalPortal>}')
+  assert.match(modal, /Access &amp; modality considered/)
+  assert.match(modal, /was recommended for this presentation; expected access and e-consult suitability were weighed for every option below alongside clinical fit, not fit alone\./)
+  assert.match(modal, /otherOptionRows\.map\(\(row\) => <li key=\{row\.key\}>/)
+  // Dr. Noah Chen and Dr. Adaeze Okonkwo already appear via the pre-existing
+  // real "Specialist-agent responses" list above this new block.
+  assert.match(modal, /Specialist-agent responses/)
+})
+
+/* --------------------------------------------------------------- Part 4 */
+
+test('Clinical priority and its chip are cleanly aligned -- the shared .section-label\'s own block-layout bottom margin (meant for stacking a label above a value) no longer off-kilters a row where it sits beside a chip instead', () => {
+  assert.match(styles, /\.care-routing-priority > \.section-label,\s*\.referral-priority-line > \.section-label,\s*\.recommended-handling-fact > \.section-label \{ margin: 0; \}/)
+})
+
+test('the Clinical priority row disappears cleanly behind the blue completion wash, in lockstep with everything else, instead of bleeding through', () => {
+  const rule = slice(styles, '.best-fit-card.referral-card.handoff-wash > .back-to-match,', '{')
+  assert.match(rule, /\.best-fit-card\.referral-card\.handoff-wash \.referral-priority-line/)
 })

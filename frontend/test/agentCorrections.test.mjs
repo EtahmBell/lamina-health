@@ -90,7 +90,7 @@ test('Chen\'s coordination modals (RequestReviewModal and every ChenDownstreamCa
 
   const downstream = slice(referralSource, 'export function ChenDownstreamCard', 'const CHEN_PATIENT_STAGE_META')
   const downstreamOccurrences = [...downstream.matchAll(/viewerPhysicianId=\{liveReferral\.receiving_physician_id\}/g)]
-  assert.equal(downstreamOccurrences.length, 5, 'every AgentCoordinationModal render inside ChenDownstreamCard must pass Chen\'s own id')
+  assert.equal(downstreamOccurrences.length, 6, 'every AgentCoordinationModal render inside ChenDownstreamCard must pass Chen\'s own id (6, after the UX polish pass added a parallel e-consult "scheduled" branch)')
   assert.doesNotMatch(downstream, /viewerPhysicianId=\{liveReferral\.referring_physician_id\}/)
 })
 

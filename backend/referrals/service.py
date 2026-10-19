@@ -14,6 +14,7 @@ from backend.clinical import build_patient_context
 from backend.demo_identity import LUCY_AGENT_ID, PCP_NAME
 from backend.models import (
     AutonomyLevel,
+    CareModality,
     ConsultationEncounter,
     CoordinationActor,
     CoordinationEvent,
@@ -79,6 +80,7 @@ def build_referral(
     *,
     referring_physician_id: str = LUCY_AGENT_ID,
     priority: ReferralPriority = "routine",
+    modality: CareModality = "in_person",
     previous_referral_id: int | None = None,
 ) -> Referral:
     """Create a new referral and assemble its initial packet. Does not persist.
@@ -106,6 +108,7 @@ def build_referral(
         referral_question=referral_question,
         urgency=_PRIORITY_URGENCY_TEXT[priority],
         priority=priority,
+        modality=modality,
         status=ReferralStatus.DRAFT,
         created_at=now,
         updated_at=now,

@@ -117,6 +117,10 @@ export type Referral = {
    * requirement_results below); resolving a missing requirement never
    * changes this, and this never changes readiness. */
   priority: ReferralPriority
+  /** Routing/triage UX polish pass, Part 3A: in_person (a visit) or
+   * econsult -- set once at referral creation, never recalculated
+   * afterward. */
+  modality: CareModality
   status: ReferralStatus
   created_at: string; updated_at: string; packet: ReferralPacket
   receiving_requirements: ReferralRequirement[]; requirement_results: RequirementCheck[]
@@ -619,8 +623,8 @@ export const consultNetwork = (id: string, pcpGuidance?: string) => request<Cons
  * physician explicitly confirmed/edited before clicking "Start referral" --
  * omit it to accept the backend's own "routine" default, never silently
  * upgraded. */
-export const createReferral = (patientId: string, receivingPhysicianId: string, priority?: ReferralPriority) => request<Referral>(`/api/patients/${encodeURIComponent(patientId)}/referrals`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId, priority: priority ?? null }),
+export const createReferral = (patientId: string, receivingPhysicianId: string, priority?: ReferralPriority, modality?: CareModality) => request<Referral>(`/api/patients/${encodeURIComponent(patientId)}/referrals`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiving_physician_id: receivingPhysicianId, priority: priority ?? null, modality: modality ?? null }),
 })
 /** Care-routing demo pass, Part R: the SAME structured access data the
  * routing/match-details UI reads, exposed narrowly for the specialist-side

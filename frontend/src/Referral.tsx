@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, askPhysicianAgent, createAgentCorrection, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type ConsultationEncounter, type CoordinationEvent, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
+import { acceptReferral, askPhysicianAgent, createAgentCorrection, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationEvent, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
@@ -41,7 +41,7 @@ export function PriorityChipRow({ priority, onChange }: { priority: ReferralPrio
   >{priorityLabel(value)}</button>)}</div>
 }
 
-function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling }: { phase: DisplayPhase; receivingPhysicianName: string; patientLabel: string; scheduling?: SchedulingCoordination | null }) {
+function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling, modality = 'in_person' }: { phase: DisplayPhase; receivingPhysicianName: string; patientLabel: string; scheduling?: SchedulingCoordination | null; modality?: CareModality }) {
   const who = lastName(receivingPhysicianName)
   switch (phase.kind) {
     case 'preparing':
@@ -98,10 +98,21 @@ function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling 
         <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Accepted</span>
         <h3>Accepted by Dr. {who}</h3>
         <p>Dr. {who} accepted {patientLabel}'s referral and added them to their care.</p>
-        <p className="referral-next-step-note">Next: Scheduling</p>
+        <p className="referral-next-step-note">Next: {modality === 'econsult' ? 'E-consult' : 'Scheduling'}</p>
         {phase.acceptedAt && <small className="referral-submission-meta">Accepted {formatSubmittedAt(phase.acceptedAt)}</small>}
       </>
     case 'scheduled': {
+      // Routing/triage UX polish pass, Part 3A: an e-consult route has no
+      // visit slot to show -- the backend's scheduling pipeline still runs
+      // unconditionally behind the scenes (Part AC: no full e-consult
+      // workflow), but presenting its synthetic appointment TIME for an
+      // e-consult would contradict the modality the physician actually
+      // selected, so this branch never reads `scheduling` at all.
+      if (modality === 'econsult') return <>
+        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>E-consult sent</span>
+        <h3>E-consult request sent to Dr. {who}</h3>
+        <p>The referral was accepted and an e-consult request was sent for asynchronous review.</p>
+      </>
       const slot = scheduling?.selected_option
       return <>
         <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>Scheduled</span>
@@ -145,7 +156,7 @@ function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling 
  *   presentation pacing -- the backend call itself is never delayed (Part E/F/Y).
  */
 export function ReferralCoordinationSurface({
-  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange, onReferralChange, onReviewedChange, priority,
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange, onReferralChange, onReviewedChange, priority, modality,
 }: {
   patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string
   restoredReferral: Referral | null
@@ -155,6 +166,11 @@ export function ReferralCoordinationSurface({
    * re-read afterward. Omitted entirely for a restored referral, which
    * already carries its own real persisted `priority`. */
   priority?: ReferralPriority
+  /** Routing/triage UX polish pass, Part 3A: which care route the physician
+   * actually selected at the moment "Start referral" is clicked -- same
+   * "read once, never re-read" shape as `priority` above. Omitted for a
+   * restored referral, which already carries its own real `modality`. */
+  modality?: CareModality
   /** Mirrors justCompleted up to the parent, which owns the actual card
    * element -- the wash background lives there (see .handoff-wash), not on
    * this overlay, so its visible edge is the card's own border-box and can
@@ -339,7 +355,7 @@ export function ReferralCoordinationSurface({
     setStatus('running'); setError(null); setVisiblePhase({ kind: 'preparing' })
     const minimumPreparingDisplay = sleep(PHASE_HOLD_MS.preparing)
     try {
-      const created = await createReferral(patientId, receivingPhysicianId, priority)
+      const created = await createReferral(patientId, receivingPhysicianId, priority, modality)
       const preflighted = await runReferralPreflight(created.id as number)
       await minimumPreparingDisplay
       if (cancelled.current) return
@@ -451,7 +467,7 @@ export function ReferralCoordinationSurface({
   return <>
     <div className="referral-coordination-surface" role="status">
       <div className={`referral-phase ${fading ? 'phase-fading' : ''}`}>
-        <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} scheduling={scheduling} />
+        <PhaseContent phase={visiblePhase} receivingPhysicianName={receivingPhysicianName} patientLabel={patientLabel} scheduling={scheduling} modality={referral?.modality ?? modality} />
       </div>
       {/* Care-routing demo pass, Part F: clinical priority and referral
        * readiness are deliberately shown as two separate labeled values,
@@ -922,7 +938,7 @@ function IncomingRequestsControl({
          * a redundant second status badge -- the whole section is already
          * called Needs your review. "Visit" is a quiet modality label, not
          * a competing status. */}
-        <p className="incoming-request-priority"><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· Visit</span></p>
+        <p className="incoming-request-priority"><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· {referral.modality === 'econsult' ? 'E-consult' : 'Visit'}</span></p>
         <p className="incoming-request-resolved">{resolvedSummary(resolvedCountFor(referral))}</p>
         <button type="button" className="text-button" onClick={() => onReview(referral)}>Review <span>→</span></button>
       </div>)}
@@ -998,15 +1014,17 @@ export function RequestReviewModal({
               <div><span className="section-label">From</span><strong>{PCP_NAME}</strong><small>Primary Care</small></div>
               <div><span className="section-label">To</span><strong>{receivingPhysicianName}</strong><small>{referral.specialty}</small></div>
             </div>
-            <p className="request-review-status"><span className="status-label resolved">Ready for your review</span></p>
-
-            {/* Routing/triage UX pass, Part T: a compact triage summary --
-             * Lamina already decided priority/modality/access before Chen
-             * ever opened this, never a numeric acuity score. */}
-            <section className="recommended-handling">
-              <p className="section-label">Recommended handling</p>
-              <p className="recommended-handling-line"><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· In-person visit</span></p>
-              {capacity && <p className="recommended-handling-fact"><span className="section-label">Expected access</span> <strong>{capacity.in_person_wait_label.replace('Approximately ', '~')}</strong></p>}
+            {/* UX polish pass, Part 7A: the redundant resolved-status badge
+             * is gone -- this whole modal already IS the review, and the
+             * badge only restated that. Part 7B/C/D: the old triage-summary
+             * section's blue-boxed treatment is gone too (it read as too
+             * heavy for how often it's seen) -- renamed "Routing summary"
+             * and presented as calm, cleanly-aligned structured facts, not
+             * a filled card. */}
+            <section className="routing-summary">
+              <p className="section-label">Routing summary</p>
+              <p className="recommended-handling-line"><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· {referral.modality === 'econsult' ? 'E-consult' : 'In-person visit'}</span></p>
+              {capacity && <p className="recommended-handling-fact"><span className="section-label">Expected access</span> <strong>{(referral.modality === 'econsult' ? capacity.econsult_response_label : capacity.in_person_wait_label)?.replace('Approximately ', '~')}</strong></p>}
               <p className="recommended-handling-fact"><span className="section-label">Referral packet</span> <strong>Complete</strong></p>
               {resolvedCount > 0 && <p className="muted-note">{resolvedSummary(resolvedCount)}</p>}
             </section>
@@ -1215,16 +1233,20 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
     <h3>You accepted {patientLabel}'s referral.</h3>
   </div>
 
+  // UX polish pass, Part 3A: an e-consult route has no visit to find -- the
+  // intro narrates preparing a response instead, and reads the
+  // e-consult-specific access fact rather than the in-person one.
+  const accessLabel = (referral.modality === 'econsult' ? capacity?.econsult_response_label : capacity?.in_person_wait_label)?.replace('Approximately ', '~')
   if (introPhase === 'checking') return <div className="next-step-card consulting">
-    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Finding an appointment</span>
-    <h3>Looking for the earliest appropriate {CHEN_SPECIALTY} visit.</h3>
-    <p className="recommended-handling-line"><PriorityChip priority={referral.priority} />{capacity?.in_person_wait_label && <span className="incoming-request-modality">· Expected within {capacity.in_person_wait_label.replace('Approximately ', '~')}</span>}</p>
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>{referral.modality === 'econsult' ? 'Preparing e-consult response' : 'Finding an appointment'}</span>
+    <h3>{referral.modality === 'econsult' ? 'Preparing an e-consult response.' : `Looking for the earliest appropriate ${CHEN_SPECIALTY} visit.`}</h3>
+    <p className="recommended-handling-line"><PriorityChip priority={referral.priority} />{accessLabel && <span className="incoming-request-modality">· Expected within {accessLabel}</span>}</p>
   </div>
 
   if (introPhase === 'routing') return <div className="next-step-card consulting">
-    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>Finding an appointment</span>
-    <h3>Confirming the visit with the scheduling workflow.</h3>
-    <p className="recommended-handling-line"><PriorityChip priority={referral.priority} />{capacity?.in_person_wait_label && <span className="incoming-request-modality">· Expected within {capacity.in_person_wait_label.replace('Approximately ', '~')}</span>}</p>
+    <span className="status-label pulse"><span className="spark-icon lead" aria-hidden="true">✧</span>{referral.modality === 'econsult' ? 'Preparing e-consult response' : 'Finding an appointment'}</span>
+    <h3>{referral.modality === 'econsult' ? 'Confirming the e-consult request.' : 'Confirming the visit with the scheduling workflow.'}</h3>
+    <p className="recommended-handling-line"><PriorityChip priority={referral.priority} />{accessLabel && <span className="incoming-request-modality">· Expected within {accessLabel}</span>}</p>
   </div>
 
   const links = <div className="referral-mode-links">
@@ -1291,6 +1313,25 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
   </>
 
   if (scheduling && scheduling.status === 'scheduled') {
+    // UX polish pass, Part 3A: the backend's scheduling pipeline still runs
+    // unconditionally behind an e-consult acceptance too (Part AC: no full
+    // e-consult workflow this pass), but its synthetic appointment TIME
+    // describes a visit slot that was never actually requested here -- this
+    // branch never surfaces it, showing the e-consult-coherent facts
+    // (priority, expected response) instead.
+    if (referral.modality === 'econsult') return <>
+      <div className="next-step-card ready">
+        <span className="status-label resolved"><span className="spark-icon lead" aria-hidden="true">✓</span>E-consult sent</span>
+        <h3>E-consult request sent</h3>
+        <p>{CHEN_NAME} will respond asynchronously.</p>
+        <p className="recommended-handling-line"><PriorityChip priority={referral.priority} />{capacity?.econsult_response_label && <span className="incoming-request-modality">· Expected within {capacity.econsult_response_label.replace('Approximately ', '~')}</span>}</p>
+        <div className="referral-mode-links">
+          <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>View referral history →</button>
+        </div>
+      </div>
+      {chatCard}
+      {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} viewerPhysicianId={liveReferral.receiving_physician_id} onClose={() => setCoordinationOpen(false)} />}
+    </>
     const slot = scheduling.selected_option
     return <>
       <div className="next-step-card ready">
@@ -1366,7 +1407,7 @@ export function chenPatientRowStatus(
   return { label: 'Referral accepted', nextStep: 'Open patient' }
 }
 
-export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
+export function ChenPatientsPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
   const [query, setQuery] = useState('')
   const [incoming, setIncoming] = useState<Referral[] | null>(null)
   const [accepted, setAccepted] = useState<Referral[] | null>(null)
@@ -1374,6 +1415,19 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
   const [error, setError] = useState('')
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [reviewing, setReviewing] = useState<Referral | null>(null)
+  // Routing/triage UX polish pass, Part 5C: a purely presentational,
+  // briefly-applied highlight for whichever patients the Dashboard's
+  // "Recent activity" auto-routing item pointed at -- never changes which
+  // patients are shown, sorted, or how long they stay (demo-friendly, not a
+  // persisted notification).
+  const [highlighted, setHighlighted] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    const ids = (params?.get('highlight') ?? '').split(',').filter(Boolean)
+    if (ids.length === 0) return
+    setHighlighted(new Set(ids))
+    const timer = window.setTimeout(() => setHighlighted(new Set()), 2600)
+    return () => window.clearTimeout(timer)
+  }, [params])
 
   /** A real backend query for "every referral in my care, however far along
    * it is" -- never a single fixed status (Part 2 fix: ?status=accepted
@@ -1439,11 +1493,11 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
     {error && <div className="error-banner" role="alert">{error}</div>}
     {active.length > 0 && <section className="patient-worklist-section">
       <div className="home-section-heading"><h2>Active patients</h2><span>{active.length}</span></div>
-      <WorklistRows rows={active} navigate={navigate} basePath="/chen/patients" />
+      <WorklistRows rows={active} navigate={navigate} basePath="/chen/patients" highlightIds={highlighted} />
     </section>}
     {previous.length > 0 && <section className="patient-worklist-section">
       <div className="home-section-heading"><h2>Previous care</h2><span>{previous.length}</span></div>
-      <WorklistRows rows={previous} navigate={navigate} basePath="/chen/patients" />
+      <WorklistRows rows={previous} navigate={navigate} basePath="/chen/patients" highlightIds={highlighted} />
     </section>}
     {rows.length === 0 && <div className="empty-state specialist-empty">
       <LaminaMark />
@@ -1478,11 +1532,14 @@ export function ChenPatientsPage({ navigate }: { navigate: Navigate }) {
  * action/relevance, never a permanent-residency guarantee).
  */
 /**
- * Routing/triage UX pass, Part X/Y: three restrained, read-only capacity
- * cards -- two real capacity LANES (in-person visits, e-consults) plus
- * urgent review shown as the exceptional escalation path, never a third
- * equal queue. Reuses the exact same structured AccessProfile the routing/
- * match-details UI already reads (Part B/K) -- no second, independently-
+ * Routing/triage UX pass, Part X/Y (polish pass, Part 5D): two restrained,
+ * read-only capacity cards -- the two real capacity LANES, visits and
+ * e-consults. Urgent review was removed as a third card (polish pass, Part
+ * 5D) -- it read as an equal-weight third queue rather than the exceptional
+ * physician-review escalation path it actually is; that distinction now
+ * lives only in copy elsewhere (Needs your review), not as its own capacity
+ * tile. Reuses the exact same structured AccessProfile the routing/match-
+ * details UI already reads (Part B/K) -- no second, independently-
  * maintained source. Currently only meaningful for Chen; renders nothing if
  * no capacity profile exists. No shadows, no KPI/metric-dashboard styling.
  */
@@ -1503,29 +1560,25 @@ function ChenCapacityCards() {
         <p className="care-capacity-card-value">Typical response</p>
         <p className="care-capacity-card-detail">{capacity.econsult_available ? (capacity.econsult_response_label ?? 'Available').replace('Approximately ', '~') : 'Not enabled'}</p>
       </div>
-      <div className="care-capacity-card">
-        <p className="care-capacity-card-label">Urgent review</p>
-        <p className="care-capacity-card-value">Escalated for physician review</p>
-      </div>
     </div>
   </section>
 }
 
-/**
- * Routing/triage UX pass, Part Z: a small, understated surface showing that
- * routine demand moves in the background -- agents triage everything, and
- * only decisions that actually require Chen land in Needs your review.
- * Deliberately static/synthetic demo activity (no backing workflow for
- * these three requests is needed, Part Z) -- never a large dashboard
- * feed, never implying Chen manually sorts every referral.
- */
-function ChenRoutingActivity() {
-  return <section className="routing-activity-note">
-    <p className="section-label">Recent routing activity</p>
-    <p className="routing-activity-summary">3 requests routed automatically</p>
-    <p className="routing-activity-detail">2 visits · 1 e-consult</p>
-  </section>
-}
+/** Routing/triage UX pass, Part Z (polish pass, Part 5A/B): the three
+ * synthetic auto-routed requests that used to be their own standalone
+ * "Recent routing activity" block are now a single item inside the
+ * Dashboard's ordinary Recent activity feed instead -- a dedicated
+ * dashboard-middle surface overstated how much was happening; folding it
+ * into Recent activity says the same thing ("routine demand moves in the
+ * background without Chen's manual sorting") at the right visual weight.
+ * Because cross-agent coordination detail is never exposed to the other
+ * physician (the Witness-style boundary this demo already keeps for agent
+ * chat), clicking through does something useful but partial: it opens
+ * Patients and briefly highlights the affected patients, rather than
+ * opening a detail view of the coordination itself. Deliberately
+ * static/synthetic (no backing workflow for these three requests is
+ * needed, Part Z). */
+export const CHEN_AUTO_ROUTED_PATIENT_IDS = ['patient-chen-robert-004', 'patient-chen-aisha-005', 'patient-chen-maya-003']
 
 export function ChenHomePage({ navigate }: { navigate: Navigate }) {
   const [incoming, setIncoming] = useState<Referral[] | null>(null)
@@ -1603,20 +1656,43 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
           <span className="lam-row-main">
             <strong>{patientName(referral.patient_id)}</strong>
             <span>{referral.specialty} referral from {PCP_NAME}</span>
-            <small><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· Visit</span> · {resolvedSummary(resolvedCountFor(referral))}</small>
+            <small><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· {referral.modality === 'econsult' ? 'E-consult' : 'Visit'}</span> · {resolvedSummary(resolvedCountFor(referral))}</small>
           </span>
           <span className="lam-row-action">Review <b>→</b></span>
         </button>)}
       </div>
     </section>}
     <ChenCapacityCards />
-    <ChenRoutingActivity />
     {topPatients.length > 0 && <section className="patient-worklist-section">
       <div className="home-section-heading"><div><h2>Patients</h2></div><button className="text-button" onClick={() => navigate('/chen/patients')}>View all patients →</button></div>
       <WorklistRows rows={topPatients} navigate={navigate} basePath="/chen/patients" />
     </section>}
     <div className="dashboard-bottom-row">
-      <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div><p className="home-empty">No agent activity yet.</p></section>
+      {/* Polish pass, Part 5B/C: the synthetic auto-routed-demand item lives
+       * here now, not as its own standalone dashboard-middle block (Part
+       * 5A) -- one entry among Chen's real agent activity, at ordinary
+       * weight. The Witness-style cross-agent boundary means this can't
+       * open a detail view of the coordination itself, so it does the next
+       * most useful thing: opens Patients with the affected patients
+       * briefly highlighted. */}
+      <section className="home-activity">
+        <div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
+        <div className="activity-stream">
+          <button
+            key="auto-routing"
+            className="activity-row interaction"
+            onClick={() => navigate(`/chen/patients?highlight=${CHEN_AUTO_ROUTED_PATIENT_IDS.join(',')}`)}
+          >
+            <span className="activity-marker interaction" />
+            <span>
+              <em className="activity-kind agent-event-label">Agent</em>
+              <strong>Your agent coordinated with Dr. Saruhashi's agent</strong>
+              <small>Endocrinology referral routed automatically · 2 visits · 1 e-consult</small>
+            </span>
+            <b>View patients →</b>
+          </button>
+        </div>
+      </section>
       <NetworkHighlights feed={feed} navigate={navigate} perspective="chen" />
     </div>
     {reviewing && <RequestReviewModal referral={reviewing} receivingPhysicianName={CHEN_NAME} onAccepted={handleAccepted} onClose={() => setReviewing(null)} />}

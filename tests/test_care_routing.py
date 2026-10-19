@@ -250,3 +250,37 @@ def test_chen_capacity_endpoint_exposes_separate_visit_and_econsult_channels(api
 def test_capacity_endpoint_404s_for_a_physician_with_no_known_profile(api_client: TestClient) -> None:
     response = api_client.get("/api/physicians/physician-jung/capacity")
     assert response.status_code == 404
+
+
+# ------------------------------------------- UX polish pass, Part 3A: modality
+
+
+def test_referral_modality_defaults_to_in_person_when_not_specified(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    assert created["modality"] == "in_person"
+
+
+def test_the_physicians_selected_modality_persists_on_the_referral(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals",
+        json={"receiving_physician_id": CHEN_ID, "modality": "econsult"},
+    ).json()
+    referral = api_client.get(f"/api/referrals/{created['id']}").json()
+    assert referral["modality"] == "econsult"
+
+
+def test_scheduling_never_touches_referral_modality_either(api_client: TestClient) -> None:
+    created = api_client.post(
+        f"/api/patients/{TONJIT_PATIENT_ID}/referrals",
+        json={"receiving_physician_id": CHEN_ID, "modality": "econsult"},
+    ).json()
+    referral_id = created["id"]
+    api_client.post(f"/api/referrals/{referral_id}/preflight")
+    api_client.post(f"/api/referrals/{referral_id}/accept", json={"receiving_physician_id": CHEN_ID})
+    api_client.post(f"/api/referrals/{referral_id}/scheduling/options", json={"receiving_physician_id": CHEN_ID})
+    routed = api_client.post(
+        f"/api/referrals/{referral_id}/scheduling/route", json={"receiving_physician_id": CHEN_ID}
+    ).json()
+    assert routed["referral"]["modality"] == "econsult", "scheduling must never recalculate the selected care modality"

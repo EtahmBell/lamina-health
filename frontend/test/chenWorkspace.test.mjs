@@ -132,7 +132,7 @@ test('ChenPatientsPage supports search, active/previous grouping, and the existi
   assert.match(fn, /className="patient-search"/)
   assert.match(fn, /<section className="patient-worklist-section">\s*\n\s*<div className="home-section-heading"><h2>Active patients<\/h2>/)
   assert.match(fn, /<h2>Previous care<\/h2>/)
-  assert.match(fn, /<WorklistRows rows=\{active\} navigate=\{navigate\} basePath="\/chen\/patients" \/>/)
+  assert.match(fn, /<WorklistRows rows=\{active\} navigate=\{navigate\} basePath="\/chen\/patients" highlightIds=\{highlighted\} \/>/)
 })
 
 test('the Incoming requests control is rendered separately from the patient list, never mixed into the worklist rows', () => {

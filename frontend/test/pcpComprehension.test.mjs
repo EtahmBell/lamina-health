@@ -113,7 +113,7 @@ test('the recommendation-ready default card is compact -- one fit indicator, one
   const view = recommendation()
   assert.match(view, /<article className=\{`best-fit-card compact \$\{swapping \? 'swapping' : ''\}`\}>/)
   assert.match(view, /<p className="fit-indicator">\{selected\.clinical_fit === 'strong' \? 'Strong clinical fit'/)
-  assert.match(view, /<p className="fit-meta">\{insuranceLabel\(selected\.insurance_status\)\} · \{selected\.availability\}<\/p>/)
+  assert.match(view, /<p className="fit-meta">\{insuranceLabel\(selected\.insurance_status\)\} · \{selectedEconsultRoute \? \(selectedEconsultRoute\.access\.econsult_response_label \?\? 'Response time unverified'\) : selected\.availability\}<\/p>/)
   assert.match(view, /<p className="fit-rationale">\{selected\.reason\}<\/p>/)
   assert.doesNotMatch(view, /Network resolved · \{consultation\.consultation\.length\} agents consulted/, 'the consult count is demoted out of the header')
   assert.match(view, /\{consultation\.consultation\.length\} physician agent\{consultation\.consultation\.length === 1 \? '' : 's'\} consulted/, 'the count still exists, inside How your agent handled this')

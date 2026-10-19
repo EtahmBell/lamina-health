@@ -140,7 +140,7 @@ test('ReferralCoordinationSurface renders in Referral mode, gated on the real re
 })
 
 test('ReferralCoordinationSurface calls the real referral API helpers, never a local fabrication', () => {
-  assert.match(referralSource, /createReferral\(patientId, receivingPhysicianId, priority\)/)
+  assert.match(referralSource, /createReferral\(patientId, receivingPhysicianId, priority, modality\)/)
   assert.match(referralSource, /runReferralPreflight\(created\.id/)
   assert.doesNotMatch(referralSource, /setTimeout\(\s*\(\)\s*=>\s*show/i, 'no setTimeout(showFakeEvent) pattern')
 })
@@ -485,7 +485,7 @@ const discoveryModeBranch = () => {
 /* -------------------------------------------------------------- Part S */
 
 test('Start referral switches the frontend viewMode to referral -- a presentation switch only, never a backend status', () => {
-  assert.match(discoveryModeBranch(), /onClick=\{startReferral\}>Start referral/)
+  assert.match(discoveryModeBranch(), /onClick=\{startReferral\}>\{selectedModality === 'econsult' \? 'Start e-consult request' : 'Start referral'\}/)
   const startReferralSource = recommendation().slice(recommendation().indexOf('const startReferral = '), recommendation().indexOf('const activeReferralPhysician ='))
   assert.match(startReferralSource, /setViewMode\('referral'\)/)
   assert.doesNotMatch(startReferralSource, /fetch\(|request\(|createReferral\(/, 'the mode switch itself makes no backend call -- ReferralCoordinationSurface does that once rendered')
@@ -670,12 +670,12 @@ test('the wash is effectively fully opaque, not merely "mostly opaque"', () => {
   assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash \{ background: rgb\(52 79 93 \/ 100%\); \}/)
 })
 
-test('underlying card content (back-button, kicker, physician row, current phase content) is explicitly faded out during the wash, in lockstep with it -- never left to bleed through under a transparent overlay', () => {
-  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash > \.back-to-match,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-kicker,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-physician,\s*\.best-fit-card\.referral-card\.handoff-wash \.referral-phase \{\s*opacity: 0; pointer-events: none; transition: opacity 500ms ease-in-out;\s*\}/)
+test('underlying card content (back-button, kicker, physician row, current phase content, clinical priority row) is explicitly faded out during the wash, in lockstep with it -- never left to bleed through under a transparent overlay', () => {
+  assert.match(styles, /\.best-fit-card\.referral-card\.handoff-wash > \.back-to-match,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-kicker,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-physician,\s*\.best-fit-card\.referral-card\.handoff-wash \.referral-phase,[\s\S]*?\.best-fit-card\.referral-card\.handoff-wash \.referral-priority-line \{\s*opacity: 0; pointer-events: none; transition: opacity 500ms ease-in-out;\s*\}/)
 })
 
 test('the hidden-during-wash content also gets a reduced-motion override, so it snaps instead of animating', () => {
-  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{\s*\.best-fit-card\.referral-card \{ transition: none; \}\s*\.best-fit-card\.referral-card\.handoff-wash > \.back-to-match,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-kicker,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-physician,\s*\.best-fit-card\.referral-card\.handoff-wash \.referral-phase \{ transition: none; \}/)
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{\s*\.best-fit-card\.referral-card \{ transition: none; \}\s*\.best-fit-card\.referral-card\.handoff-wash > \.back-to-match,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-kicker,\s*\.best-fit-card\.referral-card\.handoff-wash > \.best-fit-physician,\s*\.best-fit-card\.referral-card\.handoff-wash \.referral-phase,\s*\.best-fit-card\.referral-card\.handoff-wash \.referral-priority-line \{ transition: none; \}/)
 })
 
 /* ========================================================================

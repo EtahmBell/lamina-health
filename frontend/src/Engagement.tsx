@@ -223,9 +223,12 @@ function buildAgentDigest(records: ConsultationRecord[], overview: AgentOverview
 export type WorklistRowData = { patient: DemoPatientSummary; label: string; tone: string; nextStep: string; priority: number; updated: string | null }
 
 /** "Active patients" (still moving through care) vs "Previous care" (loop complete or
- * inactive) — grouped by care state, never by recency. */
-export function WorklistRows({ rows, navigate, basePath = '/patients' }: { rows: WorklistRowData[]; navigate: Navigate; basePath?: string }) {
-  return <div className="lam-list patient-worklist">{rows.map(({ patient, label, tone, nextStep, updated }) => <button key={patient.id} className="lam-row worklist-row" onClick={() => navigate(`${basePath}/${patient.id}`)}>
+ * inactive) — grouped by care state, never by recency. `highlightIds`
+ * (routing/triage UX polish pass, Part 5C) is a purely presentational,
+ * briefly-applied set -- never persisted, never changes which patients are
+ * shown or how they're sorted. */
+export function WorklistRows({ rows, navigate, basePath = '/patients', highlightIds }: { rows: WorklistRowData[]; navigate: Navigate; basePath?: string; highlightIds?: Set<string> }) {
+  return <div className="lam-list patient-worklist">{rows.map(({ patient, label, tone, nextStep, updated }) => <button key={patient.id} className={`lam-row worklist-row ${highlightIds?.has(patient.id) ? 'worklist-row-highlight' : ''}`} onClick={() => navigate(`${basePath}/${patient.id}`)}>
     <span className="lam-row-mark patient-row-avatar">{patient.initials}</span>
     <span className="lam-row-main"><strong>{patient.name}</strong><small>{patient.age} years · {patient.reason}</small></span>
     <span className={`worklist-status ${tone}`}>{label}</span>

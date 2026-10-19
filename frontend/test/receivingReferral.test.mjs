@@ -155,7 +155,7 @@ test('accepted referrals are merged into the shared WorklistRows rendering at th
   const fn = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
   assert.match(fn, /const \{ label, nextStep \} = chenPatientRowStatus\(referral, state\.encounter, state\.handoff\)/)
   assert.match(fn, /return \{ patient, label, tone: 'copper', nextStep, priority: -1, updated: null \}/)
-  assert.match(fn, /<WorklistRows rows=\{active\} navigate=\{navigate\} basePath="\/chen\/patients" \/>/)
+  assert.match(fn, /<WorklistRows rows=\{active\} navigate=\{navigate\} basePath="\/chen\/patients" highlightIds=\{highlighted\} \/>/)
   assert.match(fn, /No patients found/)
 })
 
@@ -246,7 +246,7 @@ test('the Chen routes are registered in the SPA dispatcher, reusing ProductShell
   const dispatch = slice(app, 'export default function App', app.length)
   assert.match(dispatch, /path === '\/chen' \|\| path === '\/chen\/home'/)
   assert.match(dispatch, /perspective="chen"/)
-  assert.match(dispatch, /<ChenPatientsPage navigate=\{navigate\} \/>/)
+  assert.match(dispatch, /<ChenPatientsPage navigate=\{navigate\} params=\{params\} \/>/)
   assert.match(dispatch, /chenPatientId === TONJIT_ID \|\| \(chenPatientId && CHEN_PATIENT_IDS\.includes\(chenPatientId\)\)\) return <PatientWorkspace patientId=\{chenPatientId\} navigate=\{navigate\} perspective="receiving" \/>/)
 })
 

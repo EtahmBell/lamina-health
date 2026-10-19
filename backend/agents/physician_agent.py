@@ -136,7 +136,7 @@ def evaluate_physician(
             0, Evidence(kind=EvidenceKind.EXPLICIT_RULE, detail=case_rules.explicit_rules[0])
         )
         fit, accepts, confidence = ClinicalFit.MODERATE, True, "high"
-        reason = "General endocrinology is also an appropriate treatment-intensification option, with a longer synthetic access interval than the recommended destination."
+        reason = "General endocrinology is also an appropriate treatment-intensification option, but with a materially longer access interval than the recommended destination."
         urgency = "Routine outpatient evaluation"
     elif profile.id == "physician-torres":
         evidence.insert(

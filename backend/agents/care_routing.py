@@ -108,7 +108,10 @@ def build_candidate_routes(context: ClinicalRepresentation) -> list[CandidateRou
             network_participation=NetworkParticipation.INTEGRATED_NETWORK,
             access=chen_access,
             recommended=False,
-            rationale="Considered, but direct in-person evaluation is preferred for this presentation.",
+            rationale=(
+                "Fast response (about 2 business days), but direct in-person evaluation is "
+                "preferred for this presentation."
+            ),
         ),
         CandidateRoute(
             physician_id="physician-ramanathan",

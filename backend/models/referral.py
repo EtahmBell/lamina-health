@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
-from .consultation import ReferralPriority, StrictModel
+from .consultation import CareModality, ReferralPriority, StrictModel
 
 
 class ReferralStatus(StrEnum):
@@ -130,6 +130,12 @@ class ReferralCreateRequest(StrictModel):
     # created) -- `None` defers to build_referral's own "routine" default,
     # never silently upgraded by the backend.
     priority: ReferralPriority | None = None
+    # Routing/triage UX polish pass, Part 3A: which care route the physician
+    # actually selected -- Dr. Chen's e-consult route is now a real
+    # selectable alternative, not just an informational one. `None` defers
+    # to build_referral's own "in_person" default, matching every referral
+    # created before this pass.
+    modality: CareModality | None = None
 
 
 class ReferralAcceptRequest(StrictModel):
@@ -150,6 +156,11 @@ class Referral(StrictModel):
     # missing requirement never changes this, and this never changes
     # readiness (Part F/U/V).
     priority: ReferralPriority = "routine"
+    # Routing/triage UX polish pass, Part 3A: in_person (a visit) or econsult
+    # -- set once at referral creation from whichever route the physician
+    # selected, never recalculated afterward. Defaults to "in_person",
+    # matching every referral created before this pass.
+    modality: CareModality = "in_person"
     status: ReferralStatus
     created_at: str
     updated_at: str
