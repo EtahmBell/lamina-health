@@ -116,7 +116,7 @@ test('the recommendation-ready default card is compact -- one fit indicator, one
   assert.match(view, /<p className="fit-meta">\{insuranceLabel\(selected\.insurance_status\)\} · \{selectedEconsultRoute \? \(selectedEconsultRoute\.access\.econsult_response_label \?\? 'Response time unverified'\) : selected\.availability\}<\/p>/)
   assert.match(view, /<p className="fit-rationale">\{selected\.reason\}<\/p>/)
   assert.doesNotMatch(view, /Network resolved · \{consultation\.consultation\.length\} agents consulted/, 'the consult count is demoted out of the header')
-  assert.match(view, /\{consultation\.consultation\.length\} physician agent\{consultation\.consultation\.length === 1 \? '' : 's'\} consulted/, 'the count still exists, inside How your agent handled this')
+  assert.match(view, /\{consultedPhysicianCount\} physician agent\{consultedPhysicianCount === 1 \? '' : 's'\} consulted/, 'the count still exists, inside How your agent handled this')
 })
 
 test('selecting an alternative crossfades the primary card, relabels provenance, and never leaves one physician\'s reasoning under another', () => {
@@ -124,9 +124,10 @@ test('selecting an alternative crossfades the primary card, relabels provenance,
   assert.match(view, /const \[selectedId, setSelectedId\] = useState\(consultation\.recommended_physician\.physician_id\)/)
   assert.match(view, /const candidates = \[primary, \.\.\.consultation\.alternatives, \.\.\.selectableRoutes\.map\(routeToEvaluation\)\]/)
   assert.match(view, /const selected = candidates\.find\(\(item\) => item\.physician_id === selectedId\) \?\? primary/)
-  assert.match(view, /const isAgentPick = selected\.physician_id === primary\.physician_id/)
-  assert.match(view, /\{isAgentPick \? 'Recommended physician' : 'Selected specialist'\}/)
-  assert.match(view, /!isAgentPick && <p className="selection-provenance">Selected by you<\/p>/)
+  assert.match(view, /const physicianDiffersFromRecommendation = selected\.physician_id !== primary\.physician_id/)
+  assert.match(view, /const isAgentPick = !physicianDiffersFromRecommendation && !modalityDiffersFromRecommendation/)
+  assert.match(view, /\{isAgentPick \? 'Recommended physician' : physicianDiffersFromRecommendation \? 'Selected specialist' : 'Selected route'\}/)
+  assert.match(view, /physicianDiffersFromRecommendation && <p className="selection-provenance">Selected by you<\/p>/)
   assert.match(view, /option\.physician_id === primary\.physician_id && <span className="agent-pick-tag">Agent's top recommendation<\/span>/)
   assert.match(view, /onClick=\{\(\) => selectCandidate\(option\.physician_id\)\}>Select this specialist/)
   assert.doesNotMatch(view, /patientFact\(|anemiaCase/, 'the Jordan/Maria-specific hardcoded reasoning lookup is gone -- every candidate uses its own real evidence/reason fields')

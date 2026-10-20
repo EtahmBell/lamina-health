@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { acceptReferral, askPhysicianAgent, createAgentCorrection, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationEvent, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
-import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME } from './demoIdentity.ts'
+import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME, TONJIT_ID } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
@@ -1668,16 +1668,35 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
       <WorklistRows rows={topPatients} navigate={navigate} basePath="/chen/patients" />
     </section>}
     <div className="dashboard-bottom-row">
-      {/* Polish pass, Part 5B/C: the synthetic auto-routed-demand item lives
-       * here now, not as its own standalone dashboard-middle block (Part
-       * 5A) -- one entry among Chen's real agent activity, at ordinary
-       * weight. The Witness-style cross-agent boundary means this can't
-       * open a detail view of the coordination itself, so it does the next
-       * most useful thing: opens Patients with the affected patients
-       * briefly highlighted. */}
+      {/* Follow-up pass, Part L-Q: TWO separate activity entries, never
+       * conflated -- Lucy/Chen agent coordination around Tonjit's referral
+       * is its own real event; the synthetic auto-routed-demand summary is
+       * a different, unrelated kind of event (Part 5B/C from the prior
+       * pass: one entry among Chen's real agent activity, at ordinary
+       * weight, not its own standalone dashboard-middle block). Order is
+       * the Tonjit coordination first (most recent for this demo), then
+       * the auto-routing summary (Part O). */}
       <section className="home-activity">
         <div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
         <div className="activity-stream">
+          {/* Witness-architecture boundary (Part M/Q): this must never open
+           * the ephemeral cross-agent chat/task transcript -- it may only
+           * navigate to an already-authorized, real destination (Tonjit's
+           * own patient record, which Chen is independently allowed to
+           * open), never reveal the private coordination context itself. */}
+          <button
+            key="saruhashi-coordination"
+            className="activity-row interaction"
+            onClick={() => navigate(`/chen/patients/${TONJIT_ID}`)}
+          >
+            <span className="activity-marker interaction" />
+            <span>
+              <em className="activity-kind agent-event-label">Agent</em>
+              <strong>Your agent coordinated with Dr. Saruhashi's agent</strong>
+              <small>{patientName(TONJIT_ID)} · Endocrinology referral</small>
+            </span>
+            <b>View patient →</b>
+          </button>
           <button
             key="auto-routing"
             className="activity-row interaction"
@@ -1686,8 +1705,8 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
             <span className="activity-marker interaction" />
             <span>
               <em className="activity-kind agent-event-label">Agent</em>
-              <strong>Your agent coordinated with Dr. Saruhashi's agent</strong>
-              <small>Endocrinology referral routed automatically · 2 visits · 1 e-consult</small>
+              <strong>3 requests routed automatically</strong>
+              <small>2 visits · 1 e-consult</small>
             </span>
             <b>View patients →</b>
           </button>

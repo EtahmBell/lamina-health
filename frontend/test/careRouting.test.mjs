@@ -167,14 +167,46 @@ test('Other options merges the real pre-existing alternatives (Okonkwo) with the
 
 /* --------------------------------------------------------------- Part 1 */
 
-test('Other options is explicitly ordered: Maya first (stronger alternative), then Chen e-consult, then Okonkwo (worse access), then the external directory last', () => {
+test('all routes are explicitly ordered: Chen in-person (the recommended route) first, then Maya (stronger alternative), then Chen e-consult, then Okonkwo (worse access), then the external directory last', () => {
   const fn = recommendationView()
-  const built = slice(fn, 'const otherOptionRows = consultation.care_routing ? [', 'const isAgentPick = selected.physician_id')
+  const built = slice(fn, 'const allOptionRows = consultation.care_routing ? [', 'const otherOptionRows = allOptionRows.filter')
+  const chenInPersonIndex = built.indexOf('chenInPersonRoute ? [{ ...routeRow(chenInPersonRoute), isAgentPick: true }]')
   const mayaIndex = built.indexOf('mayaRoute ? [routeRow(mayaRoute)]')
-  const chenIndex = built.indexOf('chenEconsultRoute ? [routeRow(chenEconsultRoute)]')
+  const chenEconsultIndex = built.indexOf('chenEconsultRoute ? [routeRow(chenEconsultRoute)]')
   const okonkwoIndex = built.indexOf('okonkwoAlternative ? [alternativeRow(okonkwoAlternative)]')
   const externalIndex = built.indexOf('externalDirectoryRoute ? [routeRow(externalDirectoryRoute)]')
-  assert.ok(mayaIndex >= 0 && chenIndex > mayaIndex && okonkwoIndex > chenIndex && externalIndex > okonkwoIndex, 'the four known options must appear in this exact deliberate order')
+  assert.ok(
+    chenInPersonIndex >= 0 && mayaIndex > chenInPersonIndex && chenEconsultIndex > mayaIndex && okonkwoIndex > chenEconsultIndex && externalIndex > okonkwoIndex,
+    'the five known options must appear in this exact deliberate order'
+  )
+})
+
+/* ------------------------------------------------- Follow-up pass, Part A-E */
+
+test('Chen\'s in-person route is a normal row in the SAME unified route list, filtered out of "Other options" only while it IS the current selection -- never a one-way trap once e-consult is picked', () => {
+  const fn = recommendationView()
+  assert.match(fn, /const chenInPersonRoute = consultation\.candidate_routes\.find\(\(route\) => route\.recommended\)/)
+  assert.match(fn, /const otherOptionRows = allOptionRows\.filter\(\(row\) => !\(row\.physicianId === selectedId && row\.modality === selectedModality\)\)/)
+})
+
+test('physician selection and modality selection are orthogonal -- selectCandidate takes both, and reselecting the SAME physician with a different modality is never a no-op treated as "nothing changed"', () => {
+  const fn = recommendationView()
+  assert.match(fn, /const selectCandidate = \(physicianId: string, modality: CareModality = 'in_person'\) => \{/)
+  assert.match(fn, /if \(physicianId === selectedId && modality === selectedModality\) return/)
+})
+
+test('the recommended route is never rewritten just because Lucy tries a different one -- Recommended care path still reads directly from consultation.care_routing, never from the current selection', () => {
+  const fn = recommendationView()
+  const careRoutingBlock = slice(fn, 'care-routing-block', '</section>}')
+  assert.doesNotMatch(careRoutingBlock, /selectedModality|selectedId/, 'Recommended care path must read only from consultation.care_routing, never the live selection')
+  assert.match(fn, /const physicianDiffersFromRecommendation = selected\.physician_id !== primary\.physician_id/)
+  assert.match(fn, /const modalityDiffersFromRecommendation = !physicianDiffersFromRecommendation && selectedModality !== 'in_person'/)
+})
+
+test('no referral is created merely by switching the selected route -- selectCandidate only ever updates local presentation state, never calls the referral API', () => {
+  const fn = recommendationView()
+  const selectCandidateFn = fn.slice(fn.indexOf('const selectCandidate = ('), fn.indexOf('/**\n   * Once the physician clicks Start referral'))
+  assert.doesNotMatch(selectCandidateFn, /createReferral|fetch\(|request\(/)
 })
 
 test('Maya Ramanathan is made genuinely selectable via a synthesized Evaluation, reusing the exact same selectCandidate mechanism Okonkwo already uses -- never a fake dead CTA', () => {
@@ -309,7 +341,8 @@ test('UX polish pass, Part 5A/B: the synthetic auto-routed demand no longer has 
   const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
   assert.doesNotMatch(home, /<ChenRoutingActivity/)
   assert.match(home, /Your agent coordinated with Dr\. Saruhashi's agent/)
-  assert.match(home, /Endocrinology referral routed automatically · 2 visits · 1 e-consult/)
+  assert.match(home, /3 requests routed automatically/)
+  assert.match(home, /2 visits · 1 e-consult/)
 })
 
 test('UX polish pass, Part 5C: clicking the auto-routing activity item navigates to Patients and briefly highlights the affected patients -- the Witness-style cross-agent boundary means it cannot open a detail view of the coordination itself', () => {
@@ -388,22 +421,53 @@ test('Chen\'s e-consult rationale reads as a real alternative (fast response) ra
 
 /* --------------------------------------------------------------- Part 2 */
 
-test('the "How your agent handled this" caret is a real flex-aligned icon, not a floating inline character', () => {
+test('the "How your agent handled this" caret is a real SVG chevron, flex-aligned, never a Unicode glyph fighting its own font metrics', () => {
   const rule = slice(styles, '.network-transparency-toggle em {', '}')
   assert.match(rule, /display: inline-flex/)
-  const iconRule = slice(styles, '.network-transparency-toggle em i {', '}')
-  assert.match(iconRule, /line-height: 1/)
+  assert.match(rule, /align-items: center/)
+  assert.doesNotMatch(app, /View consultation details <i>/, 'the old glyph-in-<i> markup is gone')
+  assert.match(app, /View consultation details <svg className="disclosure-chevron"/)
+  const chevronRule = slice(styles, '.disclosure-chevron {', '}')
+  assert.match(chevronRule, /display: block/, 'a block-level replaced element never participates in inline-text baseline layout, so it can never sit below the text it sits beside')
 })
 
 test('Consultation details content is brought up to date with the newer routing model -- Maya, Chen e-consult, and the fact that access/modality were weighed, not just fit', () => {
   const fn = recommendationView()
   const modal = slice(fn, 'aria-label="Consultation details"', '</div></ModalPortal>}')
   assert.match(modal, /Access &amp; modality considered/)
-  assert.match(modal, /was recommended for this presentation; expected access and e-consult suitability were weighed for every option below alongside clinical fit, not fit alone\./)
-  assert.match(modal, /otherOptionRows\.map\(\(row\) => <li key=\{row\.key\}>/)
+  assert.match(modal, /was recommended for this presentation; expected access and e-consult suitability were weighed for every route below alongside clinical fit, not fit alone\./)
+  assert.match(modal, /allOptionRows\.map\(\(row\) => <li key=\{row\.key\}>/)
   // Dr. Noah Chen and Dr. Adaeze Okonkwo already appear via the pre-existing
   // real "Specialist-agent responses" list above this new block.
   assert.match(modal, /Specialist-agent responses/)
+})
+
+/* ------------------------------------------------- Follow-up pass, Part G-K */
+
+test('"physician agents consulted" counts unique PHYSICIANS, never routes -- Chen\'s in-person and e-consult routes never count twice, and the count is derived (never a hardcoded "3") so it stays accurate as the routing set grows', () => {
+  const fn = recommendationView()
+  assert.match(fn, /const routingOnlyAgents = consultation\.candidate_routes/)
+  assert.match(fn, /\.filter\(\(route\) => route\.network_participation !== 'external_directory'\)/)
+  assert.match(fn, /\.filter\(\(route\) => !consultation\.consultation\.some\(\(agent\) => agent\.physician_id === route\.physician_id\)\)/)
+  assert.match(fn, /const consultedPhysicianCount = new Set\(\[/)
+  assert.match(fn, /<p className="agent-consult-count">\{consultedPhysicianCount\} physician agent\{consultedPhysicianCount === 1 \? '' : 's'\} consulted<\/p>/)
+  assert.doesNotMatch(fn, /\{consultation\.consultation\.length\} physician agent/, 'the stale hardcoded-to-the-real-pipeline-only count is gone')
+})
+
+test('Maya is represented in the specialist-agent responses whenever she is part of the current routing set, using her real structured CandidateRoute rationale -- never fabricated chain-of-thought', () => {
+  const fn = recommendationView()
+  assert.match(fn, /\{routingOnlyAgents\.map\(\(agent\) => <li key=\{agent\.physician_id\}><b>\{cleanName\(agent\.physician_name\)\}:<\/b> \{agent\.reason\}<\/li>\)\}/)
+})
+
+test('the external-directory candidate (Okafor) is never counted or listed as a physician agent consulted -- no Lamina agent ever evaluated her', () => {
+  const fn = recommendationView()
+  const routingOnlyAgentsFn = fn.slice(fn.indexOf('const routingOnlyAgents = consultation.candidate_routes'), fn.indexOf('const consultedPhysicianCount'))
+  assert.match(routingOnlyAgentsFn, /route\.network_participation !== 'external_directory'/)
+})
+
+test('"Access & modality considered" distinguishes PHYSICIANS consulted from ROUTES considered, using the unfiltered route list so it stays a stable record regardless of Lucy\'s current selection', () => {
+  const fn = recommendationView()
+  assert.match(fn, /\{consultedPhysicianCount\} physician agent\{consultedPhysicianCount === 1 \? '' : 's'\} consulted · \{allOptionRows\.length\} route\{allOptionRows\.length === 1 \? '' : 's'\} considered\./)
 })
 
 /* --------------------------------------------------------------- Part 4 */
@@ -415,4 +479,80 @@ test('Clinical priority and its chip are cleanly aligned -- the shared .section-
 test('the Clinical priority row disappears cleanly behind the blue completion wash, in lockstep with everything else, instead of bleeding through', () => {
   const rule = slice(styles, '.best-fit-card.referral-card.handoff-wash > .back-to-match,', '{')
   assert.match(rule, /\.best-fit-card\.referral-card\.handoff-wash \.referral-priority-line/)
+})
+
+/* =====================================================================
+ * Follow-up pass: fix the e-consult route trap, the caret, stale
+ * consultation-details metadata, and split the conflated Recent activity
+ * entry. See Parts A-U.
+ * ===================================================================== */
+
+/* ----------------------------------------------- Part R: reversibility */
+
+test('default Tonjit selection is Chen + in_person, and resets to exactly that on every fresh mount (no sessionStorage/module-level persistence that could survive a demo reset)', () => {
+  const fn = recommendationView()
+  assert.match(fn, /const \[selectedId, setSelectedId\] = useState\(consultation\.recommended_physician\.physician_id\)/)
+  assert.match(fn, /const \[selectedModality, setSelectedModality\] = useState<CareModality>\('in_person'\)/)
+  assert.doesNotMatch(fn, /sessionStorage.*selectedModality|selectedModality.*sessionStorage/, 'selectedModality must be plain component state, never persisted across a remount')
+})
+
+test('selecting Chen\'s e-consult route keeps selectedId on Chen and only changes selectedModality -- physician and modality are genuinely orthogonal state', () => {
+  const fn = recommendationView()
+  // The e-consult row's onClick passes Chen's own physician_id (via
+  // row.physicianId, which for the chenEconsultRoute row is CHEN_ID) and
+  // 'econsult' as modality -- never a second/duplicate physician identity.
+  assert.match(fn, /onClick=\{\(\) => selectCandidate\(row\.physicianId, row\.modality\)\}/)
+  assert.doesNotMatch(fn, /physician-chen-econsult['"]|chen::econsult/i, 'no synthetic duplicate physician id is ever invented for the e-consult route')
+})
+
+test('Chen in-person remains reachable (and Maya/Okonkwo switching keeps working) -- the SAME otherOptionRows/selectCandidate mechanism handles every transition, never a special case for any one route', () => {
+  const fn = recommendationView()
+  assert.match(fn, /\{row\.selectable && <button type="button" className="text-button" onClick=\{\(\) => selectCandidate\(row\.physicianId, row\.modality\)\}>/)
+  // every named route (chenInPerson, maya, chenEconsult, okonkwo) goes
+  // through the exact same routeRow/alternativeRow + filter pipeline --
+  // there is no per-route special-cased selection handler anywhere.
+  assert.doesNotMatch(fn, /onClick=\{\(\) => selectCandidate\('physician-chen'/, 'no hardcoded physician id bypassing the generic row.physicianId mechanism')
+})
+
+/* ----------------------------------------------------- Part S: consultation details */
+
+test('Chen is counted once even though two of his routes (in-person, e-consult) are evaluated -- the dedup happens by physician_id, in a Set', () => {
+  const fn = recommendationView()
+  assert.match(fn, /new Set\(\[\s*\.\.\.consultation\.consultation\.map\(\(agent\) => agent\.physician_id\),\s*\.\.\.routingOnlyAgents\.map\(\(agent\) => agent\.physician_id\),\s*\]\)\.size/)
+})
+
+test('the structured consultation record (ConsultationLog) remains intact and unmodified by this pass', () => {
+  const fn = recommendationView()
+  assert.match(fn, /<ConsultationLog messages=\{consultation\.messages\} focusEventId=\{focusEventId\} highlight=\{highlight\} \/>/)
+})
+
+/* ----------------------------------------------------------- Part T: caret */
+
+test('the consultation-details trigger is an aligned flex row with the caret in the same inline row as the label text, not a separate/below line', () => {
+  const fn = recommendationView()
+  assert.match(fn, /<em>View consultation details <svg className="disclosure-chevron"/, 'the label text and the chevron are siblings inside the same <em>, never on separate lines')
+  const toggleRule = slice(styles, '.network-transparency-toggle {', '}')
+  assert.match(toggleRule, /display: flex/)
+  assert.match(toggleRule, /align-items: center/)
+})
+
+/* ------------------------------------------------- Part U: Recent activity */
+
+test('Saruhashi coordination and automatic routing are two separate activity rows -- the old conflated single-row copy is gone', () => {
+  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
+  assert.doesNotMatch(home, /Endocrinology referral routed automatically/, 'the old combined single-row phrasing is gone -- these are two separate facts now')
+  const matches = [...home.matchAll(/key="(saruhashi-coordination|auto-routing)"/g)]
+  assert.equal(matches.length, 2, 'exactly two distinct activity rows exist')
+})
+
+test('the Saruhashi coordination activity never exposes the private cross-agent transcript -- it only navigates to Tonjit\'s own already-authorized patient record, never a chat/coordination modal', () => {
+  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
+  const saruhashiRow = home.slice(home.indexOf('key="saruhashi-coordination"'), home.indexOf('key="auto-routing"'))
+  assert.match(saruhashiRow, /onClick=\{\(\) => navigate\(`\/chen\/patients\/\$\{TONJIT_ID\}`\)\}/)
+  assert.doesNotMatch(saruhashiRow, /View agent conversation|AgentCoordinationModal|coordinationOpen/i, 'never opens the raw cross-agent conversation')
+})
+
+test('Recent network (NetworkHighlights) is unchanged by this pass', () => {
+  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
+  assert.match(home, /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="chen" \/>/)
 })

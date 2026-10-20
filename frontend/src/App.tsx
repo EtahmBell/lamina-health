@@ -910,10 +910,12 @@ function RecommendationView({
     selectable: true,
     isAgentPick: option.physician_id === primary.physician_id,
   })
-  /** UX polish pass, Part 1: an explicit, deliberate order -- Maya (the
-   * stronger alternative to Chen) first, then Chen's own e-consult route
-   * (a real alternative route to the SAME strong-fit physician, not a
-   * competing physician), then Dr. Okonkwo (clinically appropriate but
+  /** UX polish pass, Part 1: an explicit, deliberate order -- Dr. Chen's own
+   * in-person route first (the recommended route -- always shown here
+   * when it isn't the current selection, Follow-up pass Part A/B/D), then
+   * Maya (the stronger alternative to Chen), then Chen's own e-consult
+   * route (a real alternative route to the SAME strong-fit physician, not
+   * a competing physician), then Dr. Okonkwo (clinically appropriate but
    * materially worse access, so ranked below the Lamina-network options
    * rather than beside them), then the external-directory candidate last
    * (unverified). Never left to incidental concatenation order, which
@@ -921,20 +923,61 @@ function RecommendationView({
    * against Chen/Maya. Any future route/alternative this demo doesn't
    * explicitly name still appears, appended after -- never silently
    * dropped. */
+  const chenInPersonRoute = consultation.candidate_routes.find((route) => route.recommended)
   const mayaRoute = consultation.candidate_routes.find((route) => route.physician_id === 'physician-ramanathan')
   const chenEconsultRoute = consultation.candidate_routes.find((route) => route.physician_id === CHEN_ID && route.modality === 'econsult')
   const okonkwoAlternative = consultation.alternatives.find((option) => option.physician_id === 'physician-okonkwo')
   const externalDirectoryRoute = consultation.candidate_routes.find((route) => route.network_participation === 'external_directory')
-  const namedRouteKeys = new Set([mayaRoute, chenEconsultRoute, externalDirectoryRoute].filter((route): route is CandidateRoute => Boolean(route)).map((route) => `${route.physician_id}-${route.modality}`))
-  const otherOptionRows = consultation.care_routing ? [
+  const namedRouteKeys = new Set([chenInPersonRoute, mayaRoute, chenEconsultRoute, externalDirectoryRoute].filter((route): route is CandidateRoute => Boolean(route)).map((route) => `${route.physician_id}-${route.modality}`))
+  /** Follow-up pass, Part A-D: ONE canonical route list, unfiltered, used
+   * both for the consultation-details "routes considered" accounting
+   * (Part J) and -- filtered down to whichever route ISN'T the current
+   * selection -- for "Other options" below. This is what makes Chen
+   * in-person/e-consult switching reversible: Chen's in-person route is
+   * just another row in this same list, never special-cased, so whichever
+   * route (physician + modality) isn't currently selected simply reappears
+   * here as a normal selectable option -- physician selection and modality
+   * selection stay orthogonal, never a one-way trap. */
+  const allOptionRows = consultation.care_routing ? [
+    ...(chenInPersonRoute ? [{ ...routeRow(chenInPersonRoute), isAgentPick: true }] : []),
     ...(mayaRoute ? [routeRow(mayaRoute)] : []),
     ...(chenEconsultRoute ? [routeRow(chenEconsultRoute)] : []),
     ...(okonkwoAlternative ? [alternativeRow(okonkwoAlternative)] : []),
     ...(externalDirectoryRoute ? [routeRow(externalDirectoryRoute)] : []),
     ...consultation.alternatives.filter((option) => option.physician_id !== 'physician-okonkwo').map(alternativeRow),
-    ...consultation.candidate_routes.filter((route) => !route.recommended && !namedRouteKeys.has(`${route.physician_id}-${route.modality}`)).map(routeRow),
+    ...consultation.candidate_routes.filter((route) => !namedRouteKeys.has(`${route.physician_id}-${route.modality}`)).map(routeRow),
   ] : []
-  const isAgentPick = selected.physician_id === primary.physician_id
+  const otherOptionRows = allOptionRows.filter((row) => !(row.physicianId === selectedId && row.modality === selectedModality))
+  /** Follow-up pass, Part G-K: "physician agents consulted" must count
+   * unique PHYSICIANS, never routes -- Chen's in-person and e-consult
+   * routes are the same agent, counted once (Part H). Merges the real
+   * evaluate_physician responses (consultation.consultation -- Chen/
+   * Okonkwo/Torres for Tonjit) with whichever additional physician the
+   * newer routing model itself evaluated that isn't already in that list
+   * (Maya) -- her CandidateRoute already carries a real structured
+   * rationale/fit (never fabricated). The external-directory candidate is
+   * deliberately excluded: no Lamina agent ever evaluated her (Part K). */
+  const routingOnlyAgents = consultation.candidate_routes
+    .filter((route) => route.network_participation !== 'external_directory')
+    .filter((route) => !consultation.consultation.some((agent) => agent.physician_id === route.physician_id))
+    .reduce<{ physician_id: string; physician_name: string; reason: string }[]>((unique, route) => {
+      if (unique.some((item) => item.physician_id === route.physician_id)) return unique
+      unique.push({ physician_id: route.physician_id, physician_name: route.physician_name, reason: route.rationale ?? '' })
+      return unique
+    }, [])
+  const consultedPhysicianCount = new Set([
+    ...consultation.consultation.map((agent) => agent.physician_id),
+    ...routingOnlyAgents.map((agent) => agent.physician_id),
+  ]).size
+  // Follow-up pass, Part D: the RECOMMENDED route (Chen, in-person) never
+  // changes just because Lucy is trying out a different one -- these two
+  // booleans separately track "different physician than recommended" and
+  // "same physician, different modality than recommended", so the kicker/
+  // provenance copy below can say something true in either case, without
+  // ever rewriting consultation.care_routing itself.
+  const physicianDiffersFromRecommendation = selected.physician_id !== primary.physician_id
+  const modalityDiffersFromRecommendation = !physicianDiffersFromRecommendation && selectedModality !== 'in_person'
+  const isAgentPick = !physicianDiffersFromRecommendation && !modalityDiffersFromRecommendation
   const explicitRule = evidenceFor(selected, 'explicit_physician_rule')
   const supportingFacts = selected.evidence.filter((item) => item.kind === 'patient_fact').map((item) => item.detail).slice(0, 2)
   const reasons = [explicitRule, ...supportingFacts].filter(Boolean) as string[]
@@ -1134,7 +1177,12 @@ function RecommendationView({
      * indicator, one metadata line, one rationale sentence, and the primary action.
      * Everything denser lives behind "Review match details" below. */}
     <article className={`best-fit-card compact ${swapping ? 'swapping' : ''}`}>
-      <p className="best-fit-kicker">{isAgentPick ? 'Recommended physician' : 'Selected specialist'}</p>
+      {/* Follow-up pass, Part D: the kicker distinguishes all three real
+       * states -- the exact recommended route, a different physician than
+       * recommended, or the SAME recommended physician on a different
+       * route (e-consult) -- never conflating "different route" with
+       * "different physician". */}
+      <p className="best-fit-kicker">{isAgentPick ? 'Recommended physician' : physicianDiffersFromRecommendation ? 'Selected specialist' : 'Selected route'}</p>
       {/* UX polish pass, Part 3B: the avatar and name are both clickable --
        * every physician shown here should feel inspectable. */}
       <div className="best-fit-physician">
@@ -1143,8 +1191,8 @@ function RecommendationView({
         </PhysicianProfileLink>
         <div><h2><PhysicianProfileLink physicianId={selected.physician_id} navigate={navigate} onUnclaimed={() => setUnclaimedProfile({ name: cleanName(selected.physician_name), specialty: selected.specialty })}>{cleanName(selected.physician_name)}</PhysicianProfileLink></h2><p>{selected.specialty}</p></div>
       </div>
-      {!isAgentPick && <p className="selection-provenance">Selected by you</p>}
-      {selectedModality === 'econsult' && <p className="selection-provenance">E-consult request</p>}
+      {physicianDiffersFromRecommendation && <p className="selection-provenance">Selected by you</p>}
+      {modalityDiffersFromRecommendation && <p className="selection-provenance">E-consult request — selected by you</p>}
       <p className="fit-indicator">{selected.clinical_fit === 'strong' ? 'Strong clinical fit' : selected.clinical_fit === 'moderate' ? 'Moderate clinical fit' : 'Limited clinical fit'}</p>
       <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selectedEconsultRoute ? (selectedEconsultRoute.access.econsult_response_label ?? 'Response time unverified') : selected.availability}</p>
       <p className="fit-rationale">{selected.reason}</p>
@@ -1282,7 +1330,12 @@ function RecommendationView({
       </div>)}</div>}
     </section>}
 
-    <section className="network-transparency"><button className="network-transparency-toggle" onClick={() => setNetworkOpen(true)} aria-expanded={networkOpen}><span><b>How your agent handled this</b></span><em>View consultation details <i>⌄</i></em></button></section>
+    {/* Follow-up polish pass, Part F: the "⌄" glyph's own font metrics carry
+     * visual ink below its line-box center, so no amount of flex/line-height
+     * tuning on the character itself ever actually centers it -- replaced
+     * with a small inline SVG chevron instead, which (as a replaced element)
+     * centers reliably via the parent's flex alignment. */}
+    <section className="network-transparency"><button className="network-transparency-toggle" onClick={() => setNetworkOpen(true)} aria-expanded={networkOpen}><span><b>How your agent handled this</b></span><em>View consultation details <svg className="disclosure-chevron" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true"><path d="M1 1.5 6 6.5 11 1.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg></em></button></section>
     <p className="disclaimer">{consultation.disclaimer}</p>
     {networkOpen && <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setNetworkOpen(false) }}>
       <div className="post-flow-dialog consult-detail-dialog" role="dialog" aria-modal="true" aria-label="Consultation details">
@@ -1290,15 +1343,22 @@ function RecommendationView({
         <p className="eyebrow">Consultation details</p>
         <h2>How your agent handled this</h2>
         <div className="network-record">
-          <p className="agent-consult-count">{consultation.consultation.length} physician agent{consultation.consultation.length === 1 ? '' : 's'} consulted</p>
-          <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}
+          <p className="agent-consult-count">{consultedPhysicianCount} physician agent{consultedPhysicianCount === 1 ? '' : 's'} consulted</p>
+          <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}{routingOnlyAgents.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}
           {/* UX polish pass, Part 2B: brings this content up to date with the
            * newer routing model -- access and modality were weighed
            * alongside clinical fit for every option, not fit alone, and
            * Chen's e-consult route was a real alternative considered, not
            * an afterthought. Structured facts only, same as everything
            * else in this modal -- nothing beyond these same structured facts. */}
-          {consultation.care_routing && <div><span>Access &amp; modality considered</span><p>{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person evaluation' : 'E-consult'} was recommended for this presentation; expected access and e-consult suitability were weighed for every option below alongside clinical fit, not fit alone.</p><ul>{otherOptionRows.map((row) => <li key={row.key}><b>{row.name}{row.modality === 'econsult' ? ' — E-consult' : ''}:</b> {row.fitText} · {row.accessText}</li>)}</ul></div>}</div>
+          {/* Follow-up pass, Part J: distinguishes PHYSICIANS consulted from
+           * ROUTES considered -- there are more routes than physicians
+           * because one physician (Chen) has two routes, never the other
+           * way around. Uses `allOptionRows` (unfiltered by current
+           * selection) so this list is a stable, complete record of what
+           * was evaluated, not a reflection of whatever Lucy currently has
+           * selected. */}
+          {consultation.care_routing && <div><span>Access &amp; modality considered</span><p>{consultedPhysicianCount} physician agent{consultedPhysicianCount === 1 ? '' : 's'} consulted · {allOptionRows.length} route{allOptionRows.length === 1 ? '' : 's'} considered. {consultation.care_routing.recommended_modality === 'in_person' ? 'In-person evaluation' : 'E-consult'} was recommended for this presentation; expected access and e-consult suitability were weighed for every route below alongside clinical fit, not fit alone.</p><ul>{allOptionRows.map((row) => <li key={row.key}><b>{row.name}{row.modality === 'econsult' ? ' — E-consult' : ''}:</b> {row.fitText}{row.networkText ? ` · ${row.networkText}` : ''} · {row.accessText}</li>)}</ul></div>}</div>
           <div className="record-note">Deliberate structured messages and evidence only. Hidden model chain-of-thought is not stored or shown.</div><ConsultationLog messages={consultation.messages} focusEventId={focusEventId} highlight={highlight} /><div className="evaluation-record-heading">Physician evaluation records</div>{consultation.consultation.map((agent) => { const rule = evidenceFor(agent, 'explicit_physician_rule'); const history = evidenceFor(agent, 'historical_practice_similarity'); return <details key={agent.physician_id} open={agent.physician_id === primary.physician_id}><summary><span className="mini-avatar">{physicianInitials(agent.physician_name)}</span><span className="agent-name"><b>{cleanName(agent.physician_name)}</b><small>{agent.specialty}</small></span><span className={`decision-badge ${agent.clinical_fit}`}>{agent.accepts_case ? agent.clinical_fit === 'strong' ? 'Strong fit' : 'Accepts' : 'Redirect'}</span><span className="chevron">⌄</span></summary><div className="structured-evidence"><p>{agent.reason}</p><div className="evidence-grid"><div><span>Decision</span><strong>{agent.accepts_case ? 'Accepts case' : 'Redirects / does not accept'}</strong></div><div><span>Availability</span><strong>{agent.availability}</strong></div><div><span>Insurance</span><strong>{insuranceLabel(agent.insurance_status)}</strong></div><div><span>Required workup</span><strong>{agent.required_workup.join(' · ')}</strong></div>{rule && <div className="wide"><span>Relevant physician rule</span><strong>{rule}</strong></div>}{history && <div className="wide"><span>Historical-practice signal</span><strong>{history}</strong></div>}</div></div></details> })}
           <p>These are structured inputs and recorded conclusions, not private model reasoning.</p>
         </div>
