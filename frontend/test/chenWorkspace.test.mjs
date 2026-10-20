@@ -56,7 +56,7 @@ test('Iain\'s specialist routes/nav remain valid and untouched (he is simply no 
 
 test('ChenHomePage mirrors Lucy\'s HomePage architecture: greeting, agent banner, incoming-request awareness, patients-with-next-steps, recent activity, recent network', () => {
   const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} viewAgentPath="\/chen\/agent\?tab=overview" personaId="chen" \/>/)
+  assert.match(fn, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} viewAgentPath="\/chen\/agent\?tab=overview" personaId="chen" onTrainingUpdated=\{\(\) => getAgentOverview\('chen'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\} \/>/)
   assert.match(fn, /<h2>Needs your review<\/h2>/)
   assert.match(fn, /<h2>Patients<\/h2>/)
   assert.match(fn, /<h2>Recent activity<\/h2>/)

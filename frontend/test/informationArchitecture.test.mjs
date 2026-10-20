@@ -81,7 +81,7 @@ test('the Dashboard activity header links to the agent, not to consultations', (
 })
 
 test('Home renders the Your Agent card from canonical AgentOverview state only', () => {
-  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} personaId="lucy" \/>/)
+  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} personaId="lucy" onTrainingUpdated=\{\(\) => getAgentOverview\('lucy'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\} \/>/)
   assert.doesNotMatch(home(), /Math\.|%|average|score|trend/i, 'no invented metrics on Home')
 })
 

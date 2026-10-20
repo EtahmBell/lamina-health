@@ -144,8 +144,8 @@ def build_consultation_messages(
             recipient_agent_id=synthetic_agent_id("physician-onadeko"),
             message_type=ConsultationMessageType.FOLLOW_UP_QUESTION,
             summary=(
-                "Does progressive renal dysfunction alter willingness to accept this patient "
-                "as the initial specialist?"
+                "Whether progressive renal dysfunction changes willingness to accept this "
+                "patient as the initial specialist."
             ),
             evidence=[],
             related_patient_facts=[
@@ -166,7 +166,7 @@ def build_consultation_messages(
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.FOLLOW_UP_ANSWER,
             summary=(
-                "Yes. Current referral criteria favour nephrology first when progressive renal "
+                "Current referral criteria favour nephrology first when progressive renal "
                 "dysfunction is prominent; hypertension cardiology can follow or co-manage."
             ),
             evidence=explicit_rule,
@@ -280,7 +280,7 @@ def _build_anemia_messages(
             sender_role="Gastroenterology",
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.FOLLOW_UP_QUESTION,
-            summary="Is any prior colonoscopy or upper endoscopy documented?",
+            summary="Whether any prior colonoscopy or upper endoscopy is documented.",
             evidence=[item for item in sanchez.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
             related_patient_facts=[fact for fact in context.facts if "endoscopic" in fact],
         )
@@ -425,7 +425,7 @@ def _build_diabetes_messages(
             sender_role="Endocrinology",
             recipient_agent_id=PCP_AGENT_ID,
             message_type=ConsultationMessageType.FOLLOW_UP_QUESTION,
-            summary="Has insulin or a GLP-1/SGLT2 agent been discussed, or is the regimen still oral monotherapy plus one added agent?",
+            summary="Whether insulin or a GLP-1/SGLT2 agent has been discussed, or the regimen remains oral monotherapy plus one added agent.",
             evidence=[item for item in chen.evidence if item.kind == EvidenceKind.EXPLICIT_RULE],
             related_patient_facts=[fact for fact in context.facts if "medication" in fact.casefold()],
         )

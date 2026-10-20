@@ -204,7 +204,7 @@ test('neither modal exposes hidden chain-of-thought language', () => {
 })
 
 test('the coordination dialog has a sensible max width and relies on the shared scrollable dialog shell', () => {
-  assert.ok(styles.includes('.coordination-dialog, .consult-detail-dialog { width: min(100%, 640px); }'))
+  assert.ok(styles.includes('.coordination-dialog, .consult-detail-dialog, .network-ask-agent-dialog { width: min(100%, 640px); }'))
   assert.match(styles, /\.post-flow-dialog \{[^}]*max-height: 86vh;[^}]*overflow-y: auto/)
 })
 

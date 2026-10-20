@@ -669,3 +669,43 @@ test('backend acceptance is immediate and animation-independent -- acceptReferra
   assert.match(modalFn, /onAccepted\(updated\)/)
   assert.match(modalFn, /onClick=\{onClose\}/)
 })
+
+/* =====================================================================
+ * Pre-NLP physician-representation cleanup pass: the consultation audit
+ * no longer reads as a conversation, the Dashboard improvement card
+ * advances immediately after quick training, Network "Ask their agent"
+ * exists for eligible physicians, and training cards support Back. See
+ * Parts A-Z.
+ * ===================================================================== */
+
+/* --------------------------------------------------------------- Part W */
+
+test('the durable consultation audit uses a typed taxonomy, never conversation/transcript/messages terminology -- follow-up events read as Clarification requested/resolved, not a labeled Q&A turn', () => {
+  assert.match(app, /const MESSAGE_TYPE_LABELS: Record<ConsultationMessage\['message_type'\], string> = \{/)
+  assert.match(app, /follow_up_question: 'Clarification requested',/)
+  assert.match(app, /follow_up_answer: 'Clarification resolved',/)
+  const logFn = app.slice(app.indexOf('function ConsultationLog'), app.indexOf('function RecommendationView'))
+  assert.doesNotMatch(logFn, /\bConversation\b|\bTranscript\b/i)
+})
+
+test('the event row leads with the typed label, then the agent, then the fact -- never a bold speaker name over quoted-sounding content', () => {
+  assert.match(app, /<summary><span>\{message\.sequence\.toString\(\)\.padStart\(2, '0'\)\}<\/span><div><em>\{messageLabel\(message\)\}<\/em><strong>\{messageSender\(message\)\}<\/strong><small>\{message\.summary\}<\/small><\/div><\/summary>/)
+})
+
+test('the follow-up question/answer facts are rewritten into declarative noun form, never left as literal interrogative dialogue, for every case family that has one (Jordan/CKD, Maria/GI, Tonjit/diabetes)', () => {
+  const conversationSource = readFileSync(new URL('../../backend/agents/conversation.py', import.meta.url), 'utf8')
+  const questions = [...conversationSource.matchAll(/FOLLOW_UP_QUESTION,\s*summary=(?:\(\s*)?"([^"]*(?:"\s*\n\s*"[^"]*)*)"/g)]
+  assert.ok(questions.length >= 3, 'expected at least 3 follow-up questions across the synthetic case families')
+  for (const [, summary] of questions) {
+    assert.doesNotMatch(summary, /\?\s*$/, `follow-up question summary should read as a noun/fact, not a literal question: "${summary}"`)
+  }
+})
+
+test('the "About this consultation" disclosure, patient facts, agent identities, event order, and all other structured content remain fully intact -- this is a presentation-only change, not information deletion', () => {
+  const fn = recommendationView()
+  assert.match(fn, /<div className="evaluation-record-heading">About this consultation<\/div>/)
+  assert.match(fn, /Temporary agent working context is not retained\./)
+  assert.match(app, /\{message\.sequence\.toString\(\)\.padStart\(2, '0'\)\}/, 'sequence/order remains visible')
+  assert.match(app, /messageSender\(message\)/, 'agent identity remains visible')
+  assert.match(app, /message\.related_patient_facts\.map/, 'shared patient facts remain visible')
+})

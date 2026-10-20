@@ -18,6 +18,8 @@ from backend.agent_experience import (
     test_case_by_id,
 )
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
+from backend.models import CoordinationChatAnswer
+from backend.network_chat import answer_general_practice_question
 from backend.engagement import (
     DEPENDS_OPTION,
     EDITABLE_PERSONAS,
@@ -133,6 +135,15 @@ class AgentChatInput(BaseModel):
 
 class AgentChatFeedbackInput(BaseModel):
     feedback: Literal["reflects", "not_quite"]
+
+
+class NetworkAgentChatInput(BaseModel):
+    """Pre-NLP cleanup pass, Part J-Q: a general, non-patient-specific
+    question for a Network physician's own agent -- deliberately has no
+    patient_id/referral_id field at all, so "no patient context" is
+    enforced by the request shape itself, not just by convention."""
+
+    question: str = Field(min_length=1, max_length=500)
 
 
 class CandidateReviewInput(BaseModel):
@@ -999,6 +1010,15 @@ def answer_training_question(
     assigned_ids = {item["question_id"] for item in assigned}
     if question_id not in assigned_ids:
         raise HTTPException(404, "Question is not assigned to this session")
+    # Pre-NLP cleanup pass, Part S/T: retract any branch this question
+    # PREVIOUSLY triggered before computing anything below -- re-answering
+    # (e.g. after using the training card's Back affordance) must never
+    # finalize a conflicting old/new response, and a stale already-
+    # assigned branch id must never block a different branch the new
+    # answer should trigger instead.
+    workflow_store.retract_training_branch(workspace_id, persona_id, session_id, question_id)
+    assigned = workflow_store.training_session_questions(workspace_id, persona_id, session_id)
+    assigned_ids = {item["question_id"] for item in assigned}
     if update.skipped:
         answer = None
     else:
@@ -1642,3 +1662,51 @@ def network_physician_profile(controlled_id: str, workspace_id: DemoWorkspace) -
         ],
         "disclaimer": "Controlled synthetic physician profile · no private calibration or patient data",
     }
+
+
+@router.post("/network/physicians/{controlled_id}/ask", response_model=CoordinationChatAnswer)
+def ask_network_agent(
+    controlled_id: str, request: NetworkAgentChatInput, workspace_id: DemoWorkspace
+) -> CoordinationChatAnswer:
+    """Pre-NLP cleanup pass, Part J-Q: "Ask their agent" from a Network
+    physician profile -- general practice questions only, grounded ONLY in
+    that physician's own confirmed representation (never another patient's
+    record, another physician's referral context, or an unconfirmed/
+    proposed learning). Deliberately stateless: nothing here is persisted,
+    mirroring the existing patient-scoped coordination chat's own ephemeral
+    boundary (see backend/referrals/coordination_chat.py)."""
+    if controlled_id not in PERSONAS:
+        raise HTTPException(404, "Controlled synthetic physician not found")
+    overlays = (
+        workflow_store.profile_items(workspace_id, controlled_id)
+        if controlled_id in EDITABLE_PERSONAS
+        else []
+    )
+    interest_overlays = (
+        workflow_store.physician_interests(workspace_id, controlled_id)
+        if controlled_id in EDITABLE_PERSONAS
+        else []
+    )
+    profile = project_professional_profile(controlled_id, overlays, interest_overlays)
+    questions = (
+        _questions(workspace_id, controlled_id)
+        if controlled_id in EDITABLE_PERSONAS
+        else []
+    )
+    learnings = (
+        workflow_store.proposed_learnings(workspace_id, controlled_id)
+        if controlled_id in EDITABLE_PERSONAS
+        else []
+    )
+    representation = project_practice_representation(controlled_id, questions, learnings, profile)
+    physician_name = PERSONAS[controlled_id]["name"].replace("Dr. ", "")
+    answer, based_on, unconfirmed = answer_general_practice_question(
+        representation, physician_name, request.question
+    )
+    return CoordinationChatAnswer(
+        answer=answer,
+        based_on=based_on,
+        requires_physician_input=unconfirmed,
+        represented_agent_id=PERSONAS[controlled_id]["agent_id"],
+        created_at=datetime.now(UTC).isoformat(),
+    )

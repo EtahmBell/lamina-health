@@ -291,7 +291,7 @@ function HomePage({ navigate }: { navigate: Navigate }) {
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
-      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" matchesReady={currentWork.length} records={records} personaId="lucy" />
+      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" matchesReady={currentWork.length} records={records} personaId="lucy" onTrainingUpdated={() => getAgentOverview('lucy').then(setOverview).catch(() => {})} />
       <PatientWatchTable rows={watchRows} navigate={navigate} />
       <div className="dashboard-bottom-row">
         <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View your agent →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span>{item.kind === 'interaction' && <em className="activity-kind agent-event-label">Agent</em>}<strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
@@ -674,9 +674,25 @@ const networkParticipationLabel = (participation: NetworkParticipation) => parti
 const econsultSuitabilityLabel = (suitability: EconsultSuitability) => suitability === 'suitable' ? 'Suitable' : suitability === 'possible_not_preferred' ? 'Possible, not preferred' : 'Not suitable'
 const messageSender = (message: ConsultationMessage) => message.sender_agent_id === PCP_AGENT_ID ? `${PCP_NAME} Agent` : message.sender_name
 
+/** Pre-NLP cleanup pass, Part A/B: a durable audit-event taxonomy -- every
+ * entry reads as a typed record (Clarification requested/resolved,
+ * Requirement identified, Route recommended, ...), never as a labeled
+ * turn in a back-and-forth exchange. `fit_response` keeps its own
+ * sharper "{fit} fit" conclusion label (already audit-style, more
+ * specific than a generic "Fit conclusion returned" would be). */
+const MESSAGE_TYPE_LABELS: Record<ConsultationMessage['message_type'], string> = {
+  consult_request: 'Consult requested',
+  fit_response: 'Fit conclusion returned',
+  redirect: 'Redirect returned',
+  follow_up_question: 'Clarification requested',
+  follow_up_answer: 'Clarification resolved',
+  referral_requirement: 'Requirement identified',
+  access_update: 'Access update',
+  synthesis: 'Route recommended',
+}
 const messageLabel = (message: ConsultationMessage) => {
   if (message.message_type === 'fit_response') return `${String(message.metadata.clinical_fit || 'fit')} fit`
-  return message.message_type.replaceAll('_', ' ')
+  return MESSAGE_TYPE_LABELS[message.message_type]
 }
 
 /** UX polish pass, Part 3B (follow-up pass, Part A/B): every physician shown
@@ -713,7 +729,14 @@ function PhysicianProfileLink({ physicianId, navigate, children, className }: {
 
 function ConsultationLog({ messages, focusEventId, highlight }: { messages: ConsultationMessage[]; focusEventId?: string | null; highlight?: boolean }) {
   const stages = groupConsultationMessages(messages)
-  return <div className="consult-record-stages"><header><strong>Structured consultation record</strong><small>{messages.length} backend events · original sequence preserved</small></header>{stages.map((stage) => <section className={`consult-record-stage ${stage.kind}`} key={stage.id}><div className="consult-record-stage-heading"><span>{stage.title}</span><small>{stage.messages.length} event{stage.messages.length === 1 ? '' : 's'}</small></div><div className="consult-record-events">{stage.messages.map((message) => <details className={`consult-record-event ${message.id === focusEventId ? 'targeted' : ''} ${message.id === focusEventId && highlight ? 'event-focus' : ''}`} id={eventDomId(message.id)} open={message.id === focusEventId} key={message.id}><summary><span>{message.sequence.toString().padStart(2, '0')}</span><div><strong>{messageSender(message)}</strong><small>{message.summary}</small></div><em>{messageLabel(message)}</em></summary><div className="consult-record-evidence"><p>{message.sender_role} → {message.recipient_agent_id === PCP_AGENT_ID ? PCP_AGENT_NAME : message.recipient_agent_id === 'network' ? 'Physician network' : 'Specialist agent'}</p>{message.related_patient_facts.map((fact) => <p key={fact}><b>Patient fact</b>{fact}</p>)}{message.evidence.map((item, index) => <p key={`${index}-${item.kind}`}><b>{item.kind.replaceAll('_', ' ')}</b>{item.detail}</p>)}{!message.evidence.length && !message.related_patient_facts.length && <p>No additional structured evidence on this event.</p>}</div></details>)}</div></section>)}</div>
+  // Pre-NLP cleanup pass, Part A/D: the event TYPE leads each row (an
+  // audit-log pattern -- "what kind of record is this"), then who
+  // returned it, then the fact itself -- never a bold speaker name
+  // followed by quoted-sounding content, which is what made this read
+  // like a chat turn even though the underlying data was always
+  // structured. Same three pieces of text as before, just reordered and
+  // relabeled; no fact/content was altered.
+  return <div className="consult-record-stages"><header><strong>Structured consultation record</strong><small>{messages.length} backend events · original sequence preserved</small></header>{stages.map((stage) => <section className={`consult-record-stage ${stage.kind}`} key={stage.id}><div className="consult-record-stage-heading"><span>{stage.title}</span><small>{stage.messages.length} event{stage.messages.length === 1 ? '' : 's'}</small></div><div className="consult-record-events">{stage.messages.map((message) => <details className={`consult-record-event ${message.id === focusEventId ? 'targeted' : ''} ${message.id === focusEventId && highlight ? 'event-focus' : ''}`} id={eventDomId(message.id)} open={message.id === focusEventId} key={message.id}><summary><span>{message.sequence.toString().padStart(2, '0')}</span><div><em>{messageLabel(message)}</em><strong>{messageSender(message)}</strong><small>{message.summary}</small></div></summary><div className="consult-record-evidence"><p>{message.sender_role} → {message.recipient_agent_id === PCP_AGENT_ID ? PCP_AGENT_NAME : message.recipient_agent_id === 'network' ? 'Physician network' : 'Specialist agent'}</p>{message.related_patient_facts.map((fact) => <p key={fact}><b>Patient fact</b>{fact}</p>)}{message.evidence.map((item, index) => <p key={`${index}-${item.kind}`}><b>{item.kind.replaceAll('_', ' ')}</b>{item.detail}</p>)}{!message.evidence.length && !message.related_patient_facts.length && <p>No additional structured evidence on this event.</p>}</div></details>)}</div></section>)}</div>
 }
 
 function RecommendationView({

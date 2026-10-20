@@ -1664,7 +1664,7 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
   return <main className="page-shell home-page dashboard-page">
     <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1>{situationSummary && <p className="dashboard-situation">{situationSummary}</p>}</header>
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
-    <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('chen')} viewAgentPath="/chen/agent?tab=overview" personaId="chen" />
+    <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('chen')} viewAgentPath="/chen/agent?tab=overview" personaId="chen" onTrainingUpdated={() => getAgentOverview('chen').then(setOverview).catch(() => {})} />
     {/* Routing/triage UX pass, Part Q/R: renamed from "Incoming requests" --
      * agents triage all incoming specialty demand; this surface only ever
      * holds the requests where Chen's own decision is actually required. */}

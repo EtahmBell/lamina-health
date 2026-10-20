@@ -1046,7 +1046,12 @@ SYNTHETIC_FEED_FIXTURES = [
 
 
 def profile_items(persona_id: str, overlays: list[dict]) -> list[dict]:
-    merged = {item["id"]: item for item in BASE_PROFILE_ITEMS[persona_id]}
+    # Pre-NLP cleanup pass bugfix: a persona with no seeded base profile
+    # items (e.g. Maya, added to PERSONAS without base content yet) must
+    # not 500 -- mirrors physician_interests' own existing .get(..., [])
+    # fallback just below, rather than assuming every persona has a
+    # BASE_PROFILE_ITEMS entry.
+    merged = {item["id"]: item for item in BASE_PROFILE_ITEMS.get(persona_id, [])}
     merged.update({item["id"]: item for item in overlays})
     return sorted(merged.values(), key=lambda item: (item["category"], item["id"]))
 

@@ -1773,6 +1773,39 @@ class WorkflowStore:
             "answered_at": now,
         }
 
+    def retract_training_branch(
+        self, workspace_id: str, persona_id: str, session_id: int, parent_question_id: str
+    ) -> list[str]:
+        """Pre-NLP cleanup pass, Part S/T: when a question's answer changes,
+        any branch question it PREVIOUSLY triggered -- and that branch's own
+        stored response, if it was answered -- is no longer valid. Deleted
+        outright rather than left stale, so re-answering a question never
+        finalizes a conflicting old/new response and never lets an already-
+        assigned-but-now-irrelevant branch id block a DIFFERENT branch the
+        new answer should trigger instead (see next_branch_question's
+        assigned_ids guard in backend/api/engagement.py). This demo's
+        branching is one level deep, so only direct children are retracted.
+        Returns the retracted question ids."""
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT question_id FROM training_session_questions
+                   WHERE workspace_id=? AND persona_id=? AND session_id=? AND parent_question_id=?""",
+                (workspace_id, persona_id, session_id, parent_question_id),
+            ).fetchall()
+            retracted = [row["question_id"] for row in rows]
+            if retracted:
+                db.execute(
+                    """DELETE FROM training_session_questions
+                       WHERE workspace_id=? AND persona_id=? AND session_id=? AND parent_question_id=?""",
+                    (workspace_id, persona_id, session_id, parent_question_id),
+                )
+                db.executemany(
+                    """DELETE FROM training_responses
+                       WHERE workspace_id=? AND session_id=? AND persona_id=? AND question_id=?""",
+                    [(workspace_id, session_id, persona_id, qid) for qid in retracted],
+                )
+        return retracted
+
     def training_responses(
         self, workspace_id: str, persona_id: str, session_id: int | None = None
     ) -> list[dict]:

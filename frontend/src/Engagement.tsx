@@ -4,6 +4,7 @@ import {
   ApiError,
   addNetworkMember,
   answerTrainingQuestion,
+  askNetworkAgent,
   chatWithAgent,
   completeTrainingReview,
   createPracticeUpdate,
@@ -71,6 +72,7 @@ import {
 import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { AgentAvatar, agentTone, type AgentAvatarTone } from './AgentAvatar.tsx'
+import { ModalPortal } from './ModalPortal.tsx'
 
 type Navigate = (path: string) => void
 
@@ -201,10 +203,13 @@ export function selectImprovementPrompt(
   profile: ProfessionalProfile | null,
   profilePath: string,
 ): ImprovementPrompt | null {
+  // Pre-NLP cleanup pass, Part G: `plan.label`/`plan.support` already
+  // distinguish "unfinished active session -> resume" from "fresh start"
+  // from "review what your agent learned" (see agentBannerPlan) -- reused
+  // directly here instead of re-hardcoding one generic "Answer 3 quick
+  // questions" string for every one of those different real states.
   if (plan) {
-    return isReview
-      ? { key: 'review-training', heading: 'Make your agent more like you.', body: plan.support, ctaLabel: plan.label, kind: 'navigate', href: plan.href }
-      : { key: 'quick-training', heading: 'Make your agent more like you.', body: 'A few quick answers help your agent represent your practice more faithfully.', ctaLabel: 'Answer 3 quick questions', kind: 'quick-training' }
+    return { key: isReview ? 'review-training' : 'quick-training', heading: 'Make your agent more like you.', body: plan.support, ctaLabel: plan.label, kind: isReview ? 'navigate' : 'quick-training', href: isReview ? plan.href : undefined }
   }
   if (!profile) return null
   const caseInterestCount = profile.interests.filter((item) => item.interest_type === 'case_interest').length
@@ -291,18 +296,32 @@ export function WorklistRows({ rows, navigate, basePath = '/patients', highlight
  * expandable into up to three outcome tiles — never a raw activity duplicate). Right
  * side answers "how can I make my agent more like me?" (a small training burst that
  * opens a modal, not the full My Agent -> Train environment). */
-export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, matchesReady = 0, records = [], personaId }: {
+export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, matchesReady = 0, records = [], personaId, onTrainingUpdated }: {
   overview: AgentOverview | null; navigate: Navigate; trainPath: string; viewAgentPath: string; matchesReady?: number; records?: ConsultationRecord[]; personaId: PhysicianIdentity
+  /** Pre-NLP cleanup pass, Part F-I: the ROOT CAUSE of the card staying
+   * stuck on "Answer 3 quick questions" after finishing it was that
+   * nothing ever invalidated/refetched the `overview` prop (owned by the
+   * PARENT -- HomePage/ChenHomePage/SpecialistHomePage) once the quick-
+   * training session actually finished; `QuickTrainingModal`'s onFinished
+   * only ever closed itself. This callback lets the parent re-fetch its
+   * own training state the moment completion is real (finishTrainingSession
+   * has already resolved by the time the physician can click "Back to
+   * your Dashboard" -- see QuickTrainingModal's `finish()`), so the next
+   * render's `plan`/`prompt` are never stale. Optional so no existing
+   * caller is required to change. */
+  onTrainingUpdated?: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [trainingOpen, setTrainingOpen] = useState(false)
-  // Follow-up pass, Part R-T: fetched here (not threaded through every
+  // Follow-up pass, Part R-T (Part F-I: now also re-run on training
+  // completion, not just mount): fetched here (not threaded through every
   // caller as a new prop) so every existing call site stays unchanged --
   // "reuse the existing card" literally. Best-effort/silent on failure;
   // the card still works from `plan` alone while this is loading or
   // unavailable, exactly like before this pass.
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
-  useEffect(() => { getProfessionalProfile(personaId).then(setProfile).catch(() => {}) }, [personaId])
+  const loadProfile = () => { getProfessionalProfile(personaId).then(setProfile).catch(() => {}) }
+  useEffect(loadProfile, [personaId])
   if (!overview) return null
   const training = overview.training
   const plan = agentBannerPlan(training, trainPath)
@@ -341,7 +360,7 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, ma
         <div><p className="agent-digest-tile-label">{tile.label}</p><p className="agent-digest-tile-detail">{tile.detail}</p></div>
       </div>)}</div>
     </div>
-    {trainingOpen && <QuickTrainingModal personaId={personaId} onClose={() => setTrainingOpen(false)} onFinished={() => setTrainingOpen(false)} />}
+    {trainingOpen && <QuickTrainingModal personaId={personaId} onClose={() => setTrainingOpen(false)} onFinished={() => { setTrainingOpen(false); loadProfile(); onTrainingUpdated?.() }} />}
   </section>
 }
 
@@ -364,6 +383,11 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
   const [multiSelected, setMultiSelected] = useState<string[]>([])
   const [textAnswer, setTextAnswer] = useState('')
   const [learnings, setLearnings] = useState<ProposedLearning[]>([])
+  // Pre-NLP cleanup pass, Part R-T: every real (non-skipped) answer given
+  // this session, keyed by question id -- lets Back restore exactly what
+  // was previously selected/typed, so the physician can see and revise it
+  // rather than starting that question over blank.
+  const [answersById, setAnswersById] = useState<Record<string, string | string[]>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -413,6 +437,7 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
     setBusy(true); setError('')
     try {
       const response = await answerTrainingQuestion(personaId, session.id, current.id, skipped ? { skipped: true } : { answer: answer ?? undefined })
+      if (!skipped && answer !== null) setAnswersById((prev) => ({ ...prev, [current.id]: answer }))
       setAnsweredCount(response.answered_count ?? answeredCount + 1)
       setAnswerTarget(response.answer_target ?? answerTarget)
       setMultiSelected([]); setTextAnswer('')
@@ -434,6 +459,27 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
     }
   }
 
+  /** Pre-NLP cleanup pass, Part R-T: returns to the immediately previous
+   * TOP-LEVEL question (branch_depth === 0), skipping back over any
+   * branch/follow-up questions in between -- never past the first
+   * question (Part Z.1). Truncates `queue` to drop everything after the
+   * target, so any now-stale branch question a since-changed answer had
+   * produced is discarded on the frontend too (the backend's own
+   * retract_training_branch handles the authoritative/persisted half of
+   * this the moment the revised answer is actually re-submitted). */
+  const goBack = () => {
+    if (index === 0 || busy) return
+    let newIndex = index - 1
+    while (newIndex > 0 && queue[newIndex].branch_depth > 0) newIndex--
+    const target = queue[newIndex]
+    setQueue((prev) => prev.slice(0, newIndex + 1))
+    setIndex(newIndex)
+    setError('')
+    const prior = answersById[target.id]
+    setMultiSelected(Array.isArray(prior) ? prior : [])
+    setTextAnswer(target.question_type === 'short_text' && typeof prior === 'string' ? prior : '')
+  }
+
   return <div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <div className="training-modal" role="dialog" aria-modal="true" aria-label="Teach your agent">
       <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
@@ -448,6 +494,7 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
       </div>}
       {phase === 'questions' && current && <>
         <p className="eyebrow">Teach your agent</p>
+        {index > 0 && <button type="button" className="text-button training-back-button" disabled={busy} onClick={goBack}>← Back</button>}
         <div className="training-progress-row"><span>Question {Math.min(answerTarget, answeredCount + 1)} of {answerTarget}</span><div className="training-progress-bar" role="progressbar" aria-valuenow={Math.min(answerTarget, answeredCount + 1)} aria-valuemin={1} aria-valuemax={answerTarget}><span style={{ width: `${Math.round((answeredCount / answerTarget) * 100)}%` }} /></div></div>
         <h2 className="training-prompt">{current.prompt}</h2>
         {current.why_this_matters && <p className="training-modal-why">{current.why_this_matters}</p>}
@@ -460,7 +507,7 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
           <button className="training-choice no" disabled={busy} onClick={() => submit('No', false)}>No</button>
           <button className="training-choice yes" disabled={busy} onClick={() => submit('Yes', false)}>Yes</button>
         </div>}
-        {current.question_type === 'single_choice' && <div className="training-choices column">{current.answer_options.map((option) => <button key={option} className="training-choice-plain" disabled={busy} onClick={() => submit(option, false)}>{option}</button>)}</div>}
+        {current.question_type === 'single_choice' && <div className="training-choices column">{current.answer_options.map((option) => <button key={option} className={`training-choice-plain ${answersById[current.id] === option ? 'selected' : ''}`} disabled={busy} onClick={() => submit(option, false)}>{option}</button>)}</div>}
         {current.question_type === 'multi_select' && <>
           <div className="training-choices column multi">{current.answer_options.map((option) => { const selected = multiSelected.includes(option); return <button key={option} type="button" aria-pressed={selected} className={`training-choice-plain ${selected ? 'selected' : ''}`} onClick={() => setMultiSelected((prev) => (selected ? prev.filter((item) => item !== option) : [...prev, option]))}>{selected ? '✓ ' : ''}{option}</button> })}</div>
           <button className="button-primary training-continue" disabled={!multiSelected.length || busy} onClick={() => submit(multiSelected, false)}>Continue <span>→</span></button>
@@ -800,10 +847,14 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
   const [editingLearningId, setEditingLearningId] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [branchNote, setBranchNote] = useState<string | null>(null)
+  // Pre-NLP cleanup pass, Part R-T: every real (non-skipped) answer given
+  // this session, keyed by question id -- lets Back restore exactly what
+  // was previously selected/typed.
+  const [answersById, setAnswersById] = useState<Record<string, string | string[]>>({})
   useEffect(() => {
     let cancelled = false
     setPhase('loading'); setIndex(0); setCardState('idle'); setBranchNote(null)
-    setCompletionSummary(null); setLearnings([]); setMultiSelected([]); setTextAnswer(''); setError('')
+    setCompletionSummary(null); setLearnings([]); setMultiSelected([]); setTextAnswer(''); setError(''); setAnswersById({})
     const openReview = async (sessionId: number) => {
       const resumedSession = await resumeTrainingSession(personaId, sessionId)
       if (cancelled) return
@@ -896,6 +947,7 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     setBusy(true); setError('')
     try {
       const response = await answerTrainingQuestion(personaId, session.id, current.id, skipped ? { skipped: true } : { answer: answer ?? undefined })
+      if (!skipped && answer !== null) setAnswersById((prev) => ({ ...prev, [current.id]: answer }))
       setAnsweredCount(response.answered_count ?? answeredCount + 1)
       setAnswerTarget(response.answer_target ?? answerTarget)
       const nextQuestion = response.next_question
@@ -913,6 +965,27 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
     } finally {
       setBusy(false)
     }
+  }
+
+  /** Pre-NLP cleanup pass, Part R-T: returns to the immediately previous
+   * TOP-LEVEL question (branch_depth === 0), skipping back over any
+   * branch/follow-up questions in between -- never past the first
+   * question (Part Z.1). Truncates `queue` to drop everything after the
+   * target, so any now-stale branch question a since-changed answer had
+   * produced is discarded on the frontend too (the backend's own
+   * retract_training_branch handles the authoritative/persisted half of
+   * this the moment the revised answer is actually re-submitted). */
+  const goBack = () => {
+    if (index === 0 || busy) return
+    let newIndex = index - 1
+    while (newIndex > 0 && queue[newIndex].branch_depth > 0) newIndex--
+    const target = queue[newIndex]
+    setQueue((prev) => prev.slice(0, newIndex + 1))
+    setIndex(newIndex)
+    setCardState('idle'); setBranchNote(null); setError('')
+    const prior = answersById[target.id]
+    setMultiSelected(Array.isArray(prior) ? prior : [])
+    setTextAnswer(target.question_type === 'short_text' && typeof prior === 'string' ? prior : '')
   }
 
   const trainTenMore = async () => {
@@ -1034,7 +1107,10 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
   const displayNumber = Math.min(answerTarget, answeredCount + 1)
   return <main className={`training-shell training-active ${cardState}`}>
     <div className="training-header">
-      <p className="eyebrow">{isFocused ? 'Focused training' : 'Train your agent'}</p>
+      <div className="training-header-start">
+        <p className="eyebrow">{isFocused ? 'Focused training' : 'Train your agent'}</p>
+        {index > 0 && <button type="button" className="text-button training-back-button" disabled={busy} onClick={goBack}>← Back</button>}
+      </div>
       {isFocused
         ? <p className="training-focused-subtitle">Let's clarify this case.</p>
         : <div className="training-progress-row"><span>Question {displayNumber} of {answerTarget}</span><div className="training-progress-bar" role="progressbar" aria-valuenow={displayNumber} aria-valuemin={1} aria-valuemax={answerTarget}><span style={{ width: `${Math.round(((displayNumber - 1) / answerTarget) * 100)}%` }} /></div></div>}
@@ -1056,7 +1132,7 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
           <button className="training-choice no" disabled={busy} onClick={() => submit('No', false)}><span className="training-key" aria-hidden="true">←</span> No</button>
           <button className="training-choice yes" disabled={busy} onClick={() => submit('Yes', false)}>Yes <span className="training-key" aria-hidden="true">→</span></button>
         </div>}
-        {current.question_type === 'single_choice' && <div className="training-choices row">{current.answer_options.map((option) => <button key={option} className="training-choice-plain" disabled={busy} onClick={() => submit(option, false)}>{option}</button>)}</div>}
+        {current.question_type === 'single_choice' && <div className="training-choices row">{current.answer_options.map((option) => <button key={option} className={`training-choice-plain ${answersById[current.id] === option ? 'selected' : ''}`} disabled={busy} onClick={() => submit(option, false)}>{option}</button>)}</div>}
         {current.question_type === 'multi_select' && <>
           <div className="training-choices row multi">{current.answer_options.map((option) => { const selected = multiSelected.includes(option); return <button key={option} type="button" aria-pressed={selected} className={`training-choice-plain ${selected ? 'selected' : ''}`} onClick={() => setMultiSelected((prev) => (selected ? prev.filter((item) => item !== option) : [...prev, option]))}>{selected ? '✓ ' : ''}{option}</button> })}</div>
           <button className="button-primary training-continue" disabled={!multiSelected.length || busy} onClick={() => submit(multiSelected, false)}>Continue <span>→</span></button>
@@ -2278,9 +2354,97 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
   </main>
 }
 
+/** Pre-NLP cleanup pass, Part J-Q: a lightweight, restrained, bounded-
+ * history chat for a GENERAL practice question about this physician --
+ * explicitly NOT the patient-scoped coordination chat (CoordinationChatCard
+ * in Referral.tsx) and NOT this physician's own training/practice-chat
+ * (ChatTab above). No patient is selected, no referral exists, nothing
+ * here is persisted server-side -- bounded in-page history only, for this
+ * session; reload clears it, exactly like the other ephemeral chats this
+ * app already has. Visually consistent with those same chats (reuses
+ * .chat-thread/.chat-message/.chat-composer/.chat-starter-prompts), but
+ * its own helper copy makes the narrower scope explicit. */
+const NETWORK_AGENT_STARTER_PROMPTS = [
+  'What workup do you usually want before a referral?',
+  'When would you prefer an e-consult versus an in-person visit?',
+  'What kinds of cases are most useful to send you?',
+  'What information makes a referral most useful to you?',
+]
+
+type NetworkAgentChatMessage = { id: string; role: 'physician' | 'agent'; content: string; basedOn: string[]; unconfirmed: boolean }
+
+function NetworkAskAgentModal({ controlledId, physicianName, onClose }: { controlledId: string; physicianName: string; onClose: () => void }) {
+  const [messages, setMessages] = useState<NetworkAgentChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [promptsOpen, setPromptsOpen] = useState(false)
+  const cancelled = useRef(false)
+  useEffect(() => () => { cancelled.current = true }, [])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const send = async (question: string) => {
+    const trimmed = question.trim()
+    if (!trimmed || busy) return
+    setBusy(true); setError(''); setInput('')
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'physician', content: trimmed, basedOn: [], unconfirmed: false }])
+    try {
+      const result = await askNetworkAgent(controlledId, trimmed)
+      if (cancelled.current) return
+      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'agent', content: result.answer, basedOn: result.based_on, unconfirmed: result.requires_physician_input }])
+    } catch (sendError) {
+      if (!cancelled.current) setError(sendError instanceof Error ? sendError.message : 'Could not reach the agent.')
+    } finally {
+      if (!cancelled.current) setBusy(false)
+    }
+  }
+
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="post-flow-dialog network-ask-agent-dialog" role="dialog" aria-modal="true" aria-label={`Ask ${physicianName}'s Agent`}>
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
+      <p className="eyebrow">Ask {physicianName}'s Agent</p>
+      <h2>Ask a general question about how {physicianName} practices.</h2>
+      <p className="network-ask-agent-scope">General practice questions only. No patient context is shared.</p>
+      {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
+        {messages.map((message) => message.role === 'physician'
+          ? <p className="chat-message physician" key={message.id}>{message.content}</p>
+          : <div className="chat-message agent" key={message.id}>
+            <span className="chat-agent-label"><AgentAvatar tone="blue" /> {physicianName}'s Agent</span>
+            <p>{message.content}</p>
+            {message.unconfirmed && <p className="chat-uncertainty">Not yet confirmed by {physicianName}.</p>}
+            {message.basedOn.length > 0 && <p className="chat-grounding">Based on: {message.basedOn.join(', ')}</p>}
+          </div>)}
+        {busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar tone="blue" /> {physicianName}'s Agent</span><p className="chat-typing-dots" aria-label={`${physicianName}'s Agent is answering`}><span /><span /><span /></p></div>}
+      </div>}
+      {error && <p className="demo-reset-error" role="alert">{error}</p>}
+      <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input) }}>
+        <label htmlFor="network-ask-agent-input" className="sr-only">Ask {physicianName}'s Agent</label>
+        <input id="network-ask-agent-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask a question…" disabled={busy} />
+        <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
+      </form>
+      <details className="network-optional" open={promptsOpen} onToggle={(event) => setPromptsOpen(event.currentTarget.open)}>
+        <summary className="optional-guidance-label">Suggested questions ▾</summary>
+        <div className="chat-starter-prompts">{NETWORK_AGENT_STARTER_PROMPTS.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" disabled={busy} onClick={() => void send(prompt)}>{prompt}</button>)}</div>
+      </details>
+    </div>
+  </div></ModalPortal>
+}
+
 export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, perspective = 'lucy', params }: { controlledId: string; navigate: Navigate; backPath: string; perspective?: DemoPhysicianPerspective; params?: URLSearchParams }) {
   const [data, setData] = useState<import('./api.ts').NetworkPhysicianProfile | null>(null)
   const [error, setError] = useState('')
+  // Pre-NLP cleanup pass, Part J/N: every physician reachable on THIS page
+  // already has a real confirmed professional profile + practice
+  // representation (that's what makes them eligible for this page at
+  // all) -- unclaimed/external-directory physicians (Okonkwo, Okafor) are
+  // never reachable here, so no extra eligibility check is needed beyond
+  // "this page loaded". Hidden in preview mode (that's the physician's
+  // OWN profile, not another physician's).
+  const [askAgentOpen, setAskAgentOpen] = useState(false)
   useEffect(() => { setData(null); setError(''); getNetworkPhysicianProfile(controlledId).then(setData).catch((err: Error) => setError(err.message)) }, [controlledId])
   const relationship = useNetworkRelationship(data?.physician.npi ?? null)
   // Only the physician's own "View as others see it" link adds ?preview=1 --
@@ -2342,8 +2506,12 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
       <div className="profile-hero-status">
         <span className="agent-status-badge active"><i />Public Lamina agent</span>
         <NetworkRelationshipAction npi={data.physician.npi} relationship={relationship} />
+        {/* Part J/K: a quiet secondary action, never the primary CTA --
+         * that stays NetworkRelationshipAction's "Add to network" above. */}
+        {!isPreview && <button type="button" className="text-button ask-network-agent-trigger" onClick={() => setAskAgentOpen(true)}>Ask their agent →</button>}
       </div>
     </section>
+    {askAgentOpen && <NetworkAskAgentModal controlledId={controlledId} physicianName={cleanName(name)} onClose={() => setAskAgentOpen(false)} />}
 
     <div className="profile-facts three-up">
       <div><span>Practice location</span><strong>{data.physician.location}</strong></div>

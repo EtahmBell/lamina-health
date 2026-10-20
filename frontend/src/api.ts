@@ -666,6 +666,14 @@ export const markHandoffViewed = (referralId: number, referringPhysicianId: stri
 export const askPhysicianAgent = (referralId: number, requestingPhysicianId: string, question: string) => request<CoordinationChatAnswer>(`/api/referrals/${referralId}/coordination-chat`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requesting_physician_id: requestingPhysicianId, question }),
 })
+/** Pre-NLP cleanup pass, Part J-Q: "Ask their agent" from a Network
+ * physician profile -- deliberately has no patient_id/referral_id
+ * parameter at all; the request shape itself enforces "no patient
+ * context", reusing the same stateless/no-companion-GET shape as
+ * askPhysicianAgent above. */
+export const askNetworkAgent = (controlledId: string, question: string) => request<CoordinationChatAnswer>(`/api/workspace/network/physicians/${encodeURIComponent(controlledId)}/ask`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }),
+})
 
 export const createAgentCorrection = (
   patientId: string,

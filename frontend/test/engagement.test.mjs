@@ -161,10 +161,10 @@ test('HomeAgentCard threads the real viewing persona into the quick-training mod
 
 test('Home (both personas) renders the Your Agent card from AgentOverview, with a quiet link to My Agent', () => {
   assert.match(homePageFn(), /getAgentOverview\('lucy'\)\.then\(setOverview\)/)
-  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} personaId="lucy" \/>/)
+  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} personaId="lucy" onTrainingUpdated=\{\(\) => getAgentOverview\('lucy'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\} \/>/)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.match(specialistHome, /getAgentOverview\('iain'\)\.then\(setOverview\)/)
-  assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" personaId="iain" \/>/)
+  assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" personaId="iain" onTrainingUpdated=\{\(\) => getAgentOverview\('iain'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\} \/>/)
 })
 
 test('the full Network Pulse feed section is gone from Home; only the compact 2-item highlight preview remains', () => {
@@ -873,10 +873,37 @@ test('"Add case interests" navigates directly to the existing Profile -> Clinica
   assert.doesNotMatch(engagement, /CaseInterestEditor|DashboardInterestEditor/i)
 })
 
-test('HomeAgentCard reuses the existing getProfessionalProfile fetch (no new prop threaded through every caller) and reuses professionalProfilePath for the profile-completeness/case-interests destinations', () => {
+test('HomeAgentCard reuses the existing getProfessionalProfile fetch (threaded through a reusable loadProfile, re-run on training completion too) and reuses professionalProfilePath for the profile-completeness/case-interests destinations', () => {
   const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
-  assert.match(card, /useEffect\(\(\) => \{ getProfessionalProfile\(personaId\)\.then\(setProfile\)\.catch\(\(\) => \{\}\) \}, \[personaId\]\)/)
+  assert.match(card, /const loadProfile = \(\) => \{ getProfessionalProfile\(personaId\)\.then\(setProfile\)\.catch\(\(\) => \{\}\) \}/)
+  assert.match(card, /useEffect\(loadProfile, \[personaId\]\)/)
   assert.match(card, /const profilePath = personaId === 'owner' \? '\/me\/profile' : professionalProfilePath\(personaId\)/)
+})
+
+/* --------------------------------------------------------------- Part F-I */
+
+test('root cause fix: completing quick training now invalidates/refetches both the card\'s own profile AND the parent-owned overview/training state -- onFinished no longer just closes the modal', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
+  assert.match(card, /onFinished=\{\(\) => \{ setTrainingOpen\(false\); loadProfile\(\); onTrainingUpdated\?\.\(\) \}\}/)
+  assert.match(card, /onTrainingUpdated\?: \(\) => void/)
+})
+
+test('every HomeAgentCard caller (Lucy, Chen, Iain) passes onTrainingUpdated, refetching its own overview the moment training completes -- the parent actually receives the completion event', () => {
+  assert.match(app, /onTrainingUpdated=\{\(\) => getAgentOverview\('lucy'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\}/)
+  const referralSource = readFileSync(new URL('../src/Referral.tsx', import.meta.url), 'utf8')
+  assert.match(referralSource, /onTrainingUpdated=\{\(\) => getAgentOverview\('chen'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\}/)
+  assert.match(specialist, /onTrainingUpdated=\{\(\) => getAgentOverview\('iain'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\}/)
+})
+
+test('the improvement prompt is never randomly rotated -- selectImprovementPrompt is a pure deterministic function of real state, with no Math.random/rotation-index anywhere in it', () => {
+  const fn = engagement.slice(engagement.indexOf('export function selectImprovementPrompt'), engagement.indexOf('type DigestTile'))
+  assert.doesNotMatch(fn, /Math\.random|rotationIndex|% prompts\.length|Date\.now\(\) %/)
+})
+
+test('the resume/continue-setup state uses plan.label/plan.support directly (dynamic, already computed by agentBannerPlan) rather than one hardcoded "Answer 3 quick questions" string for every training action', () => {
+  const fn = engagement.slice(engagement.indexOf('export function selectImprovementPrompt'), engagement.indexOf('if (!profile) return null'))
+  assert.match(fn, /ctaLabel: plan\.label/)
+  assert.match(fn, /body: plan\.support/)
 })
 
 test('Lucy and Iain Home share the same dashboard architecture: Your Agent card + compact activity + optional network highlights, no separate specialist design', () => {
@@ -1310,4 +1337,86 @@ test('agent-authored posts use a quiet mineral accent, never copper -- Feed stay
 
 test('the agent rail stacks below the feed on tablet/mobile with no horizontal overflow', () => {
   assert.match(styles, /@media \(max-width: 900px\) \{\s*\.feed-layout \{ grid-template-columns: 1fr; \}\s*\.agent-assist-rail \{ position: static; \}\s*\}/)
+})
+
+/* =====================================================================
+ * Pre-NLP physician-representation cleanup pass, Part J-Q: "Ask their
+ * agent" -- a general, non-patient-specific question from an eligible
+ * Network physician profile.
+ * ===================================================================== */
+
+test('unclaimed/external-directory physicians (Okonkwo, Okafor) never expose "Ask their agent" -- that trigger only exists inside NetworkPhysicianProfilePage, which they are structurally never reachable through (they use PhysicianProfilePage/the directoryProfile branch instead)', () => {
+  const network = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(network, /Ask their agent|askNetworkAgent|NetworkAskAgentModal/, 'PhysicianProfilePage (Okonkwo\'s NPI-directory page, Okafor\'s directoryProfile page) never gains this CTA')
+})
+
+test('eligible claimed/trained physicians (reachable via NetworkPhysicianProfilePage) get a quiet "Ask their agent" action -- never the primary CTA', () => {
+  const page = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(page, /Ask their agent →/)
+  assert.match(page, /className="text-button ask-network-agent-trigger"/)
+  // NetworkRelationshipAction ("Add to network") renders first/above --
+  // the quiet ask-agent trigger is a secondary action alongside it, never
+  // replacing or outranking it.
+  assert.match(page, /<NetworkRelationshipAction npi=\{data\.physician\.npi\} relationship=\{relationship\} \/>/)
+})
+
+test('the Ask-their-agent action is hidden while previewing your OWN public profile', () => {
+  const page = slice(engagement, 'export function NetworkPhysicianProfilePage', engagement.length)
+  assert.match(page, /\{!isPreview && <button type="button" className="text-button ask-network-agent-trigger"/)
+})
+
+test('no patient context is required or sent -- askNetworkAgent posts only {question} to a controlled-physician-scoped endpoint, no patient/referral identifier anywhere in the call', () => {
+  const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
+  assert.match(apiSource, /export const askNetworkAgent = \(controlledId: string, question: string\) => request<CoordinationChatAnswer>\(`\/api\/workspace\/network\/physicians\/\$\{encodeURIComponent\(controlledId\)\}\/ask`/)
+  assert.match(apiSource, /body: JSON\.stringify\(\{ question \}\)/)
+})
+
+test('the Network agent chat is ephemeral -- bounded local component state only, no persistence, no fetch-on-mount to restore prior messages (reload clears it)', () => {
+  const modalFn = engagement.slice(engagement.indexOf('function NetworkAskAgentModal'), engagement.indexOf('export function NetworkPhysicianProfilePage'))
+  assert.match(modalFn, /const \[messages, setMessages\] = useState<NetworkAgentChatMessage\[\]>\(\[\]\)/)
+  assert.doesNotMatch(modalFn, /localStorage|sessionStorage|useEffect\(\(\) => \{[^}]*getA/s)
+})
+
+test('unsupported/unconfirmed physician preferences surface an honest uncertainty note, never a fabricated answer', () => {
+  const modalFn = engagement.slice(engagement.indexOf('function NetworkAskAgentModal'), engagement.indexOf('export function NetworkPhysicianProfilePage'))
+  assert.match(modalFn, /\{message\.unconfirmed && <p className="chat-uncertainty">Not yet confirmed by \{physicianName\}\.<\/p>\}/)
+})
+
+test('the scope-limiting helper copy is present, and the modal never creates a referral or mutates any clinical record', () => {
+  const modalFn = engagement.slice(engagement.indexOf('function NetworkAskAgentModal'), engagement.indexOf('export function NetworkPhysicianProfilePage'))
+  assert.match(modalFn, /General practice questions only\. No patient context is shared\./)
+  assert.doesNotMatch(modalFn, /createReferral|ingestConsultationEncounter|sendHandoff/)
+})
+
+/* =====================================================================
+ * Pre-NLP physician-representation cleanup pass, Part R-T: training cards
+ * support going back and revising an answer, with branch invalidation.
+ * ===================================================================== */
+
+test('Back is unavailable on the first question, in both the full and quick training flows', () => {
+  const fullPage = engagement.slice(engagement.indexOf('export function TrainingPage'), engagement.indexOf('/* ------------------------------------------------------------- Profile: shared */'))
+  assert.match(fullPage, /\{index > 0 && <button type="button" className="text-button training-back-button" disabled=\{busy\} onClick=\{goBack\}>← Back<\/button>\}/)
+  const quickModal = engagement.slice(engagement.indexOf('function QuickTrainingModal'), engagement.indexOf('// Confirmed practice-representation values'))
+  assert.match(quickModal, /\{index > 0 && <button type="button" className="text-button training-back-button" disabled=\{busy\} onClick=\{goBack\}>← Back<\/button>\}/)
+})
+
+test('goBack returns to the immediately previous TOP-LEVEL question (skipping branch/follow-up questions), truncates the queue, and restores the prior typed/selected answer -- in both flows', () => {
+  for (const [start, end] of [
+    ['export function TrainingPage', '/* ------------------------------------------------------------- Profile: shared */'],
+    ['function QuickTrainingModal', '// Confirmed practice-representation values'],
+  ]) {
+    const fn = engagement.slice(engagement.indexOf(start), engagement.indexOf(end))
+    const goBackFn = fn.slice(fn.indexOf('const goBack = () => {'), fn.indexOf('const trainTenMore') === -1 ? fn.length : fn.indexOf('const trainTenMore'))
+    assert.match(goBackFn, /if \(index === 0 \|\| busy\) return/, 'never navigates before the first question')
+    assert.match(goBackFn, /while \(newIndex > 0 && queue\[newIndex\]\.branch_depth > 0\) newIndex--/, 'skips back over branch/follow-up questions to the previous TOP-LEVEL question')
+    assert.match(goBackFn, /setQueue\(\(prev\) => prev\.slice\(0, newIndex \+ 1\)\)/, 'truncates the queue -- stale downstream branch questions are dropped')
+    assert.match(goBackFn, /setMultiSelected\(Array\.isArray\(prior\) \? prior : \[\]\)/, 'restores a prior multi_select answer')
+    assert.match(goBackFn, /setTextAnswer\(target\.question_type === 'short_text' && typeof prior === 'string' \? prior : ''\)/, 'restores a prior short_text answer')
+  }
+})
+
+test('re-answering a changed question updates in place (answersById keyed by question id) and the single_choice UI highlights the previously-given answer, never a duplicate/fresh-blank state', () => {
+  const fullPage = engagement.slice(engagement.indexOf('export function TrainingPage'), engagement.indexOf('/* ------------------------------------------------------------- Profile: shared */'))
+  assert.match(fullPage, /if \(!skipped && answer !== null\) setAnswersById\(\(prev\) => \(\{ \.\.\.prev, \[current\.id\]: answer \}\)\)/)
+  assert.match(fullPage, /className=\{`training-choice-plain \$\{answersById\[current\.id\] === option \? 'selected' : ''\}`\}/)
 })
