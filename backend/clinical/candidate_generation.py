@@ -1,4 +1,9 @@
-from backend.models import CandidateReason, ClinicalRepresentation, PhysicianProfile
+from backend.models import (
+    CandidateReason,
+    ClinicalRepresentation,
+    PhysicianCaseRules,
+    PhysicianProfile,
+)
 from backend.synthetic_data import resolve_case_rules
 
 
@@ -6,11 +11,18 @@ def generate_candidates(
     context: ClinicalRepresentation,
     physicians: list[PhysicianProfile],
     pcp_guidance: str | None = None,
+    case_rules_overrides: dict[str, PhysicianCaseRules] | None = None,
 ) -> list[CandidateReason]:
-    """Generate a deliberately broad, inspectable demo slate; ranking happens later."""
+    """Generate a deliberately broad, inspectable demo slate; ranking happens
+    later. `case_rules_overrides` (NLP referral-preference pass, Part J) is
+    keyed by physician_id -- each physician's own CONFIRMED persisted
+    referral preference, if any; looked up by the caller, never here."""
     candidates: list[CandidateReason] = []
+    overrides = case_rules_overrides or {}
     for physician in physicians:
-        accepts_signals = resolve_case_rules(physician, context).accepts_signals
+        accepts_signals = resolve_case_rules(
+            physician, context, overrides.get(physician.id)
+        ).accepts_signals
         overlap = sorted(set(context.signals) & set(accepts_signals))
         reasons = [f"Practice signal overlap: {signal.replace('_', ' ')}" for signal in overlap]
         if physician.specialty == "Nephrology" and context.progressive_renal_dysfunction:

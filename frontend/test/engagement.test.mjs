@@ -862,10 +862,19 @@ test('the improvement prompt is selected by a deterministic, state-driven helper
   assert.match(engagement, /if \(profile\.completeness\.completed_section_count < profile\.completeness\.total_section_count\) \{/)
 })
 
-test('the improvement-prompt type is an open union, not an enum hardcoded to exactly three prompt kinds -- a future referral-preferences prompt is just another priority branch', () => {
+test('the improvement-prompt type is an open union, not an enum hardcoded to exactly three prompt kinds', () => {
   assert.match(engagement, /export type ImprovementPromptKind = 'quick-training' \| 'navigate'/)
   assert.match(engagement, /export type ImprovementPrompt = \{/)
-  assert.doesNotMatch(engagement, /Describe how you receive referrals|Add referral preferences/i, 'the NLP referral-preferences prompt is not shown yet -- the feature does not exist')
+})
+
+test('the referral-preferences prompt sits between case interests and profile completeness, only while eligible and unconfirmed, and never adds a second banner', () => {
+  const fn = slice(engagement, 'export function selectImprovementPrompt', 'type DigestTile')
+  assert.match(fn, /if \(referralPreferences\?\.eligible && referralPreferences\.confirmedCount === 0\) \{/)
+  assert.match(fn, /ctaLabel: 'Add referral preferences'/)
+  const caseInterestsIndex = fn.indexOf("key: 'case-interests'")
+  const referralPrefIndex = fn.indexOf("key: 'referral-preferences'")
+  const profileCompleteIndex = fn.indexOf("key: 'complete-profile'")
+  assert.ok(caseInterestsIndex < referralPrefIndex && referralPrefIndex < profileCompleteIndex)
 })
 
 test('"Add case interests" navigates directly to the existing Profile -> Clinical & Case Interests editing experience, never a new Dashboard editor', () => {

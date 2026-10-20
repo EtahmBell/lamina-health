@@ -65,6 +65,15 @@ from .referral import (
     RequirementCheck,
     RequirementStatus,
 )
+from .referral_preference import (
+    PhysicianReferralPreference,
+    ReferralPreferenceCaseFamily,
+    ReferralPreferenceEditRequest,
+    ReferralPreferenceInterpretRequest,
+    ReferralPreferenceModality,
+    ReferralPreferenceStatus,
+    StructuredReferralPreference,
+)
 from .eval_harness import (
     AssertionKind,
     EvalAssertionResult,
@@ -156,4 +165,11 @@ __all__ = [
     "PhysicianAgentEvalSuiteResult",
     "ProhibitedBehavior",
     "SyntheticCaseContext",
+    "PhysicianReferralPreference",
+    "ReferralPreferenceCaseFamily",
+    "ReferralPreferenceEditRequest",
+    "ReferralPreferenceInterpretRequest",
+    "ReferralPreferenceModality",
+    "ReferralPreferenceStatus",
+    "StructuredReferralPreference",
 ]

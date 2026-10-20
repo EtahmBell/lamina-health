@@ -229,9 +229,9 @@ def test_a_fresh_network_consultation_is_handed_lucys_own_visible_state_only_aft
     captured: list = []
     real_consult_network = consult_api.consult_network
 
-    def spy(patient, physicians, pcp_guidance):
+    def spy(patient, physicians, pcp_guidance, **kwargs):
         captured.append(patient)
-        return real_consult_network(patient, physicians, pcp_guidance)
+        return real_consult_network(patient, physicians, pcp_guidance, **kwargs)
 
     monkeypatch.setattr(consult_api, "consult_network", spy)
 

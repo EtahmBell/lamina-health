@@ -4,6 +4,7 @@ from backend.models import (
     Evidence,
     EvidenceKind,
     PatientRecord,
+    PhysicianCaseRules,
     PhysicianEvaluation,
     PhysicianProfile,
 )
@@ -21,9 +22,19 @@ def evaluate_physician(
     patient: PatientRecord,
     context: ClinicalRepresentation,
     profile: PhysicianProfile,
+    confirmed_case_rules: PhysicianCaseRules | None = None,
+    case_interest_titles: list[str] | None = None,
 ) -> PhysicianEvaluation:
+    """`confirmed_case_rules` (NLP referral-preference pass, Part J) is the
+    physician's own confirmed persisted referral preference for this case
+    family, if any -- passed straight through to resolve_case_rules(), never
+    looked up here (this function stays a pure function of its arguments).
+    `case_interest_titles` (Part T) are the physician's own CONFIRMED case/
+    clinical interests; an overlap with this case only ever adds supporting
+    evidence, never changes `clinical_fit`/`accepts_case` -- interests are
+    not a hard eligibility gate."""
     evidence = [Evidence(kind=EvidenceKind.PATIENT_FACT, detail=fact) for fact in context.facts]
-    case_rules = resolve_case_rules(profile, context)
+    case_rules = resolve_case_rules(profile, context, confirmed_case_rules)
     matches = similar_cases(context, case_rules.historical_cases)
     for case, overlap in matches:
         evidence.append(
@@ -32,6 +43,19 @@ def evaluate_physician(
                 detail=f"Synthetic case mix includes {case.label}; overlapping signals: {', '.join(overlap)}. This is a fit signal, not a quality measure.",
             )
         )
+    for interest in case_interest_titles or []:
+        interest_words = {word for word in interest.casefold().split() if len(word) > 3}
+        case_text = f"{context.summary} {' '.join(context.facts)} {' '.join(context.signals)}".casefold()
+        if interest_words and any(word in case_text for word in interest_words):
+            evidence.append(
+                Evidence(
+                    kind=EvidenceKind.PRACTICE_SIMILARITY,
+                    detail=(
+                        f"This case matches a confirmed case interest ({interest}); a "
+                        "supporting fit signal, not an eligibility requirement."
+                    ),
+                )
+            )
     evidence.append(
         Evidence(
             kind=EvidenceKind.OPERATIONAL,

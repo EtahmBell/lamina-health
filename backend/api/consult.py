@@ -1,10 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
 from backend.agents import consult_network
+from backend.clinical import build_patient_context
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
+from backend.engagement import PERSONA_BY_PHYSICIAN_ID, physician_interests
 from backend.fhir import MedplumError, create_clinical_data_source
 from backend.models import ConsultationEncounter, ConsultationRequest, ConsultationResult, HandoffStatus, PatientRecord
 from backend.referrals import apply_medication_changes
+from backend.referral_preferences import confirmed_case_rules_override, confirmed_modality, ensure_seed_preferences
 from backend.synthetic_data import PATIENTS, PHYSICIANS_BY_PATIENT
 from backend.workflow import workflow_store
 
@@ -77,6 +80,18 @@ def get_patient(
     return _with_derived_medications(patient, workspace_id, as_physician_id)
 
 
+def _confirmed_case_interest_titles(workspace_id: str, physician_id: str) -> list[str]:
+    persona_id = PERSONA_BY_PHYSICIAN_ID.get(physician_id)
+    if persona_id is None:
+        return []
+    overlays = workflow_store.physician_interests(workspace_id, persona_id)
+    return [
+        item["title"]
+        for item in physician_interests(persona_id, overlays)
+        if item["interest_type"] == "case_interest" and item["confirmed"]
+    ]
+
+
 @router.post("/patients/{patient_id}/consultations", response_model=ConsultationResult)
 def create_consultation(
     patient_id: str, request: ConsultationRequest, workspace_id: MutableDemoWorkspace
@@ -89,6 +104,32 @@ def create_consultation(
     # see (gated on handoff-sent, bug-fix pass Part A).
     patient = _with_derived_medications(load_patient(patient_id), workspace_id)
     workflow_store.started(workspace_id, patient_id)
-    result = consult_network(patient, PHYSICIANS_BY_PATIENT[patient_id], request.pcp_guidance)
+    physicians = PHYSICIANS_BY_PATIENT[patient_id]
+    case_family = build_patient_context(patient).case_family
+    ensure_seed_preferences(workflow_store, workspace_id)
+    # NLP referral-preference pass, Part J/S/T: each physician's own
+    # CONFIRMED persisted state is looked up here (the API layer), then
+    # passed into the SAME pure consult_network() every other patient's
+    # consultation already uses -- never a second, parallel evaluation path.
+    case_rules_overrides = {
+        physician.id: override
+        for physician in physicians
+        if (override := confirmed_case_rules_override(workflow_store, workspace_id, physician.id, case_family))
+        is not None
+    }
+    case_interest_titles_by_physician = {
+        physician.id: titles
+        for physician in physicians
+        if (titles := _confirmed_case_interest_titles(workspace_id, physician.id))
+    }
+    modality_preference = confirmed_modality(workflow_store, workspace_id, "physician-chen", case_family)
+    result = consult_network(
+        patient,
+        physicians,
+        request.pcp_guidance,
+        case_rules_overrides=case_rules_overrides,
+        case_interest_titles_by_physician=case_interest_titles_by_physician,
+        confirmed_modality=modality_preference,
+    )
     workflow_store.completed(workspace_id, result)
     return result

@@ -325,6 +325,23 @@ class WorkflowStore:
                   ON physician_owner_scopes(auth_user_id, updated_at);
                 CREATE INDEX IF NOT EXISTS physician_owner_scopes_npi
                   ON physician_owner_scopes(npi);
+                CREATE TABLE IF NOT EXISTS physician_referral_preferences (
+                  id TEXT PRIMARY KEY,
+                  workspace_id TEXT NOT NULL,
+                  physician_id TEXT NOT NULL,
+                  case_family TEXT NOT NULL,
+                  source_text TEXT NOT NULL,
+                  structured_rules_json TEXT NOT NULL,
+                  status TEXT NOT NULL CHECK(
+                    status IN ('draft', 'confirmed', 'rejected', 'superseded')
+                  ),
+                  source TEXT NOT NULL,
+                  supersedes_id TEXT,
+                  representation_snapshot_id_at_confirmation TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  confirmed_at TEXT
+                );
                 """
             )
             self._migrate_demo_tables(db)
@@ -371,6 +388,8 @@ class WorkflowStore:
                   ON deferred_training_questions(workspace_id, persona_id, status, id);
                 CREATE INDEX IF NOT EXISTS agent_chat_workspace
                   ON agent_chat_responses(workspace_id, persona_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS referral_preferences_workspace
+                  ON physician_referral_preferences(workspace_id, physician_id, case_family);
                 CREATE INDEX IF NOT EXISTS focused_seed_workspace
                   ON focused_training_seeds(workspace_id, persona_id, status, created_at DESC);
                 CREATE INDEX IF NOT EXISTS enrichment_jobs_workspace
@@ -2002,6 +2021,152 @@ class WorkflowStore:
                 (workspace_id, persona_id, learning_id),
             ).fetchone()
         return dict(row) if updated and row else None
+
+    _REFERRAL_PREFERENCE_COLUMNS = (
+        "id, physician_id, case_family, source_text, structured_rules_json, status, "
+        "source, supersedes_id, representation_snapshot_id_at_confirmation, "
+        "created_at, updated_at, confirmed_at"
+    )
+
+    def create_referral_preference(
+        self,
+        workspace_id: str,
+        physician_id: str,
+        case_family: str,
+        source_text: str,
+        structured_rules_json: str,
+        source: str,
+    ) -> dict:
+        preference_id = f"pref-{secrets.token_hex(8)}"
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO physician_referral_preferences(
+                     id, workspace_id, physician_id, case_family, source_text,
+                     structured_rules_json, status, source, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)""",
+                (
+                    preference_id, workspace_id, physician_id, case_family, source_text,
+                    structured_rules_json, source, now, now,
+                ),
+            )
+        return self.referral_preference(workspace_id, preference_id)
+
+    def referral_preference(self, workspace_id: str, preference_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                f"""SELECT {self._REFERRAL_PREFERENCE_COLUMNS}
+                   FROM physician_referral_preferences
+                   WHERE workspace_id=? AND id=?""",
+                (workspace_id, preference_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_referral_preferences(self, workspace_id: str, physician_id: str) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                f"""SELECT {self._REFERRAL_PREFERENCE_COLUMNS}
+                   FROM physician_referral_preferences
+                   WHERE workspace_id=? AND physician_id=?
+                   ORDER BY id DESC""",
+                (workspace_id, physician_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_referral_preference_rules(
+        self, workspace_id: str, preference_id: str, structured_rules_json: str
+    ) -> dict | None:
+        """Structured editing of a DRAFT preference only (Part G) -- a
+        confirmed/rejected/superseded preference is immutable history."""
+        now = self._now()
+        with self._connect() as db:
+            updated = db.execute(
+                """UPDATE physician_referral_preferences
+                   SET structured_rules_json=?, updated_at=?
+                   WHERE workspace_id=? AND id=? AND status='draft'""",
+                (structured_rules_json, now, workspace_id, preference_id),
+            ).rowcount
+        return self.referral_preference(workspace_id, preference_id) if updated else None
+
+    def confirmed_referral_preference(
+        self, workspace_id: str, physician_id: str, case_family: str
+    ) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                f"""SELECT {self._REFERRAL_PREFERENCE_COLUMNS}
+                   FROM physician_referral_preferences
+                   WHERE workspace_id=? AND physician_id=? AND case_family=?
+                     AND status='confirmed'
+                   ORDER BY confirmed_at DESC LIMIT 1""",
+                (workspace_id, physician_id, case_family),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def confirmed_referral_preferences_for_physician(
+        self, workspace_id: str, physician_id: str
+    ) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                f"""SELECT {self._REFERRAL_PREFERENCE_COLUMNS}
+                   FROM physician_referral_preferences
+                   WHERE workspace_id=? AND physician_id=? AND status='confirmed'
+                   ORDER BY case_family, confirmed_at DESC""",
+                (workspace_id, physician_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def confirm_referral_preference(
+        self, workspace_id: str, preference_id: str, representation_snapshot_id: str | None
+    ) -> dict | None:
+        """Confirming a draft supersedes the prior confirmed preference for the
+        same (physician, case_family) rather than mutating it (Part I) --
+        historical evaluations/referrals stay attributable to the
+        representation state that produced them."""
+        draft = self.referral_preference(workspace_id, preference_id)
+        if draft is None or draft["status"] != "draft":
+            return None
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE physician_referral_preferences
+                   SET status='superseded', updated_at=?
+                   WHERE workspace_id=? AND physician_id=? AND case_family=? AND status='confirmed'""",
+                (now, workspace_id, draft["physician_id"], draft["case_family"]),
+            )
+            db.execute(
+                """UPDATE physician_referral_preferences
+                   SET status='confirmed', confirmed_at=?, updated_at=?,
+                       representation_snapshot_id_at_confirmation=?
+                   WHERE workspace_id=? AND id=? AND status='draft'""",
+                (now, now, representation_snapshot_id, workspace_id, preference_id),
+            )
+        return self.referral_preference(workspace_id, preference_id)
+
+    def set_referral_preference_snapshot(
+        self, workspace_id: str, preference_id: str, representation_snapshot_id: str
+    ) -> None:
+        """Set once, immediately after confirm_referral_preference() --
+        confirming must land first so this snapshot reflects the state that
+        now INCLUDES this preference (Part O: the representation version at
+        the moment of confirmation, not the moment before it)."""
+        with self._connect() as db:
+            db.execute(
+                """UPDATE physician_referral_preferences
+                   SET representation_snapshot_id_at_confirmation=?
+                   WHERE workspace_id=? AND id=?""",
+                (representation_snapshot_id, workspace_id, preference_id),
+            )
+
+    def reject_referral_preference(self, workspace_id: str, preference_id: str) -> dict | None:
+        now = self._now()
+        with self._connect() as db:
+            updated = db.execute(
+                """UPDATE physician_referral_preferences
+                   SET status='rejected', updated_at=?
+                   WHERE workspace_id=? AND id=? AND status='draft'""",
+                (now, workspace_id, preference_id),
+            ).rowcount
+        return self.referral_preference(workspace_id, preference_id) if updated else None
 
     def create_enrichment_job(self, workspace_id: str, persona_id: str, provider: str) -> dict:
         now = self._now()

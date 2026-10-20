@@ -34,6 +34,12 @@ from backend.models import (
     PhysicianAgentEvalSuiteResult,
 )
 from backend.network_chat import answer_general_practice_question
+from backend.referral_preferences import (
+    confirmed_case_rules_override,
+    confirmed_modality,
+    confirmed_referral_preference_sections,
+    confirmed_requirement_items,
+)
 from backend.referrals import assemble_initial_packet, evaluate_requirements, requirements_for, resolve_missing_requirement
 from backend.synthetic_data import ALL_PHYSICIANS
 from backend.workflow import WorkflowStore
@@ -73,11 +79,16 @@ def _scope(evaluation) -> EvalScope:
     return EvalScope.IN_SCOPE if evaluation.accepts_case else EvalScope.OUT_OF_SCOPE
 
 
-def _run_fit_or_scope(case: PhysicianAgentEvalCase):
+def _run_fit_or_scope(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str):
     profile = _PHYSICIANS_BY_ID[case.physician_id]
     patient = build_synthetic_patient(case.id, case.synthetic_case_context)
     context = build_patient_context(patient)
-    evaluation = evaluate_physician(patient, context, profile)
+    # NLP referral-preference pass, Part O: the SAME confirmed-preference
+    # lookup the product's own API layer performs (backend/api/consult.py),
+    # not a duplicated/parallel evaluation path -- a confirmed preference
+    # changes evaluation behavior exactly as it changes production behavior.
+    override = confirmed_case_rules_override(workflow_store, workspace_id, case.physician_id, context.case_family)
+    evaluation = evaluate_physician(patient, context, profile, override)
     fit = _fit_label(evaluation)
     scope = _scope(evaluation)
     rule_evidence = [item.detail for item in evaluation.evidence if item.kind.value == "explicit_physician_rule"]
@@ -104,12 +115,13 @@ def _run_fit_or_scope(case: PhysicianAgentEvalCase):
     return structured_output, assertions
 
 
-def _run_requirements(case: PhysicianAgentEvalCase):
+def _run_requirements(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str):
     patient = build_synthetic_patient(case.id, case.synthetic_case_context)
     context = build_patient_context(patient)
     referring_agent_id = "eval-harness-pcp-agent"
     packet = assemble_initial_packet(patient, context, referring_agent_id)
-    requirements = requirements_for(case.physician_id, context.case_family)
+    confirmed_items = confirmed_requirement_items(workflow_store, workspace_id, case.physician_id, context.case_family)
+    requirements = requirements_for(case.physician_id, context.case_family, confirmed_items)
     initial_checks = evaluate_requirements(requirements, packet)
     missing_before = {check.key for check in initial_checks if check.status.value != "satisfied" and check.required}
     resolved_keys: list[str] = []
@@ -150,10 +162,11 @@ def _run_requirements(case: PhysicianAgentEvalCase):
     return structured_output, assertions
 
 
-def _run_modality(case: PhysicianAgentEvalCase):
+def _run_modality(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str):
     patient = build_synthetic_patient(case.id, case.synthetic_case_context)
     context = build_patient_context(patient)
-    routing = build_care_routing(context)
+    modality_override = confirmed_modality(workflow_store, workspace_id, case.physician_id, context.case_family)
+    routing = build_care_routing(context, modality_override)
     expected = case.expected_behavior
     assertions: list[EvalAssertionResult] = []
     actual_modality = EvalModality.UNKNOWN
@@ -163,7 +176,7 @@ def _run_modality(case: PhysicianAgentEvalCase):
         econsult_suitability = routing.econsult_suitability
     if expected.expected_modality is not None:
         assertions.append(_assertion("modality", expected.expected_modality.value, actual_modality.value, actual_modality == expected.expected_modality, evidence=[f"{case.physician_id} care-routing assessment"]))
-    routes = build_candidate_routes(context)
+    routes = build_candidate_routes(context, modality_override)
     chen_econsult = next((route for route in routes if route.physician_id == case.physician_id and route.modality == "econsult"), None)
     assertions.append(_assertion("econsult_alternative_recognized", True, chen_econsult is not None, chen_econsult is not None))
     structured_output = {"recommended_modality": actual_modality.value, "econsult_suitability": econsult_suitability}
@@ -178,7 +191,10 @@ def _run_answer_practice_question(case: PhysicianAgentEvalCase, workflow_store: 
     profile = project_professional_profile(persona_id, overlays, interest_overlays)
     questions: list = []
     learnings = workflow_store.proposed_learnings(workspace_id, persona_id) if editable else []
-    representation = project_practice_representation(persona_id, questions, learnings, profile)
+    referral_sections = confirmed_referral_preference_sections(workflow_store, workspace_id, case.physician_id)
+    representation = project_practice_representation(
+        persona_id, questions, learnings, profile, confirmed_referral_preference_sections=referral_sections
+    )
     physician_name = _PHYSICIANS_BY_ID[case.physician_id].name.replace(" (synthetic)", "").replace("Dr. ", "")
     question = case.synthetic_case_context.practice_question or ""
     answer, based_on, unconfirmed = answer_general_practice_question(representation["sections"], physician_name, question)
@@ -199,11 +215,11 @@ def run_eval_case(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, w
     snapshot_id = representation_snapshot_id(workflow_store, workspace_id, PERSONA_BY_PHYSICIAN_ID.get(case.physician_id, case.physician_id))
     try:
         if case.task_type in (EvalTaskType.EVALUATE_FIT, EvalTaskType.EVALUATE_SCOPE):
-            structured_output, assertions = _run_fit_or_scope(case)
+            structured_output, assertions = _run_fit_or_scope(case, workflow_store, workspace_id)
         elif case.task_type == EvalTaskType.EVALUATE_REQUIREMENTS:
-            structured_output, assertions = _run_requirements(case)
+            structured_output, assertions = _run_requirements(case, workflow_store, workspace_id)
         elif case.task_type == EvalTaskType.EVALUATE_MODALITY:
-            structured_output, assertions = _run_modality(case)
+            structured_output, assertions = _run_modality(case, workflow_store, workspace_id)
         elif case.task_type == EvalTaskType.ANSWER_PRACTICE_QUESTION:
             structured_output, assertions = _run_answer_practice_question(case, workflow_store, workspace_id)
         else:

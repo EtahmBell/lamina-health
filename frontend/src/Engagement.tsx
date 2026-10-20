@@ -28,6 +28,7 @@ import {
   getProfessionalProfile,
   getProfileEnrichment,
   getTrainingHistory,
+  listReferralPreferences,
   publishPracticeUpdate,
   publishProfessionalPost,
   removeNetworkMember,
@@ -73,6 +74,7 @@ import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { AgentAvatar, agentTone, type AgentAvatarTone } from './AgentAvatar.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
+import { ReferralPreferenceSection } from './ReferralPreferences.tsx'
 
 type Navigate = (path: string) => void
 
@@ -202,6 +204,7 @@ export function selectImprovementPrompt(
   isReview: boolean,
   profile: ProfessionalProfile | null,
   profilePath: string,
+  referralPreferences?: { eligible: boolean; confirmedCount: number },
 ): ImprovementPrompt | null {
   // Pre-NLP cleanup pass, Part G: `plan.label`/`plan.support` already
   // distinguish "unfinished active session -> resume" from "fresh start"
@@ -215,6 +218,14 @@ export function selectImprovementPrompt(
   const caseInterestCount = profile.interests.filter((item) => item.interest_type === 'case_interest').length
   if (caseInterestCount === 0) {
     return { key: 'case-interests', heading: 'Tell your agent what cases interest you.', body: 'Case interests help your agent represent the work you most want to see.', ctaLabel: 'Add case interests', kind: 'navigate', href: `${profilePath}?tab=interests` }
+  }
+  // First NLP physician-representation feature, Part U: only for a
+  // receiving physician this feature is actually wired for (see
+  // ProfessionalProfilePage's own persona==='chen' gate) and only until
+  // they have at least one confirmed preference -- never a second banner
+  // once one exists.
+  if (referralPreferences?.eligible && referralPreferences.confirmedCount === 0) {
+    return { key: 'referral-preferences', heading: 'Teach your agent how you like to receive referrals.', body: 'Your preferences help it coordinate better with other physicians.', ctaLabel: 'Add referral preferences', kind: 'navigate', href: `${profilePath}#profile-section-referral-preferences` }
   }
   if (profile.completeness.completed_section_count < profile.completeness.total_section_count) {
     return { key: 'complete-profile', heading: 'Complete your professional profile.', body: 'A fuller profile helps colleagues understand your practice.', ctaLabel: 'Update profile', kind: 'navigate', href: profilePath }
@@ -322,13 +333,27 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, ma
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
   const loadProfile = () => { getProfessionalProfile(personaId).then(setProfile).catch(() => {}) }
   useEffect(loadProfile, [personaId])
+  // First NLP physician-representation feature, Part U: self-contained
+  // exactly like `profile` above, for the same reason -- only Chen is
+  // eligible for this feature in this pass (see ProfessionalProfilePage's
+  // own persona==='chen' gate).
+  const [confirmedReferralPreferenceCount, setConfirmedReferralPreferenceCount] = useState<number | null>(null)
+  useEffect(() => {
+    if (personaId !== 'chen') { setConfirmedReferralPreferenceCount(null); return }
+    listReferralPreferences(personaId).then((items) => setConfirmedReferralPreferenceCount(items.filter((item) => item.status === 'confirmed').length)).catch(() => {})
+  }, [personaId])
   if (!overview) return null
   const training = overview.training
   const plan = agentBannerPlan(training, trainPath)
   const tiles = buildAgentDigest(records, overview)
   const isReview = training.action === 'review_training'
   const profilePath = personaId === 'owner' ? '/me/profile' : professionalProfilePath(personaId)
-  const prompt = selectImprovementPrompt(plan, isReview, profile, profilePath)
+  const prompt = selectImprovementPrompt(
+    plan, isReview, profile, profilePath,
+    personaId === 'chen' && confirmedReferralPreferenceCount !== null
+      ? { eligible: true, confirmedCount: confirmedReferralPreferenceCount }
+      : undefined,
+  )
   return <section className="agent-banner">
     <div className="agent-banner-main">
       <div className="agent-banner-glyph" aria-hidden="true">
@@ -2064,11 +2089,12 @@ export function PracticeTab({ representation, personaId, portrait, reviewHref, n
       </div>
     </section>}
 
-    {(workupGroups.length > 0 || sections.access_facts.length > 0) && <section className="practice-section practice-section-workup">
+    {(workupGroups.length > 0 || sections.access_facts.length > 0 || sections.modality_preference) && <section className="practice-section practice-section-workup">
       <h3 className="practice-section-heading">Before referral</h3>
       <div className="practice-workup-columns">
         {workupGroups.map((group) => <div className="practice-workup-block" key={group.label}><p className="practice-subheading">{group.label}</p><ChipGroup items={group.items} /></div>)}
         {sections.access_facts.length > 0 && <div className="practice-workup-block"><p className="practice-subheading">Access</p><p className="practice-access-line">{sections.access_facts.join(' · ')}</p></div>}
+        {sections.modality_preference && <div className="practice-workup-block"><p className="practice-subheading">Modality preference</p><p className="practice-access-line">{sections.modality_preference}</p></div>}
       </div>
     </section>}
 
@@ -2349,6 +2375,11 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
     <ProfileInterestSection id="profile-section-interests" heading="Case interests" interestType="case_interest" interests={profile.interests} personaId={personaId} onSaved={onItemSaved} />
     <ProfileInterestSection heading="Clinical interests" interestType="clinical_interest" interests={profile.interests} personaId={personaId} onSaved={onItemSaved} />
     {hasInterests && <TrainingFollowUpBanner trainPath={trainingPath(personaId)} navigate={navigate} />}
+    {/* First NLP physician-representation feature: only a receiving
+     * physician with a real confirmed referral-requirements fixture to
+     * build on (Dr. Chen) gets this section in this pass -- narrow and
+     * well-tested rather than speculatively wired for every persona. */}
+    {personaId === 'chen' && <ReferralPreferenceSection personaId={personaId} />}
     <ProfilePracticeLocationsSection sections={profile.sections} personaId={personaId} onSaved={onItemSaved} />
     <ProfileResearchTeachingSection sections={profile.sections} interests={profile.interests} personaId={personaId} onSaved={onItemSaved} />
   </main>

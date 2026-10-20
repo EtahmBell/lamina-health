@@ -55,12 +55,32 @@ _EXTERNAL_DIRECTORY_CANDIDATE = {
 }
 
 
-def build_care_routing(context: ClinicalRepresentation) -> CareRoutingAssessment | None:
+def build_care_routing(
+    context: ClinicalRepresentation, confirmed_modality: str | None = None
+) -> CareRoutingAssessment | None:
     """The CARE NEED, decided before any physician is ranked (Part A/C).
     `None` for any case family this demo pass doesn't populate -- never a
-    guessed/fabricated routing assessment for a case this pass doesn't cover."""
+    guessed/fabricated routing assessment for a case this pass doesn't cover.
+    `confirmed_modality` (NLP referral-preference pass, Part E/S) is the
+    receiving physician's own CONFIRMED modality preference ("in_person",
+    "econsult", "either", or "unspecified"/`None`) -- looked up by the
+    caller, never here; `"unspecified"`/`None` leaves today's default
+    untouched."""
     if not context.progressive_glycemic_control:
         return None
+    if confirmed_modality == "econsult":
+        return CareRoutingAssessment(
+            specialty="Endocrinology",
+            recommended_modality="econsult",
+            suggested_priority="soon",
+            in_person_need="optional",
+            econsult_suitability="suitable",
+            rationale=(
+                "Persistent worsening type 2 diabetes despite medication escalation makes "
+                "Endocrinology evaluation appropriate; the receiving physician has confirmed "
+                "e-consult is suitable for this presentation."
+            ),
+        )
     return CareRoutingAssessment(
         specialty="Endocrinology",
         recommended_modality="in_person",
@@ -74,14 +94,21 @@ def build_care_routing(context: ClinicalRepresentation) -> CareRoutingAssessment
     )
 
 
-def build_candidate_routes(context: ClinicalRepresentation) -> list[CandidateRoute]:
+def build_candidate_routes(
+    context: ClinicalRepresentation, confirmed_modality: str | None = None
+) -> list[CandidateRoute]:
     """physician + modality + expected access = ROUTE (Part A). Only
     assembled alongside a real CareRoutingAssessment (see above) -- empty
-    for any case this pass doesn't cover."""
+    for any case this pass doesn't cover. `confirmed_modality` (NLP
+    referral-preference pass, Part E/S): when Dr. Chen has confirmed
+    "econsult" or "either" is preferred, his e-consult route becomes the
+    recommended one instead of in-person -- `fit_label` never changes
+    (Part V: access/modality never mutates fit)."""
     if not context.progressive_glycemic_control:
         return []
     chen_access = PHYSICIAN_ACCESS_PROFILES["physician-chen"]
     maya_access = PHYSICIAN_ACCESS_PROFILES["physician-ramanathan"]
+    chen_prefers_econsult = confirmed_modality in {"econsult", "either"}
     return [
         CandidateRoute(
             physician_id="physician-chen",
@@ -92,9 +119,11 @@ def build_candidate_routes(context: ClinicalRepresentation) -> list[CandidateRou
             evidence_confidence="high",
             network_participation=NetworkParticipation.INTEGRATED_NETWORK,
             access=chen_access,
-            recommended=True,
+            recommended=not chen_prefers_econsult,
             rationale=(
-                "Direct evaluation is preferred, Dr. Chen has the strongest practice fit, and his "
+                "A strong practice fit; in-person access remains within an acceptable window."
+                if chen_prefers_econsult
+                else "Direct evaluation is preferred, Dr. Chen has the strongest practice fit, and his "
                 "current in-person access remains within an acceptable window."
             ),
         ),
@@ -107,9 +136,12 @@ def build_candidate_routes(context: ClinicalRepresentation) -> list[CandidateRou
             evidence_confidence="high",
             network_participation=NetworkParticipation.INTEGRATED_NETWORK,
             access=chen_access,
-            recommended=False,
+            recommended=chen_prefers_econsult,
             rationale=(
-                "Fast response (about 2 business days), but direct in-person evaluation is "
+                "Dr. Chen has confirmed e-consult is suitable for this presentation, with a fast "
+                "response (about 2 business days)."
+                if chen_prefers_econsult
+                else "Fast response (about 2 business days), but direct in-person evaluation is "
                 "preferred for this presentation."
             ),
         ),

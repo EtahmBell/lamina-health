@@ -360,6 +360,7 @@ export type PracticeRepresentation = {
     referral_requirements: string[]; preferred_workup: string[]; access_facts: string[]
     explicit_rules: string[]; confirmed_learnings: PracticeLearning[]
     interests: PhysicianInterest[]; interest_safety: string
+    modality_preference: string | null; referral_preference_provenance: string[]
   }
   gaps: {
     unanswered_questions: TrainingQuestion[]; unconfirmed_rules: PracticeLearning[]
@@ -745,6 +746,34 @@ export type PhysicianAgentEvalSuiteResult = {
 export const getEvalPhysicians = () => request<EvalPhysicianSummary[]>('/api/workspace/eval/physicians')
 export const getEvalCases = (physicianId: string) => request<PhysicianAgentEvalCase[]>(`/api/workspace/eval/physicians/${encodeURIComponent(physicianId)}/cases`)
 export const runEvalSuite = (physicianId: string) => request<PhysicianAgentEvalSuiteResult>(`/api/workspace/eval/physicians/${encodeURIComponent(physicianId)}/run`, { method: 'POST' })
+
+/** First NLP physician-representation feature: natural-language referral
+ * preferences. A DRAFT is never operational -- only CONFIRM makes a
+ * preference part of the physician's durable representation. */
+export type ReferralPreferenceStatus = 'draft' | 'confirmed' | 'rejected' | 'superseded'
+export type ReferralPreferenceModality = 'in_person' | 'econsult' | 'either' | 'unspecified'
+export type ReferralRequirementItem = { key: string; label: string; required: boolean; freshness_days: number | null }
+export type StructuredReferralPreference = {
+  good_fit: string[]; required: ReferralRequirementItem[]; helpful: ReferralRequirementItem[]
+  redirect: string[]; modality: ReferralPreferenceModality
+}
+export type PhysicianReferralPreference = {
+  id: string; physician_id: string; case_family: string; source_text: string
+  structured_rules: StructuredReferralPreference; status: ReferralPreferenceStatus
+  source: 'physician_authored_nlp' | 'migrated_fixture'
+  created_at: string; updated_at: string; confirmed_at: string | null
+  supersedes_id: string | null; representation_snapshot_id_at_confirmation: string | null
+}
+const referralPreferencesBase = (personaId: PhysicianIdentity) => `/api/workspace/physician/${encodeURIComponent(personaId)}/referral-preferences`
+export const listReferralPreferences = (personaId: PhysicianIdentity) => request<PhysicianReferralPreference[]>(referralPreferencesBase(personaId))
+export const interpretReferralPreference = (personaId: PhysicianIdentity, sourceText: string) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/interpret`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source_text: sourceText }),
+})
+export const editReferralPreference = (personaId: PhysicianIdentity, preferenceId: string, structuredRules: StructuredReferralPreference) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/${encodeURIComponent(preferenceId)}`, {
+  method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ structured_rules: structuredRules }),
+})
+export const confirmReferralPreference = (personaId: PhysicianIdentity, preferenceId: string) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/${encodeURIComponent(preferenceId)}/confirm`, { method: 'POST' })
+export const rejectReferralPreference = (personaId: PhysicianIdentity, preferenceId: string) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/${encodeURIComponent(preferenceId)}/reject`, { method: 'POST' })
 export const getAgentNetwork = () => request<AgentNetwork>('/api/workspace/network')
 export const getSpecialistWorkspace = () => request<SpecialistWorkspace>('/api/workspace/specialist')
 export const getSpecialistCases = () => request<SpecialistCaseSummary[]>('/api/workspace/specialist/cases')

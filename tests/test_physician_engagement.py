@@ -466,7 +466,12 @@ def test_chen_is_a_real_editable_persona_with_his_canonical_profile_data(
     # Sourced from the same canonical PHYSICIAN_CHEN the referral domain uses
     # (backend/synthetic_data/fixtures.py) -- never a duplicated/fabricated identity.
     assert "type 2 diabetes" in representation["sections"]["clinical_focus"]
-    assert "type_2_diabetes" in representation["sections"]["good_fit"]
+    # NLP referral-preference pass, Part K/Q: Chen's confirmed referral
+    # preference (migrated from this same fixture) is now the canonical
+    # `good_fit` source -- a human-readable sentence, not a raw signal token,
+    # which is exactly the intended consolidation (one source of truth,
+    # Part A/K), not a regression.
+    assert any("type 2 diabetes" in item for item in representation["sections"]["good_fit"])
     assert representation["ranking_effect"] == "none"
     assert overview["specialty"] == "Endocrinology"
     assert overview["location"] == "Oakland, CA"

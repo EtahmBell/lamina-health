@@ -53,10 +53,16 @@ def answer_general_practice_question(
         )
 
     if any(keyword in lower for keyword in ("e-consult", "econsult", "in-person", "in person", "virtual visit")):
-        # Deliberately no fabricated e-consult policy -- this is not yet a
-        # structured, confirmable field in any practice representation, so
-        # there is nothing real to cite (Part P/Q: decline rather than
-        # invent a physician opinion).
+        # NLP referral-preference pass, Part V: grounded ONLY in a CONFIRMED
+        # modality preference -- never a draft, and never fabricated when
+        # nothing has been confirmed (Part P/Q: decline rather than invent).
+        modality_preference = sections.get("modality_preference")
+        if modality_preference:
+            return (
+                f"Dr. {physician_name} has confirmed: {modality_preference}",
+                ["confirmed referral preference"],
+                False,
+            )
         return (
             f"Dr. {physician_name} has not confirmed a preference on e-consult versus in-person visits yet.",
             [],

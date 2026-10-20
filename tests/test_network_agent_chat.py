@@ -56,11 +56,28 @@ def test_chen_answers_a_case_interest_question_from_his_confirmed_clinical_focus
     assert "type 2 diabetes" in answer["answer"]
 
 
+def test_econsult_question_answers_from_chens_confirmed_referral_preference(
+    engagement_store: WorkflowStore,
+) -> None:
+    """NLP referral-preference pass, Part V: Dr. Chen's confirmed diabetes
+    referral preference (migrated from his existing fixture, Part K) now
+    includes a confirmed modality preference -- this question is no longer
+    an honest-uncertainty case for him specifically (see
+    test_unsupported_econsult_preference_is_an_honest_uncertainty_not_a_fabricated_policy
+    below, which covers a physician with no confirmed modality preference at
+    all)."""
+    with TestClient(app) as client:
+        answer = _ask(client, "chen", "When would you prefer an e-consult versus an in-person visit?")
+    assert "has confirmed" in answer["answer"]
+    assert answer["based_on"] == ["confirmed referral preference"]
+    assert answer["requires_physician_input"] is False
+
+
 def test_unsupported_econsult_preference_is_an_honest_uncertainty_not_a_fabricated_policy(
     engagement_store: WorkflowStore,
 ) -> None:
     with TestClient(app) as client:
-        answer = _ask(client, "chen", "When would you prefer an e-consult versus an in-person visit?")
+        answer = _ask(client, "iain", "When would you prefer an e-consult versus an in-person visit?")
     assert "has not confirmed a preference" in answer["answer"]
     assert answer["based_on"] == []
     assert answer["requires_physician_input"] is True

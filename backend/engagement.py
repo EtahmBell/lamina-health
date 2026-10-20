@@ -1519,6 +1519,11 @@ def base_practice_representation(persona_id: str) -> dict:
                 "Progressive CKD with resistant hypertension usually leads to nephrology first.",
                 "Persistent iron deficiency without GI source evaluation usually leads to gastroenterology first.",
             ],
+            # NLP referral-preference pass, Part Q: always present (even when
+            # nothing is confirmed yet) so every caller sees one consistent
+            # shape rather than needing to guard a sometimes-missing key.
+            "modality_preference": None,
+            "referral_preference_provenance": [],
         }
     physician_id = PERSONAS[persona_id]["physician_id"]
     profile = PHYSICIANS_BY_ID[physician_id]
@@ -1531,6 +1536,8 @@ def base_practice_representation(persona_id: str) -> dict:
         "preferred_workup": profile.required_workup,
         "access_facts": [f"Approximately {profile.availability_days} days"],
         "explicit_rules": profile.explicit_rules,
+        "modality_preference": None,
+        "referral_preference_provenance": [],
     }
 
 
@@ -1559,8 +1566,20 @@ def project_practice_representation(
     profile: dict,
     existing_learnings: list[dict] | None = None,
     interests: list[dict] | None = None,
+    confirmed_referral_preference_sections: dict | None = None,
 ) -> dict:
+    """`confirmed_referral_preference_sections` (NLP referral-preference
+    pass, Part Q/K) -- built by backend.referral_preferences.
+    confirmed_referral_preference_sections() and passed in by the caller,
+    never computed here (keeps this function free of storage access). When
+    present, it overlays `good_fit`/`referral_requirements`/
+    `preferred_workup`/`explicit_rules`/`modality_preference`/
+    `referral_preference_provenance` onto the fixture-derived base -- the
+    physician's own confirmed preference becomes the canonical source
+    instead of a second one existing alongside it."""
     base = base_practice_representation(persona_id)
+    if confirmed_referral_preference_sections:
+        base = {**base, **confirmed_referral_preference_sections}
     confirmed = [item for item in learnings if item["status"] == "confirmed"]
     suggested = [item for item in learnings if item["status"] == "suggested"]
     existing = existing_learnings or []

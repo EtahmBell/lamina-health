@@ -2589,3 +2589,21 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .eval-assertion-list small { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .62rem; }
 .eval-assertion-evidence { font-style: italic; }
 @media (max-width: 640px) { .eval-case-detail-grid { grid-template-columns: 1fr; } }
+
+/* First NLP physician-representation feature: "How I receive referrals" */
+.referral-preference-section textarea { width: 100%; max-width: 620px; font: inherit; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; resize: vertical; margin-bottom: 10px; }
+.referral-pref-input { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.referral-pref-review-card { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted, rgb(0 0 0 / 2%)); }
+.referral-pref-status-draft { color: var(--accent-hover); }
+.referral-pref-status-confirmed { color: var(--success); }
+.referral-pref-group { margin-top: 12px; }
+.referral-pref-group:first-child { margin-top: 0; }
+.referral-pref-chip-list, .referral-pref-requirement-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.referral-pref-chip-list li { display: flex; align-items: center; gap: 8px; font-size: .74rem; }
+.referral-pref-requirement-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .74rem; }
+.referral-pref-requirement-row small { color: var(--text-secondary); }
+.referral-pref-requirement-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.referral-pref-review-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.referral-pref-confirmed-summary { margin: 14px 0 20px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; }
+.referral-pref-provenance { display: block; margin-top: 10px; color: var(--text-secondary); }
+.referral-pref-editor select { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; }

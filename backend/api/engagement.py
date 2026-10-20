@@ -20,6 +20,7 @@ from backend.agent_experience import (
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.models import CoordinationChatAnswer
 from backend.network_chat import answer_general_practice_question
+from backend.referral_preferences import confirmed_referral_preference_sections, ensure_seed_preferences
 from backend.engagement import (
     DEPENDS_OPTION,
     EDITABLE_PERSONAS,
@@ -208,6 +209,14 @@ def _existing_learnings(workspace_id: str, persona_id: str) -> list[dict]:
     return workflow_store.specialist_calibrations(workspace_id, npi)
 
 
+def _confirmed_referral_sections(workspace_id: str, persona_id: str) -> dict | None:
+    physician_id = PERSONAS[persona_id]["physician_id"]
+    if physician_id is None:
+        return None
+    ensure_seed_preferences(workflow_store, workspace_id)
+    return confirmed_referral_preference_sections(workflow_store, workspace_id, physician_id)
+
+
 def _representation(workspace_id: str, persona_id: str) -> dict:
     return project_practice_representation(
         persona_id,
@@ -218,6 +227,7 @@ def _representation(workspace_id: str, persona_id: str) -> dict:
         physician_interests(
             persona_id, workflow_store.physician_interests(workspace_id, persona_id)
         ),
+        _confirmed_referral_sections(workspace_id, persona_id),
     )
 
 
@@ -1645,7 +1655,8 @@ def network_physician_profile(controlled_id: str, workspace_id: DemoWorkspace) -
         else []
     )
     representation = project_practice_representation(
-        controlled_id, questions, learnings, profile
+        controlled_id, questions, learnings, profile,
+        confirmed_referral_preference_sections=_confirmed_referral_sections(workspace_id, controlled_id),
     )
     return {
         "physician": PERSONAS[controlled_id],
@@ -1698,7 +1709,10 @@ def ask_network_agent(
         if controlled_id in EDITABLE_PERSONAS
         else []
     )
-    representation = project_practice_representation(controlled_id, questions, learnings, profile)
+    representation = project_practice_representation(
+        controlled_id, questions, learnings, profile,
+        confirmed_referral_preference_sections=_confirmed_referral_sections(workspace_id, controlled_id),
+    )
     physician_name = PERSONAS[controlled_id]["name"].replace("Dr. ", "")
     answer, based_on, unconfirmed = answer_general_practice_question(
         representation, physician_name, request.question

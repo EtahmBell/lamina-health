@@ -3,6 +3,7 @@ from backend.models import (
     ClinicalFit,
     ConsultationResult,
     PatientRecord,
+    PhysicianCaseRules,
     PhysicianProfile,
 )
 
@@ -17,10 +18,25 @@ def consult_network(
     patient: PatientRecord,
     physicians: list[PhysicianProfile],
     pcp_guidance: str | None = None,
+    case_rules_overrides: dict[str, PhysicianCaseRules] | None = None,
+    case_interest_titles_by_physician: dict[str, list[str]] | None = None,
+    confirmed_modality: str | None = None,
 ) -> ConsultationResult:
+    """`case_rules_overrides`/`case_interest_titles_by_physician`/
+    `confirmed_modality` (NLP referral-preference pass, Part J/S/T) are each
+    physician's own CONFIRMED persisted state, looked up by the caller (see
+    backend/api/consult.py) -- never looked up here, keeping this a pure
+    function of its arguments."""
     context = build_patient_context(patient)
-    candidates = generate_candidates(context, physicians, pcp_guidance)
-    evaluations = [evaluate_physician(patient, context, profile) for profile in physicians]
+    overrides = case_rules_overrides or {}
+    interest_titles = case_interest_titles_by_physician or {}
+    candidates = generate_candidates(context, physicians, pcp_guidance, overrides)
+    evaluations = [
+        evaluate_physician(
+            patient, context, profile, overrides.get(profile.id), interest_titles.get(profile.id)
+        )
+        for profile in physicians
+    ]
     profiles_by_id = {profile.id: profile for profile in physicians}
     ranked = sorted(
         evaluations,
@@ -75,6 +91,6 @@ def consult_network(
         alternatives=alternatives,
         consultation=evaluations,
         disclaimer="Synthetic demonstration only. This record supports referral orchestration and is not medical advice or a quality ranking.",
-        care_routing=build_care_routing(context),
-        candidate_routes=build_candidate_routes(context),
+        care_routing=build_care_routing(context, confirmed_modality),
+        candidate_routes=build_candidate_routes(context, confirmed_modality),
     )

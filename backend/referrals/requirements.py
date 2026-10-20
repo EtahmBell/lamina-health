@@ -39,7 +39,20 @@ REFERRAL_REQUIREMENTS_BY_KEY: dict[tuple[str, str], list[ReferralRequirement]] =
 }
 
 
-def requirements_for(receiving_physician_id: str, case_family: str) -> list[ReferralRequirement]:
+def requirements_for(
+    receiving_physician_id: str,
+    case_family: str,
+    confirmed_items: list[ReferralRequirement] | None = None,
+) -> list[ReferralRequirement]:
+    """`confirmed_items` (NLP referral-preference pass, Part J), when supplied,
+    is the physician's own CONFIRMED persisted referral preference's required
+    + helpful items for this case family -- takes priority over the static
+    fixture below. Stays a pure function: the caller (see
+    backend/referral_preferences.py) looks up the confirmed preference from
+    storage. Falls back to the fixture when no confirmed preference exists,
+    so every physician without one is unaffected."""
+    if confirmed_items is not None:
+        return confirmed_items
     return REFERRAL_REQUIREMENTS_BY_KEY.get((receiving_physician_id, case_family), [])
 
 

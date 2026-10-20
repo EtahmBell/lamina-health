@@ -26,6 +26,7 @@ from backend.models import (
     PatientRecord,
     Referral,
     ReferralPriority,
+    ReferralRequirement,
     ReferralStatus,
     RequirementStatus,
     SchedulingCoordination,
@@ -82,6 +83,7 @@ def build_referral(
     priority: ReferralPriority = "routine",
     modality: CareModality = "in_person",
     previous_referral_id: int | None = None,
+    requirement_override: list[ReferralRequirement] | None = None,
 ) -> Referral:
     """Create a new referral and assemble its initial packet. Does not persist.
 
@@ -96,7 +98,13 @@ def build_referral(
     physician explicitly confirmed/edited before creating this referral --
     never silently upgraded here. `urgency` (pre-existing, otherwise unused
     free text) is derived from it only for a readable referral_question
-    companion string; readiness/packet assembly below never reads either."""
+    companion string; readiness/packet assembly below never reads either.
+
+    `requirement_override` (NLP referral-preference pass, Part J) is the
+    receiving physician's own CONFIRMED persisted referral preference's
+    required/helpful items for this case family, looked up by the caller
+    (backend/api/referrals.py) -- never looked up here, keeping this
+    function a pure function of its arguments."""
     context = build_patient_context(patient)
     referral_question = patient.referral_question or f"Please evaluate for {specialty.lower()} input."
     now = _now()
@@ -123,7 +131,9 @@ def build_referral(
         metadata={"receiving_physician_id": receiving_physician_id},
     )
     referral.packet = assemble_initial_packet(patient, context, referral.referring_physician_id)
-    referral.receiving_requirements = requirements_for(receiving_physician_id, context.case_family)
+    referral.receiving_requirements = requirements_for(
+        receiving_physician_id, context.case_family, requirement_override
+    )
     referral.status = ReferralStatus.ASSEMBLING
     _append_event(
         referral,

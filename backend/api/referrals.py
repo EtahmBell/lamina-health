@@ -45,6 +45,8 @@ from backend.referrals import (
     run_preflight,
     send_handoff,
 )
+from backend.clinical import build_patient_context
+from backend.referral_preferences import confirmed_requirement_items, ensure_seed_preferences
 from backend.synthetic_data import ALL_PHYSICIANS
 from backend.workflow import workflow_store
 
@@ -116,11 +118,17 @@ def create_referral(
     if active_existing is not None:
         return active_existing
     previous_episode = most_recent_referral_for_pair(existing_for_patient, receiving_physician.id)
+    case_family = build_patient_context(patient).case_family
+    ensure_seed_preferences(workflow_store, workspace_id)
+    requirement_override = confirmed_requirement_items(
+        workflow_store, workspace_id, receiving_physician.id, case_family
+    )
     referral = build_referral(
         patient, receiving_physician.id, receiving_physician.specialty,
         priority=request.priority or "routine",
         modality=request.modality or "in_person",
         previous_referral_id=previous_episode.id if previous_episode else None,
+        requirement_override=requirement_override,
     )
     return workflow_store.create_referral(workspace_id, referral)
 

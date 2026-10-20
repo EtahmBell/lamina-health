@@ -542,12 +542,22 @@ PHYSICIAN_CASE_RULES_BY_KEY: dict[tuple[str, str], PhysicianCaseRules] = {
 
 
 def resolve_case_rules(
-    profile: PhysicianProfile, context: ClinicalRepresentation
+    profile: PhysicianProfile,
+    context: ClinicalRepresentation,
+    confirmed_preference: PhysicianCaseRules | None = None,
 ) -> PhysicianCaseRules:
     """The referral representation a physician applies for one patient's case
-    family. Falls back to the physician's own general PhysicianProfile fields
-    when no case-specific override exists, so physicians who only ever see one
+    family. `confirmed_preference` (NLP referral-preference pass, Part J), when
+    supplied, takes priority over the static fixture -- the physician's own
+    CONFIRMED persisted referral preference for this case family, never a
+    draft/rejected one. Stays a pure function: the caller (see
+    backend/referral_preferences.py) is responsible for looking up that
+    confirmed preference from storage. Falls back to the physician's own
+    general PhysicianProfile fields when neither a confirmed preference nor a
+    case-specific fixture override exists, so physicians who only ever see one
     case family (nearly everyone, today) are completely unaffected."""
+    if confirmed_preference is not None:
+        return confirmed_preference
     override = PHYSICIAN_CASE_RULES_BY_KEY.get((profile.id, context.case_family))
     if override is not None:
         return override
