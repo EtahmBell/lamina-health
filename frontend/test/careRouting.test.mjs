@@ -246,14 +246,15 @@ test('the external-directory candidate\'s display name carries no fixture/debug 
 
 /* --------------------------------------------------------------- Part 3B */
 
-test('every physician shown in routing/options is inspectable by clicking their avatar or name -- Lamina physicians open a real profile, the external-directory candidate opens a small unclaimed-profile panel instead of a dead/404 link', () => {
-  assert.match(app, /function PhysicianProfileLink\(\{ physicianId, navigate, onUnclaimed, children, className \}: \{/)
+test('every physician shown in routing/options is inspectable by clicking their avatar or name -- Lamina physicians open a real profile, Okonkwo opens the NPI directory profile, the external-directory candidate opens the SAME shared profile shell via a local directory lookup, never a dead/404 link or a one-off modal', () => {
+  assert.match(app, /function PhysicianProfileLink\(\{ physicianId, navigate, children, className \}: \{/)
   assert.match(app, /const ROUTING_PHYSICIAN_PERSONA: Record<string, string> = \{ \[CHEN_ID\]: 'chen', 'physician-ramanathan': 'maya' \}/)
   assert.match(app, /const ROUTING_PHYSICIAN_NPI: Record<string, string> = \{ 'physician-okonkwo': '9900000029' \}/)
+  assert.match(app, /const ROUTING_DIRECTORY_PHYSICIANS: Record<string, DirectoryOnlyProfile> = \{/)
   const fn = recommendationView()
   assert.match(fn, /<PhysicianProfileLink physicianId=\{selected\.physician_id\}/, 'the primary match card avatar/name are clickable')
   assert.match(fn, /<PhysicianProfileLink physicianId=\{row\.physicianId\}/, 'each Other options row name is clickable')
-  assert.match(fn, /setUnclaimedProfile/, 'the external-directory candidate opens a local panel, never a navigation that would 404')
+  assert.doesNotMatch(app, /onUnclaimed|unclaimedProfile/i, 'the old one-off modal is gone entirely -- Okafor now navigates to a real page')
 })
 
 /* --------------------------------------------------------------- Part Q */
@@ -434,8 +435,8 @@ test('the "How your agent handled this" caret is a real SVG chevron, flex-aligne
 test('Consultation details content is brought up to date with the newer routing model -- Maya, Chen e-consult, and the fact that access/modality were weighed, not just fit', () => {
   const fn = recommendationView()
   const modal = slice(fn, 'aria-label="Consultation details"', '</div></ModalPortal>}')
-  assert.match(modal, /Access &amp; modality considered/)
-  assert.match(modal, /was recommended for this presentation; expected access and e-consult suitability were weighed for every route below alongside clinical fit, not fit alone\./)
+  assert.match(modal, /Routes &amp; access considered/)
+  assert.match(modal, /was recommended for this presentation; expected access and e-consult suitability were weighed for every route alongside clinical fit, not fit alone\./)
   assert.match(modal, /allOptionRows\.map\(\(row\) => <li key=\{row\.key\}>/)
   // Dr. Noah Chen and Dr. Adaeze Okonkwo already appear via the pre-existing
   // real "Specialist-agent responses" list above this new block.
@@ -465,9 +466,10 @@ test('the external-directory candidate (Okafor) is never counted or listed as a 
   assert.match(routingOnlyAgentsFn, /route\.network_participation !== 'external_directory'/)
 })
 
-test('"Access & modality considered" distinguishes PHYSICIANS consulted from ROUTES considered, using the unfiltered route list so it stays a stable record regardless of Lucy\'s current selection', () => {
+test('"Routes & access considered" distinguishes PHYSICIANS consulted from ROUTES considered, using the unfiltered route list so it stays a stable record regardless of Lucy\'s current selection -- its own heading, never blended into the dense evaluation-records card', () => {
   const fn = recommendationView()
-  assert.match(fn, /\{consultedPhysicianCount\} physician agent\{consultedPhysicianCount === 1 \? '' : 's'\} consulted · \{allOptionRows\.length\} route\{allOptionRows\.length === 1 \? '' : 's'\} considered\./)
+  assert.match(fn, /<div className="evaluation-record-heading">Routes &amp; access considered<\/div>/)
+  assert.match(fn, /\{allOptionRows\.length\} route\{allOptionRows\.length === 1 \? '' : 's'\} considered across \{consultedPhysicianCount\} physician agent\{consultedPhysicianCount === 1 \? '' : 's'\}/)
 })
 
 /* --------------------------------------------------------------- Part 4 */
@@ -555,4 +557,115 @@ test('the Saruhashi coordination activity never exposes the private cross-agent 
 test('Recent network (NetworkHighlights) is unchanged by this pass', () => {
   const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
   assert.match(home, /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="chen" \/>/)
+})
+
+/* =====================================================================
+ * Second follow-up pass: Okafor's full unclaimed profile page, Maya's
+ * consultation-evaluation record, the consultation-history privacy
+ * correction, a referral-accepted success animation, and the data-driven
+ * Dashboard improvement card. See Parts A-W.
+ * ===================================================================== */
+
+const physicianNetworkSource = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
+
+/* --------------------------------------------------------------- Part X */
+
+test('Okafor opens the SAME PhysicianProfilePage shell as Okonkwo -- a directoryProfile branch inside the one shared component, never a separate one-off modal', () => {
+  assert.match(physicianNetworkSource, /export function PhysicianProfilePage\(\{ npi, directoryProfile, navigate \}: \{ npi\?: string; directoryProfile\?: DirectoryOnlyProfile; navigate: Navigate \}\) \{/)
+  assert.match(physicianNetworkSource, /if \(directoryProfile\) \{/)
+  assert.match(physicianNetworkSource, /Not yet on Lamina/)
+  assert.match(app, /const networkDirectoryId = path\.match\(\/\^\\\/network\\\/directory\\\/\(\[\^\/\]\+\)\$\/\)\?\.\[1\]/)
+  assert.match(app, /<PhysicianProfilePage directoryProfile=\{ROUTING_DIRECTORY_PHYSICIANS\[networkDirectoryId\]\} navigate=\{navigate\} \/>/)
+})
+
+test('Okafor\'s directory page shows only known information -- no case interests, no e-consult policy, no live availability, no historical evidence, no referral requirements are invented', () => {
+  const directoryBranch = physicianNetworkSource.slice(physicianNetworkSource.indexOf('<section className="directory-information-card">'), physicianNetworkSource.indexOf('if (!profile) return'))
+  assert.match(directoryBranch, /<dd>Unverified<\/dd>/, 'availability is explicitly unverified')
+  assert.match(directoryBranch, /<dd>Unknown<\/dd>/, 'e-consult is explicitly unknown')
+  assert.match(directoryBranch, /<dd>Not yet confirmed<\/dd>/, 'practice preferences are explicitly not confirmed')
+  assert.doesNotMatch(directoryBranch, /case interest|historical|required_workup|referral requirement/i, 'no fabricated clinical/practice evidence for an unclaimed directory physician')
+})
+
+test('Okonkwo (a real claimable NPI identity) still works unchanged -- the directoryProfile branch is a separate early return, never touching the npi/profile-fetch path', () => {
+  assert.match(physicianNetworkSource, /useEffect\(\(\) => \{ if \(npi\) getProvider\(npi\)\.then\(setProfile\)\.catch/, 'the real NPI fetch path is preserved, just gated on npi being provided')
+  assert.match(app, /<PhysicianProfilePage npi=\{networkNpi\} navigate=\{navigate\} \/>/)
+})
+
+/* --------------------------------------------------------------- Part Y */
+
+test('Dr. Maya Ramanathan has a structured physician evaluation record built from her real CandidateRoute facts -- not a fabricated Evaluation shape', () => {
+  const fn = recommendationView()
+  const evalSection = fn.slice(fn.indexOf('<div className="evaluation-record-heading">Physician evaluation records</div>'), fn.indexOf('<div className="evaluation-record-heading">Routes &amp; access considered</div>'))
+  assert.match(evalSection, /\{routingOnlyAgents\.map\(\(agent\) => \{/)
+  assert.match(evalSection, /<span className=\{`decision-badge \$\{route\.fit_label\}`\}>\{fitLabelText\(route\.fit_label\)\} fit<\/span>/)
+  assert.match(evalSection, /<span>Network<\/span><strong>\{networkParticipationLabel\(route\.network_participation\)\}<\/strong>/)
+})
+
+test('Okafor never appears in Physician evaluation records or Specialist-agent responses -- routingOnlyAgents and the real consultation.consultation list both explicitly exclude the external-directory candidate', () => {
+  const fn = recommendationView()
+  assert.match(fn, /const routingOnlyAgents = consultation\.candidate_routes\s*\.filter\(\(route\) => route\.network_participation !== 'external_directory'\)/)
+})
+
+/* --------------------------------------------------------------- Part Z */
+
+test('no raw 1:1 agent-conversation transcript exists anywhere in the durable consultation-details/history UI -- no quoted dialogue turns like "Agent A said" / "Agent B replied"', () => {
+  for (const source of [app, referralSource]) {
+    assert.doesNotMatch(source, /Agent[^<]{0,20}said[:]/i)
+    assert.doesNotMatch(source, /Agent[^<]{0,20}replied[:]/i)
+  }
+  // The structured consultation record (ConsultationLog) and the
+  // structured referral coordination timeline (AgentCoordinationModal)
+  // both render typed summaries/evidence, never message.content as a
+  // quoted chat bubble.
+  assert.doesNotMatch(app, /<p>\{message\.content\}<\/p>/)
+  assert.match(referralSource, /<strong>\{EVENT_TYPE_TITLES\[event\.event_type\] \?\? event\.event_type\}<\/strong>/, 'referral coordination events remain a structured, typed timeline')
+})
+
+test('the ephemeral "Ask Dr. X\'s Agent" chat remains separate and unaffected -- local-only state, no persistence/restore-on-mount, never shown to the other physician', () => {
+  const chatCard = referralSource.slice(referralSource.indexOf('export function CoordinationChatCard'), referralSource.indexOf('/* ============================================================ RECEIVING SIDE'))
+  assert.match(chatCard, /const \[messages, setMessages\] = useState<LocalChatMessage\[\]>\(\[\]\)/, 'chat state starts empty every mount -- never restored from a backend fetch')
+  assert.doesNotMatch(chatCard, /useEffect\(\(\) => \{[^}]*getA/s, 'no effect fetches/restores prior messages on mount')
+})
+
+/* -------------------------------------------------------------- Part AA */
+
+test('an "About this consultation" disclosure exists -- shared inputs and returned conclusions are auditable, temporary agent working context is not retained, "Witness" is never named in user-facing copy', () => {
+  const fn = recommendationView()
+  assert.match(fn, /<div className="evaluation-record-heading">About this consultation<\/div>/)
+  assert.match(fn, /the information shared for this task and the conclusions returned by participating physician agents\. Temporary agent working context is not retained\./)
+  assert.doesNotMatch(fn, /Witness/)
+})
+
+/* -------------------------------------------------------------- Part AB */
+
+test('Referral accepted plays a one-shot SVG check-circle animation -- stroke-dasharray/dashoffset draw, not a GIF/video, no confetti/bounce/giant-icon treatment', () => {
+  assert.match(referralSource, /function CheckCircleAnimation\(\) \{/)
+  assert.match(referralSource, /<circle className="check-circle-ring"/)
+  assert.match(referralSource, /<path className="check-circle-mark"/)
+  assert.match(referralSource, /<CheckCircleAnimation \/>/)
+  assert.doesNotMatch(referralSource, /\.gif|<video/i)
+  const ringRule = slice(styles, '.check-circle-ring {', '}')
+  assert.match(ringRule, /stroke-dasharray: 170/)
+  assert.match(ringRule, /animation: check-circle-ring-draw 320ms/)
+})
+
+test('the check-circle animation totals approximately 540ms (320ms ring + 260ms mark starting at a 280ms delay, well inside the requested 500-700ms window) and respects prefers-reduced-motion by showing the completed icon immediately', () => {
+  const markRule = slice(styles, '.check-circle-mark {', '}')
+  assert.match(markRule, /animation: check-circle-mark-draw 260ms ease-out 280ms forwards/)
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{\s*\.check-circle-ring, \.check-circle-mark \{ animation: none; stroke-dashoffset: 0; opacity: 1; \}/)
+})
+
+test('the animation only ever mounts on a genuine live acceptance -- it lives inside RequestReviewModal\'s local `accepted` state, which starts false every mount and is never set from a restored/hydrated referral', () => {
+  const modalFn = referralSource.slice(referralSource.indexOf('export function RequestReviewModal'), referralSource.indexOf('export function markReferralJustAccepted'))
+  assert.match(modalFn, /const \[accepted, setAccepted\] = useState\(false\)/)
+  assert.doesNotMatch(modalFn, /useEffect\(\(\) => \{[^}]*setAccepted\(true\)/s, 'accepted is only ever set true inside the live accept() click handler, never by an effect that could fire on hydration')
+  assert.match(modalFn, /const accept = async \(\) => \{/)
+})
+
+test('backend acceptance is immediate and animation-independent -- acceptReferral() is awaited and the referral is actually accepted before the animation\'s own hold delay, and modal closing (onClose/onAccepted) remains functional', () => {
+  const modalFn = referralSource.slice(referralSource.indexOf('export function RequestReviewModal'), referralSource.indexOf('export function markReferralJustAccepted'))
+  assert.match(modalFn, /const updated = await acceptReferral\(referral\.id, referral\.receiving_physician_id\)/)
+  assert.match(modalFn, /setAccepted\(true\)/)
+  assert.match(modalFn, /onAccepted\(updated\)/)
+  assert.match(modalFn, /onClick=\{onClose\}/)
 })

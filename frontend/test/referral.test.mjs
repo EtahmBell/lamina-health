@@ -197,7 +197,10 @@ test('neither modal exposes hidden chain-of-thought language', () => {
     assert.doesNotMatch(source, /reasoning trace/i)
     assert.doesNotMatch(source, /hidden reasoning/i)
   }
-  assert.match(app, /Hidden model chain-of-thought is not stored or shown\./)
+  // Follow-up pass, Part K: the old defensive-sounding "not private model
+  // reasoning" disclaimer was replaced with product-specific language --
+  // see "About this consultation" coverage in careRouting.test.mjs.
+  assert.match(app, /Temporary agent working context is not retained\./)
 })
 
 test('the coordination dialog has a sensible max width and relies on the shared scrollable dialog shell', () => {

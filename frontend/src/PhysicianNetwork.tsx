@@ -367,18 +367,58 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
   </div>
 }
 
+/** UX polish pass, Part A/B: an unclaimed external-directory physician with
+ * no real Lamina/NPI record at all (Dr. Okafor) -- just a name/specialty,
+ * never a fabricated richer identity. Shares the SAME PhysicianProfilePage
+ * shell/architecture as a real claimable NPI identity (Dr. Okonkwo), just a
+ * different, much more restrained state (Part B: "one shared physician-
+ * profile architecture with state-driven differences", never a one-off
+ * modal per directory physician). */
+export type DirectoryOnlyProfile = { physicianId: string; name: string; specialty: string }
+
 /**
  * A read-only Physician Network context view. Claiming, verification and
  * activation all happen in the one canonical identity flow at /claim — see
  * Claim.tsx. This page only links into it (§31/§32: one claim experience,
  * never a second one built inside Physician Network).
  */
-export function PhysicianProfilePage({ npi, navigate }: { npi: string; navigate: Navigate }) {
+export function PhysicianProfilePage({ npi, directoryProfile, navigate }: { npi?: string; directoryProfile?: DirectoryOnlyProfile; navigate: Navigate }) {
   const [profile, setProfile] = useState<PhysicianNetworkProfile | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => { getProvider(npi).then(setProfile).catch((loadError: Error) => setError(loadError.message)) }, [npi])
+  useEffect(() => { if (npi) getProvider(npi).then(setProfile).catch((loadError: Error) => setError(loadError.message)) }, [npi])
   const relationship = useNetworkRelationship(profile?.npi ?? null)
+
+  if (directoryProfile) {
+    const name = physicianDisplayName(directoryProfile.name)
+    const initials = name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')
+    return <main className="page-shell physician-profile-page">
+      <button className="text-button back-link" onClick={() => navigate('/network')}>← Network</button>
+      <section className="provider-profile-hero">
+        <div className="profile-identity"><span className="directory-avatar large">{initials}</span><div><p className="eyebrow">Directory physician</p><h1>{name}</h1><p>{directoryProfile.specialty}</p></div></div>
+        {/* Reuses the existing "reserved" status language verbatim (see
+         * statusCopy.reserved below) -- the same honest, physician-facing
+         * phrase, never internal lifecycle jargon. */}
+        <div className="profile-hero-status"><span className="agent-status-badge reserved"><i />Not yet on Lamina</span></div>
+      </section>
+      <div className="profile-facts"><div><span>Practice location</span><strong>Not listed</strong></div><div><span>Organisation</span><strong>Not listed in directory</strong></div><div><span>Source</span><strong>External physician directory</strong></div></div>
+      <div className="profile-provenance"><strong>Not yet on Lamina</strong><p>A directory identity exists, but this physician has not claimed or trained a Lamina representation.</p></div>
+      {/* Part A: deliberately does NOT invent case interests, e-consult
+       * policy, live availability, historical practice evidence, or
+       * referral requirements -- only the three facts that are genuinely
+       * known to be unknown. */}
+      <section className="directory-information-card">
+        <p className="section-label">Directory information</p>
+        <p>Practice information is based on available external directory data and has not been physician-confirmed in Lamina.</p>
+        <dl className="route-fact-list">
+          <div><dt>Availability</dt><dd>Unverified</dd></div>
+          <div><dt>E-consult</dt><dd>Unknown</dd></div>
+          <div><dt>Practice preferences</dt><dd>Not yet confirmed</dd></div>
+        </dl>
+      </section>
+    </main>
+  }
+
   if (!profile) return <main className="page-shell physician-profile-page"><button className="text-button back-link" onClick={() => navigate('/network')}>← Network</button>{error ? <div className="error-banner">{error}</div> : <div className="directory-loading"><NetworkGlyph active /><p>Opening physician profile…</p></div>}</main>
 
   const synthetic = profile.source === 'SYNTHETIC'

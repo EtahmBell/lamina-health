@@ -41,6 +41,26 @@ export function PriorityChipRow({ priority, onChange }: { priority: ReferralPrio
   >{priorityLabel(value)}</button>)}</div>
 }
 
+/** Follow-up pass, Part P/Q: a restrained, one-shot success animation --
+ * the circular ring strokes in, then the checkmark strokes in inside it,
+ * total ~540ms. Pure CSS keyframes driven entirely by mount (no JS timers,
+ * no state), so it plays exactly once whenever this element is actually
+ * mounted and never replays on an ordinary rerender. The one real
+ * precondition -- that it only ever MOUNTS on a genuine live acceptance,
+ * never on hydration of an already-accepted referral -- is the caller's
+ * responsibility (see RequestReviewModal: this only renders inside the
+ * `accepted` branch, which is local, mount-once state that a restored/
+ * hydrated referral never sets). Respects prefers-reduced-motion by
+ * showing the completed check-circle immediately (see CSS). Backend
+ * acceptance itself already happened before this ever renders -- the
+ * animation is presentation only. */
+function CheckCircleAnimation() {
+  return <svg className="check-circle-animation" viewBox="0 0 64 64" width="52" height="52" aria-hidden="true">
+    <circle className="check-circle-ring" cx="32" cy="32" r="27" fill="none" strokeWidth="3" />
+    <path className="check-circle-mark" d="M20 33 L28 41 L44 23" fill="none" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+}
+
 function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling, modality = 'in_person' }: { phase: DisplayPhase; receivingPhysicianName: string; patientLabel: string; scheduling?: SchedulingCoordination | null; modality?: CareModality }) {
   const who = lastName(receivingPhysicianName)
   switch (phase.kind) {
@@ -1002,7 +1022,7 @@ export function RequestReviewModal({
         {!accepted && <button className="text-button post-flow-close" onClick={onClose} aria-label="Close" disabled={accepting}>×</button>}
         {accepted
           ? <div className="request-review-success" role="status">
-            <span className="referral-handoff-check" aria-hidden="true">✓</span>
+            <CheckCircleAnimation />
             <h2>Referral accepted</h2>
             <p>{patientLabel} has been added to your care.</p>
           </div>

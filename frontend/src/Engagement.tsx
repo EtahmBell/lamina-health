@@ -172,6 +172,51 @@ function agentBannerPlan(training: TrainProjection, trainPath: string): { label:
   return null
 }
 
+/** Follow-up pass, Part R-U: the right-side Dashboard card evolves from one
+ * hardcoded message into a small set of real, currently-existing physician-
+ * representation prompts, chosen by actual state rather than rotation --
+ * never a dead CTA, never a prompt for the future NLP referral-preference
+ * feature before it actually exists (Part W/U). Deliberately an open
+ * union (not an enum of exactly three) so a
+ * future prompt type is just another priority branch, never a rewrite. */
+export type ImprovementPromptKind = 'quick-training' | 'navigate'
+export type ImprovementPrompt = {
+  key: string; heading: string; body: string; ctaLabel: string; kind: ImprovementPromptKind; href?: string
+}
+
+/** Deterministic priority, reusing signals that already exist elsewhere
+ * (TrainProjection's own plan, and the professional profile's own
+ * completeness/interests) -- no new scoring engine. Order:
+ * 1. training has a real pending action (not yet initialized, or daily
+ *    training/review not yet caught up) -- the existing, highest-priority
+ *    behavior, unchanged.
+ * 2. case interests are empty -- a quick, high-value representation gap.
+ * 3. the professional profile has incomplete sections.
+ * 4. genuinely caught up on everything this pass knows how to prompt for
+ *    -- `null`, which the caller renders as "Training is up to date."
+ */
+export function selectImprovementPrompt(
+  plan: { label: string; href: string; support: string } | null,
+  isReview: boolean,
+  profile: ProfessionalProfile | null,
+  profilePath: string,
+): ImprovementPrompt | null {
+  if (plan) {
+    return isReview
+      ? { key: 'review-training', heading: 'Make your agent more like you.', body: plan.support, ctaLabel: plan.label, kind: 'navigate', href: plan.href }
+      : { key: 'quick-training', heading: 'Make your agent more like you.', body: 'A few quick answers help your agent represent your practice more faithfully.', ctaLabel: 'Answer 3 quick questions', kind: 'quick-training' }
+  }
+  if (!profile) return null
+  const caseInterestCount = profile.interests.filter((item) => item.interest_type === 'case_interest').length
+  if (caseInterestCount === 0) {
+    return { key: 'case-interests', heading: 'Tell your agent what cases interest you.', body: 'Case interests help your agent represent the work you most want to see.', ctaLabel: 'Add case interests', kind: 'navigate', href: `${profilePath}?tab=interests` }
+  }
+  if (profile.completeness.completed_section_count < profile.completeness.total_section_count) {
+    return { key: 'complete-profile', heading: 'Complete your professional profile.', body: 'A fuller profile helps colleagues understand your practice.', ctaLabel: 'Update profile', kind: 'navigate', href: profilePath }
+  }
+  return null
+}
+
 type DigestTile = { key: string; count: number; label: string; detail: string }
 
 /** A recap of outcomes, never a duplicate of the raw event log (that's Recent
@@ -251,11 +296,20 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, ma
 }) {
   const [expanded, setExpanded] = useState(false)
   const [trainingOpen, setTrainingOpen] = useState(false)
+  // Follow-up pass, Part R-T: fetched here (not threaded through every
+  // caller as a new prop) so every existing call site stays unchanged --
+  // "reuse the existing card" literally. Best-effort/silent on failure;
+  // the card still works from `plan` alone while this is loading or
+  // unavailable, exactly like before this pass.
+  const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
+  useEffect(() => { getProfessionalProfile(personaId).then(setProfile).catch(() => {}) }, [personaId])
   if (!overview) return null
   const training = overview.training
   const plan = agentBannerPlan(training, trainPath)
   const tiles = buildAgentDigest(records, overview)
   const isReview = training.action === 'review_training'
+  const profilePath = personaId === 'owner' ? '/me/profile' : professionalProfilePath(personaId)
+  const prompt = selectImprovementPrompt(plan, isReview, profile, profilePath)
   return <section className="agent-banner">
     <div className="agent-banner-main">
       <div className="agent-banner-glyph" aria-hidden="true">
@@ -269,11 +323,17 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, ma
         <button className="text-button agent-banner-view" onClick={() => navigate(viewAgentPath)}>View My Agent →</button>
       </div>
     </div>
+    {/* Follow-up pass, Part R-W: the SAME card, now showing whichever real,
+     * currently-existing prompt best fits this physician's actual state --
+     * never a second banner, never a dead CTA, never a feature that
+     * doesn't exist yet. Falls back to the original "Training is up to
+     * date." status line only once nothing this pass knows how to prompt
+     * for remains. */}
     <div className="agent-banner-action">
-      <h3>Make your agent more like you.</h3>
-      <p className="agent-banner-support">{plan ? 'A few quick answers help your agent represent your practice more faithfully.' : 'Training is up to date.'}</p>
-      {plan && isReview && <button className="button-primary" onClick={() => navigate(plan.href)}>{plan.label} <span>→</span></button>}
-      {plan && !isReview && <button className="button-primary" onClick={() => setTrainingOpen(true)}>Answer 3 quick questions <span>→</span></button>}
+      <h3>{prompt ? prompt.heading : 'Make your agent more like you.'}</h3>
+      <p className="agent-banner-support">{prompt ? prompt.body : 'Training is up to date.'}</p>
+      {prompt && prompt.kind === 'quick-training' && <button className="button-primary" onClick={() => setTrainingOpen(true)}>{prompt.ctaLabel} <span>→</span></button>}
+      {prompt && prompt.kind === 'navigate' && <button className="button-primary" onClick={() => navigate(prompt.href as string)}>{prompt.ctaLabel} <span>→</span></button>}
     </div>
     <div className={`agent-digest-expanded ${expanded ? 'open' : ''}`} aria-hidden={!expanded}>
       <div className="agent-digest-grid">{tiles.map((tile) => <div className="agent-digest-tile" key={tile.key}>

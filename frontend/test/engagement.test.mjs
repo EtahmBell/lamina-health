@@ -847,11 +847,36 @@ test('Needs you (post-8B rename of Current Work) has a calm, compact empty state
   assert.match(specialistHome, /Nothing needs you right now\./)
 })
 
-test('caught_up renders no CTA button at all — just quiet up-to-date support text', () => {
+test('genuinely caught up (no training plan, case interests present, profile complete) renders no CTA button at all — just quiet up-to-date support text', () => {
   const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
-  assert.match(card, /\{plan \? 'A few quick answers help your agent represent your practice more faithfully\.' : 'Training is up to date\.'\}/)
-  assert.match(card, /\{plan && isReview && <button/, 'the review CTA only renders when agentBannerPlan returns a review action')
-  assert.match(card, /\{plan && !isReview && <button/, 'the quick-training CTA only renders when agentBannerPlan returns a non-review action')
+  assert.match(card, /\{prompt \? prompt\.body : 'Training is up to date\.'\}/)
+  assert.match(card, /\{prompt && prompt\.kind === 'quick-training' && <button/, 'the quick-training CTA only renders for that prompt kind')
+  assert.match(card, /\{prompt && prompt\.kind === 'navigate' && <button/, 'the navigate CTA only renders for that prompt kind')
+})
+
+test('the improvement prompt is selected by a deterministic, state-driven helper -- training plan, then case interests, then profile completeness, then genuinely caught up', () => {
+  assert.match(engagement, /export function selectImprovementPrompt\(/)
+  assert.match(engagement, /if \(plan\) \{/)
+  assert.match(engagement, /const caseInterestCount = profile\.interests\.filter\(\(item\) => item\.interest_type === 'case_interest'\)\.length/)
+  assert.match(engagement, /if \(caseInterestCount === 0\) \{/)
+  assert.match(engagement, /if \(profile\.completeness\.completed_section_count < profile\.completeness\.total_section_count\) \{/)
+})
+
+test('the improvement-prompt type is an open union, not an enum hardcoded to exactly three prompt kinds -- a future referral-preferences prompt is just another priority branch', () => {
+  assert.match(engagement, /export type ImprovementPromptKind = 'quick-training' \| 'navigate'/)
+  assert.match(engagement, /export type ImprovementPrompt = \{/)
+  assert.doesNotMatch(engagement, /Describe how you receive referrals|Add referral preferences/i, 'the NLP referral-preferences prompt is not shown yet -- the feature does not exist')
+})
+
+test('"Add case interests" navigates directly to the existing Profile -> Clinical & Case Interests editing experience, never a new Dashboard editor', () => {
+  assert.match(engagement, /href: `\$\{profilePath\}\?tab=interests`/)
+  assert.doesNotMatch(engagement, /CaseInterestEditor|DashboardInterestEditor/i)
+})
+
+test('HomeAgentCard reuses the existing getProfessionalProfile fetch (no new prop threaded through every caller) and reuses professionalProfilePath for the profile-completeness/case-interests destinations', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
+  assert.match(card, /useEffect\(\(\) => \{ getProfessionalProfile\(personaId\)\.then\(setProfile\)\.catch\(\(\) => \{\}\) \}, \[personaId\]\)/)
+  assert.match(card, /const profilePath = personaId === 'owner' \? '\/me\/profile' : professionalProfilePath\(personaId\)/)
 })
 
 test('Lucy and Iain Home share the same dashboard architecture: Your Agent card + compact activity + optional network highlights, no separate specialist design', () => {
