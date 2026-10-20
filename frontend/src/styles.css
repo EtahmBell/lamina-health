@@ -2554,3 +2554,38 @@ details.network-visual-section summary em { color: var(--text-secondary); font-s
 details.network-visual-section[open] summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .network-visual-intro { margin: 14px 2px 0; color: var(--text-secondary); font-size: .69rem; line-height: 1.5; }
 @media (max-width: 760px) { .my-network-tab-header { flex-direction: column; align-items: stretch; } }
+
+/* Physician-agent evaluation harness (pre-NLP foundational pass, Part S/T)
+ * -- a restrained internal/developer surface, never styled like a
+ * product-facing scoring dashboard. No gamified visuals, no single
+ * aggregate score. */
+.eval-harness-page { max-width: 760px; }
+.eval-physician-card { margin-top: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 20px 22px; }
+.eval-physician-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.eval-physician-header h2 { margin: 0; font-size: 1.1rem; }
+.eval-physician-meta { margin: 4px 0 0; color: var(--text-secondary); font-size: .68rem; }
+.eval-case-count { margin: 16px 0 6px; color: var(--text-secondary); font-size: .6rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.eval-case-list { margin: 0; padding: 0; list-style: none; }
+.eval-case-list li { border-top: 1px solid var(--border); }
+.eval-case-list li:first-child { border-top: 0; }
+.eval-case-row { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; padding: 10px 2px; color: var(--clinical); font-size: .74rem; text-align: left; cursor: pointer; }
+.eval-case-row:disabled { color: var(--text-secondary); cursor: default; }
+.eval-case-status { width: 18px; flex: 0 0 18px; text-align: center; font-weight: 700; color: var(--text-secondary); }
+.eval-case-status.pass { color: var(--success); }
+.eval-case-status.fail { color: var(--danger); }
+.eval-case-status.error { color: var(--accent-hover); }
+.eval-metrics-line { margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: .66rem; }
+.eval-case-detail-dialog { width: min(100%, 620px); }
+.eval-case-detail-dialog h2 { margin: 6px 0 10px; font-size: 1.15rem; }
+.eval-status-pass { color: var(--success); }
+.eval-status-fail { color: var(--danger); }
+.eval-status-error { color: var(--accent-hover); }
+.eval-case-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 6px; }
+.eval-assertion-list { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.eval-assertion-list li { display: flex; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.eval-assertion-list li.passed span:first-child { color: var(--success); }
+.eval-assertion-list li.failed span:first-child { color: var(--danger); }
+.eval-assertion-list strong { display: block; font-size: .72rem; text-transform: capitalize; }
+.eval-assertion-list small { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .62rem; }
+.eval-assertion-evidence { font-style: italic; }
+@media (max-width: 640px) { .eval-case-detail-grid { grid-template-columns: 1fr; } }

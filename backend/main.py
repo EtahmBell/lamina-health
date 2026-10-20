@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.consult import router as consult_router
 from backend.api.engagement import router as engagement_router
+from backend.api.eval_harness import router as eval_harness_router
 from backend.api.physician_sandbox import router as physician_sandbox_router
 from backend.api.referrals import router as referrals_router
 from backend.api.specialist import router as specialist_router
@@ -31,6 +32,7 @@ app.include_router(engagement_router)
 app.include_router(provider_network_router)
 app.include_router(physician_sandbox_router)
 app.include_router(referrals_router)
+app.include_router(eval_harness_router)
 
 
 @app.get("/health")

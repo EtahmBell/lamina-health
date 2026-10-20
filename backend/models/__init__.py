@@ -65,6 +65,21 @@ from .referral import (
     RequirementCheck,
     RequirementStatus,
 )
+from .eval_harness import (
+    AssertionKind,
+    EvalAssertionResult,
+    EvalFitLabel,
+    EvalModality,
+    EvalRunStatus,
+    EvalScope,
+    EvalTaskType,
+    ExpectedBehavior,
+    PhysicianAgentEvalCase,
+    PhysicianAgentEvalRun,
+    PhysicianAgentEvalSuiteResult,
+    ProhibitedBehavior,
+    SyntheticCaseContext,
+)
 
 __all__ = [
     "AgentCorrection",
@@ -128,4 +143,17 @@ __all__ = [
     "ReferralStatus",
     "RequirementCheck",
     "RequirementStatus",
+    "AssertionKind",
+    "EvalAssertionResult",
+    "EvalFitLabel",
+    "EvalModality",
+    "EvalRunStatus",
+    "EvalScope",
+    "EvalTaskType",
+    "ExpectedBehavior",
+    "PhysicianAgentEvalCase",
+    "PhysicianAgentEvalRun",
+    "PhysicianAgentEvalSuiteResult",
+    "ProhibitedBehavior",
+    "SyntheticCaseContext",
 ]

@@ -700,6 +700,51 @@ export type DemoResetResult = {
 /** Clears one demo case's Lamina workflow history. Synthetic clinical data is untouched. */
 export const resetJordanDemo = () => request<DemoResetResult>('/api/workspace/demo/reset/jordan', { method: 'POST' })
 export const resetTonjitDemo = () => request<DemoResetResult>('/api/workspace/demo/reset/tonjit', { method: 'POST' })
+
+/** Physician-agent evaluation harness (pre-NLP foundational pass) -- a
+ * developer/demo inspection surface, read-only/zero-side-effect by
+ * construction. Never a patient-facing feature, never a physician score. */
+export type EvalTaskType = 'evaluate_fit' | 'evaluate_requirements' | 'evaluate_modality' | 'evaluate_scope' | 'answer_practice_question' | 'apply_confirmed_preference'
+export type EvalFitLabel = 'strong' | 'moderate' | 'weak' | 'redirect' | 'unknown'
+export type EvalModality = 'in_person' | 'econsult' | 'either' | 'unknown'
+export type EvalScope = 'in_scope' | 'out_of_scope' | 'unknown'
+export type EvalProhibitedBehavior = {
+  must_not_diagnose: boolean; must_not_invent_physician_preference: boolean; must_not_invent_patient_fact: boolean
+  must_not_claim_unconfirmed_requirement: boolean; must_not_accept_referral_on_physicians_behalf: boolean
+  must_not_escalate_urgency_autonomously: boolean
+}
+export type EvalExpectedBehavior = {
+  fit: EvalFitLabel | null; expected_required_items: string[]; expected_modality: EvalModality | null
+  expected_scope: EvalScope | null; must_reference_rule_ids: string[]; must_abstain_on: string[]
+  allow_unknown: boolean; expect_abstain: boolean
+}
+export type EvalSyntheticCaseContext = {
+  age: number | null; clinical_question: string; diagnoses: string[]; hba1c_trend: number[]
+  current_medications: string[]; fasting_glucose_trend: number[]; recent_creatinine: number | null
+  recent_egfr: number | null; practice_question: string | null
+}
+export type PhysicianAgentEvalCase = {
+  id: string; name: string; description: string; physician_id: string; case_family: string
+  synthetic_case_context: EvalSyntheticCaseContext; task_type: EvalTaskType
+  expected_behavior: EvalExpectedBehavior; prohibited_behavior: EvalProhibitedBehavior
+  tags: string[]; source: string; enabled: boolean; repeat_count: number
+}
+export type EvalAssertionResult = { assertion_type: string; expected: string; actual: string; passed: boolean; evidence: string[]; kind: 'deterministic' | 'model_behavior' }
+export type EvalRunStatus = 'pass' | 'fail' | 'error' | 'pass_with_variation'
+export type PhysicianAgentEvalRun = {
+  id: string; eval_case_id: string; physician_id: string; representation_snapshot_id: string
+  model_identifier: string; started_at: string; completed_at: string
+  structured_output: Record<string, unknown>; assertion_results: EvalAssertionResult[]
+  status: EvalRunStatus; error_message: string | null
+}
+export type EvalPhysicianSummary = { physician_id: string; name: string; specialty: string; case_count: number; representation_snapshot_id: string }
+export type PhysicianAgentEvalSuiteResult = {
+  physician_id: string; representation_snapshot_id: string; cases: PhysicianAgentEvalCase[]
+  runs: PhysicianAgentEvalRun[]; metrics: Record<string, number>
+}
+export const getEvalPhysicians = () => request<EvalPhysicianSummary[]>('/api/workspace/eval/physicians')
+export const getEvalCases = (physicianId: string) => request<PhysicianAgentEvalCase[]>(`/api/workspace/eval/physicians/${encodeURIComponent(physicianId)}/cases`)
+export const runEvalSuite = (physicianId: string) => request<PhysicianAgentEvalSuiteResult>(`/api/workspace/eval/physicians/${encodeURIComponent(physicianId)}/run`, { method: 'POST' })
 export const getAgentNetwork = () => request<AgentNetwork>('/api/workspace/network')
 export const getSpecialistWorkspace = () => request<SpecialistWorkspace>('/api/workspace/specialist')
 export const getSpecialistCases = () => request<SpecialistCaseSummary[]>('/api/workspace/specialist/cases')

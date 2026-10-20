@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type CareModality, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
+import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getEvalCases, getEvalPhysicians, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, runEvalSuite, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type CareModality, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type EvalPhysicianSummary, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PhysicianAgentEvalCase, type PhysicianAgentEvalRun, type PhysicianAgentEvalSuiteResult, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -607,6 +607,104 @@ function TonjitEncounterSimulationControl() {
 
 /** Account/privacy/demo surface — deliberately separate from the Professional
  * Profile, which is now the primary-nav "Profile" destination. */
+/** Physician-agent evaluation harness (pre-NLP foundational pass, Part S/T)
+ * -- a restrained developer/demo inspection surface reached from Settings
+ * & demo, never a new top-level product navigation item and never patient-
+ * facing. Shows whichever eval fact is actually present for a given case
+ * (expected_behavior/structured_output shapes vary by task_type), never a
+ * raw JSON dump and never one aggregate "agent score". */
+function evalFactEntries(source: Record<string, unknown>): [string, string][] {
+  return Object.entries(source)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0))
+    .map(([key, value]): [string, string] => [key.replaceAll('_', ' '), Array.isArray(value) ? (value.length ? value.join(', ') : 'None') : String(value)])
+}
+
+function EvalCaseDetailModal({ evalCase, run, onClose }: { evalCase: PhysicianAgentEvalCase; run: PhysicianAgentEvalRun; onClose: () => void }) {
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="post-flow-dialog eval-case-detail-dialog" role="dialog" aria-modal="true" aria-label={evalCase.name}>
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
+      <p className={`eyebrow eval-status-${run.status}`}>{run.status.replaceAll('_', ' ')}</p>
+      <h2>{evalCase.name}</h2>
+      <p className="page-intro">{evalCase.description}</p>
+      <div className="eval-case-detail-grid">
+        <div className="match-details-group"><p className="section-label">Expected</p><dl className="route-fact-list">{evalFactEntries(evalCase.expected_behavior)}</dl></div>
+        <div className="match-details-group"><p className="section-label">Actual</p><dl className="route-fact-list">{evalFactEntries(run.structured_output)}</dl></div>
+      </div>
+      <p className="section-label">Assertions</p>
+      <ul className="eval-assertion-list">{run.assertion_results.map((assertion, index) => <li key={index} className={assertion.passed ? 'passed' : 'failed'}>
+        <span aria-hidden="true">{assertion.passed ? '✓' : '✗'}</span>
+        <div>
+          <strong>{assertion.assertion_type.replaceAll('_', ' ')}</strong>
+          <small>Expected: {assertion.expected} · Actual: {assertion.actual}</small>
+          {assertion.evidence.length > 0 && <small className="eval-assertion-evidence">Grounded in: {assertion.evidence.join('; ')}</small>}
+        </div>
+      </li>)}</ul>
+      {run.error_message && <p className="demo-reset-error" role="alert">{run.error_message}</p>}
+    </div>
+  </div></ModalPortal>
+}
+
+function AgentEvaluationsPage({ navigate }: { navigate: Navigate }) {
+  const [physicians, setPhysicians] = useState<EvalPhysicianSummary[] | null>(null)
+  const [cases, setCases] = useState<Record<string, PhysicianAgentEvalCase[]>>({})
+  const [results, setResults] = useState<Record<string, PhysicianAgentEvalSuiteResult>>({})
+  const [running, setRunning] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [detail, setDetail] = useState<{ evalCase: PhysicianAgentEvalCase; run: PhysicianAgentEvalRun } | null>(null)
+
+  useEffect(() => {
+    getEvalPhysicians().then((list) => {
+      setPhysicians(list)
+      list.forEach((item) => {
+        getEvalCases(item.physician_id).then((loaded) => setCases((prev) => ({ ...prev, [item.physician_id]: loaded }))).catch(() => {})
+      })
+    }).catch((err: Error) => setError(err.message))
+  }, [])
+
+  const run = async (physicianId: string) => {
+    setRunning(physicianId); setError('')
+    try {
+      const result = await runEvalSuite(physicianId)
+      setResults((prev) => ({ ...prev, [physicianId]: result }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not run evaluations')
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  return <ProductShell navigate={navigate} section="settings"><main className="page-shell eval-harness-page">
+    <button className="text-button back-link" onClick={() => navigate('/settings')}>← Settings &amp; demo</button>
+    <p className="eyebrow">Internal / developer surface</p>
+    <h1>Physician agent evaluations</h1>
+    <p className="page-intro">Tests whether a physician's reconstructed agent behaves consistently with that physician's confirmed Lamina representation, on previously unseen synthetic cases. Structural checks only, never exact prose -- and never a physician score.</p>
+    {error && <div className="error-banner" role="alert">{error}</div>}
+    {!physicians && !error && <p className="muted-note">Opening evaluations…</p>}
+    {physicians?.map((physician) => {
+      const physicianCases = cases[physician.physician_id] ?? []
+      const result = results[physician.physician_id]
+      return <section className="eval-physician-card" key={physician.physician_id}>
+        <div className="eval-physician-header">
+          <div><h2>{physician.name}</h2><p className="eval-physician-meta">{physician.specialty} · Representation: {result?.representation_snapshot_id ?? physician.representation_snapshot_id}</p></div>
+          <button className="button-primary" disabled={running === physician.physician_id} onClick={() => void run(physician.physician_id)}>{running === physician.physician_id ? 'Running…' : 'Run evaluations'} <span>→</span></button>
+        </div>
+        <p className="eval-case-count">{physicianCases.length} case{physicianCases.length === 1 ? '' : 's'}</p>
+        <ul className="eval-case-list">{physicianCases.map((evalCase) => {
+          const matchingRun = result?.runs.find((item) => item.eval_case_id === evalCase.id)
+          return <li key={evalCase.id}>
+            <button type="button" className="eval-case-row" disabled={!matchingRun} onClick={() => matchingRun && setDetail({ evalCase, run: matchingRun })}>
+              <span className={`eval-case-status ${matchingRun?.status ?? 'pending'}`} aria-hidden="true">{matchingRun ? (matchingRun.status === 'pass' ? '✓' : matchingRun.status === 'error' ? '!' : '✗') : '·'}</span>
+              <span>{evalCase.name}</span>
+            </button>
+          </li>
+        })}</ul>
+        {result && <p className="eval-metrics-line">Pass rate {Math.round(result.metrics.overall_assertion_pass_rate * 100)}% · Grounding {Math.round(result.metrics.grounding_correctness * 100)}% · Correct abstention {Math.round(result.metrics.correct_abstention * 100)}%</p>}
+      </section>
+    })}
+    {detail && <EvalCaseDetailModal evalCase={detail.evalCase} run={detail.run} onClose={() => setDetail(null)} />}
+  </main></ProductShell>
+}
+
 function SettingsPage({ navigate }: { navigate: Navigate }) {
   const { user } = useAuth()
   const [agent, setAgent] = useState<MyAgent | null>(null)
@@ -650,6 +748,11 @@ function SettingsPage({ navigate }: { navigate: Navigate }) {
         <DemoResetControl patient="jordan" />
         <DemoResetControl patient="tonjit" />
         <TonjitEncounterSimulationControl />
+      </section>
+      <section className="profile-section">
+        <h2>Internal / developer</h2>
+        <p className="muted-note">Tests whether a physician's reconstructed agent behaves consistently with their confirmed Lamina representation -- not a patient-facing feature.</p>
+        <button type="button" className="text-button" onClick={() => navigate('/settings/agent-evaluations')}>Physician agent evaluations →</button>
       </section>
       {user && <p className="muted-note profile-identity-link">This workspace's Dr. Lucy Saruhashi is a separate concept from your signed-in physician account. <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities →</button></p>}
       <p className="muted-note">Read-only for this demonstration. Account settings, credentialing, and production practice verification are not implemented.</p>
@@ -1840,6 +1943,7 @@ export default function App() {
   if (path === '/agent/train') return <ProductShell navigate={navigate} section="agent"><TrainingPage personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} exitPath="/agent?tab=train" params={params} /></ProductShell>
   if (path === '/profile' || path === '/profile/professional') return <ProductShell navigate={navigate} section="profile"><ProfessionalProfilePage personaId="lucy" navigate={navigate} params={params} /></ProductShell>
   if (path === '/settings') return <SettingsPage navigate={navigate} />
+  if (path === '/settings/agent-evaluations') return <AgentEvaluationsPage navigate={navigate} />
   if (path === '/network/updates') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
   const networkProfileControlledId = path.match(/^\/network\/profile\/([^/]+)$/)?.[1]
   if (networkProfileControlledId) return <ProductShell navigate={navigate} section="network"><NetworkPhysicianProfilePage controlledId={networkProfileControlledId} navigate={navigate} backPath="/home" perspective="lucy" params={params} /></ProductShell>
