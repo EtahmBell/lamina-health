@@ -18,8 +18,9 @@ from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
 from backend.models import StructuredReferralPreference
 from backend.professional_services import AgentChatService, ResponsesApiClient
-from backend.referral_preferences import CHEN_SEED_CASE_FAMILY, clarification_opportunities, ensure_seed_preferences
+from backend.referral_preferences import CHEN_SEED_CASE_FAMILY, clarification_opportunities
 from backend.workflow import WorkflowStore
+from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
 
 CHEN_ID = "physician-chen"
 
@@ -59,9 +60,18 @@ def test_chen_with_confirmed_representation_is_never_told_his_agent_is_untrained
 # ---------------------------------------------------------------- Part H/I/K/Y: learning opportunities
 
 
-def test_a_fresh_chen_seed_surfaces_exactly_one_clarification_opportunity(store: WorkflowStore) -> None:
+def test_no_clarification_opportunity_exists_before_chen_teaches_anything(store: WorkflowStore) -> None:
+    """Demo-coherence causality fix: there is no gap to surface in a
+    representation that doesn't exist yet -- the e-consult clarification
+    must not appear until Chen has actually confirmed a baseline preference
+    for this case family to have a gap in."""
+    ws = "ws-demo-coherence-no-gap-pre-teaching"
+    assert clarification_opportunities(store, ws, CHEN_ID) == []
+
+
+def test_the_econsult_gap_surfaces_only_after_chen_confirms_his_baseline_preference(store: WorkflowStore) -> None:
     ws = "ws-demo-coherence-gap"
-    ensure_seed_preferences(store, ws)
+    teach_and_confirm_chen_baseline(store, ws)
     opportunities = clarification_opportunities(store, ws, CHEN_ID)
     assert len(opportunities) == 1
     assert opportunities[0]["id"] == "chen-econsult-modality-gap"
@@ -70,7 +80,7 @@ def test_a_fresh_chen_seed_surfaces_exactly_one_clarification_opportunity(store:
 
 def test_the_opportunity_never_frames_this_as_an_agent_error(store: WorkflowStore) -> None:
     ws = "ws-demo-coherence-safety-language"
-    ensure_seed_preferences(store, ws)
+    teach_and_confirm_chen_baseline(store, ws)
     opportunity = clarification_opportunities(store, ws, CHEN_ID)[0]
     blob = (opportunity["title"] + opportunity["body"] + opportunity["supporting_text"]).casefold()
     for forbidden in ("wrong", "mistake", "error", "incorrect"):
@@ -79,7 +89,7 @@ def test_the_opportunity_never_frames_this_as_an_agent_error(store: WorkflowStor
 
 def test_confirming_a_modality_preference_resolves_the_opportunity(store: WorkflowStore) -> None:
     ws = "ws-demo-coherence-resolve"
-    ensure_seed_preferences(store, ws)
+    teach_and_confirm_chen_baseline(store, ws)
     assert len(clarification_opportunities(store, ws, CHEN_ID)) == 1
 
     seed = store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
@@ -98,7 +108,7 @@ def test_confirming_a_modality_preference_resolves_the_opportunity(store: Workfl
 def test_a_draft_clarification_does_not_resolve_the_opportunity(store: WorkflowStore) -> None:
     """Part K: a draft never silently changes representation."""
     ws = "ws-demo-coherence-draft-no-op"
-    ensure_seed_preferences(store, ws)
+    teach_and_confirm_chen_baseline(store, ws)
     structured = StructuredReferralPreference(modality="either")
     store.create_referral_preference(
         ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "draft only", structured.model_dump_json(), "physician_authored_nlp"
@@ -108,7 +118,11 @@ def test_a_draft_clarification_does_not_resolve_the_opportunity(store: WorkflowS
 
 def test_overview_exposes_the_learning_opportunity_for_chen_but_not_other_physicians(store: WorkflowStore) -> None:
     with TestClient(app) as client:
-        _bootstrap(client)
+        ws = _bootstrap(client)
+        before_teaching = client.get("/api/workspace/physician/agent-overview?perspective=chen").json()
+        assert before_teaching["learning_opportunities"] == []
+
+        teach_and_confirm_chen_baseline(store, ws)
         chen_overview = client.get("/api/workspace/physician/agent-overview?perspective=chen").json()
         iain_overview = client.get("/api/workspace/physician/agent-overview?perspective=iain").json()
     assert len(chen_overview["learning_opportunities"]) == 1
@@ -183,9 +197,6 @@ def test_focused_medication_case_applies_confirmed_econsult_preference(store: Wo
             good_fit=["Persistent, worsening type 2 diabetes despite medication escalation."],
             modality="either",
         )
-        seed = store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
-        if seed is None:
-            ensure_seed_preferences(store, ws)
         created = store.create_referral_preference(
             ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "econsult confirmed", structured.model_dump_json(),
             "physician_authored_nlp",
@@ -205,7 +216,6 @@ def test_focused_medication_case_applies_confirmed_econsult_preference(store: Wo
 def test_worsening_escalation_case_still_prefers_in_person_after_the_same_confirmation(store: WorkflowStore) -> None:
     with TestClient(app) as client:
         ws = _bootstrap(client)
-        ensure_seed_preferences(store, ws)
         structured = StructuredReferralPreference(
             good_fit=["Persistent, worsening type 2 diabetes despite medication escalation."],
             modality="either",
@@ -229,7 +239,7 @@ def test_worsening_escalation_case_still_prefers_in_person_after_the_same_confir
 def test_running_a_synthetic_test_case_never_mutates_representation(store: WorkflowStore) -> None:
     with TestClient(app) as client:
         ws = _bootstrap(client)
-        ensure_seed_preferences(store, ws)
+        teach_and_confirm_chen_baseline(store, ws)
         before = store.confirmed_referral_preferences_for_physician(ws, CHEN_ID)
         client.post(
             "/api/workspace/physician/agent-chat?perspective=chen",
@@ -244,9 +254,15 @@ def test_running_a_synthetic_test_case_never_mutates_representation(store: Workf
 
 
 def test_reset_tonjit_also_returns_chens_referral_preferences_to_baseline(store: WorkflowStore) -> None:
+    """Demo-coherence causality fix (Part 9): reset must restore the TRUE
+    pre-teaching state -- zero confirmed referral preferences, zero
+    clarification opportunities -- never silently recreate a confirmed
+    migration standing in for Chen's own teaching."""
     with TestClient(app) as client:
         ws = _bootstrap(client)
-        ensure_seed_preferences(store, ws)
+        teach_and_confirm_chen_baseline(store, ws)
+        assert len(clarification_opportunities(store, ws, CHEN_ID)) == 1
+
         structured = StructuredReferralPreference(modality="either")
         created = store.create_referral_preference(
             ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "clarified", structured.model_dump_json(), "physician_authored_nlp"
@@ -258,5 +274,8 @@ def test_reset_tonjit_also_returns_chens_referral_preferences_to_baseline(store:
         assert response.status_code == 200
         assert response.json()["removed_chen_referral_preferences"] >= 1
 
-        # The lazy seed recreates the canonical baseline on next read.
-        assert len(clarification_opportunities(store, ws, CHEN_ID)) == 1
+        assert store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY) is None
+        # Nothing is auto-recreated -- there is no confirmed baseline left
+        # to have a gap in, so there is no opportunity either, exactly like
+        # a brand-new workspace that has never seen Chen teach anything.
+        assert clarification_opportunities(store, ws, CHEN_ID) == []

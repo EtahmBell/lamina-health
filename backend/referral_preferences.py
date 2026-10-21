@@ -22,8 +22,6 @@ from backend.models import (
     StructuredReferralPreference,
 )
 from backend.professional_services import ResponsesApiClient, _log_validation_fallback
-from backend.referrals.requirements import REFERRAL_REQUIREMENTS_BY_KEY
-from backend.representation import representation_snapshot_id
 from backend.synthetic_data.fixtures import PHYSICIAN_CHEN
 from backend.workflow import WorkflowStore
 
@@ -89,6 +87,28 @@ def _extract_list_phrases(sentence: str) -> list[str]:
     return [part.strip() for part in body.split(",") if part.strip()]
 
 
+_HELPFUL_AVAILABILITY_CLAUSE = re.compile(
+    r"\s*,?\s*(?:is|are)\s+(?:useful|helpful)\s+when\s+available", re.IGNORECASE
+)
+_HELPFUL_NOT_REQUIRED_CLAUSE = re.compile(
+    r"\s*,?\s*(?:but\s+)?(?:they|it)?\s*(?:aren'?t|are\s+not|is\s+not)\s+required", re.IGNORECASE
+)
+_HELPFUL_OPTIONAL_CLAUSE = re.compile(r"\s*,?\s*optional\b", re.IGNORECASE)
+
+
+def _extract_helpful_item_phrases(sentence: str) -> list[str]:
+    """A helpful sentence's own qualifier clause (e.g. "...are useful when
+    available, but aren't required") describes optionality -- it is never
+    itself a separate item. Stripping it before splitting on commas keeps
+    deterministic_interpret honest to its own stated contract: never
+    inventing a phantom "Custom: but aren't required" item the physician
+    never actually described."""
+    trimmed = _HELPFUL_AVAILABILITY_CLAUSE.sub("", sentence)
+    trimmed = _HELPFUL_NOT_REQUIRED_CLAUSE.sub("", trimmed)
+    trimmed = _HELPFUL_OPTIONAL_CLAUSE.sub("", trimmed)
+    return _extract_list_phrases(trimmed)
+
+
 def deterministic_interpret(source_text: str, case_family: str) -> StructuredReferralPreference:
     """A bounded, honest keyword/phrase heuristic -- the safety-net fallback
     when a live structured model call isn't configured or fails validation
@@ -118,7 +138,7 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
                         )
                     )
         elif is_helpful_sentence:
-            for phrase in _extract_list_phrases(sentence):
+            for phrase in _extract_helpful_item_phrases(sentence):
                 key, label = _requirement_key_and_label(phrase)
                 if not any(item.key == key for item in helpful):
                     helpful.append(
@@ -339,66 +359,32 @@ def _structured_from_row(row: dict[str, Any]) -> StructuredReferralPreference:
     return StructuredReferralPreference.model_validate_json(row["structured_rules_json"])
 
 
-def ensure_chen_seed_preference(workflow_store: WorkflowStore, workspace_id: str) -> None:
-    """Idempotent per-workspace migration (Part K/L): represent Dr. Chen's
-    pre-existing diabetes referral rules through this SAME persisted model,
-    using only already-established demo facts -- never invents anything new
-    to fill the schema. After this runs, his confirmed preference (not the
-    static fixture) is the canonical operational source; the fixture remains
-    only as the fallback other physicians without a confirmed preference
-    still use."""
-    if workflow_store.confirmed_referral_preference(
-        workspace_id, PHYSICIAN_CHEN.id, CHEN_SEED_CASE_FAMILY
-    ):
-        return
-    fixture_requirements = REFERRAL_REQUIREMENTS_BY_KEY.get((PHYSICIAN_CHEN.id, CHEN_SEED_CASE_FAMILY), [])
-    structured = StructuredReferralPreference(
-        good_fit=[
-            "Persistent, worsening type 2 diabetes despite primary-care medication escalation."
-        ],
-        required=[item for item in fixture_requirements if item.required],
-        helpful=[item for item in fixture_requirements if not item.required],
-        redirect=[
-            "Progressive CKD with resistant hypertension where diabetes is not the lead referral question."
-        ],
-        # Demo coherence pass, Part E/I: Chen's initial teaching never
-        # mentioned e-consult/in-person at all -- modality starts
-        # unspecified so Tonjit's episode can later surface a real,
-        # honest representation gap (Part I), rather than pre-seeding an
-        # answer he never actually gave. Downstream routing already
-        # treats "unspecified" exactly like today's long-standing default
-        # (in-person recommended) -- see build_care_routing/
-        # build_candidate_routes -- so this changes nothing about current
-        # product behavior until Chen actually confirms a modality.
-        modality="unspecified",
-    )
-    created = workflow_store.create_referral_preference(
-        workspace_id,
-        PHYSICIAN_CHEN.id,
-        CHEN_SEED_CASE_FAMILY,
-        source_text=(
-            "Migrated from Dr. Chen's existing confirmed practice fixture: persistent, "
-            "worsening type 2 diabetes despite medication escalation is a good fit; a recent "
-            "HbA1c, current diabetes medication list, and recent renal function are required "
-            "before review; a glucose log or CGM is helpful when available; in-person review "
-            "is preferred."
-        ),
-        structured_rules_json=structured.model_dump_json(),
-        source="migrated_fixture",
-    )
-    workflow_store.confirm_referral_preference(workspace_id, created["id"], None)
-    snapshot_id = representation_snapshot_id(workflow_store, workspace_id, "chen")
-    workflow_store.set_referral_preference_snapshot(workspace_id, created["id"], snapshot_id)
-
-
 def ensure_seed_preferences(workflow_store: WorkflowStore, workspace_id: str) -> None:
-    """The one place product API entry points (never the evaluation harness
-    -- Part N: zero side effects, and a mid-suite seed would also make a
-    single run's representation snapshot inconsistent with itself) call
-    before reading a confirmed preference, so Chen's migrated preference
-    exists on first real interaction. Mirrors WorkflowStore's own existing
-    lazy per-workspace seed pattern (see `_seed_default_network_members`)."""
-    ensure_chen_seed_preference(workflow_store, workspace_id)
+    """Demo-coherence causality fix: this used to lazily migrate Dr. Chen's
+    pre-existing static practice fixture into an auto-CONFIRMED referral
+    preference the first time anything touched his workspace. That broke
+    the feature's own causal story -- his receiving requirements (recent
+    HbA1c, current medications, recent renal function) were already
+    operational before he had ever taught his agent anything through this
+    flow, so "physician teaches -> representation changes -> agent behavior
+    changes" wasn't actually true for the one physician this pass exists to
+    demonstrate it for.
+
+    No physician, including Chen, is ever auto-confirmed into anything.
+    Every physician starts with zero confirmed referral preferences for
+    every case family until they actually teach and confirm one through the
+    real NLP flow (backend/api/referral_preferences.py). The old fixture
+    text/structure still exists (backend/referrals/requirements.py
+    REFERRAL_REQUIREMENTS_BY_KEY) as demo/test reference material -- see
+    requirements_for()'s _SUPERSEDED_BY_CONFIRMED_PREFERENCE guard -- it is
+    simply never read as a stand-in for Chen's own confirmed preference
+    anymore.
+
+    Kept as a no-op, rather than deleted, so the several call sites that
+    call this before reading a confirmed preference don't need to change;
+    it documents, at every one of those call sites, that no seeding
+    happens there."""
+    return
 
 
 def confirmed_case_rules_override(
@@ -424,6 +410,45 @@ def confirmed_requirement_items(
     return preference_requirement_items(_structured_from_row(row))
 
 
+# Demo-coherence causality fix: once a (physician, case_family) pair has its
+# own confirmed-preference system, the static REFERRAL_REQUIREMENTS_BY_KEY
+# fixture (backend/referrals/requirements.py) must never operate as an
+# unconfirmed substitute for that physician's real receiving requirements
+# -- that would silently make them "operational" before the physician ever
+# confirmed anything, breaking the causal "physician teaches ->
+# representation changes -> agent behavior changes" story the NLP flow
+# exists to demonstrate. Extend this set, never silently repurpose the
+# fixture dict itself, the next time another physician/case-family pair
+# gets its own confirmed-preference flow.
+SUPERSEDES_STATIC_REQUIREMENTS_FIXTURE: frozenset[tuple[str, str]] = frozenset({
+    (PHYSICIAN_CHEN.id, CHEN_SEED_CASE_FAMILY),
+})
+
+
+def requirement_override_for_referral(
+    workflow_store: WorkflowStore, workspace_id: str, physician_id: str, case_family: str
+) -> list[ReferralRequirement] | None:
+    """The requirement_override a NEW referral's packet assembly should use
+    (backend.referrals.requirements.requirements_for() itself stays
+    untouched -- see its own docstring -- so the many unrelated,
+    pre-existing callers that call build_referral()/requirements_for()
+    directly, without ever looking up a confirmed preference, are
+    completely unaffected). Returns the physician's own confirmed
+    required+helpful items when they've confirmed one; an explicit empty
+    list (deliberately never `None`, so requirements_for()'s static-fixture
+    fallback can never silently apply) once this (physician, case_family)
+    pair has graduated to the confirmed-preference system with nothing yet
+    confirmed; `None` for every other physician/case-family pair, exactly
+    like before, so requirements_for()'s pre-existing fixture fallback
+    remains their only source, unaffected."""
+    items = confirmed_requirement_items(workflow_store, workspace_id, physician_id, case_family)
+    if items is not None:
+        return items
+    if (physician_id, case_family) in SUPERSEDES_STATIC_REQUIREMENTS_FIXTURE:
+        return []
+    return None
+
+
 def confirmed_modality(
     workflow_store: WorkflowStore, workspace_id: str, physician_id: str, case_family: str
 ) -> str | None:
@@ -444,10 +469,14 @@ def clarification_opportunities(
     haven't yet confirmed X," never "your agent got this wrong." Resolves
     itself the moment Chen confirms a modality preference (Part K: this is
     read-only -- confirming happens through the normal referral-preference
-    confirm flow, never automatically from this detector itself)."""
+    confirm flow, never automatically from this detector itself).
+
+    Requires a confirmed baseline preference to already exist (`row is
+    None` below is the common case before Chen has taught his agent
+    anything at all -- there is no gap to surface in a representation that
+    doesn't exist yet; see ensure_seed_preferences' docstring)."""
     if physician_id != PHYSICIAN_CHEN.id:
         return []
-    ensure_seed_preferences(workflow_store, workspace_id)
     row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, CHEN_SEED_CASE_FAMILY)
     if row is None:
         return []

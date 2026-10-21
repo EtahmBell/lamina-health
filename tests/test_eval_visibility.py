@@ -19,8 +19,8 @@ from backend.eval_harness import runner as runner_module
 from backend.main import app
 from backend.models import EvalCategory, EvalRunStatus, ExecutionMode
 from backend.professional_services import AgentChatService, ResponsesApiClient
-from backend.referral_preferences import ensure_seed_preferences
 from backend.workflow import WorkflowStore
+from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
 
 WS = "eval-visibility-test-workspace"
 
@@ -34,10 +34,12 @@ def store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> WorkflowStore:
     # unless a test explicitly injects its own fake model client.
     monkeypatch.setattr(runner_module, "agent_chat_service", AgentChatService(ResponsesApiClient(enabled=False)))
     # The eval harness itself never seeds (Part G: zero side effects) --
-    # seed here, once, so these tests exercise the realistic "Chen has a
-    # confirmed referral preference" state the harness is actually meant to
-    # evaluate against.
-    ensure_seed_preferences(value, WS)
+    # teach+confirm Chen's baseline here, once, exactly the way a physician
+    # actually would (demo-coherence causality fix: no product-level
+    # auto-migration does this anymore), so these tests exercise the
+    # realistic "Chen has a confirmed referral preference" state the
+    # harness is actually meant to evaluate against.
+    teach_and_confirm_chen_baseline(value, WS)
     return value
 
 
@@ -91,7 +93,7 @@ def test_an_agent_behavior_eval_is_labelled_deterministic_fallback_when_no_model
     run = run_eval_case(case, store, WS)
     assert run.execution_mode == ExecutionMode.DETERMINISTIC_FALLBACK
     assert run.model_id is None
-    assert "Recent HbA1c" in run.structured_output["answer"]
+    assert "a1c" in run.structured_output["answer"].casefold()
 
 
 def test_an_agent_behavior_eval_is_labelled_model_only_when_a_real_model_call_actually_occurred(

@@ -17,6 +17,7 @@ from backend.api import engagement as engagement_api
 from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
 from backend.workflow import WorkflowStore
+from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
 
 WS = "network-query-test-workspace"
 
@@ -68,7 +69,16 @@ def test_relevant_confirmed_case_interest_surfaces_a_physician(store: WorkflowSt
 
 
 def test_relevant_confirmed_referral_preference_surfaces_a_physician(store: WorkflowStore) -> None:
+    """Demo-coherence causality fix: this match is only possible once Dr.
+    Chen has actually confirmed a referral preference for this case
+    family -- teach+confirm his baseline first, the same way the real
+    product now requires, rather than relying on an auto-migrated one."""
     with TestClient(app) as client:
+        client.get("/api/patients")
+        from backend.demo_workspace import DEFAULT_COOKIE_NAME
+
+        ws = client.cookies[DEFAULT_COOKIE_NAME]
+        teach_and_confirm_chen_baseline(store, ws)
         result = _ask(client, "Who sees patients with worsening type 2 diabetes despite medication escalation?")
     chen = next(item for item in result["physician_agents"] if item["physician_id"] == "physician-chen")
     assert any("Confirmed referral preference" in reason for reason in chen["reasons"])

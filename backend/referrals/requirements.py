@@ -50,7 +50,22 @@ def requirements_for(
     fixture below. Stays a pure function: the caller (see
     backend/referral_preferences.py) looks up the confirmed preference from
     storage. Falls back to the fixture when no confirmed preference exists,
-    so every physician without one is unaffected."""
+    so every physician without one is unaffected.
+
+    Demo-coherence causality fix: this pure function's own fallback is
+    deliberately left unchanged here -- plenty of unrelated, pre-existing
+    callers (e.g. tests/test_referral_workflow.py, the eval harness's own
+    foundational Part W suite) call build_referral()/requirements_for()
+    directly without ever looking up a confirmed preference, and rely on
+    this exact fixture fallback for their own, unrelated testing purposes.
+    The fix for Dr. Chen's specific causal story lives one layer up, at the
+    one real call site that actually creates a live referral --
+    see backend.referral_preferences.requirement_override_for_referral,
+    used by backend/api/referrals.py -- which passes an explicit `[]`
+    instead of `None` once a (physician, case_family) pair has its own
+    confirmed-preference system with nothing yet confirmed, so this
+    function's `confirmed_items is not None` branch above handles it
+    without this function needing to know anything about that system."""
     if confirmed_items is not None:
         return confirmed_items
     return REFERRAL_REQUIREMENTS_BY_KEY.get((receiving_physician_id, case_family), [])

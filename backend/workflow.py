@@ -2171,11 +2171,11 @@ class WorkflowStore:
     def reset_physician_referral_preferences(self, workspace_id: str, physician_id: str) -> int:
         """Demo coherence pass, Part V/W: returns this physician's referral
         preferences to baseline by removing everything (drafts, confirmed,
-        superseded, rejected) -- the lazy per-workspace seed (see
-        ensure_chen_seed_preference) recreates the canonical baseline the
-        next time anything reads a confirmed preference for this
-        physician, exactly like a fresh workspace. Returns the number of
-        rows removed."""
+        superseded, rejected) -- back to the true pre-teaching state of a
+        fresh workspace, where nothing is auto-recreated (see
+        backend.referral_preferences.ensure_seed_preferences' docstring:
+        no physician is ever auto-confirmed into anything). Returns the
+        number of rows removed."""
         with self._connect() as db:
             removed = db.execute(
                 "SELECT COUNT(*) FROM physician_referral_preferences WHERE workspace_id=? AND physician_id=?",

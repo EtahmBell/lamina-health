@@ -527,14 +527,17 @@ PHYSICIAN_CASE_RULES: list[PhysicianCaseRules] = [
             HistoricalCase(label="Complex diabetes medication management", features=["diabetes"])
         ],
     ),
-    PhysicianCaseRules(
-        physician_id="physician-chen",
-        case_family="type_2_diabetes",
-        accepts_signals=PHYSICIAN_CHEN.accepts_signals,
-        explicit_rules=PHYSICIAN_CHEN.explicit_rules,
-        required_workup=PHYSICIAN_CHEN.required_workup,
-        historical_cases=PHYSICIAN_CHEN.historical_cases,
-    ),
+    # Demo-coherence causality fix: a ("physician-chen", "type_2_diabetes")
+    # override used to live here too, but it only ever duplicated
+    # PHYSICIAN_CHEN's own profile fields -- identical to what
+    # resolve_case_rules()'s own generic fallback branch below already
+    # produces. Removing it is a no-op for every existing caller (verified:
+    # same accepts_signals/explicit_rules/required_workup/historical_cases
+    # either way) and avoids presenting it as a second, distinct fixture
+    # source for this case family now that Dr. Chen has his own confirmed-
+    # preference system (backend/referral_preferences.py) -- see
+    # requirements_for()'s _SUPERSEDED_BY_CONFIRMED_PREFERENCE guard for the
+    # other half of this fix.
 ]
 PHYSICIAN_CASE_RULES_BY_KEY: dict[tuple[str, str], PhysicianCaseRules] = {
     (rule.physician_id, rule.case_family): rule for rule in PHYSICIAN_CASE_RULES

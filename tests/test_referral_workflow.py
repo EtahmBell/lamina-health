@@ -258,6 +258,16 @@ def test_resolver_does_not_invent_a_result_and_referral_stays_unready_when_chart
 
 
 def test_api_create_preflight_get_boundary_works_end_to_end(api_client: TestClient) -> None:
+    """Demo-coherence causality fix: a referral created through the real API
+    only carries Dr. Chen's physician-specific receiving requirements once
+    he has actually confirmed a referral preference for this case family
+    -- teach+confirm his baseline first."""
+    from backend.demo_workspace import DEFAULT_COOKIE_NAME
+    from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
+
+    api_client.get("/api/patients")
+    teach_and_confirm_chen_baseline(referrals_api.workflow_store, api_client.cookies[DEFAULT_COOKIE_NAME])
+
     created = api_client.post(
         f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
     )
@@ -419,6 +429,12 @@ def test_active_referral_lookup_is_null_before_any_referral_exists(api_client: T
 
 
 def test_active_referral_lookup_returns_the_persisted_referral_without_needing_its_id(api_client: TestClient) -> None:
+    from backend.demo_workspace import DEFAULT_COOKIE_NAME
+    from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
+
+    api_client.get("/api/patients")
+    teach_and_confirm_chen_baseline(referrals_api.workflow_store, api_client.cookies[DEFAULT_COOKIE_NAME])
+
     created = api_client.post(
         f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
     ).json()
@@ -434,6 +450,12 @@ def test_active_referral_lookup_returns_the_persisted_referral_without_needing_i
 
 
 def test_active_referral_lookup_is_a_pure_read_and_never_reruns_preflight_or_resubmits(api_client: TestClient) -> None:
+    from backend.demo_workspace import DEFAULT_COOKIE_NAME
+    from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
+
+    api_client.get("/api/patients")
+    teach_and_confirm_chen_baseline(referrals_api.workflow_store, api_client.cookies[DEFAULT_COOKIE_NAME])
+
     created = api_client.post(
         f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
     ).json()

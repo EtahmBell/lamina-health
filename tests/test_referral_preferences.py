@@ -38,13 +38,14 @@ from backend.referral_preferences import (
     confirmed_case_rules_override,
     confirmed_requirement_items,
     deterministic_interpret,
-    ensure_seed_preferences,
+    requirement_override_for_referral,
 )
 from backend.referrals import requirements_for
 from backend.representation import representation_snapshot_id
 from backend.synthetic_data import PHYSICIAN_CHEN, TONJIT_PATIENT_ID
 from backend.synthetic_data.fixtures import PATIENTS
 from backend.workflow import WorkflowStore
+from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
 
 CHEN_ID = "physician-chen"
 
@@ -167,9 +168,9 @@ def test_confirm_makes_a_preference_appear_as_confirmed(store: WorkflowStore) ->
 def test_draft_preference_never_affects_requirements_only_confirming_does(store: WorkflowStore) -> None:
     ws = "ws-draft-does-nothing"
     before = confirmed_requirement_items(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
-    assert before is None  # not yet seeded in this isolated workspace
+    assert before is None  # not yet confirmed in this isolated workspace
 
-    ensure_seed_preferences(store, ws)
+    teach_and_confirm_chen_baseline(store, ws)
     seeded = confirmed_requirement_items(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
     assert any(item.key == "recent_renal_function" for item in seeded)
 
@@ -200,9 +201,75 @@ def test_draft_preference_never_affects_requirements_only_confirming_does(store:
     assert not any(item.key == "recent_renal_function" for item in requirements_after)
 
 
+def test_requirement_override_for_referral_never_falls_back_to_the_static_fixture_for_chen_diabetes(
+    store: WorkflowStore,
+) -> None:
+    """Unit-level proof of requirement_override_for_referral (the one real
+    call site backend/api/referrals.py uses to create a live referral):
+    with no confirmed preference at all, it returns an explicit `[]` for
+    Dr. Chen's diabetes case family -- never `None` (which would let
+    requirements_for()'s own static-fixture fallback silently substitute
+    REFERRAL_REQUIREMENTS_BY_KEY's recent_hba1c/current_medications/
+    recent_renal_function items). requirements_for() ITSELF is deliberately
+    left with its original, unconditional fallback -- see its own
+    docstring -- so this guard lives only at this one call site, never
+    inside that shared pure function."""
+    ws = "ws-requirement-override-guard"
+    assert requirement_override_for_referral(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY) == []
+    # An unrelated physician with no confirmed-preference system of their
+    # own is completely unaffected (Part J's own invariant, preserved) --
+    # None, not [], so requirements_for()'s own fixture fallback still
+    # applies for them exactly as it always has.
+    assert requirement_override_for_referral(store, ws, "physician-jung", "ckd_hypertension") is None
+
+    teach_and_confirm_chen_baseline(store, ws)
+    confirmed_items = requirement_override_for_referral(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
+    assert any(item.key == "recent_hba1c" for item in confirmed_items)
+
+
+def test_the_causal_demo_story_requirements_become_operational_only_after_chen_confirms(
+    store: WorkflowStore,
+) -> None:
+    """The most important test in this file: a referral to Dr. Chen created
+    BEFORE he has taught/confirmed anything must not carry his specific
+    diabetes receiving requirements -- those requirements must only appear
+    once he actually teaches and confirms his own NLP referral preference,
+    proving the "physician teaches -> representation changes -> agent
+    behavior changes" causal story is real, not an auto-migrated fixture
+    pretending to be it."""
+    with TestClient(app) as client:
+        _bootstrap(client)
+
+        # RESET -> evaluate/create a Tonjit referral BEFORE Chen teaches anything.
+        before_referral = client.post(
+            f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+        ).json()
+        before_keys = {item["key"] for item in before_referral["receiving_requirements"]}
+        assert "recent_hba1c" not in before_keys
+        assert "current_medications" not in before_keys
+        assert "recent_renal_function" not in before_keys
+
+        # Clear that referral (same reset the real demo uses between rehearsals)
+        # so a fresh, equivalent referral can be created for the same pair.
+        client.post("/api/workspace/demo/reset/tonjit")
+
+        # TEACH + CONFIRM Chen's real NLP referral preference.
+        client.post(_preference_url("/interpret"), json={"source_text": SOURCE_TEXT})
+        draft = client.get(_preference_url()).json()[0]
+        confirmed = client.post(_preference_url(f"/{draft['id']}/confirm")).json()
+        assert confirmed["source"] == "physician_authored_nlp"  # never "migrated_fixture"
+
+        # Evaluate/create a fresh, equivalent referral AFTER confirming.
+        after_referral = client.post(
+            f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
+        ).json()
+    after_keys = {item["key"] for item in after_referral["receiving_requirements"]}
+    assert {"recent_hba1c", "current_medications", "recent_renal_function"} <= after_keys
+
+
 def test_confirming_a_new_preference_supersedes_the_prior_confirmed_one(store: WorkflowStore) -> None:
     ws = "ws-supersede"
-    ensure_seed_preferences(store, ws)
+    teach_and_confirm_chen_baseline(store, ws)
     seed = store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
     structured = StructuredReferralPreference(good_fit=["Edited good fit."], modality="econsult")
     created = store.create_referral_preference(
@@ -225,7 +292,8 @@ def test_confirming_a_new_preference_for_a_previously_unconfigured_physician_cha
     REFERRAL_REQUIREMENTS_BY_KEY today -- before any confirmed preference, a
     referral to him carries zero receiving requirements. After confirming
     one directly in storage (he has no persona/editable-profile wiring in
-    this demo pass -- see ensure_chen_seed_preference for the same pattern),
+    this demo pass -- see tests._chen_demo_fixture.teach_and_confirm_chen_baseline
+    for the same create+confirm pattern applied to Dr. Chen),
     a real referral created through the real API carries it. (The real
     referral-creation endpoint is idempotent per patient+physician pair --
     see find_active_referral_for_pair -- so "before" is checked via the same
@@ -283,10 +351,10 @@ def test_no_duplicate_hidden_chen_rule_source_remains_operational(store: Workflo
     """After seeding, Chen's CONFIRMED preference -- not the static fixture
     -- is the one resolve_case_rules()/requirements_for() actually read."""
     ws = "ws-one-source-of-truth"
-    ensure_seed_preferences(store, ws)
+    teach_and_confirm_chen_baseline(store, ws)
     override = confirmed_case_rules_override(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
     assert override is not None
-    assert override.explicit_rules[0].startswith("Accepts: Persistent, worsening type 2 diabetes")
+    assert override.explicit_rules[0].startswith("Accepts: I commonly see patients whose diabetes")
     items = confirmed_requirement_items(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
     assert [item.key for item in items] == [
         "recent_hba1c", "current_medications", "recent_renal_function", "glucose_log",
@@ -307,13 +375,36 @@ def test_tonjit_default_behavior_is_unchanged_by_seeding_chens_confirmed_prefere
 # ---------------------------------------------------------------- Part Q: Practice Representation
 
 
-def test_confirmed_preference_appears_in_practice_representation(store: WorkflowStore) -> None:
+def test_practice_representation_shows_the_generic_baseline_before_chen_teaches_anything(
+    store: WorkflowStore,
+) -> None:
+    """Demo-coherence causality fix: before Chen has confirmed any referral
+    preference, Practice Representation must show only his generic,
+    always-true profile baseline (specialty-level accepts_signals/
+    required_workup) -- never the specific NLP-structured requirements
+    (recent HbA1c with a freshness window, current medications, recent
+    renal function) as if he had already confirmed them."""
     with TestClient(app) as client:
         _bootstrap(client)
         representation = client.get("/api/workspace/physician/agent-representation?perspective=chen").json()
     sections = representation["sections"]
-    assert any("type 2 diabetes" in item for item in sections["good_fit"])
-    assert "Recent HbA1c" in sections["referral_requirements"]
+    assert "Recent HbA1c" not in sections["referral_requirements"]
+    assert not any("current medication" in item.casefold() for item in sections["referral_requirements"])
+    assert not any("renal function" in item.casefold() for item in sections["referral_requirements"])
+    assert sections["modality_preference"] is None
+    assert sections["referral_preference_provenance"] == []
+
+
+def test_confirmed_preference_appears_in_practice_representation(store: WorkflowStore) -> None:
+    with TestClient(app) as client:
+        _bootstrap(client)
+        client.post(_preference_url("/interpret"), json={"source_text": SOURCE_TEXT})
+        draft = client.get(_preference_url()).json()[0]
+        client.post(_preference_url(f"/{draft['id']}/confirm"))
+        representation = client.get("/api/workspace/physician/agent-representation?perspective=chen").json()
+    sections = representation["sections"]
+    assert any("diabetes" in item.casefold() for item in sections["good_fit"])
+    assert any("a1c" in item.casefold() for item in sections["referral_requirements"])
     # Demo coherence pass, Part E/I: Chen's initial teaching never mentioned
     # e-consult/in-person, so modality starts unspecified -- this is what
     # lets Tonjit's episode later surface a real, honest representation gap.
@@ -352,19 +443,22 @@ def test_an_unrelated_case_interest_adds_no_fabricated_evidence() -> None:
 def test_ask_their_agent_grounds_in_confirmed_referral_preferences(store: WorkflowStore) -> None:
     with TestClient(app) as client:
         _bootstrap(client)
+        client.post(_preference_url("/interpret"), json={"source_text": SOURCE_TEXT})
+        draft = client.get(_preference_url()).json()[0]
+        client.post(_preference_url(f"/{draft['id']}/confirm"))
         response = client.post(
             "/api/workspace/network/physicians/chen/ask",
             json={"question": "What information do you generally want before a diabetes referral?"},
         )
     answer = response.json()
-    assert "Recent HbA1c" in answer["answer"]
+    assert "a1c" in answer["answer"].casefold()
     assert answer["requires_physician_input"] is False
 
 
 def test_ask_their_agent_never_grounds_in_a_draft_preference(store: WorkflowStore) -> None:
     with TestClient(app) as client:
         ws = _bootstrap(client)
-        ensure_seed_preferences(store, ws)
+        teach_and_confirm_chen_baseline(store, ws)
         structured = StructuredReferralPreference(good_fit=["A draft-only good fit nobody has confirmed."])
         store.create_referral_preference(
             ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "draft", structured.model_dump_json(), "physician_authored_nlp"
@@ -396,20 +490,20 @@ def test_ask_their_agent_abstains_when_no_physician_has_confirmed_a_modality_pre
 def test_representation_snapshot_changes_after_confirmation(store: WorkflowStore) -> None:
     ws = "ws-snapshot-changes"
     before = representation_snapshot_id(store, ws, "chen")
-    ensure_seed_preferences(store, ws)
-    after_seed = representation_snapshot_id(store, ws, "chen")
-    assert before != after_seed
+    teach_and_confirm_chen_baseline(store, ws)
+    after_first_confirm = representation_snapshot_id(store, ws, "chen")
+    assert before != after_first_confirm  # the physician's own first confirm is what changes it
 
     structured = StructuredReferralPreference(good_fit=["A new confirmed good fit."])
     created = store.create_referral_preference(
         ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "another edit", structured.model_dump_json(), "physician_authored_nlp"
     )
     unconfirmed_still = representation_snapshot_id(store, ws, "chen")
-    assert unconfirmed_still == after_seed  # a draft never changes the snapshot
+    assert unconfirmed_still == after_first_confirm  # a draft never changes the snapshot
 
     store.confirm_referral_preference(ws, created["id"], None)
     after_second_confirm = representation_snapshot_id(store, ws, "chen")
-    assert after_second_confirm != after_seed
+    assert after_second_confirm != after_first_confirm
 
 
 def test_evaluation_harness_demonstrates_behavior_change_before_and_after_a_confirmed_preference(
@@ -419,7 +513,7 @@ def test_evaluation_harness_demonstrates_behavior_change_before_and_after_a_conf
     requirements_case = next(
         case for case in CHEN_EVAL_CASES if case.id == "chen-missing-renal-requirement"
     )
-    ensure_seed_preferences(store, ws)
+    teach_and_confirm_chen_baseline(store, ws)
     before_run = run_eval_case(requirements_case, store, ws)
     assert before_run.status.value == "pass"
     assert "recent_renal_function" in before_run.structured_output["missing_required_items"]
