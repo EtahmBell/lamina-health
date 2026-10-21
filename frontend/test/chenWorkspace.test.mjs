@@ -174,17 +174,18 @@ test('/chen/agent uses Chen\'s own real identity/representation data, never Lucy
 test('/chen/agent reuses the exact same Overview/Train/Test tabs and shared panels as Lucy\'s and Iain\'s My Agent -- no Chen-specific version', () => {
   const fn = slice(referralSource, 'export function ChenAgentPage', 'export function ChenNetworkPage')
   assert.match(fn, /<AgentOverviewPanel overview=\{overview\} representation=\{representation\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} personaId="chen" \/>/)
-  assert.match(fn, /<TrainTab trainProjection=\{trainProjection\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} \/>/)
+  assert.match(fn, /<TrainTab trainProjection=\{trainProjection\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} personaId="chen" learningOpportunities=\{overview\.learning_opportunities\} \/>/)
   assert.match(fn, /<ChatTab personaId="chen" agentName=\{agentName\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} \/>/)
   assert.doesNotMatch(referralSource, /function ChenOverviewPanel|function ChenTrainTab|function ChenChatTab/)
 })
 
 /* ------------------------------------------------------------- Part J: Network */
 
-test('/chen/network has both a Colleagues (My Network) tab and a Feed tab, same structure as Lucy\'s and Iain\'s Network pages', () => {
+test('/chen/network has both a Colleagues (My Network) tab and a Feed tab, same structure as Lucy\'s and Iain\'s Network pages, and defaults to Colleagues', () => {
   const fn = slice(referralSource, 'export function ChenNetworkPage', referralSource.length)
   assert.match(fn, /<NetworkTabs tab=\{tab\} onSelect=\{selectTab\} \/>/)
-  assert.match(fn, /tab === 'my-network' \? <ChenMyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="chen" navigate=\{navigate\} \/>/)
+  assert.match(fn, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
+  assert.match(fn, /tab === 'my-network'\s*\n\s*\? <ChenMyNetworkTab navigate=\{navigate\} onViewInFeed=\{viewInFeed\} \/>\s*\n\s*: <NetworkFeedTab personaId="chen" navigate=\{navigate\} focusPostId=\{focusPostId\} onFocused=\{\(\) => setFocusPostId\(null\)\} \/>/)
 })
 
 test('ChenMyNetworkTab routes to physician profiles through networkProfilePath(\'chen\', ...), never Lucy\'s or Iain\'s perspective', () => {
@@ -213,7 +214,11 @@ test('Chen has his own real PERSONAS/DEMO_ENRICHMENT/BASE_PROFILE_ITEMS/TRAINING
   const backendProfessionalServices = readFileSync(new URL('../../backend/professional_services.py', import.meta.url), 'utf8')
   assert.match(backendEngagement, /"chen": \{\s*\n\s*"id": "chen",\s*\n\s*"physician_id": "physician-chen",/)
   assert.match(backendEngagement, /EDITABLE_PERSONAS = \{"lucy", "iain", "chen"\}/)
-  assert.match(backendEngagement, /"chen": \[\],\s*\n\s*"iain": \[/, 'TRAINING_QUESTIONS has a real (empty, not missing) chen entry')
+  // Demo coherence pass, Part L: Chen's TRAINING_QUESTIONS entry is no
+  // longer deliberately empty -- it now carries one real canonical-case
+  // question -- but it must still be a real, present dict key (never a
+  // missing one that would KeyError).
+  assert.match(backendEngagement, /TRAINING_QUESTIONS: dict\[str, list\[dict\[str, Any\]\]\] = \{[\s\S]*?"chen": \[/, 'TRAINING_QUESTIONS has a real chen entry')
   assert.match(backendProfessionalServices, /"chen": \[\s*\n\s*\("training", "Synthetic endocrinology training background"\),/)
 })
 

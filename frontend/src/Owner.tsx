@@ -240,7 +240,7 @@ export function OwnerAgentPage({ navigate, params }: { navigate: Navigate; param
     <section className="agent-hero"><div className="agent-hero-mark"><LaminaMark active={overview?.training.initialized ?? false} /></div><div><p className="eyebrow">Your physician agent</p><h1>{overview?.physician.agent_name ?? 'Your Agent'}</h1><p>Private · represents how you practice. Not visible to the network.</p></div></section>
     <nav className="agent-tabs" aria-label="My Agent sections">{OWNER_AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
     {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('owner')} personaId="owner" />}
-    {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={ownerTrainPath} />}
+    {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={ownerTrainPath} personaId="owner" learningOpportunities={overview?.learning_opportunities ?? []} />}
     {tab === 'test' && <ChatTab personaId="owner" agentName={overview?.physician.agent_name ?? 'Your Agent'} navigate={navigate} trainPath={ownerTrainPath} />}
   </main></OwnerShell>
 }

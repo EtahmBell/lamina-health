@@ -377,6 +377,10 @@ export type TrainingQuestion = {
   id: string; physician_persona: string
   source_type: 'profile_confirmation' | 'existing_practice_rule' | 'canonical_case' | 'network_question' | 'explicit_synthetic_demo' | 'initialization' | 'unresolved_branch' | 'practice_gap' | 'bounded_practice_context' | 'deterministic_branch' | 'agent_chat_correction'
   source_reference: string | null; prompt: string; question_type: TrainingQuestionType
+  /** Demo coherence pass, Part L: a visible case-context block for any
+   * question genuinely grounded in one specific existing patient fixture
+   * -- null whenever there is no real case behind the question. */
+  case_context: string | null
   answer_options: string[]; why_this_matters: string; status: 'unanswered' | 'answered' | 'skipped'
   asked_count: number | null; synthetic: true; created_at: string
   root_question_id: string; parent_question_id: string | null; branch_depth: number
@@ -469,12 +473,22 @@ export type AgentOverviewStats = {
   network_cases_count: number; last_trained_at: string | null
   published_updates_count: number; network_physicians_count: number
 }
+/** Demo coherence pass, Part H/Y: a small, demo-scoped signal -- never a
+ * fake general learning-analytics engine. `clarifying_question`/
+ * `supporting_text` back the "Clarify" flow (Part I/J); the architecture
+ * is written so a future richer signal ("14 reviewed, 11 resolved...")
+ * is just more fields here, not a rewrite. */
+export type LearningOpportunity = {
+  id: string; case_family: string; title: string; body: string
+  clarifying_question: string; supporting_text: string
+}
 export type AgentOverview = {
   physician: ControlledPhysicianIdentity; specialty: string; location: string
   portrait: string; portrait_confirmed_facts: string[]; stats: AgentOverviewStats
   initialization: AgentInitializationStatus; training: TrainProjection; last_trained_at: string | null
   more_training_available: boolean
   next_action: TrainingAction
+  learning_opportunities: LearningOpportunity[]
   ranking_effect: 'none'
 }
 export type OwnedTrainingQuestion = Omit<TrainingQuestion, 'physician_persona'> & { physician_persona: string }
@@ -800,6 +814,11 @@ export type ReferralRequirementItem = { key: string; label: string; required: bo
 export type StructuredReferralPreference = {
   good_fit: string[]; required: ReferralRequirementItem[]; helpful: ReferralRequirementItem[]
   redirect: string[]; modality: ReferralPreferenceModality
+  /** Demo coherence pass, Part J: plain-text nuance for a genuinely
+   * conditional modality preference (e.g. e-consult for a focused,
+   * fully-documented question; in-person when worsening despite
+   * escalation) -- never a new care-routing decision engine. */
+  modality_notes: string | null
 }
 export type PhysicianReferralPreference = {
   id: string; physician_id: string; case_family: string; source_text: string

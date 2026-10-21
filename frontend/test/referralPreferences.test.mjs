@@ -67,7 +67,7 @@ test('the currently-confirmed preference is shown with its provenance, reusing t
 
 test('the section lives on the physician\'s own Profile, scoped to the one physician this pass wires it for', () => {
   const profilePage = slice(engagement, 'export function ProfessionalProfilePage', 'function NetworkAskAgentModal')
-  assert.match(profilePage, /personaId === 'chen' && <ReferralPreferenceSection personaId=\{personaId\} \/>/)
+  assert.match(profilePage, /personaId === 'chen' && <ReferralPreferenceSection personaId=\{personaId\} navigate=\{navigate\} \/>/)
 })
 
 test('Practice Representation shows a confirmed modality preference as plain text, not a new raw JSON block', () => {

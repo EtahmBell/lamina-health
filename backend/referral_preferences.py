@@ -131,16 +131,32 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
         elif any(phrase in sentence_lower for phrase in ("prefer", "routed elsewhere", "redirect", "do not usually see", "don't usually see")):
             redirect.append(sentence.rstrip(".!? "))
 
+    modality_notes: str | None = None
     if "e-consult" in lower or "econsult" in lower:
         if "in-person" in lower or "in person" in lower:
             modality = "either"
+            # Demo coherence pass, Part J: capture the actual conditional
+            # sentences as grounding text -- never collapsing a genuinely
+            # conditional preference into one flat enum value with no
+            # supporting detail.
+            econsult_sentences = [
+                sentence.rstrip(".!? ") for sentence in _split_sentences(source_text)
+                if "e-consult" in sentence.casefold() or "econsult" in sentence.casefold()
+            ]
+            in_person_sentences = [
+                sentence.rstrip(".!? ") for sentence in _split_sentences(source_text)
+                if "in-person" in sentence.casefold() or "in person" in sentence.casefold()
+            ]
+            notes = [*econsult_sentences, *in_person_sentences]
+            modality_notes = ". ".join(dict.fromkeys(notes)) + "." if notes else None
         else:
             modality = "econsult"
     elif "in-person" in lower or "in person" in lower:
         modality = "in_person"
 
     return StructuredReferralPreference(
-        good_fit=good_fit, required=required, helpful=helpful, redirect=redirect, modality=modality
+        good_fit=good_fit, required=required, helpful=helpful, redirect=redirect,
+        modality=modality, modality_notes=modality_notes,
     )
 
 
@@ -266,6 +282,8 @@ def preference_requirement_items(structured: StructuredReferralPreference) -> li
 
 
 def preference_modality_label(structured: StructuredReferralPreference) -> str | None:
+    if structured.modality == "either" and structured.modality_notes:
+        return structured.modality_notes
     labels = {
         "in_person": "In-person review preferred.",
         "econsult": "E-consult preferred.",
@@ -343,7 +361,16 @@ def ensure_chen_seed_preference(workflow_store: WorkflowStore, workspace_id: str
         redirect=[
             "Progressive CKD with resistant hypertension where diabetes is not the lead referral question."
         ],
-        modality="in_person",
+        # Demo coherence pass, Part E/I: Chen's initial teaching never
+        # mentioned e-consult/in-person at all -- modality starts
+        # unspecified so Tonjit's episode can later surface a real,
+        # honest representation gap (Part I), rather than pre-seeding an
+        # answer he never actually gave. Downstream routing already
+        # treats "unspecified" exactly like today's long-standing default
+        # (in-person recommended) -- see build_care_routing/
+        # build_candidate_routes -- so this changes nothing about current
+        # product behavior until Chen actually confirms a modality.
+        modality="unspecified",
     )
     created = workflow_store.create_referral_preference(
         workspace_id,
@@ -405,6 +432,43 @@ def confirmed_modality(
         return None
     structured = _structured_from_row(row)
     return None if structured.modality == "unspecified" else structured.modality
+
+
+def clarification_opportunities(
+    workflow_store: WorkflowStore, workspace_id: str, physician_id: str
+) -> list[dict[str, Any]]:
+    """Demo coherence pass, Part H/I/Y: a small, deterministic, demo-scoped
+    detector of ONE genuinely useful representation gap -- never a general
+    learning-ranking engine (Part Y explicitly defers that). Chen's recent
+    diabetes work is valid and safe either way; this only ever says "you
+    haven't yet confirmed X," never "your agent got this wrong." Resolves
+    itself the moment Chen confirms a modality preference (Part K: this is
+    read-only -- confirming happens through the normal referral-preference
+    confirm flow, never automatically from this detector itself)."""
+    if physician_id != PHYSICIAN_CHEN.id:
+        return []
+    ensure_seed_preferences(workflow_store, workspace_id)
+    row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, CHEN_SEED_CASE_FAMILY)
+    if row is None:
+        return []
+    structured = _structured_from_row(row)
+    if structured.modality != "unspecified":
+        return []
+    return [
+        {
+            "id": "chen-econsult-modality-gap",
+            "case_family": CHEN_SEED_CASE_FAMILY,
+            "title": "A recent diabetes referral surfaced one useful gap in your agent's representation.",
+            "body": "You haven't yet confirmed when you prefer e-consult for focused diabetes questions.",
+            "clarifying_question": "When would you be comfortable starting with an e-consult for a diabetes referral?",
+            "supporting_text": (
+                "Your agent already understands that persistent worsening despite treatment "
+                "escalation is generally a good fit for in-person evaluation. It does not yet "
+                "have confirmed guidance on when a focused diabetes question can start "
+                "asynchronously."
+            ),
+        }
+    ]
 
 
 def confirmed_referral_preference_sections(

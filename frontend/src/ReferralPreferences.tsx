@@ -13,13 +13,14 @@ import {
   type PhysicianIdentity, type PhysicianReferralPreference, type ReferralRequirementItem,
   type StructuredReferralPreference,
 } from './api.ts'
+import { ModalPortal } from './ModalPortal.tsx'
 
 const MODALITY_LABELS: Record<StructuredReferralPreference['modality'], string> = {
   in_person: 'In-person preferred', econsult: 'E-consult preferred',
   either: 'Either; no strong preference', unspecified: 'Not specified',
 }
 
-const EMPTY_RULES: StructuredReferralPreference = { good_fit: [], required: [], helpful: [], redirect: [], modality: 'unspecified' }
+const EMPTY_RULES: StructuredReferralPreference = { good_fit: [], required: [], helpful: [], redirect: [], modality: 'unspecified', modality_notes: null }
 
 function RequirementRow({ item, onToggleRequired, onRemove }: {
   item: ReferralRequirementItem; onToggleRequired?: () => void; onRemove?: () => void
@@ -124,7 +125,27 @@ function ConfirmedPreferenceSummary({ preference }: { preference: PhysicianRefer
   </div>
 }
 
-export function ReferralPreferenceSection({ personaId }: { personaId: PhysicianIdentity }) {
+type Navigate = (path: string) => void
+
+/** Mirrors Engagement.tsx's own agentPracticePath exactly -- duplicated
+ * (not imported) to avoid a circular import, since Engagement.tsx already
+ * imports ReferralPreferenceSection from this file. */
+function practiceRepresentationPath(perspective: PhysicianIdentity): string {
+  return perspective === 'iain' ? '/specialist/agent'
+    : perspective === 'chen' ? '/chen/agent'
+      : perspective === 'owner' ? '/me/agent?tab=practice'
+        : '/agent?tab=knowledge'
+}
+
+export function ReferralPreferenceSection({
+  personaId, navigate, heading = 'How I receive referrals',
+  intro = 'Describe what makes a referral useful to you, what information you usually need, and which cases are a good fit for your practice.',
+  placeholder,
+  onConfirmed,
+}: {
+  personaId: PhysicianIdentity; navigate?: Navigate; heading?: string; intro?: string
+  placeholder?: string; onConfirmed?: () => void
+}) {
   const [preferences, setPreferences] = useState<PhysicianReferralPreference[] | null>(null)
   const [sourceText, setSourceText] = useState('')
   const [draft, setDraft] = useState<PhysicianReferralPreference | null>(null)
@@ -162,8 +183,9 @@ export function ReferralPreferenceSection({ personaId }: { personaId: PhysicianI
     try {
       await confirmReferralPreference(personaId, draft.id)
       setDraft(null); setSourceText(''); setEditing(false)
-      setConfirmedNote('Confirmed. Your agent now uses this.')
+      setConfirmedNote('Added to how your agent represents your practice.')
       load()
+      onConfirmed?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not confirm this preference.')
     } finally {
@@ -198,13 +220,13 @@ export function ReferralPreferenceSection({ personaId }: { personaId: PhysicianI
   }
 
   return <section className="profile-section referral-preference-section" id="profile-section-referral-preferences">
-    <h2>How I receive referrals</h2>
-    <p className="muted-note">
-      Describe what makes a referral useful to you, what information you usually need, and which
-      cases are a good fit for your practice.
-    </p>
+    <h2>{heading}</h2>
+    <p className="muted-note">{intro}</p>
 
-    {confirmedNote && <p className="profile-save-note" role="status">{confirmedNote}</p>}
+    {confirmedNote && <p className="profile-save-note" role="status">
+      {confirmedNote}
+      {navigate && <button type="button" className="text-button" onClick={() => navigate(practiceRepresentationPath(personaId))}>View in Practice Representation →</button>}
+    </p>}
     {confirmedPreference && !draft && <ConfirmedPreferenceSummary preference={confirmedPreference} />}
 
     {!draft && <div className="referral-pref-input">
@@ -215,9 +237,11 @@ export function ReferralPreferenceSection({ personaId }: { personaId: PhysicianI
         value={sourceText}
         onChange={(event) => setSourceText(event.target.value)}
         placeholder={
-          'For diabetes referrals, I usually need a recent A1c, current diabetes medications, and ' +
-          "recent kidney function. Glucose logs or CGM are useful when available, but aren't required. " +
-          'I commonly see patients whose diabetes remains poorly controlled despite treatment escalation.'
+          placeholder ?? (
+            'For diabetes referrals, I usually need a recent A1c, current diabetes medications, and ' +
+            "recent kidney function. Glucose logs or CGM are useful when available, but aren't required. " +
+            'I commonly see patients whose diabetes remains poorly controlled despite treatment escalation.'
+          )
         }
       />
       {error && <p className="demo-reset-error" role="alert">{error}</p>}
@@ -247,4 +271,34 @@ export function ReferralPreferenceSection({ personaId }: { personaId: PhysicianI
       </div>
     </div>}
   </section>
+}
+
+/** Demo coherence pass, Part D/J: reuses ReferralPreferenceSection inside a
+ * modal/overlay shell -- the SAME NLP interpret/review/confirm pipeline,
+ * never a duplicated backend or a second component. Used both from My
+ * Agent -> Train ("Describe how you receive referrals") and from the
+ * "Clarify" action on a surfaced representation gap, each with its own
+ * framing via props rather than a forked implementation. */
+export function ReferralPreferenceModal({
+  personaId, navigate, onClose, heading, intro, placeholder,
+}: {
+  personaId: PhysicianIdentity; navigate?: Navigate; onClose: () => void
+  heading?: string; intro?: string; placeholder?: string
+}) {
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="post-flow-dialog referral-preference-modal-dialog" role="dialog" aria-modal="true" aria-label={heading ?? 'Describe how you receive referrals'}>
+      <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
+      {/* Part F: deliberately does NOT auto-close on confirm -- the
+       * physician should actually see the "Added to how your agent
+       * represents your practice" success state, not have it vanish the
+       * instant they confirm. They close explicitly via the × above. */}
+      <ReferralPreferenceSection
+        personaId={personaId}
+        navigate={navigate}
+        heading={heading}
+        intro={intro}
+        placeholder={placeholder}
+      />
+    </div>
+  </div></ModalPortal>
 }

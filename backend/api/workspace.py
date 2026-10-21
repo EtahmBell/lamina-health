@@ -108,8 +108,19 @@ def reset_jordan_demo(workspace_id: MutableDemoWorkspace) -> dict:
 def reset_tonjit_demo(workspace_id: MutableDemoWorkspace) -> dict:
     """Reset only the controlled Tonjit synthetic case's Lamina-owned workflow
     state (consultation history and any referrals), so the closed-loop
-    referral demo can be replayed from its pre-consult state."""
-    return workflow_store.reset_demo_case(workspace_id, TONJIT_PATIENT_ID)
+    referral demo can be replayed from its pre-consult state.
+
+    Demo coherence pass, Part V/W: also returns Dr. Chen's referral
+    preferences to their canonical baseline (the migrated diabetes
+    preference, with modality unspecified) -- the lazy per-workspace seed
+    recreates it on next read, so "teach -> confirm -> Tonjit ->
+    e-consult clarification" can be rehearsed repeatedly without manual
+    database edits between runs."""
+    result = workflow_store.reset_demo_case(workspace_id, TONJIT_PATIENT_ID)
+    result["removed_chen_referral_preferences"] = workflow_store.reset_physician_referral_preferences(
+        workspace_id, "physician-chen"
+    )
+    return result
 
 
 @router.get("/network")

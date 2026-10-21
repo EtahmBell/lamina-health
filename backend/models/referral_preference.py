@@ -44,6 +44,13 @@ class StructuredReferralPreference(StrictModel):
     helpful: list[ReferralRequirement] = Field(default_factory=list)
     redirect: list[str] = Field(default_factory=list)
     modality: ReferralPreferenceModality = "unspecified"
+    # Demo coherence pass, Part J: when a physician's modality preference is
+    # genuinely conditional (e.g. e-consult for a focused question with
+    # complete workup, in-person when worsening despite escalation), this
+    # holds that nuance as plain text rather than forcing it into the flat
+    # `modality` enum -- never a new care-routing/e-consult decision engine,
+    # just descriptive grounding text for Ask Their Agent / My Agent Test.
+    modality_notes: str | None = None
 
 
 class PhysicianReferralPreference(StrictModel):

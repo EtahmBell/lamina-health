@@ -485,7 +485,11 @@ def test_chen_is_a_real_editable_persona_with_his_canonical_profile_data(
     assert "Nephrologist" not in overview["portrait"]
     assert "Endocrinology" in overview["portrait"]
     assert overview["initialization"]["initialized"] is False
-    assert training["questions"] == []
+    # Demo coherence pass, Part L: Chen now has one real canonical-case
+    # training question (grounded in his own pre-existing patient panel),
+    # rather than an empty bank.
+    assert len(training["questions"]) == 1
+    assert training["questions"][0]["id"] == "chen-thyroid-nodule-fit"
 
 
 def test_chen_public_profile_is_reachable_and_shows_his_real_referral_representation(

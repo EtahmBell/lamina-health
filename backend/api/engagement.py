@@ -21,7 +21,11 @@ from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.models import CoordinationChatAnswer
 from backend.network_chat import answer_general_practice_question
 from backend.network_query import ask_network
-from backend.referral_preferences import confirmed_referral_preference_sections, ensure_seed_preferences
+from backend.referral_preferences import (
+    clarification_opportunities,
+    confirmed_referral_preference_sections,
+    ensure_seed_preferences,
+)
 from backend.engagement import (
     DEPENDS_OPTION,
     EDITABLE_PERSONAS,
@@ -686,7 +690,7 @@ def agent_overview(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
     training = _training_projection(workspace_id, persona_id)
     initialization = physician_initialization(workspace_id, persona_id)
     confirmed = representation["sections"]["confirmed_learnings"]
-    portrait, portrait_facts = deterministic_portrait(persona_id, confirmed)
+    portrait, portrait_facts = deterministic_portrait(persona_id, confirmed, representation["sections"])
     records = workflow_store.history(workspace_id, limit=200)
     if persona_id == "iain":
         network_cases_count = len(
@@ -704,6 +708,10 @@ def agent_overview(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
         workspace_id, persona_id, "published"
     )
     network_physicians = workflow_store.network_members(workspace_id)
+    physician_id = PERSONAS[persona_id]["physician_id"]
+    learning_opportunities = (
+        clarification_opportunities(workflow_store, workspace_id, physician_id) if physician_id else []
+    )
     stats = {
         "questions_answered_total": training["questions_answered_total"],
         "training_sessions_completed": training["sessions_completed"],
@@ -729,6 +737,7 @@ def agent_overview(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
         "last_trained_at": training["last_trained_at"],
         "more_training_available": training["more_training_available"],
         "next_action": training["action"],
+        "learning_opportunities": learning_opportunities,
         "ranking_effect": "none",
     }
 
@@ -773,6 +782,8 @@ def chat_with_agent(
         "practice:explicit_rules",
         "practice:preferred_workup",
         "practice:clinical_focus",
+        "practice:good_fit",
+        "practice:modality_preference",
         "practice:explicit_rules:renal-routing",
         "practice:explicit_rules:anaemia-routing",
         *[

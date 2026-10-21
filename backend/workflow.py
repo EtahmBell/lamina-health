@@ -2168,6 +2168,25 @@ class WorkflowStore:
             ).rowcount
         return self.referral_preference(workspace_id, preference_id) if updated else None
 
+    def reset_physician_referral_preferences(self, workspace_id: str, physician_id: str) -> int:
+        """Demo coherence pass, Part V/W: returns this physician's referral
+        preferences to baseline by removing everything (drafts, confirmed,
+        superseded, rejected) -- the lazy per-workspace seed (see
+        ensure_chen_seed_preference) recreates the canonical baseline the
+        next time anything reads a confirmed preference for this
+        physician, exactly like a fresh workspace. Returns the number of
+        rows removed."""
+        with self._connect() as db:
+            removed = db.execute(
+                "SELECT COUNT(*) FROM physician_referral_preferences WHERE workspace_id=? AND physician_id=?",
+                (workspace_id, physician_id),
+            ).fetchone()[0]
+            db.execute(
+                "DELETE FROM physician_referral_preferences WHERE workspace_id=? AND physician_id=?",
+                (workspace_id, physician_id),
+            )
+        return removed
+
     def create_enrichment_job(self, workspace_id: str, persona_id: str, provider: str) -> dict:
         now = self._now()
         with self._connect() as db:

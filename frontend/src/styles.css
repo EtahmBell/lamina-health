@@ -2657,3 +2657,14 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .connection-row { padding: 0; }
 .connection-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 16px; border: 0; background: transparent; padding: 16px 20px; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
 .connection-row-ask { flex-shrink: 0; margin-right: 20px; white-space: nowrap; }
+
+/* Demo coherence pass: Train tab 3 modes, learned-this-week card, case context */
+.train-mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 16px; }
+.train-mode-card { border: 1px solid var(--border); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.train-mode-card h3 { margin: 0; font-size: .82rem; font-weight: 500; line-height: 1.4; }
+.train-mode-recent-work { border-color: var(--accent-hover); }
+.agent-learned-this-week-card { border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin: 4px 0; }
+.agent-learned-count { font-weight: 600; margin: 4px 0 10px; }
+.training-case-context { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-muted, rgb(0 0 0 / 2%)); }
+.training-case-context p:last-child { margin: 4px 0 0; }
+.referral-preference-modal-dialog { width: min(100%, 640px); max-height: 86vh; overflow-y: auto; }

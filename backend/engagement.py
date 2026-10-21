@@ -511,12 +511,25 @@ BASE_INTERESTS: dict[str, list[dict[str, Any]]] = {
 
 
 TRAINING_QUESTIONS: dict[str, list[dict[str, Any]]] = {
-    # Deliberately empty: Chen's own calibration question bank is next-pass
-    # work (referral-preference authoring), not this pass (Part K). An empty
-    # list -- not a missing key -- lets every generic projection below degrade
-    # to an honest "nothing trained yet" state instead of a KeyError, exactly
-    # like a brand-new real physician with no training history yet.
-    "chen": [],
+    # Demo coherence pass, Part L: one real canonical-case question grounded
+    # in Chen's own pre-existing patient panel (Maya Thompson, CHEN_MAYA_
+    # PATIENT_ID) -- never a "would this case fit" question with no case
+    # context shown (see normalize_question's case_context field below).
+    "chen": [
+        {
+            "id": "chen-thyroid-nodule-fit",
+            "physician_persona": "chen",
+            "source_type": "canonical_case",
+            "source_reference": "patient-chen-maya-003",
+            "prompt": "Would this presentation fit your endocrinology practice before the diagnosis is confirmed?",
+            "question_type": "yes_no_depends",
+            "answer_options": ["Yes", "Depends", "No"],
+            "why_this_matters": "Helps your agent understand which referrals are a good fit even before a diagnosis is confirmed.",
+            "asked_count": None,
+            "synthetic": True,
+            "created_at": BASE_TIMESTAMP,
+        },
+    ],
     "iain": [
         {
             "id": "iain-resistant-htn-normal-kidney",
@@ -1153,8 +1166,35 @@ def question_by_id(persona_id: str, question_id: str) -> dict | None:
     return None
 
 
+# Demo coherence pass, Part M: physician-facing "why this matters" copy --
+# never the raw internal dimension name (e.g. never "Clarifies the
+# physician's diagnosis phenotype boundary."). Keyed by the same
+# _CALIBRATION_DIMENSIONS dimension names, so adding a dimension there
+# without adding a friendly purpose here is a visible KeyError rather than
+# a silent ontology-language leak.
+_DIMENSION_FRIENDLY_PURPOSE: dict[str, str] = {
+    "diagnosis_phenotype": "Helps your agent understand which referrals are a good fit even before a diagnosis is confirmed.",
+    "disease_severity": "Helps your agent understand how severity affects whether a referral is a good fit.",
+    "trajectory": "Helps your agent understand how a changing or worsening course affects fit.",
+    "comorbidity": "Helps your agent understand how other conditions affect whether a case is a good fit.",
+    "prior_workup": "Helps your agent understand how much workup you want completed first.",
+    "required_labs": "Helps your agent understand what information should be available before a referral.",
+    "treatment_history": "Helps your agent understand how prior treatment affects whether a referral is a good fit.",
+    "geography_access": "Helps your agent understand how distance or access affects scheduling.",
+    "procedure_need": "Helps your agent understand when a procedure question should involve you.",
+    "care_setting": "Helps your agent understand when you prefer to become involved.",
+    "age_context": "Helps your agent understand how a patient's age affects fit.",
+    "exclusion_conditions": "Helps your agent understand when a case is better handled elsewhere.",
+    "interests": "Helps your agent understand which cases you're most interested in seeing.",
+}
+
+
 def generated_training_questions(persona_id: str):
-    """Yield a large deterministic bank from grounded calibration dimensions."""
+    """Yield a large deterministic bank from grounded calibration dimensions.
+
+    Demo coherence pass, Part L: these questions have no specific patient
+    case behind them, so the prompt is deliberately generic ("Do you
+    generally accept...") rather than implying an unshown "this case"."""
     if persona_id == "lucy":
         practice = "primary-care coordination"
     elif persona_id == "iain":
@@ -1170,12 +1210,10 @@ def generated_training_questions(persona_id: str):
                 "physician_persona": persona_id,
                 "source_type": "practice_gap",
                 "source_reference": f"calibration:{dimension}:{condition_index}",
-                "prompt": (f"Would this case fit your {practice} practice if {condition}?"),
+                "prompt": (f"Do you generally accept a {practice} referral when {condition}?"),
                 "question_type": "yes_no_depends",
                 "answer_options": ["Yes", "Depends", "No"],
-                "why_this_matters": (
-                    f"Clarifies the physician's {dimension.replace('_', ' ')} boundary."
-                ),
+                "why_this_matters": _DIMENSION_FRIENDLY_PURPOSE[dimension],
                 "dimension_being_narrowed": dimension,
                 "question_objective": "Locate a bounded practice-fit decision boundary.",
                 "asked_count": None,
@@ -1183,6 +1221,18 @@ def generated_training_questions(persona_id: str):
                 "terminal": False,
                 "created_at": BASE_TIMESTAMP,
             }
+
+
+# Demo coherence pass, Part L: a visible CASE CONTEXT block for every
+# question that is genuinely grounded in one specific existing patient
+# fixture -- never a question that says "this case"/"this presentation"
+# with nothing shown. Keyed by patient id (see backend/synthetic_data/
+# fixtures.py); only covers patients a canonical_case question actually
+# references today.
+_CANONICAL_CASE_CONTEXT: dict[str, str] = {
+    "patient-ckd-htn-001": "62-year-old referred for resistant hypertension with progressively worsening kidney function.",
+    "patient-chen-maya-003": "34-year-old referred for a thyroid nodule with indeterminate fine-needle-aspiration cytology. Diagnosis has not yet been confirmed.",
+}
 
 
 def normalize_question(question: dict) -> dict:
@@ -1206,6 +1256,11 @@ def normalize_question(question: dict) -> dict:
         "terminal": question.get("terminal", True),
         "generated_from": question.get("source_type"),
         "priority": source_priority.get(question.get("source_type", ""), 50),
+        "case_context": (
+            _CANONICAL_CASE_CONTEXT.get(question.get("source_reference"))
+            if question.get("source_type") == "canonical_case"
+            else None
+        ),
     }
 
 
@@ -1256,23 +1311,23 @@ def next_branch_question(
 
 _BRANCH_NARROWING = {
     "diagnosis_phenotype": (
-        "Would the case fit if the referring question were limited to diagnostic clarification?",
+        "Would a referral like this still fit if the referring question were limited to diagnostic clarification?",
         "Would it still fit if the diagnosis remained unconfirmed after the basic workup?",
     ),
     "disease_severity": (
-        "Would objective progression make the case appropriate despite limited symptoms?",
+        "Would objective progression make a referral like this appropriate despite limited symptoms?",
         "Would it still fit if the latest single measurement were reassuring?",
     ),
     "trajectory": (
-        "Would documented progression over multiple measurements make the case appropriate?",
+        "Would documented progression over multiple measurements make a referral like this appropriate?",
         "Would it still fit if the latest measurement were stable?",
     ),
     "comorbidity": (
-        "Would the case fit if the comorbidity directly constrained usual management?",
+        "Would a referral like this still fit if the comorbidity directly constrained usual management?",
         "Would it still fit if another specialist were already co-managing the patient?",
     ),
     "prior_workup": (
-        "Would the case fit if all basic testing were complete except one preferred study?",
+        "Would a referral like this still fit if all basic testing were complete except one preferred study?",
         "Would it still fit if that study could not be obtained locally?",
     ),
     "required_labs": (
@@ -1280,15 +1335,15 @@ _BRANCH_NARROWING = {
         "Would it still be enough if the last result were more than three months old?",
     ),
     "treatment_history": (
-        "Would intolerance of first-line treatment make the case appropriate?",
+        "Would intolerance of first-line treatment make a referral like this appropriate?",
         "Would it still fit before another standard option had been tried?",
     ),
     "geography_access": (
-        "Would a video-first visit make the case practical for your practice?",
+        "Would a video-first visit make a referral like this practical for your practice?",
         "Would it still fit if all follow-up also had to be remote?",
     ),
     "procedure_need": (
-        "Would the case fit if the immediate question were whether a procedure is indicated?",
+        "Would a referral like this still fit if the immediate question were whether a procedure is indicated?",
         "Would it still fit if the procedure had to occur at another site?",
     ),
     "care_setting": (
@@ -1296,15 +1351,15 @@ _BRANCH_NARROWING = {
         "Would it still fit if an in-person examination were likely afterward?",
     ),
     "age_context": (
-        "Would age alter your threshold for accepting the case?",
+        "Would age alter your threshold for accepting a referral like this?",
         "Would it still fit if functional status were preserved?",
     ),
     "exclusion_conditions": (
-        "Would you accept the case after the competing diagnosis was excluded?",
+        "Would you accept a referral like this after the competing diagnosis was excluded?",
         "Would it still fit if another specialty needed to evaluate first?",
     ),
     "interests": (
-        "Would the case fit even if it were outside your stated interests but within scope?",
+        "Would a referral like this still fit even if it were outside your stated interests but within scope?",
         "Would it still fit if it required multidisciplinary co-management?",
     ),
     "communication_preference": (
@@ -1360,11 +1415,14 @@ def deterministic_branch_question(
             "prompt": prompt,
             "question_type": "short_text" if at_cap else "yes_no_depends",
             "answer_options": [] if at_cap else ["Yes", "Depends", "No"],
-            "why_this_matters": f"Narrows the {dimension.replace('_', ' ')} boundary.",
+            "why_this_matters": _DIMENSION_FRIENDLY_PURPOSE.get(dimension, _DIMENSION_FRIENDLY_PURPOSE["diagnosis_phenotype"]),
             "dimension_being_narrowed": dimension,
             "terminal_candidate": at_cap,
+            # Demo coherence pass, Part M: this text can become part of a
+            # CONFIRMED practice-rule statement (see synthesize_branch_
+            # learning) -- never internal ontology language, even here.
             "proposed_boundary_rationale": (
-                f"This answer clarifies the physician's {dimension.replace('_', ' ')} boundary."
+                "Based on your answer, this narrows when a referral like this is a good fit"
             ),
             "source_references": [parent.get("source_reference")]
             if parent.get("source_reference")
@@ -1534,15 +1592,12 @@ def synthesize_branch_learning(root_question_id: str, branch: list[tuple[dict, d
     if len(answered) == 1:
         return proposed_learning_statement(leaf_question["id"], leaf_response["answer"])
     answer = leaf_response["answer"]
-    dimension = str(leaf_question.get("dimension_being_narrowed") or "practice fit").replace(
-        "_", " "
-    )
     rationale = leaf_question.get("proposed_boundary_rationale")
     if rationale:
-        return f"{rationale.rstrip('.')} Final boundary response: {answer}."
-    return (
-        f"The physician's {dimension} boundary resolves to {answer} at: {leaf_question['prompt']}"
-    )
+        return f"{rationale.rstrip('.')}. Final boundary response: {answer}."
+    # Demo coherence pass, Part M: a physician-facing fallback, never a raw
+    # internal dimension name.
+    return f"Based on your answer ({answer}), this narrows when a referral like this is a good fit."
 
 
 def base_practice_representation(persona_id: str) -> dict:

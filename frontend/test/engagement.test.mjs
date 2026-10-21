@@ -141,10 +141,10 @@ test('the agent banner (post-8B rename of the Your Agent card) never shows a ref
   assert.doesNotMatch(mapping, /\d+ of \d+/, 'never a finite "x of y" completion count for the open-ended representation')
 })
 
-test('the quick-training modal is its own session track, isolated from the full My Agent -> Train flow', () => {
+test('the quick-training modal is its own session track, isolated from the full My Agent -> Train flow, except when it is genuinely serving the one-time initialization sequence', () => {
   const modal = slice(engagement, 'function QuickTrainingModal', 'export function TrainingPage')
-  assert.match(modal, /getTrainingHistory\(personaId, 'quick'\)/, 'the Dashboard burst must ask for the quick track, never the shared/standard one')
-  assert.match(modal, /startTrainingSession\(personaId, \{ mode: 'quick', limit: 3 \}\)/)
+  assert.match(modal, /getTrainingHistory\(personaId, initializationNeeded \? 'standard' : 'quick'\)/, 'the Dashboard burst must ask for the quick track, never the shared/standard one, unless initialization is genuinely still needed')
+  assert.match(modal, /startTrainingSession\(personaId, initializationNeeded \? \{ mode: 'initialization' \} : \{ mode: 'quick', limit: 3 \}\)/)
 })
 
 test('the quick modal reads its progress from the backend-computed answered_count, never a raw response-list length (a Depends clarifier is not a top-level question)', () => {
@@ -939,13 +939,13 @@ test('the Network sidebar icon is a simple thin-line people/group mark, not the 
   assert.match(icon, /fill="none"/, 'thin-line treatment, not a filled glyph')
 })
 
-test('Network defaults to Feed and routes ?tab=my-network to Colleagues, for both personas (post-8B: Feed is primary, not graph/directory-first)', () => {
+test('Network defaults to Colleagues and only ?tab=feed opens Feed, for every persona (demo coherence pass, Part S: Colleagues is the main-nav landing surface, not Feed)', () => {
   const lucyShell = slice(app, 'function LucyNetworkPage', 'function HomePage')
-  assert.match(lucyShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'my-network' \? 'my-network' : 'feed'\)/)
+  assert.match(lucyShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
   assert.match(lucyShell, /\? <MyNetworkTab navigate=\{navigate\} onViewInFeed=\{viewInFeed\} \/>/)
   assert.match(lucyShell, /: <NetworkFeedTab personaId="lucy" navigate=\{navigate\} focusPostId=\{focusPostId\} onFocused=\{\(\) => setFocusPostId\(null\)\} \/>/)
   const specialistShell = slice(specialist, 'export function SpecialistNetworkPage', specialist.length)
-  assert.match(specialistShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'my-network' \? 'my-network' : 'feed'\)/)
+  assert.match(specialistShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
   assert.match(specialistShell, /tab === 'my-network' \? <SpecialistMyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="iain" navigate=\{navigate\} \/>/)
 })
 

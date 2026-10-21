@@ -209,10 +209,13 @@ function eventTimestamp(value: string) {
 /** Feed is the default/primary tab — a colleague directory is secondary. */
 function LucyNetworkPage({ navigate, params }: { navigate: Navigate; params: URLSearchParams }) {
   const tabParam = params.get('tab')
-  const [tab, setTab] = useState<NetworkTab>(tabParam === 'my-network' ? 'my-network' : 'feed')
+  // Demo coherence pass, Part S: a fresh main-nav Network entry (no ?tab=)
+  // lands on Colleagues by default -- Feed is only shown when explicitly
+  // requested (?tab=feed, including the legacy /network/updates alias).
+  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
   const [focusPostId, setFocusPostId] = useState<string | null>(null)
-  useEffect(() => { setTab(tabParam === 'my-network' ? 'my-network' : 'feed') }, [tabParam])
-  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'my-network' ? '/network?tab=my-network' : '/network') }
+  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
+  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/network?tab=feed' : '/network?tab=my-network') }
   // Active-network pass, Part M: a relevant-broadcast result's "View in Feed"
   // switches tabs and focuses the referenced post, never a separate detail route.
   const viewInFeed = (postId: string) => { setFocusPostId(postId); selectTab('feed') }
@@ -513,7 +516,7 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
           <div className="learning-grid">{(agent?.learnings ?? []).filter((learning) => learning.status === 'suggested').map((learning) => <article className={`learning-card ${focusedLearning === learning.key ? 'focused' : ''}`} id={`learning-${learning.key}`} key={learning.key}><span className={`learning-status ${learning.status}`}>Proposed · needs confirmation</span><p>{learning.statement}</p><small>Source: {learning.provenance}</small>{focusedLearning === learning.key && caseParam && <p className="learning-case-source">Raised from the {patientName(caseParam)} consultation.{recordParam && <button className="text-button" onClick={() => navigate(consultationPath(Number(recordParam)))}>View consultation →</button>}</p>}{editing === learning.key ? <div className="learning-edit"><label htmlFor={`edit-${learning.key}`}>Correct this preference</label><textarea id={`edit-${learning.key}`} maxLength={240} value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="button-primary" disabled={!draft.trim()} onClick={() => act(learning, 'edit', draft)}>Save draft</button><button className="text-button" onClick={() => setEditing(null)}>Cancel</button></div></div> : <div className="learning-actions"><button onClick={() => act(learning, 'confirm')}>Confirm</button><button onClick={() => { setEditing(learning.key); setDraft(learning.statement) }}>Edit</button><button onClick={() => act(learning, 'reject')}>Reject</button></div>}</article>)}</div>
         </section>
       } />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('lucy')} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('lucy')} personaId="lucy" learningOpportunities={overview?.learning_opportunities ?? []} />}
       {tab === 'test' && <ChatTab personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} trainPath={trainingPath('lucy')} />}
     </>}
   </main></ProductShell>

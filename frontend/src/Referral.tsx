@@ -7,6 +7,7 @@ import { timeAwareGreeting } from './greeting.ts'
 import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
+import { ActiveNetworkRail } from './NetworkQuery.tsx'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
@@ -1779,7 +1780,7 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
       </div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{CHEN_AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
       {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('chen')} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" learningOpportunities={overview.learning_opportunities} />}
       {tab === 'test' && <ChatTab personaId="chen" agentName={agentName} navigate={navigate} trainPath={trainingPath('chen')} />}
     </>}
   </main>
@@ -1787,22 +1788,30 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
 
 /** Mirrors SpecialistMyNetworkTab's exact shape (Specialist.tsx), generalized
  * to Chen's perspective -- "Colleagues" (Part J): physicians explicitly added
- * to his network, or whose agents have interacted with his, deduped by id. */
-function ChenMyNetworkTab({ navigate }: { navigate: Navigate }) {
+ * to his network, or whose agents have interacted with his, deduped by id.
+ * Demo coherence pass, Part T: gains the SAME right-rail Active Network
+ * experience Lucy's Colleagues tab has -- the shared ActiveNetworkRail
+ * component, never a second persona-specific implementation. */
+function ChenMyNetworkTab({ navigate, onViewInFeed }: { navigate: Navigate; onViewInFeed?: (postId: string) => void }) {
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
   const [error, setError] = useState('')
   useEffect(() => { getNetworkFeed('chen').then(setFeed).catch((err: Error) => setError(err.message)) }, [])
   const physicians = feed ? [...new Map(feed.items.map((item) => [item.physician.id, item.physician])).values()] : []
   return <div className="my-network-tab">
-    <p className="network-intro">Physicians relevant to your practice — explicitly added to your network, or whose agents have interacted with yours.</p>
-    {error && <div className="error-banner" role="alert">{error}</div>}
-    {!feed && !error && <p className="muted-note">Loading network…</p>}
-    {feed && physicians.length === 0 && <div className="empty-state history-empty"><LaminaMark /><h2>No relevant physicians yet</h2><p>Physicians appear here once your agent participates in a network interaction, or once a professional connection is added.</p></div>}
-    {physicians.length > 0 && <div className="lam-list">{physicians.map((physician) => <button className="lam-row" key={physician.id} onClick={() => navigate(networkProfilePath('chen', physician.id))}>
-      <span className="lam-row-mark patient-row-avatar">{physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')}</span>
-      <span className="lam-row-main"><strong>{physician.name}</strong><span>{physician.specialty}</span><small>{physician.location}</small></span>
-      <span className="lam-row-action">View professional profile <b>→</b></span>
-    </button>)}</div>}
+    <div className="network-colleagues-layout">
+      <div className="network-colleagues-main">
+        <p className="network-intro">Physicians relevant to your practice — explicitly added to your network, or whose agents have interacted with yours.</p>
+        {error && <div className="error-banner" role="alert">{error}</div>}
+        {!feed && !error && <p className="muted-note">Loading network…</p>}
+        {feed && physicians.length === 0 && <div className="empty-state history-empty"><LaminaMark /><h2>No relevant physicians yet</h2><p>Physicians appear here once your agent participates in a network interaction, or once a professional connection is added.</p></div>}
+        {physicians.length > 0 && <div className="lam-list">{physicians.map((physician) => <button className="lam-row" key={physician.id} onClick={() => navigate(networkProfilePath('chen', physician.id))}>
+          <span className="lam-row-mark patient-row-avatar">{physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')}</span>
+          <span className="lam-row-main"><strong>{physician.name}</strong><span>{physician.specialty}</span><small>{physician.location}</small></span>
+          <span className="lam-row-action">View professional profile <b>→</b></span>
+        </button>)}</div>}
+      </div>
+      <ActiveNetworkRail navigate={navigate} onViewInFeed={(postId) => onViewInFeed?.(postId)} />
+    </div>
   </div>
 }
 
@@ -1812,12 +1821,18 @@ function ChenMyNetworkTab({ navigate }: { navigate: Navigate }) {
  * 'chen'), never Lucy's or Iain's. */
 export function ChenNetworkPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
   const tabParam = params?.get('tab') ?? null
-  const [tab, setTab] = useState<NetworkTab>(tabParam === 'my-network' ? 'my-network' : 'feed')
-  useEffect(() => { setTab(tabParam === 'my-network' ? 'my-network' : 'feed') }, [tabParam])
-  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'my-network' ? '/chen/network?tab=my-network' : '/chen/network') }
+  // Demo coherence pass, Part S: a fresh main-nav Network entry lands on
+  // Colleagues by default, matching Lucy's own Network page.
+  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
+  const [focusPostId, setFocusPostId] = useState<string | null>(null)
+  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
+  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/chen/network?tab=feed' : '/chen/network?tab=my-network') }
+  const viewInFeed = (postId: string) => { setFocusPostId(postId); selectTab('feed') }
   return <main className="page-shell physician-directory-page">
     <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
     <NetworkTabs tab={tab} onSelect={selectTab} />
-    {tab === 'my-network' ? <ChenMyNetworkTab navigate={navigate} /> : <NetworkFeedTab personaId="chen" navigate={navigate} />}
+    {tab === 'my-network'
+      ? <ChenMyNetworkTab navigate={navigate} onViewInFeed={viewInFeed} />
+      : <NetworkFeedTab personaId="chen" navigate={navigate} focusPostId={focusPostId} onFocused={() => setFocusPostId(null)} />}
   </main>
 }

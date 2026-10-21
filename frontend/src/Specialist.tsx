@@ -359,7 +359,7 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
 
       {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('iain')} personaId="iain" />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} personaId="iain" learningOpportunities={overview?.learning_opportunities ?? []} />}
       {tab === 'test' && <ChatTab personaId="iain" agentName={workspace.physician.agent_name} navigate={navigate} trainPath={trainingPath('iain')} />}
     </>}
   </main>
@@ -414,9 +414,11 @@ function SpecialistMyNetworkTab({ navigate }: { navigate: Navigate }) {
 /** Feed is the default/primary tab — a colleague directory is secondary. */
 export function SpecialistNetworkPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
   const tabParam = params?.get('tab') ?? null
-  const [tab, setTab] = useState<NetworkTab>(tabParam === 'my-network' ? 'my-network' : 'feed')
-  useEffect(() => { setTab(tabParam === 'my-network' ? 'my-network' : 'feed') }, [tabParam])
-  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'my-network' ? '/specialist/network?tab=my-network' : '/specialist/network') }
+  // Demo coherence pass, Part S: a fresh main-nav Network entry lands on
+  // Colleagues by default, matching Lucy's/Chen's own Network pages.
+  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
+  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
+  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/specialist/network?tab=feed' : '/specialist/network?tab=my-network') }
   return <main className="page-shell physician-directory-page">
     <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
     <NetworkTabs tab={tab} onSelect={selectTab} />

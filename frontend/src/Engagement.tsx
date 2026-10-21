@@ -47,6 +47,7 @@ import {
   type ConsultationRecord,
   type DemoPhysicianPerspective,
   type FocusedTrainingSeed,
+  type LearningOpportunity,
   type NetworkFeed,
   type NetworkFeedItem,
   type PhysicianIdentity,
@@ -74,7 +75,7 @@ import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { AgentAvatar, agentTone, type AgentAvatarTone } from './AgentAvatar.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
-import { ReferralPreferenceSection } from './ReferralPreferences.tsx'
+import { ReferralPreferenceModal, ReferralPreferenceSection } from './ReferralPreferences.tsx'
 
 type Navigate = (path: string) => void
 
@@ -396,7 +397,15 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, ma
  * TrainingPage's (yes_no / yes_no_depends / single_choice / multi_select /
  * short_text) so a multiple-choice question looks and behaves identically here and
  * in the full flow. */
-function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: PhysicianIdentity; onClose: () => void; onFinished: () => void }) {
+function QuickTrainingModal({ personaId, onClose, onFinished, initializationNeeded = false }: {
+  personaId: PhysicianIdentity; onClose: () => void; onFinished: () => void
+  /** Demo coherence pass, Part B/C: the SAME shared modal also serves the
+   * one-time mandatory initialization sequence, when it's genuinely still
+   * needed -- never a second training-modal implementation just for that
+   * state. Ordinary "quick questions" training (the common case) stays
+   * mode: 'quick'/limit: 3. */
+  initializationNeeded?: boolean
+}) {
   const [phase, setPhase] = useState<'loading' | 'questions' | 'completed' | 'error'>('loading')
   const [session, setSession] = useState<TrainingSession | null>(null)
   const [queue, setQueue] = useState<TrainingQuestion[]>([])
@@ -417,19 +426,19 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
   useEffect(() => {
     let cancelled = false
     const open = async () => {
-      const training = await getTrainingHistory(personaId, 'quick')
+      const training = await getTrainingHistory(personaId, initializationNeeded ? 'standard' : 'quick')
       if (cancelled) return
       const activeId = training.active_session_id
       const started = activeId
         ? await resumeTrainingSession(personaId, activeId)
-        : await startTrainingSession(personaId, { mode: 'quick', limit: 3 })
+        : await startTrainingSession(personaId, initializationNeeded ? { mode: 'initialization' } : { mode: 'quick', limit: 3 })
       if (cancelled) return
       const answeredIds = new Set((started.responses ?? []).map((item) => item.question_id))
       const remaining = (started.questions ?? []).filter((item) => !answeredIds.has(item.id))
       setSession(started)
       setQueue(remaining)
       setAnsweredCount(started.answered_count ?? (started.responses ?? []).length)
-      setAnswerTarget(started.answer_target ?? 3)
+      setAnswerTarget(started.answer_target ?? (initializationNeeded ? 10 : 3))
       setPhase(remaining.length > 0 ? 'questions' : 'completed')
     }
     void open().catch((err: unknown) => {
@@ -521,6 +530,10 @@ function QuickTrainingModal({ personaId, onClose, onFinished }: { personaId: Phy
         <p className="eyebrow">Teach your agent</p>
         {index > 0 && <button type="button" className="text-button training-back-button" disabled={busy} onClick={goBack}>← Back</button>}
         <div className="training-progress-row"><span>Question {Math.min(answerTarget, answeredCount + 1)} of {answerTarget}</span><div className="training-progress-bar" role="progressbar" aria-valuenow={Math.min(answerTarget, answeredCount + 1)} aria-valuemin={1} aria-valuemax={answerTarget}><span style={{ width: `${Math.round((answeredCount / answerTarget) * 100)}%` }} /></div></div>
+        {/* Demo coherence pass, Part L: a visible case-context block for
+         * any question genuinely grounded in one specific existing patient
+         * -- never "this case"/"this presentation" with nothing shown. */}
+        {current.case_context && <div className="training-case-context"><p className="section-label">Case context</p><p>{current.case_context}</p></div>}
         <h2 className="training-prompt">{current.prompt}</h2>
         {current.why_this_matters && <p className="training-modal-why">{current.why_this_matters}</p>}
         {current.question_type === 'yes_no_depends' && <div className="training-choices spatial">
@@ -1171,6 +1184,7 @@ export function TrainingPage({ personaId, agentName, navigate, exitPath, params 
         <span className="training-source-tag">{source.tag}</span>
         <p className="training-source-detail">{source.detail}</p>
         {isFollowUp && <p className="training-branch-context">Follow-up {current.branch_depth}{current.branch_condition ? ` · Based on: ${current.branch_condition}` : ''}</p>}
+        {current.case_context && <div className="training-case-context"><p className="section-label">Case context</p><p>{current.case_context}</p></div>}
         <h2 className="training-prompt">{current.prompt}</h2>
         {current.question_type === 'yes_no_depends' && <div className="training-choices spatial">
           <button className="training-choice no" disabled={busy} onClick={() => submit('No', false)}><span className="training-key" aria-hidden="true">←</span> No</button>
@@ -1930,9 +1944,11 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
   overview: AgentOverview | null; representation: PracticeRepresentation | null
   navigate: Navigate; trainPath: string; personaId: PhysicianIdentity; consultationRecords?: ConsultationRecord[]; extra?: ReactNode
 }) {
+  const [clarifyOpportunity, setClarifyOpportunity] = useState<LearningOpportunity | null>(null)
   if (!overview) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
   const training = overview.training
   const reviewHref = training.state === 'review_pending' && training.review_session_id ? `${trainPath}?review=${training.review_session_id}` : null
+  const opportunity = overview.learning_opportunities[0] ?? null
   return <div className="agent-overview-v2">
     <TrainingReminder overview={overview} navigate={navigate} trainPath={trainPath} />
     <section className="agent-portrait-card">
@@ -1942,6 +1958,20 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
     <hr className="agent-overview-divider" />
     <AgentNetworkActivity records={consultationRecords} />
     <hr className="agent-overview-divider" />
+    {/* Demo coherence pass, Part H/I/Y: at most the one real, currently-open
+     * clarification opportunity -- never a fabricated analytics backlog.
+     * Deliberately placed ABOVE the representation detail below. */}
+    <section className="agent-learned-this-week-card">
+      <p className="eyebrow">What your agent learned this week</p>
+      {opportunity
+        ? <>
+          <p>Most new signals were resolved using your existing representation.</p>
+          <p className="agent-learned-count">1 thing needs your judgment</p>
+          <button className="button-primary" onClick={() => setClarifyOpportunity(opportunity)}>Review <span>→</span></button>
+        </>
+        : <p className="agent-empty-note">Nothing needs your judgment right now.</p>}
+    </section>
+    <hr className="agent-overview-divider" />
     <div className="agent-detail-divider">
       <h2>How your agent currently represents your practice</h2>
       <p className="page-intro">A detailed, structured picture built from setup, training, and your confirmed preferences.</p>
@@ -1949,6 +1979,14 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
     {representation
       ? <PracticeTab representation={representation} personaId={personaId} portrait={null} reviewHref={reviewHref} navigate={navigate} heading={false} extra={extra} />
       : <div className="page-state embedded"><div className="loading-line" /><p>Opening your confirmed representation…</p></div>}
+    {clarifyOpportunity && <ReferralPreferenceModal
+      personaId={personaId}
+      navigate={navigate}
+      onClose={() => setClarifyOpportunity(null)}
+      heading={clarifyOpportunity.clarifying_question}
+      intro={clarifyOpportunity.supporting_text}
+      placeholder="For straightforward medication questions, I'm happy to start with an e-consult when the recent A1c, current medications, and kidney function are available. If control is continuing to worsen despite treatment escalation, I generally prefer an in-person evaluation."
+    />}
   </div>
 }
 
@@ -2160,47 +2198,55 @@ export function findPendingReviewHistoryEntry(history: TrainingHistoryEntry[]): 
   return history.find((item) => item.proposed_count > item.confirmed_count + item.edited_count + item.rejected_count) ?? null
 }
 
-export function TrainTab({ trainProjection, navigate, trainPath }: {
+/** Demo coherence pass, Part B/C: three parallel ways to teach the agent,
+ * all updating the SAME physician-representation architecture -- never
+ * three independent learning systems. "Quick questions" opens the shared
+ * QuickTrainingModal (never a navigation to the legacy full-screen
+ * TrainingPage for ordinary training); "Describe your practice" reuses
+ * the existing NLP referral-preference pipeline via ReferralPreferenceModal.
+ * "From recent work" surfaces at most the one real, currently-open
+ * clarification opportunity (Part H/I/Y) -- never a fabricated backlog. */
+export function TrainTab({ trainProjection, navigate, trainPath, personaId, learningOpportunities = [] }: {
   trainProjection: TrainProjection | null
-  navigate: Navigate; trainPath: string
+  navigate: Navigate; trainPath: string; personaId?: PhysicianIdentity
+  learningOpportunities?: LearningOpportunity[]
 }) {
+  const [quickTrainingOpen, setQuickTrainingOpen] = useState(false)
+  const [describeOpen, setDescribeOpen] = useState(false)
+  const [clarifyOpportunity, setClarifyOpportunity] = useState<LearningOpportunity | null>(null)
   if (!trainProjection) return <div className="page-state embedded"><div className="loading-line" /><p>Opening training…</p></div>
-  const activeId = trainProjection.active_session_id
   const reviewId = trainProjection.review_session_id
+  const needsReview = trainProjection.state === 'review_pending' && reviewId
+  const initializationNeeded = trainProjection.state === 'initialization_needed'
   return <div className="train-tab-v2">
     <h2>Train your agent</h2>
-    <p className="panel-intro">Answer a few quick questions about how you practice. Your answers help Lamina represent your preferences more accurately.</p>
-    {trainProjection.state === 'initialization_needed'
-      ? <div className="train-primary-card">
-        <p className="section-label">Set up your agent</p>
-        <h3>Complete your first 10-question session</h3>
-        <button className="button-primary" onClick={() => navigate(activeId ? `${trainPath}?resume=${activeId}` : `${trainPath}?mode=initialization`)}>Continue setup <span>→</span></button>
+    <p className="panel-intro">There are a few ways to teach your agent how you practice. All of them update the same representation.</p>
+
+    <div className="train-mode-grid">
+      {learningOpportunities.length > 0 && <div className="train-mode-card train-mode-recent-work">
+        <p className="section-label">From recent work</p>
+        <h3>{learningOpportunities[0].title}</h3>
+        <p>{learningOpportunities[0].body}</p>
+        <button className="button-primary" onClick={() => setClarifyOpportunity(learningOpportunities[0])}>Clarify <span>→</span></button>
+      </div>}
+      <div className="train-mode-card">
+        <p className="section-label">Quick questions</p>
+        <h3>{initializationNeeded ? 'Complete a short first session so your agent has a starting picture of your practice.' : 'Answer a few high-value gaps in how your agent represents your practice.'}</h3>
+        <button className="button-primary" onClick={() => needsReview ? navigate(`${trainPath}?review=${reviewId}`) : setQuickTrainingOpen(true)}>
+          {needsReview ? 'Review what your agent learned' : initializationNeeded ? 'Get started' : 'Answer a few questions'} <span>→</span>
+        </button>
       </div>
-      : trainProjection.state === 'active_unstarted' && activeId
-        ? <div className="train-primary-card">
-          <p className="section-label">Train your agent</p>
-          <h3>{trainProjection.answer_target ?? 10} questions</h3>
-          <button className="button-primary" onClick={() => navigate(`${trainPath}?resume=${activeId}`)}>Start training <span>→</span></button>
-        </div>
-        : trainProjection.state === 'active_in_progress' && activeId
-          ? <div className="train-primary-card">
-            <p className="section-label">Training in progress</p>
-            <h3>{trainProjection.answered_count} of {trainProjection.answer_target ?? 10} answered</h3>
-            <button className="button-primary" onClick={() => navigate(`${trainPath}?resume=${activeId}`)}>Resume training <span>→</span></button>
-          </div>
-      : trainProjection.state === 'review_pending' && reviewId
-        ? <div className="train-primary-card">
-          <p className="section-label">Training complete</p>
-          <h3>Review what your agent learned</h3>
-          <button className="button-primary" onClick={() => navigate(`${trainPath}?review=${reviewId}`)}>Review learnings <span>→</span></button>
-        </div>
-        : trainProjection.state === 'ready'
-          ? <div className="train-primary-card">
-            <p className="section-label">Today's training</p>
-            <h3>10 questions</h3>
-            <button className="button-primary" onClick={() => navigate(`${trainPath}?mode=daily`)}>Start training <span>→</span></button>
-          </div>
-          : <p className="agent-empty-note">Your agent is caught up for now.</p>}
+      {/* First NLP physician-representation feature: only wired for Chen in
+       * this demo, same restriction as ProfessionalProfilePage's own
+       * persona==='chen' gate -- never offered to a persona (e.g. Lucy)
+       * the backend has no receiving-physician representation for. */}
+      {personaId === 'chen' && <div className="train-mode-card">
+        <p className="section-label">Describe your practice</p>
+        <h3>Tell your agent naturally how you receive referrals or handle a type of case.</h3>
+        <button className="button-primary" onClick={() => setDescribeOpen(true)}>Describe your referral preferences <span>→</span></button>
+      </div>}
+    </div>
+
     {(trainProjection.questions_answered_total > 0 || trainProjection.recent_training_history.length > 0) && <div className="train-history-summary">
       <span>{trainProjection.questions_answered_total} questions answered</span>
       <span>{trainProjection.sessions_completed} session{trainProjection.sessions_completed === 1 ? '' : 's'} completed</span>
@@ -2214,6 +2260,17 @@ export function TrainTab({ trainProjection, navigate, trainPath }: {
         <small>{trainHistorySummaryLine(entry)}</small>
       </div>)}
     </div>}
+
+    {quickTrainingOpen && personaId && <QuickTrainingModal personaId={personaId} onClose={() => setQuickTrainingOpen(false)} onFinished={() => setQuickTrainingOpen(false)} initializationNeeded={initializationNeeded} />}
+    {describeOpen && personaId && <ReferralPreferenceModal personaId={personaId} navigate={navigate} onClose={() => setDescribeOpen(false)} />}
+    {clarifyOpportunity && personaId && <ReferralPreferenceModal
+      personaId={personaId}
+      navigate={navigate}
+      onClose={() => setClarifyOpportunity(null)}
+      heading={clarifyOpportunity.clarifying_question}
+      intro={clarifyOpportunity.supporting_text}
+      placeholder="For straightforward medication questions, I'm happy to start with an e-consult when the recent A1c, current medications, and kidney function are available. If control is continuing to worsen despite treatment escalation, I generally prefer an in-person evaluation."
+    />}
   </div>
 }
 
@@ -2403,7 +2460,7 @@ export function ProfessionalProfilePage({ personaId, navigate, params }: { perso
      * physician with a real confirmed referral-requirements fixture to
      * build on (Dr. Chen) gets this section in this pass -- narrow and
      * well-tested rather than speculatively wired for every persona. */}
-    {personaId === 'chen' && <ReferralPreferenceSection personaId={personaId} />}
+    {personaId === 'chen' && <ReferralPreferenceSection personaId={personaId} navigate={navigate} />}
     <ProfilePracticeLocationsSection sections={profile.sections} personaId={personaId} onSaved={onItemSaved} />
     <ProfileResearchTeachingSection sections={profile.sections} interests={profile.interests} personaId={personaId} onSaved={onItemSaved} />
   </main>

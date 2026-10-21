@@ -314,7 +314,10 @@ def test_confirmed_preference_appears_in_practice_representation(store: Workflow
     sections = representation["sections"]
     assert any("type 2 diabetes" in item for item in sections["good_fit"])
     assert "Recent HbA1c" in sections["referral_requirements"]
-    assert sections["modality_preference"] == "In-person review preferred."
+    # Demo coherence pass, Part E/I: Chen's initial teaching never mentioned
+    # e-consult/in-person, so modality starts unspecified -- this is what
+    # lets Tonjit's episode later surface a real, honest representation gap.
+    assert sections["modality_preference"] is None
     assert sections["referral_preference_provenance"]
 
 

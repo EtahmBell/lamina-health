@@ -8,10 +8,54 @@ from typing import Any
 from backend.engagement import BASE_TIMESTAMP, PERSONAS, PHYSICIANS_BY_ID, normalize_question
 
 _TEST_CASES: dict[str, list[dict[str, Any]]] = {
-    # Empty, not missing: Chen's own calibration/test-case bank is next-pass
-    # work (Part K), not this one. Avoids a KeyError if this endpoint is ever
-    # reached for him, same as TRAINING_QUESTIONS/INITIALIZATION_QUESTIONS.
-    "chen": [],
+    # Demo coherence pass, Part N/O/P: three real synthetic cases -- the
+    # first two deliberately distinct from Tonjit (never re-testing the
+    # exact case that trained the agent), demonstrating that a confirmed
+    # e-consult/in-person boundary generalizes rather than merely matching
+    # one memorized case.
+    "chen": [
+        {
+            "id": "chen-test-focused-medication-question",
+            "title": "Focused diabetes medication question",
+            "summary": "Routine medication-management question with complete workup; no stated need for an in-person exam.",
+            "facts": [
+                "61-year-old with type 2 diabetes",
+                "Recent HbA1c available",
+                "Current medication list available",
+                "Recent renal function available",
+                "PCP has a focused medication-management question; no stated need for an in-person exam",
+            ],
+            "intended_domain": "modality_preference",
+            "source": "controlled_synthetic_distinct_from_tonjit",
+            "correction_prompt": "Would you want this specific diabetes question handled differently?",
+        },
+        {
+            "id": "chen-test-worsening-escalation",
+            "title": "Worsening diabetes despite treatment escalation",
+            "summary": "A Tonjit-like but distinct presentation -- persistent worsening despite medication escalation.",
+            "facts": [
+                "58-year-old with type 2 diabetes",
+                "HbA1c rising despite two medication increases over 12 months",
+                "Current medication list and recent renal function available",
+            ],
+            "intended_domain": "modality_preference",
+            "source": "controlled_synthetic_distinct_from_tonjit",
+            "correction_prompt": "Would you want this specific diabetes question handled differently?",
+        },
+        {
+            "id": "chen-test-suspected-thyroid",
+            "title": "Suspected endocrine condition, diagnosis not yet confirmed",
+            "summary": "A thyroid-study abnormality referral where the diagnosis is not yet confirmed.",
+            "facts": [
+                "48-year-old referred for abnormal thyroid studies",
+                "Symptoms concerning for thyroid disease",
+                "Diagnosis has not yet been confirmed",
+            ],
+            "intended_domain": "practice_fit_boundary",
+            "source": "controlled_synthetic_boundary",
+            "correction_prompt": "Would this presentation fit your endocrinology practice before the diagnosis is confirmed?",
+        },
+    ],
     "lucy": [
         {
             "id": "lucy-test-progressive-ckd",
@@ -131,7 +175,7 @@ def test_case_by_id(persona_id: str, case_id: str) -> dict | None:
 
 
 def deterministic_portrait(
-    persona_id: str, confirmed_learnings: list[dict]
+    persona_id: str, confirmed_learnings: list[dict], representation_sections: dict | None = None
 ) -> tuple[str, list[str]]:
     if persona_id == "lucy":
         portrait = (
@@ -151,11 +195,32 @@ def deterministic_portrait(
         # Generic, truthful fallback for any other persona (e.g. Chen) --
         # built from their own canonical specialty/focus data, never a
         # fabricated nephrology portrait (the old unconditional else-branch).
+        #
+        # Demo coherence pass, Part G: "trained / not trained" must be
+        # derived from actual confirmed representation (good fit, referral
+        # requirements, modality, practice rules -- the same sections
+        # Practice Representation itself renders), never solely from
+        # whether the legacy structured training session happens to be
+        # complete. A physician with real confirmed representation is
+        # never told their agent is untrained.
         physician = PHYSICIANS_BY_ID[PERSONAS[persona_id]["physician_id"]]
         focus = ", ".join(physician.focus_areas) if physician.focus_areas else physician.specialty
+        sections = representation_sections or {}
+        has_confirmed_representation = bool(
+            confirmed_learnings
+            or sections.get("good_fit")
+            or sections.get("referral_requirements")
+            or sections.get("explicit_rules")
+            or sections.get("modality_preference")
+        )
+        readiness = (
+            "Your agent has a working representation of your practice."
+            if has_confirmed_representation
+            else "Keep teaching your agent to build out its representation of your practice."
+        )
         portrait = (
             f"{physician.specialty} physician in {PERSONAS[persona_id]['location']} with interests "
-            f"in {focus}. Your agent has not been trained on your practice preferences yet."
+            f"in {focus}. {readiness}"
         )
     facts = [item["statement"] for item in confirmed_learnings]
     if facts:
@@ -228,6 +293,66 @@ def deterministic_agent_chat(
 
     assert test_case is not None
     case_id = test_case["id"]
+
+    # Demo coherence pass, Part N/O/P/X: grounded in the ACTUAL confirmed
+    # representation (never a hardcoded answer disconnected from it) --
+    # before Chen confirms an e-consult/in-person boundary, the focused
+    # case honestly abstains to in-person/unknown rather than inventing an
+    # e-consult policy (Part X: absence of confirmed guidance is
+    # conservative, never an invented allowance).
+    modality_preference = sections.get("modality_preference")
+    econsult_confirmed = bool(modality_preference) and (
+        "econsult" in modality_preference.casefold() or "e-consult" in modality_preference.casefold()
+    )
+    if case_id == "chen-test-focused-medication-question":
+        if econsult_confirmed:
+            return {
+                "answer": (
+                    "Based on your confirmed preference, an e-consult can be appropriate here -- "
+                    "the required workup is already complete and this is a focused medication question."
+                ),
+                "evidence_summary": test_case["facts"],
+                "based_on": ["practice:modality_preference"],
+                "coverage": "confirmed_representation",
+                "uncertainty": None,
+                "can_train_from_this": False,
+            }
+        return {
+            "answer": (
+                "You haven't yet confirmed when an e-consult is appropriate for a focused diabetes "
+                "question, so I'd keep this in-person to stay within your confirmed guidance."
+            ),
+            "evidence_summary": test_case["facts"],
+            "based_on": [],
+            "coverage": "uncertain",
+            "uncertainty": "No confirmed e-consult preference is available for this scenario yet.",
+            "can_train_from_this": True,
+        }
+    if case_id == "chen-test-worsening-escalation":
+        good_fit = sections.get("good_fit", [])
+        return {
+            "answer": (
+                "This matches your confirmed good-fit description of persistent, worsening type 2 "
+                "diabetes despite medication escalation -- in-person evaluation remains preferred."
+                if good_fit
+                else "You have not confirmed a specific preference for worsening diabetes cases yet."
+            ),
+            "evidence_summary": test_case["facts"],
+            "based_on": ["practice:good_fit"] if good_fit else [],
+            "coverage": "confirmed_representation" if good_fit else "uncertain",
+            "uncertainty": None if good_fit else "No confirmed good-fit description is available.",
+            "can_train_from_this": not good_fit,
+        }
+    if case_id == "chen-test-suspected-thyroid":
+        return {
+            "answer": "You have not confirmed a preference for this presentation yet.",
+            "evidence_summary": test_case["facts"],
+            "based_on": [],
+            "coverage": "uncertain",
+            "uncertainty": "No confirmed rule covers a suspected-but-unconfirmed thyroid presentation.",
+            "can_train_from_this": True,
+        }
+
     known: dict[str, tuple[str, list[str]]] = {
         "lucy-test-progressive-ckd": (
             "Your current representation would usually route this synthetic scenario to nephrology first.",
