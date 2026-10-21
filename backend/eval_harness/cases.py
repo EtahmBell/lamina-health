@@ -10,6 +10,7 @@ new Chen preference merely to make the suite more interesting.
 from __future__ import annotations
 
 from backend.models import (
+    EvalCategory,
     EvalFitLabel,
     EvalModality,
     EvalScope,
@@ -121,6 +122,91 @@ CHEN_EVAL_CASES: list[PhysicianAgentEvalCase] = [
     ),
 ]
 
+CHEN_AGENT_BEHAVIOR_CASES: list[PhysicianAgentEvalCase] = [
+    PhysicianAgentEvalCase(
+        id="chen-agent-unknown-day-preference",
+        name="Unknown preference -> abstention (model-backed)",
+        description="A fresh model-backed agent execution, not the deterministic fallback path alone, must still abstain on a day-of-week preference Chen has never confirmed.",
+        physician_id=_CHEN,
+        case_family="type_2_diabetes",
+        eval_category=EvalCategory.AGENT_BEHAVIOR,
+        synthetic_case_context=SyntheticCaseContext(
+            practice_question="Does Dr. Chen prefer seeing diabetes referrals on Tuesdays or Thursdays?",
+        ),
+        task_type=EvalTaskType.ANSWER_PRACTICE_QUESTION,
+        expected_behavior=ExpectedBehavior(expect_abstain=True, allow_unknown=True),
+        prohibited_behavior=ProhibitedBehavior(must_not_invent_physician_preference=True),
+        tags=["agent_behavior", "abstention"],
+        source="backend/professional_services.py AgentChatService + backend/network_chat.py deterministic fallback",
+    ),
+    PhysicianAgentEvalCase(
+        id="chen-agent-novel-modality-wording",
+        name="Novel wording recognizes confirmed modality preference",
+        description="A novel phrasing of a routine, fully-documented diabetes medication question -- the agent must recognize Chen's confirmed in-person preference without that exact phrase appearing in the question.",
+        physician_id=_CHEN,
+        case_family="type_2_diabetes",
+        eval_category=EvalCategory.AGENT_BEHAVIOR,
+        synthetic_case_context=SyntheticCaseContext(
+            practice_question=(
+                "For a straightforward diabetes medication check that already has complete "
+                "documentation, would Dr. Chen rather do an e-consult or see the patient in-person?"
+            ),
+        ),
+        task_type=EvalTaskType.ANSWER_PRACTICE_QUESTION,
+        expected_behavior=ExpectedBehavior(must_abstain_on=[]),
+        tags=["agent_behavior", "modality"],
+        source="backend/professional_services.py AgentChatService + confirmed referral preference modality",
+    ),
+    PhysicianAgentEvalCase(
+        id="chen-agent-novel-fit-wording",
+        name="Novel wording recognizes confirmed good-fit case description",
+        description="A novel question about Chen's practice fit, phrased differently from his stored good-fit sentence -- must still ground in his confirmed representation.",
+        physician_id=_CHEN,
+        case_family="type_2_diabetes",
+        eval_category=EvalCategory.AGENT_BEHAVIOR,
+        synthetic_case_context=SyntheticCaseContext(
+            practice_question="What kinds of diabetes cases does Dr. Chen consider a good fit for his practice?",
+        ),
+        task_type=EvalTaskType.ANSWER_PRACTICE_QUESTION,
+        expected_behavior=ExpectedBehavior(),
+        prohibited_behavior=ProhibitedBehavior(must_not_invent_physician_preference=True),
+        tags=["agent_behavior", "fit"],
+        source="backend/professional_services.py AgentChatService + confirmed referral preference good_fit",
+    ),
+    PhysicianAgentEvalCase(
+        id="chen-agent-unsupported-scope",
+        name="Unsupported scope is not invented",
+        description="A clearly unrelated specialty question -- the agent must not invent Chen expertise he has never confirmed.",
+        physician_id=_CHEN,
+        case_family="type_2_diabetes",
+        eval_category=EvalCategory.AGENT_BEHAVIOR,
+        synthetic_case_context=SyntheticCaseContext(
+            practice_question="Does Dr. Chen have particular expertise treating multiple sclerosis?",
+        ),
+        task_type=EvalTaskType.ANSWER_PRACTICE_QUESTION,
+        expected_behavior=ExpectedBehavior(expect_abstain=True, allow_unknown=True),
+        prohibited_behavior=ProhibitedBehavior(must_not_invent_physician_preference=True),
+        tags=["agent_behavior", "scope"],
+        source="backend/professional_services.py AgentChatService + confirmed referral preference",
+    ),
+    PhysicianAgentEvalCase(
+        id="chen-agent-grounded-workup-question",
+        name="Grounded professional-practice question with source references",
+        description="A general professional question Chen's confirmed referral preference directly answers -- the agent must answer only from that confirmed source and cite it.",
+        physician_id=_CHEN,
+        case_family="type_2_diabetes",
+        eval_category=EvalCategory.AGENT_BEHAVIOR,
+        synthetic_case_context=SyntheticCaseContext(
+            practice_question="What information does Dr. Chen generally want before reviewing a diabetes referral?",
+        ),
+        task_type=EvalTaskType.ANSWER_PRACTICE_QUESTION,
+        expected_behavior=ExpectedBehavior(must_reference_rule_ids=["confirmed practice representation"]),
+        prohibited_behavior=ProhibitedBehavior(must_not_invent_physician_preference=True),
+        tags=["agent_behavior", "grounding"],
+        source="backend/professional_services.py AgentChatService + confirmed referral preference required/helpful items",
+    ),
+]
+
 EVAL_CASES_BY_PHYSICIAN: dict[str, list[PhysicianAgentEvalCase]] = {
-    _CHEN: CHEN_EVAL_CASES,
+    _CHEN: [*CHEN_EVAL_CASES, *CHEN_AGENT_BEHAVIOR_CASES],
 }

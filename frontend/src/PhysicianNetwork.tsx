@@ -12,7 +12,8 @@ import {
   type ProviderSearchResponse,
 } from './api.ts'
 import { ENGAGEMENT_PERSONA_BY_NPI } from './demoIdentity.ts'
-import { networkProfilePath, NetworkRelationshipAction, useNetworkRelationship } from './Engagement.tsx'
+import { networkProfilePath, NetworkAskAgentModal, NetworkRelationshipAction, useNetworkRelationship } from './Engagement.tsx'
+import { ActiveNetworkRail } from './NetworkQuery.tsx'
 import { connectionLine, physicianDisplayName, physicianInitials, rankedNetworkList, type NetworkRelationship } from './networkRoster.ts'
 
 type Navigate = (path: string) => void
@@ -117,18 +118,29 @@ function DirectoryResult({ profile, navigate, inNetwork, busy, onAdd, onRemove }
 }
 
 /** One row in "Most connected in your network" or the expanded full list — the
- * same component either way, just a different slice of rankedNetworkList(). */
+ * same component either way, just a different slice of rankedNetworkList().
+ * Active-network pass, Part N: an eligible claimed/trained physician (a
+ * real public agent persona, currently active) additionally gets a quiet
+ * "Ask their agent" action, opening the same drawer the rest of the
+ * network uses -- never shown for an unclaimed/external-directory identity. */
 function ConnectionRow({ member, navigate }: { member: NetworkRelationship; navigate: Navigate }) {
-  return <button className="lam-row" onClick={() => navigate(`/network/${member.npi}`)}>
-    <span className="lam-row-mark directory-avatar">{member.initials}</span>
-    <span className="lam-row-main">
-      <strong>{member.name}</strong>
-      <span>{member.specialty}{member.resolved && member.location ? ` · ${member.location}` : ''}</span>
-      <small>{connectionLine(member)}</small>
-    </span>
-    {member.status ? <StatusBadge status={member.status} /> : <span className="agent-status-badge unknown"><i />Agent state unknown</span>}
-    <span className="lam-row-action">View physician <b>→</b></span>
-  </button>
+  const [askOpen, setAskOpen] = useState(false)
+  const personaId = ENGAGEMENT_PERSONA_BY_NPI[member.npi]
+  const eligible = member.status === 'active' && Boolean(personaId)
+  return <div className="lam-row connection-row">
+    <button className="connection-row-main" onClick={() => navigate(`/network/${member.npi}`)}>
+      <span className="lam-row-mark directory-avatar">{member.initials}</span>
+      <span className="lam-row-main">
+        <strong>{member.name}</strong>
+        <span>{member.specialty}{member.resolved && member.location ? ` · ${member.location}` : ''}</span>
+        <small>{connectionLine(member)}</small>
+      </span>
+      {member.status ? <StatusBadge status={member.status} /> : <span className="agent-status-badge unknown"><i />Agent state unknown</span>}
+      <span className="lam-row-action">View physician <b>→</b></span>
+    </button>
+    {eligible && <button type="button" className="text-button connection-row-ask" onClick={() => setAskOpen(true)}>Ask their agent →</button>}
+    {askOpen && personaId && <NetworkAskAgentModal controlledId={personaId} physicianName={physicianDisplayName(member.name)} onClose={() => setAskOpen(false)} />}
+  </div>
 }
 
 /** The Colleagues hero: a Network-specific sibling of the Dashboard agent banner
@@ -312,7 +324,7 @@ function AddColleagueModal({ navigate, onClose, memberNpis, onChanged }: {
 }
 
 /** Network → My Network content for Lucy (the only persona with a workspace-scoped roster today — see Pass 7C report). Restructured (Network+Feed refinement pass) into a hero, a ranked "Most connected" top 5, and an inline-expandable full list -- no specialty grouping, no graph/visualization. */
-export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
+export function MyNetworkTab({ navigate, onViewInFeed }: { navigate: Navigate; onViewInFeed?: (postId: string) => void }) {
   const [network, setNetwork] = useState<AgentNetwork | null>(null)
   const [networkError, setNetworkError] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
@@ -340,28 +352,36 @@ export function MyNetworkTab({ navigate }: { navigate: Navigate }) {
   return <div className="my-network-tab">
     <NetworkHero onAdd={() => setAddOpen(true)} />
 
-    {network && <SuggestedConnections suggestions={suggestions} navigate={navigate} pendingNpi={pendingSuggestionNpi} onAdd={addSuggestion} />}
+    {/* Active-network pass, Part H: a restrained right rail alongside the
+     * existing Colleagues content -- the Feed itself is untouched, and this
+     * layout only applies to the Colleagues tab. */}
+    <div className="network-colleagues-layout">
+      <div className="network-colleagues-main">
+        {network && <SuggestedConnections suggestions={suggestions} navigate={navigate} pendingNpi={pendingSuggestionNpi} onAdd={addSuggestion} />}
 
-    <section className="network-primary-section">
-      {networkError && <div className="error-banner" role="alert">Network relationships unavailable: {networkError}</div>}
-      {!network && !networkError && <div className="directory-loading"><NetworkGlyph active /><p>Loading your physician relationships…</p></div>}
-      {network && !ranked.length && <div className="empty-state">
-        <NetworkGlyph />
-        <h2>Your network will grow as you consult physician agents and add colleagues you already work with.</h2>
-        <button className="button-primary" onClick={() => setAddOpen(true)}>Add a colleague <span>→</span></button>
-      </div>}
-      {ranked.length > 0 && <>
-        <h2 className="network-section-title">Most connected in your network</h2>
-        <div className="lam-list">{top.map((member) => <ConnectionRow key={member.npi} member={member} navigate={navigate} />)}</div>
-        {rest.length > 0 && <>
-          <button className="text-button network-see-all" aria-expanded={showAllColleagues} onClick={() => setShowAllColleagues((value) => !value)}>{showAllColleagues ? 'Hide full list ↑' : 'See all colleagues ↓'}</button>
-          <div className={`network-full-list ${showAllColleagues ? 'open' : ''}`}>
-            <div className="lam-list">{rest.map((member) => <ConnectionRow key={member.npi} member={member} navigate={navigate} />)}</div>
-          </div>
-        </>}
-        <p className="network-roster-note">{ranked.length} physician{ranked.length === 1 ? '' : 's'} in your network.</p>
-      </>}
-    </section>
+        <section className="network-primary-section">
+          {networkError && <div className="error-banner" role="alert">Network relationships unavailable: {networkError}</div>}
+          {!network && !networkError && <div className="directory-loading"><NetworkGlyph active /><p>Loading your physician relationships…</p></div>}
+          {network && !ranked.length && <div className="empty-state">
+            <NetworkGlyph />
+            <h2>Your network will grow as you consult physician agents and add colleagues you already work with.</h2>
+            <button className="button-primary" onClick={() => setAddOpen(true)}>Add a colleague <span>→</span></button>
+          </div>}
+          {ranked.length > 0 && <>
+            <h2 className="network-section-title">Most connected in your network</h2>
+            <div className="lam-list">{top.map((member) => <ConnectionRow key={member.npi} member={member} navigate={navigate} />)}</div>
+            {rest.length > 0 && <>
+              <button className="text-button network-see-all" aria-expanded={showAllColleagues} onClick={() => setShowAllColleagues((value) => !value)}>{showAllColleagues ? 'Hide full list ↑' : 'See all colleagues ↓'}</button>
+              <div className={`network-full-list ${showAllColleagues ? 'open' : ''}`}>
+                <div className="lam-list">{rest.map((member) => <ConnectionRow key={member.npi} member={member} navigate={navigate} />)}</div>
+              </div>
+            </>}
+            <p className="network-roster-note">{ranked.length} physician{ranked.length === 1 ? '' : 's'} in your network.</p>
+          </>}
+        </section>
+      </div>
+      <ActiveNetworkRail navigate={navigate} onViewInFeed={(postId) => onViewInFeed?.(postId)} />
+    </div>
 
     {addOpen && <AddColleagueModal navigate={navigate} onClose={() => setAddOpen(false)} memberNpis={memberNpis} onChanged={loadNetwork} />}
   </div>

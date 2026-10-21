@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getEvalCases, getEvalPhysicians, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, runEvalSuite, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type CareModality, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type EvalPhysicianSummary, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PhysicianAgentEvalCase, type PhysicianAgentEvalRun, type PhysicianAgentEvalSuiteResult, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
+import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getEvalCases, getEvalPhysicians, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, runEvalCaseRepeated, runEvalSuite, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type CareModality, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type EvalPhysicianSummary, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PhysicianAgentEvalCase, type PhysicianAgentEvalRun, type PhysicianAgentEvalSuiteResult, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
@@ -210,12 +210,18 @@ function eventTimestamp(value: string) {
 function LucyNetworkPage({ navigate, params }: { navigate: Navigate; params: URLSearchParams }) {
   const tabParam = params.get('tab')
   const [tab, setTab] = useState<NetworkTab>(tabParam === 'my-network' ? 'my-network' : 'feed')
+  const [focusPostId, setFocusPostId] = useState<string | null>(null)
   useEffect(() => { setTab(tabParam === 'my-network' ? 'my-network' : 'feed') }, [tabParam])
   const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'my-network' ? '/network?tab=my-network' : '/network') }
+  // Active-network pass, Part M: a relevant-broadcast result's "View in Feed"
+  // switches tabs and focuses the referenced post, never a separate detail route.
+  const viewInFeed = (postId: string) => { setFocusPostId(postId); selectTab('feed') }
   return <main className="page-shell physician-directory-page">
     <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
     <NetworkTabs tab={tab} onSelect={selectTab} />
-    {tab === 'my-network' ? <MyNetworkTab navigate={navigate} /> : <NetworkFeedTab personaId="lucy" navigate={navigate} />}
+    {tab === 'my-network'
+      ? <MyNetworkTab navigate={navigate} onViewInFeed={viewInFeed} />
+      : <NetworkFeedTab personaId="lucy" navigate={navigate} focusPostId={focusPostId} onFocused={() => setFocusPostId(null)} />}
   </main>
 }
 
@@ -619,6 +625,20 @@ function evalFactEntries(source: Record<string, unknown>): [string, string][] {
     .map(([key, value]): [string, string] => [key.replaceAll('_', ' '), Array.isArray(value) ? (value.length ? value.join(', ') : 'None') : String(value)])
 }
 
+const EVAL_CATEGORY_LABELS: Record<PhysicianAgentEvalCase['eval_category'], string> = {
+  representation_system: 'Representation / system evaluation',
+  agent_behavior: 'Agent behavior evaluation (model-dependent)',
+}
+
+/** Evaluation visibility pass, Part D: execution mode is always shown
+ * explicitly, never implied -- a deterministic fallback is never rendered
+ * as though a model-backed agent passed the case. */
+function ExecutionModeBadge({ run }: { run: PhysicianAgentEvalRun }) {
+  return run.execution_mode === 'model'
+    ? <span className="eval-execution-mode model">Model: {run.model_id}</span>
+    : <span className="eval-execution-mode deterministic">Deterministic fallback</span>
+}
+
 function EvalCaseDetailModal({ evalCase, run, onClose }: { evalCase: PhysicianAgentEvalCase; run: PhysicianAgentEvalRun; onClose: () => void }) {
   return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <div className="post-flow-dialog eval-case-detail-dialog" role="dialog" aria-modal="true" aria-label={evalCase.name}>
@@ -626,6 +646,11 @@ function EvalCaseDetailModal({ evalCase, run, onClose }: { evalCase: PhysicianAg
       <p className={`eyebrow eval-status-${run.status}`}>{run.status.replaceAll('_', ' ')}</p>
       <h2>{evalCase.name}</h2>
       <p className="page-intro">{evalCase.description}</p>
+      <div className="eval-case-meta-row">
+        <span className={`eval-category-badge ${evalCase.eval_category}`}>{EVAL_CATEGORY_LABELS[evalCase.eval_category]}</span>
+        <ExecutionModeBadge run={run} />
+        <span className="eval-snapshot-badge">Representation: {run.representation_snapshot_id}</span>
+      </div>
       <div className="eval-case-detail-grid">
         <div className="match-details-group"><p className="section-label">Expected</p><dl className="route-fact-list">{evalFactEntries(evalCase.expected_behavior)}</dl></div>
         <div className="match-details-group"><p className="section-label">Actual</p><dl className="route-fact-list">{evalFactEntries(run.structured_output)}</dl></div>
@@ -642,6 +667,25 @@ function EvalCaseDetailModal({ evalCase, run, onClose }: { evalCase: PhysicianAg
       {run.error_message && <p className="demo-reset-error" role="alert">{run.error_message}</p>}
     </div>
   </div></ModalPortal>
+}
+
+/** Part F: restrained repeated-run inspection for one model-dependent case
+ * -- "5/5 structural assertions passed", never a fabricated aggregate
+ * "Agent Score". */
+function RepeatedRunControl({ physicianId, evalCase }: { physicianId: string; evalCase: PhysicianAgentEvalCase }) {
+  const [runs, setRuns] = useState<PhysicianAgentEvalRun[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const repeat = async (times: number) => {
+    setBusy(true)
+    try { setRuns(await runEvalCaseRepeated(physicianId, evalCase.id, times)) }
+    finally { setBusy(false) }
+  }
+  const passed = runs?.filter((item) => item.status === 'pass').length ?? 0
+  return <span className="eval-repeat-control" onClick={(event) => event.stopPropagation()}>
+    <button type="button" className="text-button" disabled={busy} onClick={() => void repeat(1)}>Run once</button>
+    <button type="button" className="text-button" disabled={busy} onClick={() => void repeat(5)}>Run 5 times</button>
+    {runs && <small className="eval-repeat-summary">{passed} / {runs.length} structural assertions passed</small>}
+  </span>
 }
 
 function AgentEvaluationsPage({ navigate }: { navigate: Navigate }) {
@@ -683,21 +727,33 @@ function AgentEvaluationsPage({ navigate }: { navigate: Navigate }) {
     {physicians?.map((physician) => {
       const physicianCases = cases[physician.physician_id] ?? []
       const result = results[physician.physician_id]
+      const representationCases = physicianCases.filter((item) => item.eval_category === 'representation_system')
+      const agentBehaviorCases = physicianCases.filter((item) => item.eval_category === 'agent_behavior')
+      const renderCaseRow = (evalCase: PhysicianAgentEvalCase) => {
+        const matchingRun = result?.runs.find((item) => item.eval_case_id === evalCase.id)
+        return <li key={evalCase.id}>
+          <button type="button" className="eval-case-row" disabled={!matchingRun} onClick={() => matchingRun && setDetail({ evalCase, run: matchingRun })}>
+            <span className={`eval-case-status ${matchingRun?.status ?? 'pending'}`} aria-hidden="true">{matchingRun ? (matchingRun.status === 'pass' ? '✓' : matchingRun.status === 'error' ? '!' : '✗') : '·'}</span>
+            <span>{evalCase.name}</span>
+            {matchingRun && <ExecutionModeBadge run={matchingRun} />}
+          </button>
+          {evalCase.eval_category === 'agent_behavior' && <RepeatedRunControl physicianId={physician.physician_id} evalCase={evalCase} />}
+        </li>
+      }
       return <section className="eval-physician-card" key={physician.physician_id}>
         <div className="eval-physician-header">
           <div><h2>{physician.name}</h2><p className="eval-physician-meta">{physician.specialty} · Representation: {result?.representation_snapshot_id ?? physician.representation_snapshot_id}</p></div>
           <button className="button-primary" disabled={running === physician.physician_id} onClick={() => void run(physician.physician_id)}>{running === physician.physician_id ? 'Running…' : 'Run evaluations'} <span>→</span></button>
         </div>
         <p className="eval-case-count">{physicianCases.length} case{physicianCases.length === 1 ? '' : 's'}</p>
-        <ul className="eval-case-list">{physicianCases.map((evalCase) => {
-          const matchingRun = result?.runs.find((item) => item.eval_case_id === evalCase.id)
-          return <li key={evalCase.id}>
-            <button type="button" className="eval-case-row" disabled={!matchingRun} onClick={() => matchingRun && setDetail({ evalCase, run: matchingRun })}>
-              <span className={`eval-case-status ${matchingRun?.status ?? 'pending'}`} aria-hidden="true">{matchingRun ? (matchingRun.status === 'pass' ? '✓' : matchingRun.status === 'error' ? '!' : '✗') : '·'}</span>
-              <span>{evalCase.name}</span>
-            </button>
-          </li>
-        })}</ul>
+        {representationCases.length > 0 && <div className="eval-category-group">
+          <p className="section-label">Representation / system evaluation</p>
+          <ul className="eval-case-list">{representationCases.map(renderCaseRow)}</ul>
+        </div>}
+        {agentBehaviorCases.length > 0 && <div className="eval-category-group">
+          <p className="section-label">Agent behavior evaluation (model-dependent)</p>
+          <ul className="eval-case-list">{agentBehaviorCases.map(renderCaseRow)}</ul>
+        </div>}
         {result && <p className="eval-metrics-line">Pass rate {Math.round(result.metrics.overall_assertion_pass_rate * 100)}% · Grounding {Math.round(result.metrics.grounding_correctness * 100)}% · Correct abstention {Math.round(result.metrics.correct_abstention * 100)}%</p>}
       </section>
     })}

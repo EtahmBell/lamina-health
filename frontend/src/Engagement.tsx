@@ -599,13 +599,13 @@ function feedInitials(name: string) {
  * the post never reads as though the physician authored it directly. */
 type FeedListItem = NetworkFeedItem & { isAgentAuthored?: true; representedPhysicianName?: string; agentTone?: AgentAvatarTone }
 
-function FeedCard({ item, navigate, perspective }: { item: FeedListItem; navigate: Navigate; perspective: DemoPhysicianPerspective }) {
+function FeedCard({ item, navigate, perspective, focused }: { item: FeedListItem; navigate: Navigate; perspective: DemoPhysicianPerspective; focused?: boolean }) {
   const when = item.published_at ?? item.created_at
   const [expanded, setExpanded] = useState(false)
   const isLong = item.body.length > 220
   const preview = isLong && !expanded ? `${item.body.slice(0, 220).trimEnd()}…` : item.body
   const linkable = Boolean(item.physician.id)
-  return <article className={`feed-post ${item.isAgentAuthored ? 'agent-authored' : ''}`}>
+  return <article id={`feed-post-${item.id}`} className={`feed-post ${item.isAgentAuthored ? 'agent-authored' : ''} ${focused ? 'focused' : ''}`}>
     <div className="feed-post-header">
       {item.isAgentAuthored
         ? <span className="feed-post-agent-avatar"><AgentAvatar tone={item.agentTone} /></span>
@@ -773,11 +773,26 @@ function AgentAssistRail({ personaId, onPublished }: { personaId: DemoPhysicianP
       <div className="watch-topic-chips">{POSTING_WATCH_TOPICS.map((topic) => <button key={topic} type="button" className={`post-tag-chip ${watching.includes(topic) ? 'active' : ''}`} aria-pressed={watching.includes(topic)} onClick={() => toggleWatch(topic)}>{topic}</button>)}</div>
       <button className="text-button agent-assist-prefs-link" disabled title="Coming soon">Posting preferences →</button>
     </section>
+    {/* Active-network pass, Part R: restrained -- a short explanatory note,
+     * not a new large card, and never claiming automatic/unreviewed
+     * learning from everything posted. */}
+    <section className="agent-assist-card agent-assist-representation-note">
+      <h3>Representation in the network</h3>
+      <p>What you share helps your agent represent you across the network.</p>
+      <p>Other physician agents can use your approved updates as attributed professional context. You review any proposed change to how your agent represents your practice.</p>
+    </section>
     {activeDraft && <DraftIdeaPreviewModal personaId={personaId} draft={activeDraft} onClose={() => setPreviewId(null)} />}
   </aside>
 }
 
-export function NetworkFeedTab({ personaId, navigate, onPublished }: { personaId: DemoPhysicianPerspective; navigate: Navigate; onPublished?: (post: ProfessionalPost) => void }) {
+export function NetworkFeedTab({ personaId, navigate, onPublished, focusPostId, onFocused }: {
+  personaId: DemoPhysicianPerspective; navigate: Navigate; onPublished?: (post: ProfessionalPost) => void
+  /** Active-network pass, Part M: an "Ask the Network" broadcast result's
+   * "View in Feed" switches tabs and focuses this exact post with a subtle
+   * temporary highlight, then normal Feed behavior resumes -- no separate
+   * detail route, no persisted focus state. */
+  focusPostId?: string | null; onFocused?: () => void
+}) {
   const [feed, setFeed] = useState<NetworkFeed | null>(null)
   const [error, setError] = useState('')
   const load = () => { getNetworkFeed(personaId).then(setFeed).catch((err: Error) => setError(err.message)) }
@@ -785,6 +800,15 @@ export function NetworkFeedTab({ personaId, navigate, onPublished }: { personaId
   const items: FeedListItem[] = feed
     ? [...feed.items, ...AGENT_FEED_POSTS].sort((a, b) => (b.published_at ?? b.created_at).localeCompare(a.published_at ?? a.created_at))
     : []
+  useEffect(() => {
+    if (!focusPostId || !feed) return
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`feed-post-${focusPostId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    const timer = window.setTimeout(() => onFocused?.(), 2600)
+    return () => { window.cancelAnimationFrame(frame); window.clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusPostId, feed])
   return <div className="network-feed-tab">
     <div className="network-feed-tab-header">
       <div><h2>Feed</h2><p className="page-intro">Professional updates from physicians and practices your network interacts with.</p></div>
@@ -801,7 +825,7 @@ export function NetworkFeedTab({ personaId, navigate, onPublished }: { personaId
           <h2>No updates from your network yet.</h2>
           <p>Updates will appear as physicians and agents in your network share professional changes.</p>
         </div>}
-        {items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} />)}
+        {items.map((item) => <FeedCard key={item.id} item={item} navigate={navigate} perspective={personaId} focused={item.id === focusPostId} />)}
       </div>
       <AgentAssistRail personaId={personaId} onPublished={(post) => { onPublished?.(post); load() }} />
     </div>}
@@ -2404,7 +2428,7 @@ const NETWORK_AGENT_STARTER_PROMPTS = [
 
 type NetworkAgentChatMessage = { id: string; role: 'physician' | 'agent'; content: string; basedOn: string[]; unconfirmed: boolean }
 
-function NetworkAskAgentModal({ controlledId, physicianName, onClose }: { controlledId: string; physicianName: string; onClose: () => void }) {
+export function NetworkAskAgentModal({ controlledId, physicianName, onClose, groundedIn }: { controlledId: string; physicianName: string; onClose: () => void; groundedIn?: string[] }) {
   const [messages, setMessages] = useState<NetworkAgentChatMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -2434,12 +2458,16 @@ function NetworkAskAgentModal({ controlledId, physicianName, onClose }: { contro
     }
   }
 
-  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <div className="post-flow-dialog network-ask-agent-dialog" role="dialog" aria-modal="true" aria-label={`Ask ${physicianName}'s Agent`}>
+  return <ModalPortal><div className="post-flow-overlay drawer-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="post-flow-dialog network-ask-agent-dialog drawer-dialog" role="dialog" aria-modal="true" aria-label={`Ask ${physicianName}'s Agent`}>
       <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
       <p className="eyebrow">Ask {physicianName}'s Agent</p>
       <h2>Ask a general question about how {physicianName} practices.</h2>
       <p className="network-ask-agent-scope">General practice questions only. No patient context is shared.</p>
+      {groundedIn && groundedIn.length > 0 && <div className="drawer-grounded-in">
+        <p className="section-label">Grounded in</p>
+        <ul>{groundedIn.map((item) => <li key={item}>{item}</li>)}</ul>
+      </div>}
       {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
         {messages.map((message) => message.role === 'physician'
           ? <p className="chat-message physician" key={message.id}>{message.content}</p>

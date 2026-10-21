@@ -491,6 +491,22 @@ BASE_INTERESTS: dict[str, list[dict[str, Any]]] = {
             start=1,
         )
     ],
+    # Active-network pass, Part I: a real, confirmed case interest so "Ask
+    # the Network" has a genuine physician-agent match to surface for an
+    # osteoporosis-style query -- not a query-time fabrication.
+    "maya": [
+        {
+            "id": "maya-case-interest-osteoporosis",
+            "interest_type": "case_interest",
+            "title": "Osteoporosis management",
+            "detail": None,
+            "provenance": "synthetic_demo",
+            "confirmed": True,
+            "shareable": True,
+            "created_at": BASE_TIMESTAMP,
+            "updated_at": BASE_TIMESTAMP,
+        }
+    ],
 }
 
 
@@ -907,10 +923,17 @@ BRANCH_TRANSITIONS = {
 def _feed(
     id: str, persona: str, kind: str, title: str, body: str, when: str,
     image_filename: str | None = None, image_alt: str | None = None, media_style: str = "cover",
+    provenance_type: str = "physician_authored",
 ) -> dict:
     """One synthetic feed fixture. `image_filename` names a file under
     frontend/public/post_images/ -- served as a plain static path, never fetched
-    externally or embedded as base64. Text-only posts pass image_filename=None."""
+    externally or embedded as base64. Text-only posts pass image_filename=None.
+
+    `provenance_type` (active-network pass, Part P) is one of:
+    "physician_authored", "physician_approved_agent_draft", or
+    "agent_broadcast_from_confirmed_representation" -- the smallest clean
+    distinction the broadcast-semantics pass needs; every fixture here is
+    physician-authored unless explicitly marked otherwise."""
     return {
         "id": id,
         "physician_persona": persona,
@@ -918,6 +941,8 @@ def _feed(
         "title": title,
         "body": body,
         "provenance": "synthetic_demo",
+        "provenance_type": provenance_type,
+        "physician_approved": True,
         "status": "published",
         "created_at": when,
         "published_at": when,
@@ -935,6 +960,21 @@ def _feed(
 # rhythm is intentional: 8 of 13 posts carry a real photo/figure, the rest are
 # text-only, and image posts are not allowed to stack more than two deep.
 SYNTHETIC_FEED_FIXTURES = [
+    _feed(
+        "fixture-maya-osteoporosis", "maya", "practice_focus",
+        "Seeing more complexity in osteoporosis referrals lately",
+        "I've been seeing more challenging osteoporosis cases recently -- more patients with prior "
+        "fragility fractures and borderline DEXA results than I'd expect from a general referral mix.",
+        "2026-10-12T10:00:00+00:00",
+    ),
+    _feed(
+        "fixture-chen-diabetes-fit-broadcast", "chen", "practice_focus",
+        "What I look for in a diabetes referral",
+        "Persistent, worsening type 2 diabetes despite primary-care medication escalation is squarely in "
+        "my practice -- treatment intensification is exactly the kind of case I want to see directly.",
+        "2026-10-10T08:00:00+00:00",
+        provenance_type="agent_broadcast_from_confirmed_representation",
+    ),
     _feed(
         "fixture-lucy-tcmnet", "lucy", "research",
         "Building TCMNet: mapping traditional medicine knowledge for AI",

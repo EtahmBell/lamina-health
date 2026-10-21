@@ -12,14 +12,16 @@ PatientRecord -- never a parallel evaluation-only reimplementation, never
 real patient data, and never a write to live workflow/clinical state.
 """
 
-from .cases import CHEN_EVAL_CASES, EVAL_CASES_BY_PHYSICIAN
+from .cases import CHEN_AGENT_BEHAVIOR_CASES, CHEN_EVAL_CASES, EVAL_CASES_BY_PHYSICIAN
 from .representation import representation_snapshot_id
-from .runner import run_eval_case, run_eval_suite
+from .runner import run_eval_case, run_eval_case_repeated, run_eval_suite
 
 __all__ = [
+    "CHEN_AGENT_BEHAVIOR_CASES",
     "CHEN_EVAL_CASES",
     "EVAL_CASES_BY_PHYSICIAN",
     "representation_snapshot_id",
     "run_eval_case",
+    "run_eval_case_repeated",
     "run_eval_suite",
 ]

@@ -942,7 +942,8 @@ test('the Network sidebar icon is a simple thin-line people/group mark, not the 
 test('Network defaults to Feed and routes ?tab=my-network to Colleagues, for both personas (post-8B: Feed is primary, not graph/directory-first)', () => {
   const lucyShell = slice(app, 'function LucyNetworkPage', 'function HomePage')
   assert.match(lucyShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'my-network' \? 'my-network' : 'feed'\)/)
-  assert.match(lucyShell, /tab === 'my-network' \? <MyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="lucy" navigate=\{navigate\} \/>/)
+  assert.match(lucyShell, /\? <MyNetworkTab navigate=\{navigate\} onViewInFeed=\{viewInFeed\} \/>/)
+  assert.match(lucyShell, /: <NetworkFeedTab personaId="lucy" navigate=\{navigate\} focusPostId=\{focusPostId\} onFocused=\{\(\) => setFocusPostId\(null\)\} \/>/)
   const specialistShell = slice(specialist, 'export function SpecialistNetworkPage', specialist.length)
   assert.match(specialistShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'my-network' \? 'my-network' : 'feed'\)/)
   assert.match(specialistShell, /tab === 'my-network' \? <SpecialistMyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="iain" navigate=\{navigate\} \/>/)
@@ -1354,9 +1355,17 @@ test('the agent rail stacks below the feed on tablet/mobile with no horizontal o
  * Network physician profile.
  * ===================================================================== */
 
-test('unclaimed/external-directory physicians (Okonkwo, Okafor) never expose "Ask their agent" -- that trigger only exists inside NetworkPhysicianProfilePage, which they are structurally never reachable through (they use PhysicianProfilePage/the directoryProfile branch instead)', () => {
+test('unclaimed/external-directory physicians (Okonkwo, Okafor) never expose "Ask their agent" -- that trigger only exists inside NetworkPhysicianProfilePage (and, since the active-network pass, the eligible-row action on Colleagues), never on PhysicianProfilePage/the directoryProfile branch', () => {
   const network = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
-  assert.doesNotMatch(network, /Ask their agent|askNetworkAgent|NetworkAskAgentModal/, 'PhysicianProfilePage (Okonkwo\'s NPI-directory page, Okafor\'s directoryProfile page) never gains this CTA')
+  const directoryProfilePage = network.slice(network.indexOf('export function PhysicianProfilePage'))
+  assert.doesNotMatch(directoryProfilePage, /Ask their agent|askNetworkAgent|NetworkAskAgentModal/, 'PhysicianProfilePage (Okonkwo\'s NPI-directory page, Okafor\'s directoryProfile page) never gains this CTA')
+})
+
+test('Colleagues rows only offer "Ask their agent" for an eligible (active, real-persona) physician, never an unclaimed/unknown-status one', () => {
+  const network = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
+  const connectionRow = network.slice(network.indexOf('function ConnectionRow'), network.indexOf('function NetworkHero'))
+  assert.match(connectionRow, /const eligible = member\.status === 'active' && Boolean\(personaId\)/)
+  assert.match(connectionRow, /\{eligible && <button type="button" className="text-button connection-row-ask"/)
 })
 
 test('eligible claimed/trained physicians (reachable via NetworkPhysicianProfilePage) get a quiet "Ask their agent" action -- never the primary CTA', () => {

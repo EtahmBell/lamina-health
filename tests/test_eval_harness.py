@@ -10,7 +10,13 @@ from fastapi.testclient import TestClient
 
 from backend import demo_workspace as demo_workspace_module
 from backend.api import eval_harness as eval_harness_api
-from backend.eval_harness import CHEN_EVAL_CASES, representation_snapshot_id, run_eval_case, run_eval_suite
+from backend.eval_harness import (
+    CHEN_EVAL_CASES,
+    EVAL_CASES_BY_PHYSICIAN,
+    representation_snapshot_id,
+    run_eval_case,
+    run_eval_suite,
+)
 from backend.main import app
 from backend.models import (
     EvalFitLabel,
@@ -307,10 +313,11 @@ def test_the_api_lists_physicians_cases_and_runs_the_suite(store: WorkflowStore)
         physicians = client.get("/api/workspace/eval/physicians").json()
         assert any(item["physician_id"] == "physician-chen" for item in physicians)
         cases = client.get("/api/workspace/eval/physicians/physician-chen/cases").json()
-        assert len(cases) == len(CHEN_EVAL_CASES)
+        all_chen_cases = EVAL_CASES_BY_PHYSICIAN["physician-chen"]
+        assert len(cases) == len(all_chen_cases)
         result = client.post("/api/workspace/eval/physicians/physician-chen/run").json()
         assert result["physician_id"] == "physician-chen"
-        assert len(result["runs"]) == len(CHEN_EVAL_CASES)
+        assert len(result["runs"]) == len(all_chen_cases)
 
 
 def test_unseeded_physician_404s(store: WorkflowStore) -> None:

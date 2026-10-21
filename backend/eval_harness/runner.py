@@ -24,16 +24,19 @@ from backend.engagement import (
 from backend.models import (
     AssertionKind,
     EvalAssertionResult,
+    EvalCategory,
     EvalFitLabel,
     EvalModality,
     EvalRunStatus,
     EvalScope,
     EvalTaskType,
+    ExecutionMode,
     PhysicianAgentEvalCase,
     PhysicianAgentEvalRun,
     PhysicianAgentEvalSuiteResult,
 )
 from backend.network_chat import answer_general_practice_question
+from backend.professional_services import agent_chat_service
 from backend.referral_preferences import (
     confirmed_case_rules_override,
     confirmed_modality,
@@ -49,6 +52,11 @@ from .representation import representation_snapshot_id
 from .synthetic_patient import build_synthetic_patient
 
 _MODEL_IDENTIFIER = "deterministic_fixture_v1"
+_AGENT_CHAT_ALLOWED_REFERENCES = [
+    "confirmed practice representation",
+    "confirmed case/clinical interests",
+    "confirmed training learnings",
+]
 
 _PHYSICIANS_BY_ID = {profile.id: profile for profile in ALL_PHYSICIANS}
 
@@ -183,21 +191,29 @@ def _run_modality(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, w
     return structured_output, assertions
 
 
-def _run_answer_practice_question(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str):
+def _representation_sections(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str) -> dict:
     persona_id = PERSONA_BY_PHYSICIAN_ID.get(case.physician_id, case.physician_id)
     editable = persona_id in EDITABLE_PERSONAS
     overlays = workflow_store.profile_items(workspace_id, persona_id) if editable else []
     interest_overlays = workflow_store.physician_interests(workspace_id, persona_id) if editable else []
     profile = project_professional_profile(persona_id, overlays, interest_overlays)
-    questions: list = []
     learnings = workflow_store.proposed_learnings(workspace_id, persona_id) if editable else []
     referral_sections = confirmed_referral_preference_sections(workflow_store, workspace_id, case.physician_id)
     representation = project_practice_representation(
-        persona_id, questions, learnings, profile, confirmed_referral_preference_sections=referral_sections
+        persona_id, [], learnings, profile, confirmed_referral_preference_sections=referral_sections
     )
-    physician_name = _PHYSICIANS_BY_ID[case.physician_id].name.replace(" (synthetic)", "").replace("Dr. ", "")
+    return representation["sections"]
+
+
+def _physician_display_name(physician_id: str) -> str:
+    return _PHYSICIANS_BY_ID[physician_id].name.replace(" (synthetic)", "").replace("Dr. ", "")
+
+
+def _run_answer_practice_question(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str):
+    sections = _representation_sections(case, workflow_store, workspace_id)
+    physician_name = _physician_display_name(case.physician_id)
     question = case.synthetic_case_context.practice_question or ""
-    answer, based_on, unconfirmed = answer_general_practice_question(representation["sections"], physician_name, question)
+    answer, based_on, unconfirmed = answer_general_practice_question(sections, physician_name, question)
     expected = case.expected_behavior
     assertions = []
     if expected.expect_abstain:
@@ -207,14 +223,77 @@ def _run_answer_practice_question(case: PhysicianAgentEvalCase, workflow_store: 
     return structured_output, assertions
 
 
-def run_eval_case(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str) -> PhysicianAgentEvalRun:
+def _run_agent_behavior(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str):
+    """Evaluation visibility pass, Part C/D: a GENUINELY model-dependent
+    execution path -- reuses backend.professional_services.agent_chat_service,
+    the SAME service the real practice-chat product feature calls, rather
+    than a parallel "fake eval agent". `execution_mode`/`model_id` are read
+    directly off which path actually ran (Part D: never implied)."""
+    sections = _representation_sections(case, workflow_store, workspace_id)
+    physician_name = _physician_display_name(case.physician_id)
+    question = case.synthetic_case_context.practice_question or case.synthetic_case_context.clinical_question
+    fallback_answer, fallback_based_on, fallback_unconfirmed = answer_general_practice_question(
+        sections, physician_name, question
+    )
+    fallback = {
+        "answer": fallback_answer,
+        "evidence_summary": fallback_based_on,
+        "based_on": fallback_based_on,
+        "coverage": "uncertain" if fallback_unconfirmed else "confirmed_representation",
+        "uncertainty": "No confirmed representation answers this." if fallback_unconfirmed else None,
+        "can_train_from_this": False,
+    }
+    payload = {
+        "physician_name": physician_name,
+        "question": question,
+        "representation_sections": sections,
+        "allowed_references": _AGENT_CHAT_ALLOWED_REFERENCES,
+    }
+    result, provider = agent_chat_service.respond(payload, fallback)
+    execution_mode = ExecutionMode.MODEL if provider == "responses_api" else ExecutionMode.DETERMINISTIC_FALLBACK
+    model_id = agent_chat_service.client.model if execution_mode == ExecutionMode.MODEL else None
+
+    abstained = result.get("coverage") == "uncertain"
+    based_on = result.get("based_on") or []
+    answer = str(result.get("answer") or "")
+    expected = case.expected_behavior
+    assertions: list[EvalAssertionResult] = []
+    if expected.expect_abstain:
+        assertions.append(_assertion("abstention", True, abstained, abstained, evidence=[answer], kind=AssertionKind.MODEL_BEHAVIOR))
+    if expected.must_reference_rule_ids:
+        grounded = bool(based_on)
+        assertions.append(_assertion(
+            "grounding", ", ".join(expected.must_reference_rule_ids), ", ".join(based_on) or "ungrounded",
+            grounded, evidence=based_on, kind=AssertionKind.MODEL_BEHAVIOR,
+        ))
+    if case.prohibited_behavior.must_not_invent_physician_preference:
+        # Answering confidently (not abstaining) with no grounded reference
+        # at all would be an invented, unsupported claim.
+        unsupported = not abstained and not based_on
+        assertions.append(_assertion(
+            "must_not_invent_physician_preference", "no unsupported claim",
+            "unsupported claim" if unsupported else "grounded or abstained", not unsupported,
+            evidence=[answer], kind=AssertionKind.MODEL_BEHAVIOR,
+        ))
+    structured_output = {"answer": answer, "based_on": based_on, "coverage": result.get("coverage")}
+    return structured_output, assertions, execution_mode, model_id
+
+
+def run_eval_case(
+    case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str, iteration: int = 1
+) -> PhysicianAgentEvalRun:
     """Pure/read-only: builds a throwaway synthetic patient/representation
     snapshot, runs it through the real production functions, and returns a
-    result -- never writes anything (Part N)."""
+    result -- never writes anything (Part N). `iteration` is recorded, never
+    used to vary behavior itself -- repeated runs call this identically."""
     started_at = _now()
     snapshot_id = representation_snapshot_id(workflow_store, workspace_id, PERSONA_BY_PHYSICIAN_ID.get(case.physician_id, case.physician_id))
+    execution_mode = ExecutionMode.DETERMINISTIC_FALLBACK
+    model_id: str | None = None
     try:
-        if case.task_type in (EvalTaskType.EVALUATE_FIT, EvalTaskType.EVALUATE_SCOPE):
+        if case.eval_category == EvalCategory.AGENT_BEHAVIOR:
+            structured_output, assertions, execution_mode, model_id = _run_agent_behavior(case, workflow_store, workspace_id)
+        elif case.task_type in (EvalTaskType.EVALUATE_FIT, EvalTaskType.EVALUATE_SCOPE):
             structured_output, assertions = _run_fit_or_scope(case, workflow_store, workspace_id)
         elif case.task_type == EvalTaskType.EVALUATE_REQUIREMENTS:
             structured_output, assertions = _run_requirements(case, workflow_store, workspace_id)
@@ -231,6 +310,9 @@ def run_eval_case(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, w
             physician_id=case.physician_id,
             representation_snapshot_id=snapshot_id,
             model_identifier=_MODEL_IDENTIFIER,
+            execution_mode=execution_mode,
+            model_id=model_id,
+            iteration=iteration,
             started_at=started_at,
             completed_at=_now(),
             structured_output=structured_output,
@@ -244,6 +326,9 @@ def run_eval_case(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, w
             physician_id=case.physician_id,
             representation_snapshot_id=snapshot_id,
             model_identifier=_MODEL_IDENTIFIER,
+            execution_mode=execution_mode,
+            model_id=model_id,
+            iteration=iteration,
             started_at=started_at,
             completed_at=_now(),
             structured_output={},
@@ -251,6 +336,15 @@ def run_eval_case(case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, w
             status=EvalRunStatus.ERROR,
             error_message=str(error),
         )
+
+
+def run_eval_case_repeated(
+    case: PhysicianAgentEvalCase, workflow_store: WorkflowStore, workspace_id: str, times: int
+) -> list[PhysicianAgentEvalRun]:
+    """Part F: internal/demo repeated-run inspection for a single case --
+    deliberately per-case (never the whole suite) so this stays a small,
+    opt-in cost, not an automatic expensive re-run."""
+    return [run_eval_case(case, workflow_store, workspace_id, iteration=index) for index in range(1, max(1, times) + 1)]
 
 
 def _metrics(runs: list[PhysicianAgentEvalRun]) -> dict[str, float]:

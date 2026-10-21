@@ -20,6 +20,7 @@ from backend.agent_experience import (
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.models import CoordinationChatAnswer
 from backend.network_chat import answer_general_practice_question
+from backend.network_query import ask_network
 from backend.referral_preferences import confirmed_referral_preference_sections, ensure_seed_preferences
 from backend.engagement import (
     DEPENDS_OPTION,
@@ -145,6 +146,16 @@ class NetworkAgentChatInput(BaseModel):
     enforced by the request shape itself, not just by convention."""
 
     question: str = Field(min_length=1, max_length=500)
+
+
+class AskNetworkInput(BaseModel):
+    """Evaluation-visibility + active-network pass, Part I/J: a general
+    professional-network query, with an OPTIONAL patient reference for
+    purpose-bound routing evidence (Part K) -- never a referral, never
+    durable candidate-agent memory."""
+
+    question: str = Field(min_length=1, max_length=500)
+    patient_id: str | None = None
 
 
 class CandidateReviewInput(BaseModel):
@@ -1724,3 +1735,26 @@ def ask_network_agent(
         represented_agent_id=PERSONAS[controlled_id]["agent_id"],
         created_at=datetime.now(UTC).isoformat(),
     )
+
+
+@router.post("/network/ask")
+def ask_network_endpoint(request: AskNetworkInput, workspace_id: DemoWorkspace) -> dict:
+    """Active-physician-network pass, Part I/J/V: a bounded, explainable
+    professional-network query -- grounded only in confirmed physician
+    representation/case interests/referral preferences and physician-
+    approved broadcasts, with an optional patient reference reusing the
+    SAME care-routing/candidate-generation/evaluation functions the rest of
+    the product uses. Never creates a referral, never persists candidate-
+    agent memory, never mutates representation (Part G/K)."""
+    from backend.api.consult import _with_derived_medications, load_patient
+    from backend.synthetic_data import PHYSICIANS_BY_PATIENT
+
+    ensure_seed_preferences(workflow_store, workspace_id)
+    patient = None
+    candidate_physician_ids: list[str] | None = None
+    if request.patient_id:
+        if request.patient_id not in PHYSICIANS_BY_PATIENT:
+            raise HTTPException(404, "Synthetic patient not found")
+        patient = _with_derived_medications(load_patient(request.patient_id), workspace_id)
+        candidate_physician_ids = [item.id for item in PHYSICIANS_BY_PATIENT[request.patient_id]]
+    return ask_network(workflow_store, workspace_id, request.question, patient, candidate_physician_ids)

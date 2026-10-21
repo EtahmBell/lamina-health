@@ -534,6 +534,40 @@ export type PostDraftRequest = {
 export type NetworkFeedItem = PracticeUpdate & {
   physician: ControlledPhysicianIdentity; relationship_basis: Array<'explicit_network_member' | 'canonical_agent_interaction'>
 }
+
+/** Active physician-agent network pass, Part P: the smallest clean
+ * distinction between physician-authored content, a physician-approved
+ * agent-assisted draft, and a broadcast that is simply an output of a
+ * physician's existing confirmed representation. */
+export type BroadcastProvenanceType = 'physician_authored' | 'physician_approved_agent_draft' | 'agent_broadcast_from_confirmed_representation'
+
+/** Part I/J/S: a bounded, explainable "Ask the Network" query -- never a
+ * generic search engine, never a magic 0-100 physician score. */
+export type NetworkPhysicianAgentMatch = {
+  physician_id: string; physician_name: string; specialty: string; agent_name: string
+  reasons: string[]; confirmed_case_interests: string[]; confirmed_good_fit: string[]
+  modality_preference: string | null
+}
+export type NetworkBroadcastMatch = {
+  post_id: string; physician_persona: string; physician_name: string
+  title: string; snippet: string; provenance_type: BroadcastProvenanceType
+}
+export type NetworkRoutingEvidence = {
+  case_family: string
+  candidates: Array<{ physician_id: string; reasons: string[] }>
+  evaluations: Evaluation[]
+  care_routing: CareRoutingAssessment | null
+  candidate_routes: CandidateRoute[]
+}
+export type AskNetworkResult = {
+  question: string
+  physician_agents: NetworkPhysicianAgentMatch[]
+  broadcasts: NetworkBroadcastMatch[]
+  routing: NetworkRoutingEvidence | null
+}
+export const askNetwork = (question: string, patientId?: string) => request<AskNetworkResult>('/api/workspace/network/ask', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, patient_id: patientId }),
+})
 export type NetworkFeed = {
   items: NetworkFeedItem[]; relationship_sources: string[]
   ranking: 'chronological_only'; disclaimer: string
@@ -724,9 +758,15 @@ export type EvalSyntheticCaseContext = {
   current_medications: string[]; fasting_glucose_trend: number[]; recent_creatinine: number | null
   recent_egfr: number | null; practice_question: string | null
 }
+/** Evaluation visibility pass, Part C: the critical distinction between
+ * deterministic REPRESENTATION/SYSTEM evaluation and genuinely model-
+ * dependent AGENT BEHAVIOR evaluation -- never implied, always read off
+ * the case/run itself. */
+export type EvalCategory = 'representation_system' | 'agent_behavior'
+export type EvalExecutionMode = 'model' | 'deterministic_fallback'
 export type PhysicianAgentEvalCase = {
   id: string; name: string; description: string; physician_id: string; case_family: string
-  synthetic_case_context: EvalSyntheticCaseContext; task_type: EvalTaskType
+  synthetic_case_context: EvalSyntheticCaseContext; task_type: EvalTaskType; eval_category: EvalCategory
   expected_behavior: EvalExpectedBehavior; prohibited_behavior: EvalProhibitedBehavior
   tags: string[]; source: string; enabled: boolean; repeat_count: number
 }
@@ -734,7 +774,8 @@ export type EvalAssertionResult = { assertion_type: string; expected: string; ac
 export type EvalRunStatus = 'pass' | 'fail' | 'error' | 'pass_with_variation'
 export type PhysicianAgentEvalRun = {
   id: string; eval_case_id: string; physician_id: string; representation_snapshot_id: string
-  model_identifier: string; started_at: string; completed_at: string
+  model_identifier: string; execution_mode: EvalExecutionMode; model_id: string | null; iteration: number
+  started_at: string; completed_at: string
   structured_output: Record<string, unknown>; assertion_results: EvalAssertionResult[]
   status: EvalRunStatus; error_message: string | null
 }
@@ -746,6 +787,9 @@ export type PhysicianAgentEvalSuiteResult = {
 export const getEvalPhysicians = () => request<EvalPhysicianSummary[]>('/api/workspace/eval/physicians')
 export const getEvalCases = (physicianId: string) => request<PhysicianAgentEvalCase[]>(`/api/workspace/eval/physicians/${encodeURIComponent(physicianId)}/cases`)
 export const runEvalSuite = (physicianId: string) => request<PhysicianAgentEvalSuiteResult>(`/api/workspace/eval/physicians/${encodeURIComponent(physicianId)}/run`, { method: 'POST' })
+/** Part F: per-case repeated-run inspection (e.g. "Run 5 times") --
+ * deliberately scoped to one case, never the whole suite. */
+export const runEvalCaseRepeated = (physicianId: string, caseId: string, times: number) => request<PhysicianAgentEvalRun[]>(`/api/workspace/eval/physicians/${encodeURIComponent(physicianId)}/cases/${encodeURIComponent(caseId)}/run?times=${times}`, { method: 'POST' })
 
 /** First NLP physician-representation feature: natural-language referral
  * preferences. A DRAFT is never operational -- only CONFIRM makes a

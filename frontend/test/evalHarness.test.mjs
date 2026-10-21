@@ -56,3 +56,41 @@ test('the API client calls the real read-only/zero-side-effect endpoints -- list
   assert.match(api, /export const getEvalCases = \(physicianId: string\) => request<PhysicianAgentEvalCase\[\]>\(`\/api\/workspace\/eval\/physicians\/\$\{encodeURIComponent\(physicianId\)\}\/cases`\)/)
   assert.match(api, /export const runEvalSuite = \(physicianId: string\) => request<PhysicianAgentEvalSuiteResult>\(`\/api\/workspace\/eval\/physicians\/\$\{encodeURIComponent\(physicianId\)\}\/run`, \{ method: 'POST' \}\)/)
 })
+
+/* =====================================================================
+ * Evaluation visibility pass, Part B-G: representation/system vs
+ * agent-behavior evaluation, execution mode, repeated runs.
+ * ===================================================================== */
+
+test('cases are grouped into Representation/system and Agent behavior sections, never blended into one undifferentiated list', () => {
+  const pageFn = slice(app, 'function AgentEvaluationsPage', 'function SettingsPage')
+  assert.match(pageFn, /const representationCases = physicianCases\.filter\(\(item\) => item\.eval_category === 'representation_system'\)/)
+  assert.match(pageFn, /const agentBehaviorCases = physicianCases\.filter\(\(item\) => item\.eval_category === 'agent_behavior'\)/)
+  assert.match(pageFn, /Representation \/ system evaluation/)
+  assert.match(pageFn, /Agent behavior evaluation \(model-dependent\)/)
+})
+
+test('execution mode is always shown explicitly -- a deterministic fallback is never rendered as a model pass', () => {
+  assert.match(app, /function ExecutionModeBadge\(/)
+  assert.match(app, /run\.execution_mode === 'model'/)
+  assert.match(app, /<span className="eval-execution-mode model">Model: \{run\.model_id\}<\/span>/)
+  assert.match(app, /<span className="eval-execution-mode deterministic">Deterministic fallback<\/span>/)
+})
+
+test('the detail modal surfaces the representation snapshot and execution mode alongside Expected/Actual', () => {
+  const modalFn = slice(app, 'function EvalCaseDetailModal', 'function AgentEvaluationsPage')
+  assert.match(modalFn, /<ExecutionModeBadge run=\{run\} \/>/)
+  assert.match(modalFn, /Representation: \{run\.representation_snapshot_id\}/)
+})
+
+test('a model-dependent case offers restrained repeated-run inspection -- "N / M structural assertions passed", never a fabricated Agent Score', () => {
+  const control = slice(app, 'function RepeatedRunControl', 'function AgentEvaluationsPage')
+  assert.match(control, />Run once</)
+  assert.match(control, />Run 5 times</)
+  assert.match(control, /\{passed\} \/ \{runs\.length\} structural assertions passed/)
+  assert.doesNotMatch(control, /[Aa]gent [Ss]core/)
+})
+
+test('the repeated-run API client is scoped to one case, never the whole suite', () => {
+  assert.match(api, /export const runEvalCaseRepeated = \(physicianId: string, caseId: string, times: number\) => request<PhysicianAgentEvalRun\[\]>\(`\/api\/workspace\/eval\/physicians\/\$\{encodeURIComponent\(physicianId\)\}\/cases\/\$\{encodeURIComponent\(caseId\)\}\/run\?times=\$\{times\}`, \{ method: 'POST' \}\)/)
+})

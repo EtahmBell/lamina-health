@@ -19,6 +19,30 @@ from pydantic import Field
 from .consultation import StrictModel
 
 
+class EvalCategory(StrEnum):
+    """Evaluation visibility pass, Part C: the critical distinction between
+    testing deterministic/structured PRODUCT behavior (resolve_case_rules,
+    requirements_for, build_care_routing, representation snapshots, draft-
+    vs-confirmed semantics) and testing whether a genuinely model-backed
+    agent execution can correctly APPLY a representation to a novel
+    scenario. A deterministic function call is never labeled as an "LLM
+    eval" just because its task_type happens to resemble one."""
+
+    REPRESENTATION_SYSTEM = "representation_system"
+    AGENT_BEHAVIOR = "agent_behavior"
+
+
+class ExecutionMode(StrEnum):
+    """Evaluation visibility pass, Part D: every model-dependent result
+    must say, explicitly, whether a model actually ran or the deterministic
+    fallback did -- never implied, never silently defaulted. A
+    representation/system eval is always DETERMINISTIC_FALLBACK (no model
+    call is ever attempted for those task types)."""
+
+    MODEL = "model"
+    DETERMINISTIC_FALLBACK = "deterministic_fallback"
+
+
 class EvalTaskType(StrEnum):
     """Deliberately small -- one task type per existing production decision
     point this harness can exercise. Never grown into a generic benchmark
@@ -111,6 +135,10 @@ class PhysicianAgentEvalCase(StrictModel):
     case_family: str
     synthetic_case_context: SyntheticCaseContext
     task_type: EvalTaskType
+    # Evaluation visibility pass, Part C: which of the two categories this
+    # case belongs to -- set once, at authoring time, never inferred from
+    # runtime behavior.
+    eval_category: EvalCategory = EvalCategory.REPRESENTATION_SYSTEM
     expected_behavior: ExpectedBehavior
     prohibited_behavior: ProhibitedBehavior = Field(default_factory=ProhibitedBehavior)
     tags: list[str] = Field(default_factory=list)
@@ -163,6 +191,14 @@ class PhysicianAgentEvalRun(StrictModel):
     # management subsystem.
     representation_snapshot_id: str
     model_identifier: str
+    # Evaluation visibility pass, Part D: explicit, never implied. A
+    # representation/system eval is always DETERMINISTIC_FALLBACK with
+    # model_id=None -- no model is ever invoked for those task types, so
+    # there is nothing to "fall back" from; this just records the honest
+    # fact that no model execution occurred.
+    execution_mode: ExecutionMode = ExecutionMode.DETERMINISTIC_FALLBACK
+    model_id: str | None = None
+    iteration: int = 1
     started_at: str
     completed_at: str
     structured_output: dict[str, Any] = Field(default_factory=dict)

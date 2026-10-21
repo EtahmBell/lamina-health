@@ -2607,3 +2607,53 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .referral-pref-confirmed-summary { margin: 14px 0 20px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; }
 .referral-pref-provenance { display: block; margin-top: 10px; color: var(--text-secondary); }
 .referral-pref-editor select { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; }
+
+/* Evaluation visibility pass: category/execution-mode badges, repeated runs */
+.eval-case-meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+.eval-category-badge, .eval-execution-mode, .eval-snapshot-badge { font-size: .62rem; font-weight: 600; letter-spacing: .02em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+.eval-category-badge.agent_behavior { color: var(--accent-hover); border-color: var(--accent-hover); }
+.eval-execution-mode.model { color: var(--success); border-color: var(--success); }
+.eval-execution-mode.deterministic { color: var(--text-secondary); }
+.eval-category-group { margin-top: 14px; }
+.eval-category-group .section-label { margin-bottom: 6px; }
+.eval-case-row { display: flex; align-items: center; gap: 8px; }
+.eval-repeat-control { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px 26px; }
+.eval-repeat-summary { color: var(--text-secondary); font-size: .66rem; }
+
+/* Active physician-agent network pass: Ask Their Agent as a right-side drawer */
+.post-flow-overlay.drawer-overlay { justify-content: flex-end; padding: 0; background: rgb(36 30 24 / 35%); }
+.post-flow-dialog.drawer-dialog { width: min(100%, 420px); height: 100%; max-height: 100%; border-radius: 0; margin: 0; animation: drawer-slide-in .22s ease-out; box-shadow: -16px 0 40px rgb(36 52 71 / 16%); }
+@keyframes drawer-slide-in { from { transform: translateX(16px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.drawer-grounded-in { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.drawer-grounded-in ul { margin: 4px 0 0; padding-left: 18px; font-size: .7rem; color: var(--text-secondary); }
+@media (prefers-reduced-motion: reduce) { .post-flow-dialog.drawer-dialog { animation: none; } }
+
+/* Ask the Network -- Colleagues right rail */
+.active-network-rail { display: flex; flex-direction: column; gap: 16px; }
+.ask-network-card { border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+.ask-network-card h3 { margin: 0 0 4px; }
+.ask-network-card textarea { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; resize: vertical; margin: 8px 0; }
+.ask-network-patient-context { display: flex; align-items: center; gap: 8px; font-size: .72rem; margin-bottom: 10px; }
+.ask-network-patient-context select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.ask-network-patient-note { font-size: .66rem; color: var(--text-secondary); margin: -4px 0 8px; }
+.ask-network-results { margin-top: 14px; display: flex; flex-direction: column; gap: 14px; }
+.ask-network-result-group h4 { margin: 0 0 8px; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); }
+.ask-network-agent-card, .ask-network-broadcast-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.ask-network-agent-card strong, .ask-network-broadcast-card strong { display: block; }
+.ask-network-agent-card small, .ask-network-broadcast-card small { color: var(--text-secondary); }
+.ask-network-reasons { margin: 6px 0; padding-left: 16px; font-size: .68rem; }
+.ask-network-card-actions { display: flex; gap: 10px; margin-top: 6px; }
+.ask-network-empty { font-size: .7rem; color: var(--text-secondary); }
+.network-colleagues-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; align-items: start; }
+.network-colleagues-layout > .network-colleagues-main { min-width: 0; }
+@media (max-width: 960px) { .network-colleagues-layout { grid-template-columns: 1fr; } }
+
+/* Feed post one-shot focus highlight */
+.feed-post.focused { animation: feed-post-focus-wash 2.5s ease-out; }
+@keyframes feed-post-focus-wash { 0% { background-color: rgb(201 160 99 / 16%); } 100% { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .feed-post.focused { animation: none; } }
+
+/* Colleagues row: primary navigate action + quiet trailing "Ask their agent" */
+.connection-row { padding: 0; }
+.connection-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 16px; border: 0; background: transparent; padding: 16px 20px; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.connection-row-ask { flex-shrink: 0; margin-right: 20px; white-space: nowrap; }

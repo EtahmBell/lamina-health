@@ -277,14 +277,19 @@ def test_feed_requires_membership_or_canonical_interaction(
         assert iain_item["relationship_basis"] == ["explicit_network_member"]
 
         client.post("/api/workspace/network/members", json={"npi": CHEN_NPI})
+        # Active-network pass, Part P: Chen now has a real confirmed-
+        # representation broadcast of his own (fixture-chen-diabetes-fit-
+        # broadcast) -- adding him as an explicit member surfaces it exactly
+        # like Iain's post was surfaced one step earlier.
         assert {item["physician_persona"] for item in client.get(
             _url("/api/workspace/network/feed", "lucy")
-        ).json()["items"]} == baseline | {"iain"}
+        ).json()["items"]} == baseline | {"iain", "chen"}
 
         _consult(client)
         jordan_feed = client.get(_url("/api/workspace/network/feed", "lucy")).json()
         assert {item["physician_persona"] for item in jordan_feed["items"]} == baseline | {
             "iain",
+            "chen",
             "onadeko",
         }
 
@@ -293,6 +298,7 @@ def test_feed_requires_membership_or_canonical_interaction(
 
     assert {item["physician_persona"] for item in full_feed["items"]} == baseline | {
         "iain",
+        "chen",
         "onadeko",
         "sofia",
         "tiffany",
