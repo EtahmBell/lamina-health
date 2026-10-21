@@ -1966,10 +1966,10 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
       {opportunity
         ? <>
           <p>Most new signals were resolved using your existing representation.</p>
-          <p className="agent-learned-count">1 thing needs your judgment</p>
+          <p className="agent-learned-count">One clarification needs your input</p>
           <button className="button-primary" onClick={() => setClarifyOpportunity(opportunity)}>Review <span>→</span></button>
         </>
-        : <p className="agent-empty-note">Nothing needs your judgment right now.</p>}
+        : <p className="agent-empty-note">Nothing needs your input right now.</p>}
     </section>
     <hr className="agent-overview-divider" />
     <div className="agent-detail-divider">
@@ -2111,15 +2111,14 @@ export function PracticeTab({ representation, personaId, portrait, reviewHref, n
   const goodFit = sections.good_fit.filter((item) => !isRawSignalCode(item))
   const notFit = sections.not_a_fit.filter((item) => !isRawSignalCode(item))
 
-  const workupSameAsReferral = sections.referral_requirements.length > 0
-    && sections.preferred_workup.length > 0
-    && JSON.stringify(sections.referral_requirements) === JSON.stringify(sections.preferred_workup)
-  const workupGroups = workupSameAsReferral
-    ? [{ label: 'Preferred workup', items: sections.preferred_workup }]
-    : [
-      { label: 'Referral preferences', items: sections.referral_requirements },
-      { label: 'Preferred workup', items: sections.preferred_workup },
-    ].filter((group) => group.items.length > 0)
+  // Demo UX + semantic polish pass, Part 3: referral_requirements/
+  // preferred_workup are now mutually exclusive (required-only vs
+  // helpful-only) at the data layer, so the same item is never shown
+  // under two neighboring columns -- no dedup check needed here anymore.
+  const workupGroups = [
+    { label: 'Required before review', items: sections.referral_requirements },
+    { label: 'Helpful when available', items: sections.preferred_workup },
+  ].filter((group) => group.items.length > 0)
 
   const ruleLabels = new Set(sections.explicit_rules.map(normalizeLabel))
   const extraLearnings = sections.confirmed_learnings.filter((item) => !ruleLabels.has(normalizeLabel(item.statement)))

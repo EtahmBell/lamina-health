@@ -811,14 +811,20 @@ export const runEvalCaseRepeated = (physicianId: string, caseId: string, times: 
 export type ReferralPreferenceStatus = 'draft' | 'confirmed' | 'rejected' | 'superseded'
 export type ReferralPreferenceModality = 'in_person' | 'econsult' | 'either' | 'unspecified'
 export type ReferralRequirementItem = { key: string; label: string; required: boolean; freshness_days: number | null }
+/** Demo UX + semantic polish pass, Part 7: ONE modality and the ONE
+ * condition under which the physician actually said it applies -- never a
+ * routing engine, just structured descriptive grounding so "in-person" is
+ * never misrepresented as a redirect and a genuinely conditional
+ * preference is never collapsed into a misleading "Either; no strong
+ * preference" line. */
+export type ModalityRule = { modality: 'econsult' | 'in_person'; condition: string }
 export type StructuredReferralPreference = {
   good_fit: string[]; required: ReferralRequirementItem[]; helpful: ReferralRequirementItem[]
   redirect: string[]; modality: ReferralPreferenceModality
-  /** Demo coherence pass, Part J: plain-text nuance for a genuinely
-   * conditional modality preference (e.g. e-consult for a focused,
-   * fully-documented question; in-person when worsening despite
-   * escalation) -- never a new care-routing decision engine. */
+  /** Demo coherence pass, Part J: free-text fallback only -- modality_rules
+   * below is the preferred, structured source whenever it's non-empty. */
   modality_notes: string | null
+  modality_rules: ModalityRule[]
 }
 export type PhysicianReferralPreference = {
   id: string; physician_id: string; case_family: string; source_text: string

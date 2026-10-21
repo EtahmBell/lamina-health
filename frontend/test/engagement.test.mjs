@@ -816,9 +816,10 @@ test('referral fit only renders when the backend provides meaningful good-fit/no
   assert.match(page, /\(goodFit\.length > 0 \|\| notFit\.length > 0\) && <section className="practice-section practice-section-fit">/)
 })
 
-test('workup/referral/access sections use canonical data and collapse an identical referral/workup duplicate into one group', () => {
+test('Before-referral sections are mutually exclusive by construction (required-only vs helpful-only), never collapsed via a runtime duplicate check', () => {
   const page = practiceTabFn()
-  assert.match(page, /workupSameAsReferral/)
+  assert.match(page, /label: 'Required before review', items: sections\.referral_requirements/)
+  assert.match(page, /label: 'Helpful when available', items: sections\.preferred_workup/)
   assert.match(page, /sections\.access_facts\.join\(' · '\)/)
 })
 

@@ -86,7 +86,7 @@ test('the learned-this-week card sits above the practice-representation detail, 
   const learnedIndex = fn.indexOf('What your agent learned this week')
   const detailIndex = fn.indexOf('How your agent currently represents your practice')
   assert.ok(learnedIndex > -1 && detailIndex > -1 && learnedIndex < detailIndex)
-  assert.match(fn, /1 thing needs your judgment/)
+  assert.match(fn, /One clarification needs your input/)
   assert.doesNotMatch(fn, /[Aa]gent [Ss]core/)
 })
 

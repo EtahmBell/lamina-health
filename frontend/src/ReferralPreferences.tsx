@@ -10,8 +10,8 @@ import { useEffect, useState } from 'react'
 import {
   confirmReferralPreference, editReferralPreference, interpretReferralPreference,
   listReferralPreferences, rejectReferralPreference,
-  type PhysicianIdentity, type PhysicianReferralPreference, type ReferralRequirementItem,
-  type StructuredReferralPreference,
+  type ModalityRule, type PhysicianIdentity, type PhysicianReferralPreference,
+  type ReferralRequirementItem, type StructuredReferralPreference,
 } from './api.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
@@ -20,7 +20,19 @@ const MODALITY_LABELS: Record<StructuredReferralPreference['modality'], string> 
   either: 'Either; no strong preference', unspecified: 'Not specified',
 }
 
-const EMPTY_RULES: StructuredReferralPreference = { good_fit: [], required: [], helpful: [], redirect: [], modality: 'unspecified', modality_notes: null }
+/** Demo UX + semantic polish pass, Part 7/10: a conditional modality rule
+ * renders as its own small labeled block -- never collapsed into the flat
+ * MODALITY_LABELS line above, which is only shown when there are no real
+ * conditional rules to display instead. */
+const MODALITY_RULE_HEADING: Record<ModalityRule['modality'], string> = {
+  econsult: 'E-consult can be appropriate when',
+  in_person: 'In-person preferred when',
+}
+
+const EMPTY_RULES: StructuredReferralPreference = {
+  good_fit: [], required: [], helpful: [], redirect: [], modality: 'unspecified',
+  modality_notes: null, modality_rules: [],
+}
 
 function RequirementRow({ item, onToggleRequired, onRemove }: {
   item: ReferralRequirementItem; onToggleRequired?: () => void; onRemove?: () => void
@@ -52,11 +64,17 @@ function ReadOnlyInterpretation({ rules }: { rules: StructuredReferralPreference
       <p className="section-label">Generally prefers routed elsewhere</p>
       <ul className="referral-pref-chip-list">{rules.redirect.map((item) => <li key={item}>{item}</li>)}</ul>
     </div>}
-    {rules.modality !== 'unspecified' && <div className="referral-pref-group">
-      <p className="section-label">Modality</p>
-      <p>{MODALITY_LABELS[rules.modality]}</p>
-    </div>}
-    {rules.good_fit.length === 0 && rules.required.length === 0 && rules.helpful.length === 0 && rules.redirect.length === 0 && rules.modality === 'unspecified'
+    {rules.modality_rules.length > 0
+      ? rules.modality_rules.map((rule, index) => <div className="referral-pref-group" key={`${rule.modality}-${index}`}>
+        <p className="section-label">{MODALITY_RULE_HEADING[rule.modality]}</p>
+        <p>{rule.condition.replace(/\.?$/, '.')}</p>
+      </div>)
+      : rules.modality !== 'unspecified' && <div className="referral-pref-group">
+        <p className="section-label">Modality</p>
+        <p>{MODALITY_LABELS[rules.modality]}</p>
+      </div>}
+    {rules.good_fit.length === 0 && rules.required.length === 0 && rules.helpful.length === 0 && rules.redirect.length === 0
+      && rules.modality === 'unspecified' && rules.modality_rules.length === 0
       && <p className="muted-note">Nothing could be interpreted from that description -- try adding more detail.</p>}
   </div>
 }
@@ -98,6 +116,11 @@ function StructuredRulesEditor({ rules, onChange }: {
       <ul className="referral-pref-chip-list">{rules.redirect.map((item) => <li key={item}>{item}
         <button type="button" className="text-button" onClick={() => onChange({ ...rules, redirect: rules.redirect.filter((x) => x !== item) })} aria-label={`Remove ${item}`}>×</button>
       </li>)}</ul>
+    </div>}
+    {rules.modality_rules.length > 0 && <div className="referral-pref-group">
+      <p className="section-label">Conditional modality guidance</p>
+      <ul className="referral-pref-chip-list">{rules.modality_rules.map((rule, index) => <li key={`${rule.modality}-${index}`}>{MODALITY_RULE_HEADING[rule.modality]} {rule.condition.toLowerCase()}.</li>)}</ul>
+      <p className="muted-note">Edit the full description above and re-interpret to change this.</p>
     </div>}
     <div className="referral-pref-group">
       <label htmlFor="referral-pref-modality-select" className="section-label">Modality preference</label>
@@ -142,9 +165,10 @@ export function ReferralPreferenceSection({
   intro = 'Describe what makes a referral useful to you, what information you usually need, and which cases are a good fit for your practice.',
   placeholder,
   onConfirmed,
+  onDone,
 }: {
   personaId: PhysicianIdentity; navigate?: Navigate; heading?: string; intro?: string
-  placeholder?: string; onConfirmed?: () => void
+  placeholder?: string; onConfirmed?: () => void; onDone?: () => void
 }) {
   const [preferences, setPreferences] = useState<PhysicianReferralPreference[] | null>(null)
   const [sourceText, setSourceText] = useState('')
@@ -219,38 +243,46 @@ export function ReferralPreferenceSection({
     }
   }
 
+  const finishConfirmation = () => { setConfirmedNote(''); onDone?.() }
+
   return <section className="profile-section referral-preference-section" id="profile-section-referral-preferences">
     <h2>{heading}</h2>
     <p className="muted-note">{intro}</p>
 
-    {confirmedNote && <p className="profile-save-note" role="status">
-      {confirmedNote}
-      {navigate && <button type="button" className="text-button" onClick={() => navigate(practiceRepresentationPath(personaId))}>View in Practice Representation →</button>}
-    </p>}
-    {confirmedPreference && !draft && <ConfirmedPreferenceSummary preference={confirmedPreference} />}
+    {confirmedNote
+      ? <div className="referral-pref-success" role="status">
+        <p className="profile-save-note">✓ {confirmedNote}</p>
+        <div className="referral-pref-success-actions">
+          {navigate && <button type="button" className="text-button" onClick={() => navigate(practiceRepresentationPath(personaId))}>View in Practice Representation →</button>}
+          <button type="button" className="button-primary" onClick={finishConfirmation}>Done</button>
+        </div>
+      </div>
+      : <>
+        {confirmedPreference && !draft && <ConfirmedPreferenceSummary preference={confirmedPreference} />}
 
-    {!draft && <div className="referral-pref-input">
-      <label htmlFor="referral-pref-source-text" className="sr-only">Describe how you receive referrals</label>
-      <textarea
-        id="referral-pref-source-text"
-        rows={4}
-        value={sourceText}
-        onChange={(event) => setSourceText(event.target.value)}
-        placeholder={
-          placeholder ?? (
-            'For diabetes referrals, I usually need a recent A1c, current diabetes medications, and ' +
-            "recent kidney function. Glucose logs or CGM are useful when available, but aren't required. " +
-            'I commonly see patients whose diabetes remains poorly controlled despite treatment escalation.'
-          )
-        }
-      />
-      {error && <p className="demo-reset-error" role="alert">{error}</p>}
-      <button type="button" className="button-primary" disabled={busy || !sourceText.trim()} onClick={() => void interpret()}>
-        {busy ? 'Interpreting…' : 'Interpret preferences'} <span>→</span>
-      </button>
-    </div>}
+        {!draft && <div className="referral-pref-input">
+          <label htmlFor="referral-pref-source-text" className="sr-only">Describe how you receive referrals</label>
+          <p className="referral-pref-example-label">Example</p>
+          <textarea
+            id="referral-pref-source-text"
+            rows={4}
+            value={sourceText}
+            onChange={(event) => setSourceText(event.target.value)}
+            placeholder={
+              placeholder ?? (
+                'For diabetes referrals, I usually need a recent A1c, current diabetes medications, and ' +
+                "recent kidney function. Glucose logs or CGM are useful when available, but aren't required. " +
+                'I commonly see patients whose diabetes remains poorly controlled despite treatment escalation.'
+              )
+            }
+          />
+          {error && <p className="demo-reset-error" role="alert">{error}</p>}
+          <button type="button" className="button-primary" disabled={busy || !sourceText.trim()} onClick={() => void interpret()}>
+            {busy ? 'Interpreting…' : 'Interpret preferences'} <span>→</span>
+          </button>
+        </div>}
 
-    {draft && <div className="referral-pref-review-card">
+        {draft && <div className="referral-pref-review-card">
       <p className={`eyebrow referral-pref-status-${draft.status}`}>{draft.status === 'draft' ? 'Draft -- not yet operational' : draft.status}</p>
       <h3>We interpreted this as</h3>
       {editing
@@ -270,6 +302,7 @@ export function ReferralPreferenceSection({
           </>}
       </div>
     </div>}
+      </>}
   </section>
 }
 
@@ -288,16 +321,18 @@ export function ReferralPreferenceModal({
   return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <div className="post-flow-dialog referral-preference-modal-dialog" role="dialog" aria-modal="true" aria-label={heading ?? 'Describe how you receive referrals'}>
       <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
-      {/* Part F: deliberately does NOT auto-close on confirm -- the
-       * physician should actually see the "Added to how your agent
-       * represents your practice" success state, not have it vanish the
-       * instant they confirm. They close explicitly via the × above. */}
+      {/* Part F/6: does NOT auto-close the instant confirm() resolves --
+       * the physician sees the "Added to how your agent represents your
+       * practice" success state first, with its own Done action that
+       * closes the modal cleanly (never left sitting in a large editable
+       * "currently confirmed" form as the next state). */}
       <ReferralPreferenceSection
         personaId={personaId}
         navigate={navigate}
         heading={heading}
         intro={intro}
         placeholder={placeholder}
+        onDone={onClose}
       />
     </div>
   </div></ModalPortal>

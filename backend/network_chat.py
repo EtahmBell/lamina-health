@@ -34,7 +34,12 @@ def answer_general_practice_question(
     sections = representation.get("sections", representation)
     clinical_focus = sections.get("clinical_focus") or []
     good_fit = sections.get("good_fit") or []
-    preferred_workup = sections.get("preferred_workup") or sections.get("referral_requirements") or []
+    # Demo UX + semantic polish pass, Part 3: referral_requirements/
+    # preferred_workup are now mutually exclusive (required-only vs
+    # helpful-only), so a flat "what do you want before a referral"
+    # answer needs the union of both -- never just one or the other,
+    # which would silently drop either the required or the helpful items.
+    preferred_workup = [*(sections.get("referral_requirements") or []), *(sections.get("preferred_workup") or [])]
     access_facts = sections.get("access_facts") or []
     interests = [item["statement"] if isinstance(item, dict) and "statement" in item else item for item in (sections.get("interests") or [])]
     confirmed_learnings = [item["statement"] for item in (sections.get("confirmed_learnings") or [])]

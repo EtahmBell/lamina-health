@@ -1622,13 +1622,30 @@ def base_practice_representation(persona_id: str) -> dict:
         }
     physician_id = PERSONAS[persona_id]["physician_id"]
     profile = PHYSICIANS_BY_ID[physician_id]
+    # Demo UX + semantic polish pass, Part 1/2: once a physician has their
+    # own confirmed-preference system (lazy import -- backend.
+    # referral_preferences already imports backend.professional_services,
+    # which imports this module, so importing it back at module load time
+    # would be circular), the generic profile.required_workup fixture must
+    # never populate a "receiving requirements" section pre-confirmation --
+    # that visually implies a confirmed referral policy the physician never
+    # actually taught. The data itself is untouched and still used
+    # elsewhere (e.g. the candidate-evaluation "before referral" display
+    # every physician gets); only THIS representation surface omits it
+    # until there's a real confirmed preference to show instead.
+    from backend.referral_preferences import SUPERSEDES_STATIC_REQUIREMENTS_FIXTURE
+
+    case_family = next(
+        (family for (pid, family) in SUPERSEDES_STATIC_REQUIREMENTS_FIXTURE if pid == physician_id), None
+    )
+    receiving_requirements_known = case_family is None
     return {
         "specialty": profile.specialty,
         "clinical_focus": profile.focus_areas,
         "good_fit": profile.accepts_signals,
         "not_a_fit": [],
-        "referral_requirements": profile.required_workup,
-        "preferred_workup": profile.required_workup,
+        "referral_requirements": profile.required_workup if receiving_requirements_known else [],
+        "preferred_workup": profile.required_workup if receiving_requirements_known else [],
         "access_facts": [f"Approximately {profile.availability_days} days"],
         "explicit_rules": profile.explicit_rules,
         "modality_preference": None,

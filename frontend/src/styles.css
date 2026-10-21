@@ -2357,6 +2357,10 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
  * competing status badge. Reused alongside PriorityChip wherever a
  * modality needs a one-word companion label. */
 .incoming-request-modality { color: var(--text-secondary); font-size: .64rem; }
+/* Demo UX + semantic polish pass, Part 12: the priority pill and the
+   modality separator that follows it need breathing room -- fixes every
+   "[Soon]· Visit" occurrence in one place, never per call site. */
+.priority-chip + .incoming-request-modality { margin-left: 6px; }
 
 /* Routing/triage UX pass, Part X/Y (polish pass, Part 5D): two small, calm,
  * read-only capacity cards -- the two real capacity LANES, visits and
@@ -2607,6 +2611,11 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .referral-pref-confirmed-summary { margin: 14px 0 20px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; }
 .referral-pref-provenance { display: block; margin-top: 10px; color: var(--text-secondary); }
 .referral-pref-editor select { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; }
+/* Demo UX + semantic polish pass: example-vs-stored-data clarity, and the
+   confirmation success state replacing the big form as the next view. */
+.referral-pref-example-label { margin: 2px 0 2px; color: var(--text-secondary); font-size: .62rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.referral-pref-success { padding: 16px 0 4px; }
+.referral-pref-success-actions { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
 
 /* Evaluation visibility pass: category/execution-mode badges, repeated runs */
 .eval-case-meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
@@ -2630,8 +2639,12 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 
 /* Ask the Network -- Colleagues right rail */
 .active-network-rail { display: flex; flex-direction: column; gap: 16px; }
-.ask-network-card { border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+.ask-network-card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-soft); padding: 20px; }
 .ask-network-card h3 { margin: 0 0 4px; }
+/* Demo UX + semantic polish pass, Part 14: stays visible while scrolling
+   Colleagues on desktop; stacks normally (no sticky) below the 960px
+   breakpoint where the layout itself drops to a single column. */
+@media (min-width: 961px) { .network-colleagues-layout .active-network-rail { position: sticky; top: 76px; } }
 .ask-network-card textarea { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; resize: vertical; margin: 8px 0; }
 .ask-network-patient-context { display: flex; align-items: center; gap: 8px; font-size: .72rem; margin-bottom: 10px; }
 .ask-network-patient-context select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; }

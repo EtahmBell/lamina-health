@@ -66,6 +66,7 @@ from .referral import (
     RequirementStatus,
 )
 from .referral_preference import (
+    ModalityRule,
     PhysicianReferralPreference,
     ReferralPreferenceCaseFamily,
     ReferralPreferenceEditRequest,
@@ -176,4 +177,5 @@ __all__ = [
     "ReferralPreferenceModality",
     "ReferralPreferenceStatus",
     "StructuredReferralPreference",
+    "ModalityRule",
 ]

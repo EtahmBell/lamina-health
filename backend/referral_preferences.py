@@ -109,6 +109,27 @@ def _extract_helpful_item_phrases(sentence: str) -> list[str]:
     return _extract_list_phrases(trimmed)
 
 
+_LEADING_CONDITIONAL_PATTERN = re.compile(r"^\s*if\s+(.+?),\s*(.+)$", re.IGNORECASE)
+_TRAILING_CONDITIONAL_PATTERN = re.compile(r"(.+?)\b(?:when|if)\b\s+(.+)$", re.IGNORECASE)
+
+
+def _modality_condition(sentence: str) -> str | None:
+    """Extracts the clause describing WHEN a modality applies -- never the
+    whole sentence verbatim -- so "E-consult can be appropriate when X" and
+    "If X, I generally prefer an in-person evaluation" both yield just X,
+    never a copy of the trigger phrase itself. `None` when the sentence
+    mentions a modality but states no actual condition (Part 7: never
+    invent a condition the physician didn't give)."""
+    text = sentence.rstrip(".!? ")
+    leading = _LEADING_CONDITIONAL_PATTERN.match(text)
+    if leading:
+        return leading.group(1).strip().capitalize()
+    trailing = _TRAILING_CONDITIONAL_PATTERN.match(text)
+    if trailing:
+        return trailing.group(2).strip().capitalize()
+    return None
+
+
 def deterministic_interpret(source_text: str, case_family: str) -> StructuredReferralPreference:
     """A bounded, honest keyword/phrase heuristic -- the safety-net fallback
     when a live structured model call isn't configured or fails validation
@@ -119,11 +140,29 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
     required: list[ReferralRequirement] = []
     helpful: list[ReferralRequirement] = []
     redirect: list[str] = []
+    modality_rules: list[dict[str, str]] = []
     modality = "unspecified"
     lower = source_text.casefold()
 
     for sentence in _split_sentences(source_text):
         sentence_lower = sentence.casefold()
+        # Demo UX + semantic polish pass, Part 7: a sentence describing a
+        # modality (e-consult/in-person) is about MODALITY, never about
+        # fit/requirements/redirect -- classify it below and skip the rest
+        # of this loop entirely, so e.g. "...the required recent workup is
+        # already available" never gets mistaken for a REQUIRED item, and
+        # "...I generally prefer an in-person evaluation" never gets
+        # mistaken for a redirect just because it contains "prefer".
+        if "e-consult" in sentence_lower or "econsult" in sentence_lower:
+            condition = _modality_condition(sentence)
+            if condition:
+                modality_rules.append({"modality": "econsult", "condition": condition})
+            continue
+        if "in-person" in sentence_lower or "in person" in sentence_lower:
+            condition = _modality_condition(sentence)
+            if condition:
+                modality_rules.append({"modality": "in_person", "condition": condition})
+            continue
         is_helpful_sentence = any(
             phrase in sentence_lower
             for phrase in ("useful when available", "aren't required", "are not required", "optional", "not required")
@@ -148,35 +187,48 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
                     )
         elif any(phrase in sentence_lower for phrase in ("commonly see", "usually see", "good fit", "good-fit")):
             good_fit.append(sentence.rstrip(".!? "))
-        elif any(phrase in sentence_lower for phrase in ("prefer", "routed elsewhere", "redirect", "do not usually see", "don't usually see")):
+        # Demo UX + semantic polish pass, Part 7: a bare "prefer" is NOT a
+        # redirect signal (that broke "I generally prefer an in-person
+        # evaluation" before modality sentences were excluded above, and
+        # would break it again for anyone who says "I'd prefer X" about
+        # their own practice) -- only an explicit redirect-to-another-
+        # specialty/provider phrase counts.
+        elif any(phrase in sentence_lower for phrase in (
+            "routed elsewhere", "prefer to redirect", "refer elsewhere", "redirect",
+            "do not usually see", "don't usually see",
+        )):
             redirect.append(sentence.rstrip(".!? "))
 
-    modality_notes: str | None = None
-    if "e-consult" in lower or "econsult" in lower:
-        if "in-person" in lower or "in person" in lower:
-            modality = "either"
-            # Demo coherence pass, Part J: capture the actual conditional
-            # sentences as grounding text -- never collapsing a genuinely
-            # conditional preference into one flat enum value with no
-            # supporting detail.
-            econsult_sentences = [
-                sentence.rstrip(".!? ") for sentence in _split_sentences(source_text)
-                if "e-consult" in sentence.casefold() or "econsult" in sentence.casefold()
-            ]
-            in_person_sentences = [
-                sentence.rstrip(".!? ") for sentence in _split_sentences(source_text)
-                if "in-person" in sentence.casefold() or "in person" in sentence.casefold()
-            ]
-            notes = [*econsult_sentences, *in_person_sentences]
-            modality_notes = ". ".join(dict.fromkeys(notes)) + "." if notes else None
-        else:
-            modality = "econsult"
+    econsult_conditions = [rule["condition"] for rule in modality_rules if rule["modality"] == "econsult"]
+    in_person_conditions = [rule["condition"] for rule in modality_rules if rule["modality"] == "in_person"]
+    if econsult_conditions and in_person_conditions:
+        modality = "either"
+    elif econsult_conditions:
+        modality = "econsult"
+    elif in_person_conditions:
+        modality = "in_person"
+    elif "e-consult" in lower or "econsult" in lower:
+        modality = "either" if ("in-person" in lower or "in person" in lower) else "econsult"
     elif "in-person" in lower or "in person" in lower:
         modality = "in_person"
 
+    # modality_notes is now only a fallback free-text summary for the rare
+    # case modality_rules extraction found no clean condition at all --
+    # modality_rules itself is the preferred, structured source (Part 7).
+    modality_notes: str | None = None
+    if modality == "either" and not modality_rules:
+        sentences_mentioning_modality = [
+            sentence.rstrip(".!? ") for sentence in _split_sentences(source_text)
+            if any(phrase in sentence.casefold() for phrase in ("e-consult", "econsult", "in-person", "in person"))
+        ]
+        modality_notes = (
+            ". ".join(dict.fromkeys(sentences_mentioning_modality)) + "."
+            if sentences_mentioning_modality else None
+        )
+
     return StructuredReferralPreference(
         good_fit=good_fit, required=required, helpful=helpful, redirect=redirect,
-        modality=modality, modality_notes=modality_notes,
+        modality=modality, modality_notes=modality_notes, modality_rules=modality_rules,
     )
 
 
@@ -301,7 +353,25 @@ def preference_requirement_items(structured: StructuredReferralPreference) -> li
     return [*structured.required, *structured.helpful]
 
 
+_MODALITY_RULE_VERB = {"econsult": "E-consult can be appropriate", "in_person": "In-person is preferred"}
+
+
+def modality_guidance_sentences(structured: StructuredReferralPreference) -> list[str]:
+    """One readable sentence per structured modality_rules entry -- the
+    preferred, non-misleading source for any flat-text context (Ask Their
+    Agent's answer string, Practice Representation's one-line summary)
+    that can't render ModalityRule as its own UI block. Never a single
+    "Either; no strong preference" line once real conditional guidance
+    exists (Part 7/10)."""
+    return [
+        f"{_MODALITY_RULE_VERB[rule.modality]} when {rule.condition.rstrip('.').lower()}."
+        for rule in structured.modality_rules
+    ]
+
+
 def preference_modality_label(structured: StructuredReferralPreference) -> str | None:
+    if structured.modality_rules:
+        return " ".join(modality_guidance_sentences(structured))
     if structured.modality == "either" and structured.modality_notes:
         return structured.modality_notes
     labels = {
@@ -489,12 +559,12 @@ def clarification_opportunities(
             "case_family": CHEN_SEED_CASE_FAMILY,
             "title": "A recent diabetes referral surfaced one useful gap in your agent's representation.",
             "body": "You haven't yet confirmed when you prefer e-consult for focused diabetes questions.",
-            "clarifying_question": "When would you be comfortable starting with an e-consult for a diabetes referral?",
+            # Demo UX + semantic polish pass, Part 8: short enough to never
+            # wrap into a heavy multi-line modal title.
+            "clarifying_question": "When would you start with an e-consult?",
             "supporting_text": (
-                "Your agent already understands that persistent worsening despite treatment "
-                "escalation is generally a good fit for in-person evaluation. It does not yet "
-                "have confirmed guidance on when a focused diabetes question can start "
-                "asynchronously."
+                "Your agent knows you prefer in-person care when diabetes continues to worsen "
+                "despite treatment escalation. It does not yet know when e-consult is appropriate."
             ),
         }
     ]
@@ -525,7 +595,12 @@ def confirmed_referral_preference_sections(
         good_fit.extend(structured.good_fit)
         required_labels.extend(item.label for item in structured.required)
         helpful_labels.extend(item.label for item in structured.helpful)
-        explicit_rules.extend(f"Accepts: {item.rstrip('.')}." for item in structured.good_fit)
+        # Demo UX + semantic polish pass, Part 3: never restate the same
+        # good-fit sentence here -- it is already shown under "Referral
+        # fit." Only a genuinely distinct redirect-to-another-specialty
+        # statement belongs in Practice Rules; an empty structured.redirect
+        # means there is nothing additional to show, not that this
+        # physician was told to redirect everything.
         explicit_rules.extend(
             f"Generally prefers routed elsewhere: {item.rstrip('.')}." for item in structured.redirect
         )
@@ -539,8 +614,13 @@ def confirmed_referral_preference_sections(
         )
     return {
         "good_fit": list(dict.fromkeys(good_fit)),
+        # Demo UX + semantic polish pass, Part 3: "Required before review"
+        # and "Helpful when available" are now mutually exclusive sections
+        # -- referral_requirements carries only required items,
+        # preferred_workup only helpful ones -- so the same item is never
+        # rendered under two neighboring columns.
         "referral_requirements": list(dict.fromkeys(required_labels)),
-        "preferred_workup": list(dict.fromkeys([*required_labels, *helpful_labels])),
+        "preferred_workup": list(dict.fromkeys(helpful_labels)),
         "explicit_rules": list(dict.fromkeys(explicit_rules)),
         "modality_preference": modality_label,
         "referral_preference_provenance": provenance,

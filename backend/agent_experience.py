@@ -210,6 +210,7 @@ def deterministic_portrait(
             confirmed_learnings
             or sections.get("good_fit")
             or sections.get("referral_requirements")
+            or sections.get("preferred_workup")
             or sections.get("explicit_rules")
             or sections.get("modality_preference")
         )
@@ -255,7 +256,10 @@ def deterministic_agent_chat(
                 "can_train_from_this": not interests,
             }
         if "workup" in lower or "before a referral" in lower:
-            workup = sections.get("preferred_workup", [])
+            # Demo UX + semantic polish pass, Part 3: referral_requirements/
+            # preferred_workup are now mutually exclusive (required-only vs
+            # helpful-only) -- a flat "preferred workup" answer needs both.
+            workup = [*sections.get("referral_requirements", []), *sections.get("preferred_workup", [])]
             return {
                 "answer": (
                     f"Your current representation lists {', '.join(workup)}."

@@ -16,6 +16,7 @@ from backend.api import workspace as workspace_api
 from backend.fhir import SyntheticClinicalDataSource
 from backend.main import app
 from backend.workflow import WorkflowStore
+from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
 
 
 @pytest.fixture
@@ -39,7 +40,16 @@ def _ask(client: TestClient, controlled_id: str, question: str) -> dict:
 def test_chen_answers_a_workup_question_from_his_confirmed_representation(
     engagement_store: WorkflowStore,
 ) -> None:
+    """Demo UX + semantic polish pass: this answer is grounded in Chen's
+    own CONFIRMED referral preference -- never his generic, always-present
+    profile baseline passed off as if it were a confirmed receiving
+    policy. Teach+confirm his baseline first, the same way the real
+    product now requires."""
     with TestClient(app) as client:
+        client.get("/api/patients")
+        from backend.demo_workspace import DEFAULT_COOKIE_NAME
+
+        teach_and_confirm_chen_baseline(engagement_store, client.cookies[DEFAULT_COOKIE_NAME])
         answer = _ask(client, "chen", "What workup do you usually want before seeing a referral?")
     assert "Chen" in answer["answer"]
     assert answer["based_on"] == ["confirmed practice representation"]

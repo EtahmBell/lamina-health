@@ -36,7 +36,7 @@ test('interpreting never calls confirm -- a draft is created and reviewed before
 test('only the explicit "Looks right" action calls confirmReferralPreference', () => {
   const confirmFn = slice(referralPreferences, 'const confirm = async', 'const saveEdits = async')
   assert.match(confirmFn, /confirmReferralPreference\(personaId, draft\.id\)/)
-  const reviewActions = slice(referralPreferences, 'referral-pref-review-actions', '</div>\n    </div>\n  </section>')
+  const reviewActions = slice(referralPreferences, 'referral-pref-review-actions', '</div>\n    </div>}\n      </>}')
   assert.match(reviewActions, />Looks right</)
   assert.match(reviewActions, /onClick=\{\(\) => void confirm\(\)\}/)
 })

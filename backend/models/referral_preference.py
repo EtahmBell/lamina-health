@@ -32,6 +32,23 @@ class ReferralPreferenceStatus(StrEnum):
     SUPERSEDED = "superseded"
 
 
+class ModalityRule(StrictModel):
+    """Demo UX + semantic polish pass: a genuinely conditional modality
+    preference (e-consult appropriate under one condition, in-person
+    preferred under a different one) is NOT a redirect -- "in-person" is a
+    modality, never "routed elsewhere" -- and it is not well represented by
+    a single flat enum + free-text sentence either. Each rule names ONE
+    modality and the ONE condition under which the physician actually said
+    it applies, so representation/Ask Their Agent/Test/interpretation UI
+    can all show the real conditional guidance instead of collapsing it
+    into a misleading "Either; no strong preference" line. Still the
+    smallest clean extension -- no routing engine, no scoring, no case
+    classifier reads this; it is descriptive grounding text, structured."""
+
+    modality: Literal["econsult", "in_person"]
+    condition: str
+
+
 class StructuredReferralPreference(StrictModel):
     """The structured rule types a physician-receiving preference can express
     (Part E). `required`/`helpful` reuse the existing ReferralRequirement
@@ -44,13 +61,18 @@ class StructuredReferralPreference(StrictModel):
     helpful: list[ReferralRequirement] = Field(default_factory=list)
     redirect: list[str] = Field(default_factory=list)
     modality: ReferralPreferenceModality = "unspecified"
-    # Demo coherence pass, Part J: when a physician's modality preference is
-    # genuinely conditional (e.g. e-consult for a focused question with
-    # complete workup, in-person when worsening despite escalation), this
-    # holds that nuance as plain text rather than forcing it into the flat
-    # `modality` enum -- never a new care-routing/e-consult decision engine,
-    # just descriptive grounding text for Ask Their Agent / My Agent Test.
+    # Demo coherence pass, Part J: free-text fallback for a conditional
+    # modality preference that couldn't be split into clean modality_rules
+    # below -- kept for backward compatibility, but modality_rules is now
+    # the preferred, structured source whenever it's non-empty.
     modality_notes: str | None = None
+    # Demo UX + semantic polish pass, Part 7: the structured conditional
+    # modality guidance -- see ModalityRule above. `modality` above still
+    # carries a best-effort flat default (kept for backward compatibility
+    # with every existing reader of that field); this list is what
+    # representation/Ask Their Agent/Test/interpretation UI should actually
+    # render once it's non-empty.
+    modality_rules: list[ModalityRule] = Field(default_factory=list)
 
 
 class PhysicianReferralPreference(StrictModel):
