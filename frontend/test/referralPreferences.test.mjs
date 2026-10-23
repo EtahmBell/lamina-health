@@ -28,7 +28,7 @@ test('the API client exposes interpret/list/edit/confirm/reject against the real
 })
 
 test('interpreting never calls confirm -- a draft is created and reviewed before anything becomes operational', () => {
-  const interpretFn = slice(referralPreferences, 'const interpret = async', 'const confirm = async')
+  const interpretFn = slice(referralPreferences, 'const interpret = async', 'const confirmed = ')
   assert.match(interpretFn, /interpretReferralPreference\(personaId, trimmed\)/)
   assert.doesNotMatch(interpretFn, /confirmReferralPreference/)
 })
@@ -41,9 +41,9 @@ test('only the explicit "Looks right" action calls confirmReferralPreference', (
   assert.match(reviewActions, /onClick=\{\(\) => void confirm\(\)\}/)
 })
 
-test('the draft review card is visually marked as not yet operational, distinct from a confirmed preference', () => {
+test('the draft review card is visually marked as a proposed learning, not yet operational, distinct from a confirmed preference', () => {
   assert.match(referralPreferences, /referral-pref-status-\$\{draft\.status\}/)
-  assert.match(referralPreferences, /draft\.status === 'draft' \? 'Draft -- not yet operational' : draft\.status/)
+  assert.match(referralPreferences, /draft\.status === 'draft' \? 'Proposed learning · not yet operational' : draft\.status/)
 })
 
 test('"Edit interpretation" offers structured editing -- toggle required/helpful and remove a rule -- never raw JSON', () => {

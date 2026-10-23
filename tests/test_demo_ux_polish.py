@@ -70,10 +70,14 @@ def _bootstrap(client: TestClient) -> str:
 # ---------------------------------------------------------------- Part 1/2: pre-training representation
 
 
-def test_chens_generic_profile_workup_never_appears_as_a_receiving_requirement_pre_training() -> None:
+def test_chens_pre_training_requirements_are_his_footprint_baseline_not_generic_profile_workup() -> None:
+    """Routing consolidation pass, Part O/Y: the footprint baseline the
+    agent actually applies is shown, split required vs helpful -- never the
+    generic profile workup duplicated into both sections."""
     sections = base_practice_representation("chen")
-    assert sections["referral_requirements"] == []
-    assert sections["preferred_workup"] == []
+    assert "Recent renal function" in sections["referral_requirements"]
+    assert "Glucose log or CGM data" in sections["preferred_workup"]
+    assert not set(sections["referral_requirements"]) & set(sections["preferred_workup"])
     # Clinical focus/access are untouched -- only the receiving-requirements
     # sections that would visually imply a confirmed referral policy change.
     assert sections["clinical_focus"]
@@ -200,7 +204,9 @@ def test_reset_then_teach_then_clarify_end_to_end_causality_still_holds(store: W
         before = client.post(
             f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
         ).json()
-        assert before["receiving_requirements"] == []
+        # Routing consolidation pass, Part Y: the footprint baseline already
+        # applies before any teaching.
+        assert any(item["key"] == "recent_renal_function" for item in before["receiving_requirements"])
 
         client.post("/api/workspace/demo/reset/tonjit")
         preference_url = "/api/workspace/physician/chen/referral-preferences"

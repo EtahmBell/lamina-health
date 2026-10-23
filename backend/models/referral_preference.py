@@ -99,8 +99,14 @@ class PhysicianReferralPreference(StrictModel):
 
 
 class ReferralPreferenceInterpretRequest(StrictModel):
+    """`clarifies` (routing consolidation pass, Part Q): set when this text
+    answers a clarification card. The interpretation then refines only what
+    the card asked about (modality guidance), merged onto the currently
+    confirmed preference -- still a DRAFT until the physician confirms."""
+
     source_text: str = Field(min_length=1, max_length=4000)
     case_family: ReferralPreferenceCaseFamily | None = None
+    clarifies: Literal["modality"] | None = None
 
 
 class ReferralPreferenceEditRequest(StrictModel):

@@ -55,9 +55,32 @@ export type EconsultSuitability = 'suitable' | 'possible_not_preferred' | 'not_s
 export type InPersonNeed = 'preferred' | 'optional' | 'not_needed'
 export type CandidateFitLabel = 'strong' | 'moderate' | 'poor' | 'potential'
 export type EvidenceConfidence = 'high' | 'medium' | 'low' | 'unverified'
+/** PATIENT NEED (routing consolidation pass, Part B1): specialty,
+ * clinician-confirmable priority, and which modalities are CLINICALLY
+ * viable. `recommended_modality`/`in_person_need`/`econsult_suitability`
+ * summarize the route-fit outcome for display. */
+export type ModalityViability = {
+  visit: 'viable' | 'not_viable'; econsult: 'viable' | 'conditional' | 'not_viable'; basis: string
+}
 export type CareRoutingAssessment = {
   specialty: string; recommended_modality: CareModality; suggested_priority: ReferralPriority
   in_person_need: InPersonNeed; econsult_suitability: EconsultSuitability; rationale: string
+  modality_viability?: ModalityViability | null; priority_basis?: string | null
+  referral_question?: string | null; hard_constraints?: string[]
+}
+/** One inspectable reason tagged with its provenance (Part E) -- evidence,
+ * never model scratchpad. */
+export type MatchEvidenceCategory = 'specialty_scope' | 'similar_case_experience' | 'case_interest' | 'referral_preference' | 'modality_policy' | 'access_capacity' | 'continuity' | 'network_relationship'
+export type MatchEvidence = { category: MatchEvidenceCategory; summary: string; source: string }
+/** PHYSICIAN-CASE FIT (Part B2): two-sided, access-free, no numeric value.
+ * `similar_case_patterns` are privacy-preserving case patterns only. */
+export type PhysicianCaseFit = {
+  physician_id: string; physician_name: string
+  clinical_fit: 'strong' | 'moderate' | 'poor'
+  receiving_fit: 'strong' | 'moderate' | 'limited' | 'unknown'
+  similar_case_patterns: string[]
+  econsult_policy: 'acceptable' | 'possible_not_preferred' | 'unknown' | 'not_offered'
+  evidence: MatchEvidence[]
 }
 /** Evidence-confidence/connectivity labels, never physician-quality tiers
  * (Part J) -- deliberately not "Tier 1/2/3". */
@@ -74,6 +97,7 @@ export type CandidateRoute = {
   fit_label: CandidateFitLabel; evidence_confidence: EvidenceConfidence
   network_participation: NetworkParticipation; access: AccessProfile
   recommended: boolean; rationale: string | null
+  route_evidence?: MatchEvidence[]; within_access_target?: boolean | null
 }
 export type Consultation = {
   consultation_id: string; patient_id: string; patient_facts_used: string[]; recommended_physician: Evaluation
@@ -81,6 +105,7 @@ export type Consultation = {
   alternatives: Evaluation[]; consultation: Evaluation[]; messages: ConsultationMessage[]; disclaimer: string
   care_routing: CareRoutingAssessment | null
   candidate_routes: CandidateRoute[]
+  physician_fits?: PhysicianCaseFit[]
 }
 export type PatientActivity = {
   patient_id: string; last_opened: string | null; last_started: string | null
@@ -481,6 +506,14 @@ export type AgentOverviewStats = {
 export type LearningOpportunity = {
   id: string; case_family: string; title: string; body: string
   clarifying_question: string; supporting_text: string
+  /** Routing consolidation pass, Part P: every clarification says where it
+   * came from and why Lamina is asking. The yes/no statements are the
+   * natural-language meaning of each quick answer -- still interpreted and
+   * confirmed through the same referral-preference pipeline. */
+  source?: 'recent_work' | 'recent_referrals' | 'profile'
+  source_label?: string; reason?: string
+  response_type?: 'yes_no_depends'
+  yes_statement?: string; no_statement?: string; depends_prompt?: string
 }
 export type AgentOverview = {
   physician: ControlledPhysicianIdentity; specialty: string; location: string
@@ -835,8 +868,11 @@ export type PhysicianReferralPreference = {
 }
 const referralPreferencesBase = (personaId: PhysicianIdentity) => `/api/workspace/physician/${encodeURIComponent(personaId)}/referral-preferences`
 export const listReferralPreferences = (personaId: PhysicianIdentity) => request<PhysicianReferralPreference[]>(referralPreferencesBase(personaId))
-export const interpretReferralPreference = (personaId: PhysicianIdentity, sourceText: string) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/interpret`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source_text: sourceText }),
+/** `clarifies: 'modality'` (Part Q) refines only the modality boundary a
+ * clarification asked about, merged onto the confirmed preference server-
+ * side -- still a draft until confirmed. */
+export const interpretReferralPreference = (personaId: PhysicianIdentity, sourceText: string, clarifies?: 'modality') => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/interpret`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clarifies ? { source_text: sourceText, clarifies } : { source_text: sourceText }),
 })
 export const editReferralPreference = (personaId: PhysicianIdentity, preferenceId: string, structuredRules: StructuredReferralPreference) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/${encodeURIComponent(preferenceId)}`, {
   method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ structured_rules: structuredRules }),

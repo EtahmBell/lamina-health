@@ -54,20 +54,22 @@ test('Iain\'s specialist routes/nav remain valid and untouched (he is simply no 
 
 /* ------------------------------------------------------------- Part B: Dashboard */
 
-test('ChenHomePage mirrors Lucy\'s HomePage architecture: greeting, agent banner, incoming-request awareness, patients-with-next-steps, recent activity, recent network', () => {
+test('ChenHomePage mirrors Lucy\'s HomePage architecture: greeting, agent banner, one "Patients with next steps" worklist, recent activity, recent network', () => {
   const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} viewAgentPath="\/chen\/agent\?tab=overview" personaId="chen" onTrainingUpdated=\{\(\) => getAgentOverview\('chen'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\} \/>/)
-  assert.match(fn, /<h2>Needs your review<\/h2>/)
-  assert.match(fn, /<h2>Patients<\/h2>/)
+  assert.match(fn, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} viewAgentPath="\/chen\/agent\?tab=overview" \/>/)
+  assert.match(fn, /<h2>Patients with next steps<\/h2>/)
+  assert.doesNotMatch(fn, /<h2>Needs your review<\/h2>/)
+  assert.doesNotMatch(fn, /<h2>Patients<\/h2>/)
   assert.match(fn, /<h2>Recent activity<\/h2>/)
   assert.match(fn, /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="chen" \/>/)
 })
 
-test('ChenHomePage\'s incoming-request row reuses the exact same submitted-referral data and RequestReviewModal as Patients -> Incoming requests -- never a duplicate fixture', () => {
+test('a new referral on ChenHomePage is that patient\'s next step, built from the real submitted-referral data and opening the same RequestReviewModal -- never a duplicate fixture', () => {
   const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
   assert.match(fn, /getPhysicianReferrals\(CHEN_ID, 'submitted'\)/)
   assert.match(fn, /setIncoming\(submitted\)/)
-  assert.match(fn, /resolvedSummary\(resolvedCountFor\(referral\)\)/)
+  assert.match(fn, /chenNextSteps\(incoming, accepted, careState, new Date\(\)\)/)
+  assert.match(fn, /item\.kind === 'review_referral' \? incoming\?\.find/)
   assert.match(fn, /<RequestReviewModal referral=\{reviewing\} receivingPhysicianName=\{CHEN_NAME\} onAccepted=\{handleAccepted\} onClose=\{\(\) => setReviewing\(null\)\} \/>/)
   assert.doesNotMatch(fn, /submitted-fixture|fakeReferral|mockReferral/i)
 })
@@ -79,28 +81,32 @@ test('ChenHomePage\'s incoming-request row reuses the exact same submitted-refer
  * ordinary priority once sent -- never a permanent-residency guarantee.
  * =========================================================================== */
 
-test('ChenHomePage merges accepted-or-later referrals into its Patients worklist, reusing the exact same chenPatientRowStatus/careState logic ChenPatientsPage already uses -- not a separate, divergent implementation', () => {
+test('ChenHomePage merges accepted-or-later referrals into the same worklist from their real encounter/handoff state -- not a separate, divergent implementation', () => {
   const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
   assert.match(fn, /getPhysicianReferrals\(CHEN_ID\)/)
   assert.match(fn, /ACCEPTED_OR_LATER_STATUSES\.includes\(referral\.status\)/)
   assert.match(fn, /getEncounter\(referral\.id\), getHandoff\(referral\.id, CHEN_ID\)/)
-  assert.match(fn, /chenPatientRowStatus\(referral, state\.encounter, state\.handoff\)/)
+  const builder = slice(referralSource, 'function chenNextSteps', 'export function RequestReviewModal')
+  assert.match(builder, /acceptedReferralStep\(referral, \{/)
+  assert.match(builder, /referralReviewStep\(referral, now, PCP_NAME\)/)
+  assert.match(builder, /\.\.\.CHEN_SEEDED_NEXT_STEPS/)
 })
 
-test('a pending "Review handoff" referral-derived row outranks every other row, including the static seeded roster -- priority -2, below the seeded roster\'s 0-6 range and below the ordinary -1 given to any other accepted referral', () => {
+test('a pending "Review handoff" is a physician-judgment next step with its own service target, so it competes for attention by time remaining -- never a hard-coded rank', () => {
   const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /priority: nextStep === 'Review handoff' \? -2 : -1/)
+  assert.doesNotMatch(fn, /priority: nextStep === 'Review handoff' \? -2 : -1/)
+  assert.match(fn, /const topSteps = topAttention\(steps\)/)
 })
 
-test('once a handoff is sent (or there is nothing to review yet), the referral-derived row returns to ordinary priority and can be pushed off the top-3 Dashboard slice by other patients -- the Dashboard never hard-codes "this patient always appears"', () => {
+test('once a handoff is sent the referral leaves the worklist, and no patient is ever pinned to the Dashboard by id', () => {
   const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.doesNotMatch(fn, /patient\.id === TONJIT_ID|patient_id === TONJIT_ID/, 'no patient-id special-casing keeps a referral pinned to the Dashboard')
-  assert.match(fn, /\[\.\.\.actionableRows, \.\.\.seededRows\]\s*\n\s*\.sort\(\(a, b\) => a\.priority - b\.priority\)\s*\n\s*\.slice\(0, 3\)/)
+  assert.doesNotMatch(fn, /patient\.id === TONJIT_ID|patient_id === TONJIT_ID|patientId === TONJIT_ID/, 'no patient-id special-casing keeps a referral pinned to the Dashboard')
+  assert.match(fn, /<NextStepRows items=\{topSteps\} onOpen=\{openStep\} \/>/)
 })
 
-test('ChenHomePage never shows fake requests when there are none', () => {
+test('ChenHomePage never shows fake next steps when there are none', () => {
   const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /\{incoming && incoming\.length > 0 && <section className="dashboard-needs-you">/)
+  assert.match(fn, /\{topSteps\.length > 0 && <section className="patient-worklist-section">/)
 })
 
 /* ---------------------------------------------------- Part C/D/E: seeded patients */
@@ -135,12 +141,12 @@ test('ChenPatientsPage supports search, active/previous grouping, and the existi
   assert.match(fn, /<WorklistRows rows=\{active\} navigate=\{navigate\} basePath="\/chen\/patients" highlightIds=\{highlighted\} \/>/)
 })
 
-test('the Incoming requests control is rendered separately from the patient list, never mixed into the worklist rows', () => {
+test('on Patients, an incoming referral is a row in the same list (opening the review in place) -- never a separate header control', () => {
   const fn = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
   const headerBlock = slice(fn, '<header className="selector-header">', '</header>')
-  assert.match(headerBlock, /<IncomingRequestsControl/)
-  const worklistBlock = slice(fn, 'const seededRows', 'const rows =')
-  assert.doesNotMatch(worklistBlock, /IncomingRequestsControl/)
+  assert.doesNotMatch(headerBlock, /IncomingRequestsControl/)
+  assert.match(fn, /nextStep: 'Review referral', priority: -3, updated: null, onOpen: \(\) => setReviewing\(referral\)/)
+  assert.match(fn, /const rows = \[\.\.\.incomingRows, \.\.\.acceptedRows, \.\.\.seededRows\]/)
 })
 
 test('seeded-patient stage copy is reframed for an established specialist practice, reusing the existing PatientStage vocabulary (no new enum)', () => {
@@ -174,7 +180,7 @@ test('/chen/agent uses Chen\'s own real identity/representation data, never Lucy
 test('/chen/agent reuses the exact same Overview/Train/Test tabs and shared panels as Lucy\'s and Iain\'s My Agent -- no Chen-specific version', () => {
   const fn = slice(referralSource, 'export function ChenAgentPage', 'export function ChenNetworkPage')
   assert.match(fn, /<AgentOverviewPanel overview=\{overview\} representation=\{representation\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} personaId="chen" \/>/)
-  assert.match(fn, /<TrainTab trainProjection=\{trainProjection\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} personaId="chen" learningOpportunities=\{overview\.learning_opportunities\} \/>/)
+  assert.match(fn, /<TrainTab trainProjection=\{trainProjection\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} personaId="chen" learningOpportunities=\{overview\.learning_opportunities\} focusId=\{params\?\.get\('focus'\) \?\? null\}/)
   assert.match(fn, /<ChatTab personaId="chen" agentName=\{agentName\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} \/>/)
   assert.doesNotMatch(referralSource, /function ChenOverviewPanel|function ChenTrainTab|function ChenChatTab/)
 })

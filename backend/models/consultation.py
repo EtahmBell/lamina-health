@@ -130,8 +130,15 @@ class ClinicalRepresentation(StrictModel):
 
 
 class HistoricalCase(StrictModel):
+    """A privacy-preserving case PATTERN from a physician's practice history
+    (routing consolidation pass, Part B/D) -- a structured description of a
+    kind of case, never a prior patient. Carries no names, identifiers,
+    dates, or counts; `modalities_used` records only how comparable cases
+    were handled (visit and/or e-consult), when the fixture knows it."""
+
     label: str
     features: list[str]
+    modalities_used: list[Literal["in_person", "econsult"]] = Field(default_factory=list)
 
 
 class PhysicianProfile(StrictModel):
@@ -207,12 +214,79 @@ class NetworkParticipation(StrEnum):
     EXTERNAL_DIRECTORY = "external_directory"
 
 
+VisitViability = Literal["viable", "not_viable"]
+# "conditional": clinically possible only if the receiving physician's own
+# policy supports it for this presentation -- never decided by the patient
+# need alone.
+EconsultViability = Literal["viable", "conditional", "not_viable"]
+ReceivingFit = Literal["strong", "moderate", "limited", "unknown"]
+# How THIS physician handles e-consult for this kind of case. "unknown" is a
+# genuine representation gap (never defaulted to acceptable); "not_offered"
+# removes the e-consult route entirely.
+EconsultPolicy = Literal["acceptable", "possible_not_preferred", "unknown", "not_offered"]
+MatchEvidenceCategory = Literal[
+    "specialty_scope",
+    "similar_case_experience",
+    "case_interest",
+    "referral_preference",
+    "modality_policy",
+    "access_capacity",
+    "continuity",
+    "network_relationship",
+]
+
+
+class ModalityViability(StrictModel):
+    """Which modalities are CLINICALLY viable for this patient (routing
+    consolidation pass, Part B1/F) -- a patient-need fact only. Never reads
+    any physician's preference; physician modality policy is applied later,
+    in physician-case fit, and the final visit-vs-e-consult choice is made
+    in route fit."""
+
+    visit: VisitViability
+    econsult: EconsultViability
+    basis: str
+
+
+class MatchEvidence(StrictModel):
+    """One inspectable reason, tagged with where it came from (Part E) --
+    structured evidence, never model scratchpad."""
+
+    category: MatchEvidenceCategory
+    summary: str
+    source: str
+
+
+class PhysicianCaseFit(StrictModel):
+    """Physician-case fit, the second routing computation (Part B2): "for
+    whom is this actually a good case?" Deliberately two-sided --
+    `clinical_fit` is patient -> physician (specialty/scope), `receiving_fit`
+    is physician -> patient (explicit practice rules, similar-case
+    experience, confirmed interests/preferences). Access never enters
+    either; a busy physician keeps the same fit (Part B3). No numeric
+    value of any kind."""
+
+    physician_id: str
+    physician_name: str
+    clinical_fit: Literal["strong", "moderate", "poor"]
+    receiving_fit: ReceivingFit
+    similar_case_patterns: list[str] = Field(default_factory=list)
+    econsult_policy: EconsultPolicy = "unknown"
+    evidence: list[MatchEvidence] = Field(default_factory=list)
+
+
 class CareRoutingAssessment(StrictModel):
-    """What kind of care this patient needs, BEFORE any physician is ranked
-    (care-routing demo pass, Part A/B) -- specialty + modality + priority +
-    whether in-person is actually needed, never a giant numeric score.
-    Deterministic synthetic routing for this demo, never presented as an
-    autonomously-validated clinical urgency determination."""
+    """PATIENT NEED -- what care this patient needs, BEFORE any physician is
+    ranked (care-routing demo pass, Part A/B; routing consolidation pass,
+    Part B1). Specialty, clinician-confirmable priority, and which
+    modalities are clinically viable (`modality_viability`) are patient
+    facts. `recommended_modality`/`in_person_need`/`econsult_suitability`
+    are a display summary of the ROUTE-FIT outcome (see
+    backend/agents/care_routing.py) -- kept for the existing UI, never an
+    input to physician fit. Deterministic synthetic routing for this demo,
+    never presented as an autonomously-validated clinical urgency
+    determination: `suggested_priority` is protocol-grounded and stays a
+    suggestion until the referring clinician confirms it."""
 
     specialty: str
     recommended_modality: CareModality
@@ -220,6 +294,10 @@ class CareRoutingAssessment(StrictModel):
     in_person_need: InPersonNeed
     econsult_suitability: EconsultSuitability
     rationale: str
+    modality_viability: ModalityViability | None = None
+    priority_basis: str | None = None
+    referral_question: str | None = None
+    hard_constraints: list[str] = Field(default_factory=list)
 
 
 class AccessProfile(StrictModel):
@@ -256,6 +334,13 @@ class CandidateRoute(StrictModel):
     access: AccessProfile
     recommended: bool
     rationale: str | None = None
+    # Routing consolidation pass, Part B3/E: route-level evidence (modality
+    # policy, access/capacity, network relationship) -- physician-case fit
+    # evidence lives on ConsultationResult.physician_fits, never duplicated
+    # here. `within_access_target` is whether this route's modality-specific
+    # access meets the clinician-confirmed priority's window.
+    route_evidence: list[MatchEvidence] = Field(default_factory=list)
+    within_access_target: bool | None = None
 
 
 class ConsultationRequest(StrictModel):
@@ -298,3 +383,6 @@ class ConsultationResult(StrictModel):
     # this pass. Populated only for the Tonjit/diabetes demo case for now.
     care_routing: CareRoutingAssessment | None = None
     candidate_routes: list[CandidateRoute] = Field(default_factory=list)
+    # Routing consolidation pass, Part B2: physician-case fit per routed
+    # physician, kept separate from both the patient need and the routes.
+    physician_fits: list[PhysicianCaseFit] = Field(default_factory=list)

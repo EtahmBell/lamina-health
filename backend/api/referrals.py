@@ -91,6 +91,19 @@ def get_physician_capacity(physician_id: str, _workspace_id: DemoWorkspace) -> A
     return profile
 
 
+def _booked_slot_ids(workspace_id: str, physician_id: str, referral_id: int) -> frozenset[str]:
+    """Slots already confirmed for this physician's OTHER referrals --
+    never offered again (Part L: no silent displacement)."""
+    booked = set()
+    for other in workflow_store.list_referrals(workspace_id, receiving_physician_id=physician_id):
+        if other.id is None or other.id == referral_id:
+            continue
+        scheduling = workflow_store.get_scheduling(workspace_id, other.id)
+        if scheduling is not None and scheduling.selected_option is not None:
+            booked.add(scheduling.selected_option.slot_id)
+    return frozenset(booked)
+
+
 def _load_referral(workspace_id: str, referral_id: int) -> Referral:
     referral = workflow_store.get_referral(workspace_id, referral_id)
     if referral is None:
@@ -187,7 +200,10 @@ def accept_referral_endpoint(
         raise HTTPException(status_code=409, detail=str(error)) from error
     existing_scheduling = workflow_store.get_scheduling(workspace_id, referral_id)
     try:
-        scheduling = find_scheduling_options(updated, receiving_physician.id, physician_name, existing_scheduling)
+        scheduling = find_scheduling_options(
+            updated, receiving_physician.id, physician_name, existing_scheduling,
+            _booked_slot_ids(workspace_id, receiving_physician.id, referral_id),
+        )
         routed = route_options_to_scheduling(updated, scheduling, receiving_physician.id, physician_name)
     except ValueError:
         # Defensive only -- should not happen immediately after a fresh
@@ -233,7 +249,10 @@ def find_referral_scheduling_options(
     physician_name = _physician_display_name(request.receiving_physician_id)
     existing = workflow_store.get_scheduling(workspace_id, referral_id)
     try:
-        scheduling = find_scheduling_options(referral, request.receiving_physician_id, physician_name, existing)
+        scheduling = find_scheduling_options(
+            referral, request.receiving_physician_id, physician_name, existing,
+            _booked_slot_ids(workspace_id, request.receiving_physician_id, referral_id),
+        )
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     updated_referral = workflow_store.update_referral(workspace_id, referral)

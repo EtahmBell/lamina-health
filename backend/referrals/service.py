@@ -37,7 +37,7 @@ from backend.synthetic_data import synthetic_agent_id
 from .packet import assemble_initial_packet
 from .requirements import evaluate_requirements, requirements_for
 from .resolver import resolve_missing_requirement
-from .scheduling import synthetic_chen_availability
+from .scheduling import open_slots, synthetic_chen_availability
 
 
 def _now() -> str:
@@ -419,12 +419,16 @@ def find_scheduling_options(
     receiving_physician_id: str,
     receiving_physician_name: str,
     existing: SchedulingCoordination | None,
+    booked_slot_ids: frozenset[str] = frozenset(),
 ) -> SchedulingCoordination:
     """Legitimate agent work (Part F): check Dr. Chen's known synthetic
     availability and return valid new-patient slots. Safe to call repeatedly
     -- an already-persisted SchedulingCoordination is returned unchanged
     (and no duplicate event is appended), never regenerated with different
-    slots on a second click."""
+    slots on a second click. `booked_slot_ids` are slots already held by
+    other patients: they are never offered, whatever this referral's
+    priority (Part L) -- with nothing open, this raises so the caller
+    escalates instead of displacing anyone."""
     if referral.receiving_physician_id != receiving_physician_id:
         raise ValueError(
             f"{receiving_physician_id!r} is not the receiving physician for this referral."
@@ -436,7 +440,12 @@ def find_scheduling_options(
             f"Cannot find scheduling options for a referral in status {referral.status.value!r}; "
             "it must first be accepted."
         )
-    slots = synthetic_chen_availability()
+    slots = open_slots(synthetic_chen_availability(), booked_slot_ids)
+    if not slots:
+        raise ValueError(
+            "No open appointment slot; escalate to an alternative route or clinic scheduling. "
+            "No booked appointment is displaced."
+        )
     now = _now()
     _append_event(
         referral,

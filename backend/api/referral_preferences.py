@@ -16,7 +16,11 @@ from backend.models import (
     ReferralPreferenceInterpretRequest,
     StructuredReferralPreference,
 )
-from backend.referral_preferences import ensure_seed_preferences, referral_preference_interpretation_service
+from backend.referral_preferences import (
+    ensure_seed_preferences,
+    merge_modality_clarification,
+    referral_preference_interpretation_service,
+)
 from backend.representation import representation_snapshot_id
 from backend.workflow import workflow_store
 
@@ -74,6 +78,10 @@ def interpret_preference(
     case_family, structured, _provider = referral_preference_interpretation_service.interpret(
         request.source_text, specialty, request.case_family
     )
+    if request.clarifies == "modality":
+        structured = merge_modality_clarification(
+            workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family), structured
+        )
     created = workflow_store.create_referral_preference(
         workspace_id,
         physician_id,

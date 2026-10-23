@@ -27,11 +27,12 @@ test('Lucy, Chen, Iain, and Owner all pass a real personaId into TrainTab -- the
   assert.doesNotMatch(engagement, /function ChenTrainTab|function LucyTrainTab/)
 })
 
-test('ordinary training opens the shared QuickTrainingModal, never a navigation to the legacy full-screen TrainingPage', () => {
+test('routing consolidation pass, Part O/S: the structured question bank is internal demo tooling only -- never the primary Train workflow, and never a navigation to the legacy full-screen TrainingPage', () => {
   const fn = slice(engagement, 'export function TrainTab', 'export function ChatTab')
-  assert.match(fn, /setQuickTrainingOpen\(true\)/)
-  assert.doesNotMatch(fn, /navigate\(`\$\{trainPath\}\?mode=daily`\)/, 'ordinary quick training no longer navigates away')
-  assert.match(fn, /<QuickTrainingModal personaId=\{personaId\} onClose=\{\(\) => setQuickTrainingOpen\(false\)\} onFinished=\{\(\) => setQuickTrainingOpen\(false\)\} initializationNeeded=\{initializationNeeded\} \/>/)
+  assert.match(fn, /<details className="train-internal-tools">/)
+  assert.match(fn, /<summary>Internal demo tooling<\/summary>/)
+  assert.doesNotMatch(fn, /navigate\(`\$\{trainPath\}\?mode=daily`\)/)
+  assert.match(fn, /\{toolingOpen && personaId && <QuickTrainingModal/)
 })
 
 test('the one-time mandatory initialization sequence still works -- the SAME modal, told to use the standard track', () => {
@@ -52,31 +53,40 @@ test('the training modal backdrop dims the page, never the modal content itself 
 
 // ---------------------------------------------------------------- three teaching modes
 
-test('Train reframes around three parallel teaching modes, never "Question 1 of 10" as the primary concept', () => {
+test('Train is a learning control center -- Needs your input, Tell your agent something, Learning history -- never "Question 1 of 10" or quick-question homework', () => {
   const fn = slice(engagement, 'export function TrainTab', 'export function ChatTab')
-  assert.match(fn, /From recent work/)
-  assert.match(fn, /Quick questions/)
-  assert.match(fn, /Describe your practice/)
-  assert.doesNotMatch(fn, /Question \d+ of \d+/)
+  const order = ['>Needs your input<', 'heading="Tell your agent something"', '>Learning history<']
+  const positions = order.map((marker) => fn.indexOf(marker))
+  assert.ok(positions.every((position) => position >= 0), 'all three sections present')
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'in this order')
+  assert.doesNotMatch(fn, /Question \d+ of \d+|Question \{/)
+  assert.doesNotMatch(fn, /Quick questions|Answer a few questions/)
 })
 
-test('"Describe your practice" reuses ReferralPreferenceModal -- the existing NLP pipeline, never a duplicated backend', () => {
+test('"Tell your agent something" reuses ReferralPreferenceSection -- the existing NLP interpret/confirm pipeline, never a duplicated backend -- and is optional', () => {
   const fn = slice(engagement, 'export function TrainTab', 'export function ChatTab')
-  assert.match(fn, /<ReferralPreferenceModal personaId=\{personaId\} navigate=\{navigate\} onClose=\{\(\) => setDescribeOpen\(false\)\} \/>/)
-  assert.match(fn, /personaId === 'chen' && <div className="train-mode-card">/)
+  assert.match(fn, /<ReferralPreferenceSection\s+personaId=\{personaId\}/)
+  assert.match(fn, /intro="Optional\. Describe a preference, case interest, referral requirement, or how you handle a type of case\."/)
+  assert.match(fn, /canTeach && personaId && <section className="train-section train-teach-section">/)
 })
 
-test('"From recent work" surfaces at most the one real clarification opportunity, never a fabricated backlog', () => {
+test('Needs your input lists only real clarification opportunities from the backend, each with its source and reason -- never a fabricated backlog', () => {
   const fn = slice(engagement, 'export function TrainTab', 'export function ChatTab')
-  assert.match(fn, /learningOpportunities\.length > 0 && <div className="train-mode-card train-mode-recent-work">/)
-  assert.match(fn, /\{learningOpportunities\[0\]\.title\}/)
+  assert.match(fn, /const open = learningOpportunities\.filter/)
+  assert.match(fn, /\{item\.source_label \?\? 'From recent work'\}/)
+  assert.match(fn, /\{item\.reason && <p className="clarification-reason"><strong>Why Lamina is asking<\/strong>\{item\.reason\}<\/p>\}/)
   assert.doesNotMatch(fn, /14 signals|11 resolved|fabricat/i)
 })
 
-test('clicking Clarify opens the shared NLP modal, pre-framed with the real clarifying question -- never silently operationalizing anything', () => {
+test('answering a clarification opens the ClarificationModal over the current page, framed with the real question -- nothing is operational until the physician confirms', () => {
   const fn = slice(engagement, 'export function TrainTab', 'export function ChatTab')
-  assert.match(fn, /heading=\{clarifyOpportunity\.clarifying_question\}/)
-  assert.match(fn, /intro=\{clarifyOpportunity\.supporting_text\}/)
+  assert.match(fn, /<ClarificationModal\s+personaId=\{personaId\}\s+opportunity=\{clarifying\}/)
+  const modal = slice(engagement, 'function ClarificationModal', 'const PREFERENCE_HISTORY_LABELS')
+  assert.match(modal, /<ModalPortal>/)
+  assert.match(modal, /\{opportunity\.clarifying_question\}/)
+  assert.match(modal, /interpretReferralPreference\(personaId, composed, 'modality'\)/)
+  assert.doesNotMatch(modal, /confirmReferralPreference/)
+  assert.match(modal, /<PreferenceDraftReview/)
 })
 
 // ---------------------------------------------------------------- "what your agent learned this week"
@@ -90,10 +100,11 @@ test('the learned-this-week card sits above the practice-representation detail, 
   assert.doesNotMatch(fn, /[Aa]gent [Ss]core/)
 })
 
-test('the overview Clarify button opens the same ReferralPreferenceModal, scoped to the one real opportunity', () => {
+test('the Overview "What your agent learned this week" Review CTA opens Train focused on the one real clarification', () => {
   const fn = slice(engagement, 'export function AgentOverviewPanel', 'export type AgentActivityRow')
   assert.match(fn, /const opportunity = overview\.learning_opportunities\[0\] \?\? null/)
-  assert.match(fn, /onClick=\{\(\) => setClarifyOpportunity\(opportunity\)\}>Review/)
+  assert.match(fn, /onClick=\{\(\) => navigate\(clarificationFocusPath\(trainPath, opportunity\.id\)\)\}>Review/)
+  assert.doesNotMatch(fn, /ReferralPreferenceModal/)
 })
 
 // ---------------------------------------------------------------- case context / language cleanup

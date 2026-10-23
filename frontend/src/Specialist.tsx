@@ -126,7 +126,7 @@ export function SpecialistHomePage({ navigate }: { navigate: Navigate }) {
           </div>
           : <p className="dashboard-empty-note">Nothing needs you right now.</p>}
       </section>
-      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('iain')} viewAgentPath="/specialist/agent?tab=overview" personaId="iain" onTrainingUpdated={() => getAgentOverview('iain').then(setOverview).catch(() => {})} />
+      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('iain')} viewAgentPath="/specialist/agent?tab=overview" />
       {workspace.case_count > 0
         ? <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
           <div className="lam-list quiet">{recent.slice(0, 5).map((item) => <SpecialistActivityRow key={item.consultation_record_id} item={item} navigate={navigate} />)}</div>
@@ -359,7 +359,7 @@ export function SpecialistAgentPage({ navigate, params }: { navigate: Navigate; 
       <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
 
       {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('iain')} personaId="iain" />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} personaId="iain" learningOpportunities={overview?.learning_opportunities ?? []} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('iain')} personaId="iain" learningOpportunities={overview?.learning_opportunities ?? []} focusId={params?.get('focus') ?? null} onLearningChanged={() => getAgentOverview('iain').then(setOverview).catch(() => {})} />}
       {tab === 'test' && <ChatTab personaId="iain" agentName={workspace.physician.agent_name} navigate={navigate} trainPath={trainingPath('iain')} />}
     </>}
   </main>

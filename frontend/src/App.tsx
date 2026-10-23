@@ -20,6 +20,7 @@ import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, Spe
 import { TrendChart } from './TrendChart.tsx'
 import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
+import { EVIDENCE_CATEGORY_LABELS, matchEvidence, whyThisMatch } from './matchExplanation.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
 type Navigate = (path: string) => void
@@ -291,7 +292,6 @@ function HomePage({ navigate }: { navigate: Navigate }) {
   }, [])
   const ordered = [...records].sort((a, b) => b.completed_at.localeCompare(a.completed_at))
   const latestByPatient = ordered.filter((record, index) => ordered.findIndex((item) => item.patient_id === record.patient_id) === index)
-  const currentWork = latestByPatient.slice(0, 3)
   const activity = agentActivity(ordered).slice(0, 3)
   const watchRows = buildWatchRows(latestByPatient, referralsByPatient)
   const greetingName = `Dr. ${PCP_NAME.split(' ').at(-1)}`
@@ -300,7 +300,7 @@ function HomePage({ navigate }: { navigate: Navigate }) {
     {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
     {!loading && !error && <>
-      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" matchesReady={currentWork.length} records={records} personaId="lucy" onTrainingUpdated={() => getAgentOverview('lucy').then(setOverview).catch(() => {})} />
+      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" records={records} />
       <PatientWatchTable rows={watchRows} navigate={navigate} />
       <div className="dashboard-bottom-row">
         <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View your agent →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span>{item.kind === 'interaction' && <em className="activity-kind agent-event-label">Agent</em>}<strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
@@ -516,7 +516,7 @@ function MyAgentPage({ navigate, params }: { navigate: Navigate; params: URLSear
           <div className="learning-grid">{(agent?.learnings ?? []).filter((learning) => learning.status === 'suggested').map((learning) => <article className={`learning-card ${focusedLearning === learning.key ? 'focused' : ''}`} id={`learning-${learning.key}`} key={learning.key}><span className={`learning-status ${learning.status}`}>Proposed · needs confirmation</span><p>{learning.statement}</p><small>Source: {learning.provenance}</small>{focusedLearning === learning.key && caseParam && <p className="learning-case-source">Raised from the {patientName(caseParam)} consultation.{recordParam && <button className="text-button" onClick={() => navigate(consultationPath(Number(recordParam)))}>View consultation →</button>}</p>}{editing === learning.key ? <div className="learning-edit"><label htmlFor={`edit-${learning.key}`}>Correct this preference</label><textarea id={`edit-${learning.key}`} maxLength={240} value={draft} onChange={(event) => setDraft(event.target.value)} /><div><button className="button-primary" disabled={!draft.trim()} onClick={() => act(learning, 'edit', draft)}>Save draft</button><button className="text-button" onClick={() => setEditing(null)}>Cancel</button></div></div> : <div className="learning-actions"><button onClick={() => act(learning, 'confirm')}>Confirm</button><button onClick={() => { setEditing(learning.key); setDraft(learning.statement) }}>Edit</button><button onClick={() => act(learning, 'reject')}>Reject</button></div>}</article>)}</div>
         </section>
       } />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('lucy')} personaId="lucy" learningOpportunities={overview?.learning_opportunities ?? []} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('lucy')} personaId="lucy" learningOpportunities={overview?.learning_opportunities ?? []} focusId={params.get('focus')} onLearningChanged={refreshOverview} />}
       {tab === 'test' && <ChatTab personaId="lucy" agentName={PCP_AGENT_NAME} navigate={navigate} trainPath={trainingPath('lucy')} />}
     </>}
   </main></ProductShell>
@@ -1061,6 +1061,13 @@ function RecommendationView({
   const selectedEconsultRoute = selectedModality === 'econsult'
     ? consultation.candidate_routes.find((route) => route.physician_id === selectedId && route.modality === 'econsult')
     : undefined
+  /** Routing consolidation pass, Part D/E: physician-case fit and the
+   * selected route are separate backend computations; "Why Dr. X" reads
+   * both, never a single opaque value. Absent for unrouted cases. */
+  const selectedFit = consultation.physician_fits?.find((fit) => fit.physician_id === selectedId)
+  const selectedRoute = consultation.candidate_routes.find((route) => route.physician_id === selectedId && route.modality === selectedModality)
+  const patientFirstName = patientName(consultation.patient_id).split(' ')[0]
+  const whyLines = selectedFit ? whyThisMatch(selectedFit, selectedRoute, patientFirstName) : []
   /** Routing/triage UX pass, Part J/K (polish pass, Part 1): ONE canonical
    * "Other options" list, merging the pre-existing real alternatives
    * (Okonkwo, via consultation.alternatives) with the new routing model's
@@ -1351,14 +1358,16 @@ function RecommendationView({
     {consultation.care_routing && <section className="care-routing-block">
       <p className="section-label">Recommended care path</p>
       <h3>{consultation.care_routing.specialty}</h3>
-      <p className="care-routing-modality">{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person evaluation recommended' : 'E-consult recommended'}</p>
+      <p className="care-routing-modality">{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person is appropriate for this presentation' : 'E-consult recommended'}</p>
       <div className="care-routing-priority">
         <span className="section-label">Priority</span>
         <PriorityChipRow priority={priority} onChange={setPriority} />
         {priority === consultation.care_routing.suggested_priority && <small className="care-routing-priority-note">Suggested by your agent</small>}
       </div>
       <p className="care-routing-rationale">{consultation.care_routing.rationale}</p>
-      <p className="care-routing-footnote">Access and alternative care routes considered.</p>
+      <p className="care-routing-footnote">{consultation.care_routing.recommended_modality === 'in_person' && consultation.care_routing.modality_viability?.econsult !== 'not_viable'
+        ? 'E-consult remains an alternative modality for other appropriate cases. Access and alternative routes considered.'
+        : 'Access and alternative care routes considered.'}</p>
     </section>}
     {/* Compact by default (see design_references/) -- only name, specialty, one fit
      * indicator, one metadata line, one rationale sentence, and the primary action.
@@ -1380,9 +1389,16 @@ function RecommendationView({
       </div>
       {physicianDiffersFromRecommendation && <p className="selection-provenance">Selected by you</p>}
       {modalityDiffersFromRecommendation && <p className="selection-provenance">E-consult request — selected by you</p>}
-      <p className="fit-indicator">{selected.clinical_fit === 'strong' ? 'Strong clinical fit' : selected.clinical_fit === 'moderate' ? 'Moderate clinical fit' : 'Limited clinical fit'}</p>
-      <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selectedEconsultRoute ? (selectedEconsultRoute.access.econsult_response_label ?? 'Response time unverified') : selected.availability}</p>
-      <p className="fit-rationale">{selected.reason}</p>
+      {whyLines.length > 0
+        ? <section className="why-this-match" aria-label="Why this match">
+          <p className="section-label">Why this match</p>
+          <ul className="why-this-match-list">{whyLines.map((line) => <li key={line.key}><strong>{line.label}</strong><span>{line.detail}</span></li>)}</ul>
+        </section>
+        : <>
+          <p className="fit-indicator">{selected.clinical_fit === 'strong' ? 'Strong clinical fit' : selected.clinical_fit === 'moderate' ? 'Moderate clinical fit' : 'Limited clinical fit'}</p>
+          <p className="fit-meta">{insuranceLabel(selected.insurance_status)} · {selectedEconsultRoute ? (selectedEconsultRoute.access.econsult_response_label ?? 'Response time unverified') : selected.availability}</p>
+          <p className="fit-rationale">{selected.reason}</p>
+        </>}
       {/* Backend/view-mode navigation can never bypass real workflow state
        * (demo-consolidation pass, Part 3): once a real referral already
        * exists to THIS physician, "Start referral" never renders again here
@@ -1458,11 +1474,30 @@ function RecommendationView({
             <div><dt>Modality</dt><dd>{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person evaluation' : 'E-consult'}</dd></div>
             <div><dt>Priority</dt><dd><PriorityChip priority={consultation.care_routing.suggested_priority} /></dd></div>
             <div><dt>E-consult</dt><dd>{econsultSuitabilityLabel(consultation.care_routing.econsult_suitability)}</dd></div>
+            {consultation.care_routing.modality_viability && <div><dt>Clinically viable</dt><dd>Visit: {consultation.care_routing.modality_viability.visit === 'viable' ? 'yes' : 'no'} · E-consult: {consultation.care_routing.modality_viability.econsult === 'viable' ? 'yes' : consultation.care_routing.modality_viability.econsult === 'conditional' ? "only if the receiving physician's policy supports it" : 'no'}</dd></div>}
+            {consultation.care_routing.priority_basis && <div><dt>Priority basis</dt><dd>{consultation.care_routing.priority_basis}</dd></div>}
           </dl>
         </div>
         {(() => {
           const recommendedRoute = consultation.candidate_routes.find((route) => route.recommended)
           if (!recommendedRoute) return null
+          /** Routing consolidation pass, Part E: when structured fit
+           * evidence exists, show every reason WITH where it came from
+           * (similar-case history, confirmed preference, modality policy,
+           * access, network) -- evidence, never model scratchpad. */
+          const detailRoute = selectedRoute ?? recommendedRoute
+          const detailFit = consultation.physician_fits?.find((fit) => fit.physician_id === detailRoute.physician_id)
+          if (detailFit) {
+            return <div className="match-details-group">
+              <p className="section-label">Why {cleanName(detailRoute.physician_name)}</p>
+              <ul className="match-evidence-list">{matchEvidence(detailFit, detailRoute).map((item, index) => <li key={`${item.category}-${index}`}>
+                <span className="match-evidence-category">{EVIDENCE_CATEGORY_LABELS[item.category]}</span>
+                <span className="match-evidence-summary">{item.summary}</span>
+                <small className="match-evidence-source">Source: {item.source}</small>
+              </li>)}</ul>
+              {detailRoute.rationale && <p className="route-why-recommended"><span className="route-why-recommended-label">{detailRoute.recommended ? 'Why recommended:' : 'Route note:'}</span> {detailRoute.rationale}</p>}
+            </div>
+          }
           return <div className="match-details-group">
             <p className="section-label">Why {cleanName(recommendedRoute.physician_name)}</p>
             <dl className="route-fact-list">

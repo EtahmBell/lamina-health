@@ -81,7 +81,7 @@ test('the Dashboard activity header links to the agent, not to consultations', (
 })
 
 test('Home renders the Your Agent card from canonical AgentOverview state only', () => {
-  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} personaId="lucy" onTrainingUpdated=\{\(\) => getAgentOverview\('lucy'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\} \/>/)
+  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" records=\{records\} \/>/)
   assert.doesNotMatch(home(), /Math\.|%|average|score|trend/i, 'no invented metrics on Home')
 })
 
@@ -102,7 +102,7 @@ test('Dashboard activity carries timestamps and gives agent-originated events th
 test('legacy case-raised learning records no longer drive ordinary Home current work', () => {
   assert.doesNotMatch(home(), /agent learning\{pending\.length === 1/)
   assert.doesNotMatch(home(), /navigate\(calibrationPath\(\)\)/)
-  assert.match(home(), /const currentWork = latestByPatient\.slice\(0, 3\)/)
+  assert.match(home(), /const watchRows = buildWatchRows\(latestByPatient, referralsByPatient\)/)
 })
 
 /* ---------------------------------------------------------- patient detail */

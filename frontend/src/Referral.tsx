@@ -8,6 +8,7 @@ import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
 import { ActiveNetworkRail } from './NetworkQuery.tsx'
+import { acceptedReferralStep, attentionOrder, CHEN_SEEDED_NEXT_STEPS, handledByAgentOrStaff, referralReviewStep, topAttention, type NextStepItem } from './specialistWorklist.ts'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
@@ -928,43 +929,39 @@ export function CoordinationChatCard({
 const resolvedCountFor = (referral: Referral) =>
   referral.coordination_events.filter((event) => event.event_type === 'information_attached').length
 
-/**
- * The compact "Incoming requests · N" control (Part E) -- hidden entirely
- * when there are zero submitted referrals, never a noisy empty card. Opens a
- * quick triage popover (Part F), not a navigation page.
- */
-function IncomingRequestsControl({
-  referrals, open, onToggle, onReview,
-}: { referrals: Referral[]; open: boolean; onToggle: () => void; onReview: (referral: Referral) => void }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onClick = (event: MouseEvent) => { if (containerRef.current && !containerRef.current.contains(event.target as Node)) onToggle() }
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onToggle() }
-    document.addEventListener('mousedown', onClick)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey) }
-  }, [open, onToggle])
-  return <div className="incoming-requests" ref={containerRef}>
-    <button type="button" className="incoming-requests-toggle" onClick={onToggle} aria-haspopup="menu" aria-expanded={open}>
-      Needs your review <span>{referrals.length}</span>
-    </button>
-    {open && <div className="incoming-requests-popover" role="menu" aria-label="Needs your review">
-      {referrals.map((referral) => <div className="incoming-request-row" role="menuitem" key={referral.id}>
-        <div className="incoming-request-main">
-          <strong>{patientName(referral.patient_id)}</strong>
-          <span>{referral.specialty} referral from {PCP_NAME}</span>
-        </div>
-        {/* Routing/triage UX pass, Part S: ONE status chip (priority), never
-         * a redundant second status badge -- the whole section is already
-         * called Needs your review. "Visit" is a quiet modality label, not
-         * a competing status. */}
-        <p className="incoming-request-priority"><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· {referral.modality === 'econsult' ? 'E-consult' : 'Visit'}</span></p>
-        <p className="incoming-request-resolved">{resolvedSummary(resolvedCountFor(referral))}</p>
-        <button type="button" className="text-button" onClick={() => onReview(referral)}>Review <span>→</span></button>
-      </div>)}
-    </div>}
-  </div>
+/** Routing consolidation pass, Part I: one row in a specialist's
+ * "Patients with next steps" -- a new referral to review is just that
+ * patient's current next step, shown with its clinician-defined priority
+ * and modality, never in a separate "Needs your review" section. */
+function NextStepRows({ items, onOpen }: { items: NextStepItem[]; onOpen: (item: NextStepItem) => void }) {
+  return <div className="lam-list patient-worklist next-step-worklist">{items.map((item) => <button key={item.id} className="lam-row next-step-row" onClick={() => onOpen(item)}>
+    <span className="lam-row-mark patient-row-avatar">{patientInitials(item.patientId)}</span>
+    <span className="lam-row-main">
+      <strong>{patientName(item.patientId)}</strong>
+      <small className="next-step-meta"><PriorityChip priority={item.priority} /><span className="incoming-request-modality">· {item.modality === 'econsult' ? 'E-consult' : 'Visit'}</span></small>
+      <span className="next-step-detail">{item.detail}</span>
+    </span>
+    <span className="lam-row-action">{item.action} <b>→</b></span>
+  </button>)}</div>
+}
+
+/** Every next step for Dr. Chen's patients, from real referral state plus
+ * his established synthetic panel -- the single source his Dashboard
+ * worklist reads. */
+function chenNextSteps(
+  incoming: Referral[] | null, accepted: Referral[] | null,
+  careState: Map<number, { encounter: ConsultationEncounter | null; handoff: HandoffSummary | null }>,
+  now: Date,
+): NextStepItem[] {
+  const referralSteps = (accepted ?? []).map((referral) => {
+    const state = (referral.id != null && careState.get(referral.id)) || { encounter: null, handoff: null }
+    return acceptedReferralStep(referral, {
+      encounterDocumented: Boolean(state.encounter),
+      handoffStatus: state.handoff?.status ?? null,
+      handoffDraftedAt: state.handoff?.drafted_at ?? null,
+    }, now)
+  }).filter((item): item is NextStepItem => item !== null)
+  return [...(incoming ?? []).map((referral) => referralReviewStep(referral, now, PCP_NAME)), ...referralSteps, ...CHEN_SEEDED_NEXT_STEPS]
 }
 
 /**
@@ -1434,7 +1431,6 @@ export function ChenPatientsPage({ navigate, params }: { navigate: Navigate; par
   const [accepted, setAccepted] = useState<Referral[] | null>(null)
   const [careState, setCareState] = useState<Map<number, { encounter: ConsultationEncounter | null; handoff: HandoffSummary | null }>>(new Map())
   const [error, setError] = useState('')
-  const [requestsOpen, setRequestsOpen] = useState(false)
   const [reviewing, setReviewing] = useState<Referral | null>(null)
   // Routing/triage UX polish pass, Part 5C: a purely presentational,
   // briefly-applied highlight for whichever patients the Dashboard's
@@ -1496,19 +1492,23 @@ export function ChenPatientsPage({ navigate, params }: { navigate: Navigate; par
       return { patient, label, tone: 'copper', nextStep, priority: -1, updated: null }
     })
     .filter((row): row is WorklistRowData => row !== null)
-  const rows = [...acceptedRows, ...seededRows].sort((a, b) => a.priority - b.priority)
+  // Routing consolidation pass, Part I: an incoming referral is simply that
+  // patient's current next step -- a row in the same list, opening the
+  // review in place, never a separate "Needs your review" control.
+  const incomingRows: WorklistRowData[] = (incoming ?? [])
+    .map((referral): WorklistRowData | null => {
+      const patient = DEMO_PATIENTS.find((item) => item.id === referral.patient_id)
+      if (!patient || `${patient.name} ${patient.reason}`.toLowerCase().includes(query.toLowerCase()) === false) return null
+      return { patient, label: 'New referral', tone: 'copper', nextStep: 'Review referral', priority: -3, updated: null, onOpen: () => setReviewing(referral) }
+    })
+    .filter((row): row is WorklistRowData => row !== null)
+  const rows = [...incomingRows, ...acceptedRows, ...seededRows].sort((a, b) => a.priority - b.priority)
   const active = rows.filter((row) => row.priority < CHEN_PREVIOUS_CARE_PRIORITY)
   const previous = rows.filter((row) => row.priority >= CHEN_PREVIOUS_CARE_PRIORITY)
 
   return <main className="page-shell selector-page">
     <header className="selector-header">
-      <div><p className="eyebrow">Specialist patients</p><h1>Patients</h1><p>People in your active care.</p></div>
-      {incoming && incoming.length > 0 && <IncomingRequestsControl
-        referrals={incoming}
-        open={requestsOpen}
-        onToggle={() => setRequestsOpen((value) => !value)}
-        onReview={(referral) => { setRequestsOpen(false); setReviewing(referral) }}
-      />}
+      <div><p className="eyebrow">Specialist patients</p><h1>Patients</h1><p>People in your active care, including new referrals awaiting your review.</p></div>
     </header>
     <label className="patient-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients or clinical problem…" aria-label="Search patients" /></label>
     {error && <div className="error-banner" role="alert">{error}</div>}
@@ -1637,57 +1637,35 @@ export function ChenHomePage({ navigate }: { navigate: Navigate }) {
   }
 
   const greetingName = `Dr. ${CHEN_NAME.split(' ').at(-1)}`
-  const seededRows: WorklistRowData[] = CHEN_SEEDED_PATIENTS
-    .map((patient): WorklistRowData => {
-      const meta = CHEN_PATIENT_STAGE_META[patient.stage]
-      return { patient, label: meta.label, tone: meta.tone, nextStep: meta.nextStep, priority: meta.priority, updated: null }
-    })
-  const actionableRows: WorklistRowData[] = (accepted ?? [])
-    .map((referral): WorklistRowData | null => {
-      const patient = DEMO_PATIENTS.find((item) => item.id === referral.patient_id)
-      if (!patient) return null
-      const state = (referral.id && careState.get(referral.id)) || { encounter: null, handoff: null }
-      const { label, nextStep } = chenPatientRowStatus(referral, state.encounter, state.handoff)
-      // A pending handoff review outranks everything else on the Dashboard
-      // (Part B); once sent (or if there's simply nothing to review yet),
-      // this row is no more urgent than any other accepted patient and
-      // competes for the top-3 slice on equal footing (Part C).
-      return { patient, label, tone: 'copper', nextStep, priority: nextStep === 'Review handoff' ? -2 : -1, updated: null }
-    })
-    .filter((row): row is WorklistRowData => row !== null)
-  const topPatients = [...actionableRows, ...seededRows]
-    .sort((a, b) => a.priority - b.priority)
-    .slice(0, 3)
-  const situationSummary = incoming && incoming.length > 0
-    ? `${incoming.length} incoming referral${incoming.length === 1 ? '' : 's'} ${incoming.length === 1 ? 'needs' : 'need'} your review.`
+  /** Routing consolidation pass, Part I-M: ONE "Patients with next steps"
+   * worklist. The top three are the next steps most deserving Dr. Chen's
+   * attention now (specialistWorklist.ts: physician judgment required,
+   * readiness, time remaining to a modality-specific service target, then
+   * clinician-defined priority) -- not newest-first, not static priority
+   * alone. Agent/staff-resolvable steps never take a top slot. */
+  const steps = incoming === null ? [] : chenNextSteps(incoming, accepted, careState, new Date())
+  const topSteps = topAttention(steps)
+  const physicianSteps = attentionOrder(steps)
+  const agentHandledCount = handledByAgentOrStaff(steps).length
+  const situationSummary = physicianSteps.length > 0
+    ? `${physicianSteps.length} patient${physicianSteps.length === 1 ? ' has a next step' : 's have next steps'} that need${physicianSteps.length === 1 ? 's' : ''} you.`
     : null
+  const openStep = (item: NextStepItem) => {
+    const referral = item.kind === 'review_referral' ? incoming?.find((candidate) => candidate.id === item.referralId) : undefined
+    if (referral) setReviewing(referral)
+    else navigate(`/chen/patients/${item.patientId}`)
+  }
 
   return <main className="page-shell home-page dashboard-page">
     <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1>{situationSummary && <p className="dashboard-situation">{situationSummary}</p>}</header>
     {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
-    <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('chen')} viewAgentPath="/chen/agent?tab=overview" personaId="chen" onTrainingUpdated={() => getAgentOverview('chen').then(setOverview).catch(() => {})} />
-    {/* Routing/triage UX pass, Part Q/R: renamed from "Incoming requests" --
-     * agents triage all incoming specialty demand; this surface only ever
-     * holds the requests where Chen's own decision is actually required. */}
-    {incoming && incoming.length > 0 && <section className="dashboard-needs-you">
-      <div className="home-section-heading"><div><h2>Needs your review</h2></div><span>{incoming.length}</span></div>
-      <div className="lam-list needs-attention">
-        {incoming.map((referral) => <button key={referral.id} className="lam-row" onClick={() => setReviewing(referral)}>
-          <span className="lam-row-mark patient-row-avatar">{patientInitials(referral.patient_id)}</span>
-          <span className="lam-row-main">
-            <strong>{patientName(referral.patient_id)}</strong>
-            <span>{referral.specialty} referral from {PCP_NAME}</span>
-            <small><PriorityChip priority={referral.priority} /><span className="incoming-request-modality">· {referral.modality === 'econsult' ? 'E-consult' : 'Visit'}</span> · {resolvedSummary(resolvedCountFor(referral))}</small>
-          </span>
-          <span className="lam-row-action">Review <b>→</b></span>
-        </button>)}
-      </div>
+    <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('chen')} viewAgentPath="/chen/agent?tab=overview" />
+    {topSteps.length > 0 && <section className="patient-worklist-section">
+      <div className="home-section-heading"><div><h2>Patients with next steps</h2><p className="dashboard-watchlist-sub">Ordered by clinical timing and service targets.</p></div><button className="text-button" onClick={() => navigate('/chen/patients')}>View all patients →</button></div>
+      <NextStepRows items={topSteps} onOpen={openStep} />
+      {agentHandledCount > 0 && <p className="next-step-agent-note">{agentHandledCount} administrative step{agentHandledCount === 1 ? ' is' : 's are'} being handled by your agent and staff.</p>}
     </section>}
     <ChenCapacityCards />
-    {topPatients.length > 0 && <section className="patient-worklist-section">
-      <div className="home-section-heading"><div><h2>Patients</h2></div><button className="text-button" onClick={() => navigate('/chen/patients')}>View all patients →</button></div>
-      <WorklistRows rows={topPatients} navigate={navigate} basePath="/chen/patients" />
-    </section>}
     <div className="dashboard-bottom-row">
       {/* Follow-up pass, Part L-Q: TWO separate activity entries, never
        * conflated -- Lucy/Chen agent coordination around Tonjit's referral
@@ -1780,7 +1758,7 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
       </div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{CHEN_AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
       {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" learningOpportunities={overview.learning_opportunities} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" learningOpportunities={overview.learning_opportunities} focusId={params?.get('focus') ?? null} onLearningChanged={() => getAgentOverview('chen').then(setOverview).catch(() => {})} />}
       {tab === 'test' && <ChatTab personaId="chen" agentName={agentName} navigate={navigate} trainPath={trainingPath('chen')} />}
     </>}
   </main>

@@ -474,10 +474,35 @@ def confirmed_case_rules_override(
 def confirmed_requirement_items(
     workflow_store: WorkflowStore, workspace_id: str, physician_id: str, case_family: str
 ) -> list[ReferralRequirement] | None:
+    """`None` when nothing is confirmed, or when the confirmed preference
+    says nothing about requirements (e.g. a modality-only clarification) --
+    either way the baseline still applies, mirroring
+    case_rules_from_preference()'s own `or fallback` behavior."""
     row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family)
     if row is None:
         return None
-    return preference_requirement_items(_structured_from_row(row))
+    return preference_requirement_items(_structured_from_row(row)) or None
+
+
+def merge_modality_clarification(
+    confirmed_row: dict[str, Any] | None, interpreted: StructuredReferralPreference
+) -> StructuredReferralPreference:
+    """A clarification answer refines ONLY the modality boundary it was
+    asked about (routing consolidation pass, Part Q): everything else is
+    carried over from the currently confirmed preference, so confirming a
+    clarification can never silently drop confirmed requirements or fit
+    guidance. Pure; the result is still only a draft."""
+    if confirmed_row is None:
+        return StructuredReferralPreference(
+            modality=interpreted.modality,
+            modality_notes=interpreted.modality_notes,
+            modality_rules=interpreted.modality_rules,
+        )
+    return _structured_from_row(confirmed_row).model_copy(update={
+        "modality": interpreted.modality,
+        "modality_notes": interpreted.modality_notes,
+        "modality_rules": interpreted.modality_rules,
+    })
 
 
 # Demo-coherence causality fix: once a (physician, case_family) pair has its
@@ -490,9 +515,15 @@ def confirmed_requirement_items(
 # exists to demonstrate. Extend this set, never silently repurpose the
 # fixture dict itself, the next time another physician/case-family pair
 # gets its own confirmed-preference flow.
-SUPERSEDES_STATIC_REQUIREMENTS_FIXTURE: frozenset[tuple[str, str]] = frozenset({
-    (PHYSICIAN_CHEN.id, CHEN_SEED_CASE_FAMILY),
-})
+#
+# Routing consolidation pass, Part O/Y: Dr. Chen's diabetes pair is no
+# longer listed here. Physicians must not have to teach Lamina before it is
+# useful -- his synthetic practice-footprint requirements
+# (REFERRAL_REQUIREMENTS_BY_KEY) are the operational BASELINE until he
+# confirms his own preference, which then supersedes it (confirmed >
+# footprint, never the reverse). The baseline only ever asks for
+# information; it never orders anything or gates care.
+SUPERSEDES_STATIC_REQUIREMENTS_FIXTURE: frozenset[tuple[str, str]] = frozenset()
 
 
 def requirement_override_for_referral(
@@ -532,40 +563,69 @@ def confirmed_modality(
 def clarification_opportunities(
     workflow_store: WorkflowStore, workspace_id: str, physician_id: str
 ) -> list[dict[str, Any]]:
-    """Demo coherence pass, Part H/I/Y: a small, deterministic, demo-scoped
-    detector of ONE genuinely useful representation gap -- never a general
-    learning-ranking engine (Part Y explicitly defers that). Chen's recent
-    diabetes work is valid and safe either way; this only ever says "you
-    haven't yet confirmed X," never "your agent got this wrong." Resolves
-    itself the moment Chen confirms a modality preference (Part K: this is
-    read-only -- confirming happens through the normal referral-preference
-    confirm flow, never automatically from this detector itself).
+    """Clarification cards (routing consolidation pass, Part O/P): raised
+    from the physician's own WORK, not from a question bank, and only for a
+    consequential, unresolved representation boundary -- one whose answer
+    would change how cases are routed. Deterministic and demo-scoped; never
+    a general learning-ranking engine.
 
-    Requires a confirmed baseline preference to already exist (`row is
-    None` below is the common case before Chen has taught his agent
-    anything at all -- there is no gap to surface in a representation that
-    doesn't exist yet; see ensure_seed_preferences' docstring)."""
+    The e-consult boundary qualifies: Dr. Chen's practice history includes
+    focused diabetes medication questions answered by e-consult (an
+    authorized practice-history signal), route fit cannot recommend
+    e-consult without his policy, and nothing he has confirmed says when he
+    prefers it. The card resolves itself once he confirms any modality
+    guidance through the normal interpret -> review -> confirm flow -- this
+    detector only reads; it never confirms anything.
+
+    Every card carries `source`/`source_label`/`reason` so the physician can
+    always see why Lamina is asking. No prior patient is ever named."""
     if physician_id != PHYSICIAN_CHEN.id:
         return []
     row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, CHEN_SEED_CASE_FAMILY)
-    if row is None:
+    if row is not None and _structured_from_row(row).modality != "unspecified":
         return []
-    structured = _structured_from_row(row)
-    if structured.modality != "unspecified":
+    econsult_history = [
+        case for case in PHYSICIAN_CHEN.historical_cases
+        if "econsult" in case.modalities_used and "type_2_diabetes" in case.features
+    ]
+    if not econsult_history:
         return []
     return [
         {
             "id": "chen-econsult-modality-gap",
             "case_family": CHEN_SEED_CASE_FAMILY,
-            "title": "A recent diabetes referral surfaced one useful gap in your agent's representation.",
-            "body": "You haven't yet confirmed when you prefer e-consult for focused diabetes questions.",
+            "source": "recent_work",
+            "source_label": "From recent work",
+            "title": "Your agent has seen focused diabetes medication questions it could route by e-consult.",
+            "body": (
+                "Your agent has seen several focused diabetes medication questions but does not yet "
+                "have confirmed guidance on when you prefer e-consult."
+            ),
+            "reason": (
+                "Your answer decides whether focused questions can be answered by e-consult instead "
+                "of using a visit slot. Your agent will not route anything to e-consult until you confirm."
+            ),
             # Demo UX + semantic polish pass, Part 8: short enough to never
             # wrap into a heavy multi-line modal title.
-            "clarifying_question": "When would you start with an e-consult?",
+            "clarifying_question": "Start focused diabetes medication questions as an e-consult?",
             "supporting_text": (
                 "Your agent knows you prefer in-person care when diabetes continues to worsen "
                 "despite treatment escalation. It does not yet know when e-consult is appropriate."
             ),
+            "response_type": "yes_no_depends",
+            # The natural-language statement each quick answer stands for --
+            # still interpreted, reviewed, and confirmed through the SAME
+            # referral-preference pipeline as anything the physician types.
+            "yes_statement": (
+                "For focused diabetes medication questions, I'm happy to start with an e-consult when "
+                "the recent A1c, current medications, and kidney function are available. If diabetes is "
+                "continuing to worsen despite treatment escalation, I generally prefer an in-person evaluation."
+            ),
+            "no_statement": (
+                "If a diabetes referral needs my input, I generally prefer an in-person evaluation, "
+                "including for focused medication questions."
+            ),
+            "depends_prompt": "What does it depend on?",
         }
     ]
 

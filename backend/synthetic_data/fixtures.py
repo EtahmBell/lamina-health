@@ -234,11 +234,25 @@ PHYSICIAN_CHEN = PhysicianProfile(
         "Accept progressive type 2 diabetes with worsening HbA1c despite primary-care medication escalation."
     ],
     required_workup=["Current HbA1c", "Home glucose log"],
+    # Privacy-preserving practice-history PATTERNS (routing consolidation
+    # pass, Part D) -- structured kinds of cases from his synthetic case mix,
+    # never prior patients, and deliberately without counts.
     historical_cases=[
         HistoricalCase(
             label="Progressive type 2 diabetes despite oral medication escalation",
             features=["type_2_diabetes", "progressive_glycemic_control"],
-        )
+            modalities_used=["in_person"],
+        ),
+        HistoricalCase(
+            label="Treatment intensification after inadequate glycemic control on multiple agents",
+            features=["type_2_diabetes", "progressive_glycemic_control"],
+            modalities_used=["in_person"],
+        ),
+        HistoricalCase(
+            label="Focused diabetes medication-management questions with complete recent workup",
+            features=["type_2_diabetes", "focused_medication_question"],
+            modalities_used=["econsult"],
+        ),
     ],
     insurance_networks=["Lamina Demo PPO", "Bay Demo HMO"],
     location="Oakland, CA",

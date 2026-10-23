@@ -53,3 +53,12 @@ def synthetic_chen_availability(now: datetime | None = None) -> list[Appointment
             )
         )
     return slots
+
+
+def open_slots(slots: list[AppointmentSlot], booked_slot_ids: frozenset[str]) -> list[AppointmentSlot]:
+    """Only slots nobody holds (routing consolidation pass, Part L). Incoming
+    demand -- however high its clinician-confirmed priority -- never
+    cancels, bumps, or reassigns an already-booked patient's appointment.
+    When nothing is open, the caller escalates (alternative route, e-consult
+    if clinically appropriate, or clinic scheduling); it never displaces."""
+    return [slot for slot in slots if slot.slot_id not in booked_slot_ids]

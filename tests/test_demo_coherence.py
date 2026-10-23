@@ -60,16 +60,22 @@ def test_chen_with_confirmed_representation_is_never_told_his_agent_is_untrained
 # ---------------------------------------------------------------- Part H/I/K/Y: learning opportunities
 
 
-def test_no_clarification_opportunity_exists_before_chen_teaches_anything(store: WorkflowStore) -> None:
-    """Demo-coherence causality fix: there is no gap to surface in a
-    representation that doesn't exist yet -- the e-consult clarification
-    must not appear until Chen has actually confirmed a baseline preference
-    for this case family to have a gap in."""
-    ws = "ws-demo-coherence-no-gap-pre-teaching"
-    assert clarification_opportunities(store, ws, CHEN_ID) == []
+def test_the_clarification_arises_from_work_without_any_manual_teaching(store: WorkflowStore) -> None:
+    """Routing consolidation pass, Part O/P/Y: the e-consult boundary is
+    raised from Chen's own practice history (focused medication questions
+    handled by e-consult), not from a question bank and not gated on his
+    having taught anything first -- and it says why Lamina is asking."""
+    ws = "ws-demo-coherence-gap-from-work"
+    opportunities = clarification_opportunities(store, ws, CHEN_ID)
+    assert len(opportunities) == 1
+    card = opportunities[0]
+    assert card["source"] == "recent_work"
+    assert card["source_label"] == "From recent work"
+    assert card["reason"]
+    assert card["response_type"] == "yes_no_depends"
 
 
-def test_the_econsult_gap_surfaces_only_after_chen_confirms_his_baseline_preference(store: WorkflowStore) -> None:
+def test_the_econsult_gap_still_surfaces_after_chen_confirms_his_baseline_preference(store: WorkflowStore) -> None:
     ws = "ws-demo-coherence-gap"
     teach_and_confirm_chen_baseline(store, ws)
     opportunities = clarification_opportunities(store, ws, CHEN_ID)
@@ -120,7 +126,7 @@ def test_overview_exposes_the_learning_opportunity_for_chen_but_not_other_physic
     with TestClient(app) as client:
         ws = _bootstrap(client)
         before_teaching = client.get("/api/workspace/physician/agent-overview?perspective=chen").json()
-        assert before_teaching["learning_opportunities"] == []
+        assert len(before_teaching["learning_opportunities"]) == 1
 
         teach_and_confirm_chen_baseline(store, ws)
         chen_overview = client.get("/api/workspace/physician/agent-overview?perspective=chen").json()
@@ -255,9 +261,10 @@ def test_running_a_synthetic_test_case_never_mutates_representation(store: Workf
 
 def test_reset_tonjit_also_returns_chens_referral_preferences_to_baseline(store: WorkflowStore) -> None:
     """Demo-coherence causality fix (Part 9): reset must restore the TRUE
-    pre-teaching state -- zero confirmed referral preferences, zero
-    clarification opportunities -- never silently recreate a confirmed
-    migration standing in for Chen's own teaching."""
+    pre-teaching state -- zero confirmed referral preferences -- never
+    silently recreate a confirmed migration standing in for Chen's own
+    teaching. The work-derived e-consult clarification is unresolved
+    again (routing consolidation pass, Part O), so the demo replays."""
     with TestClient(app) as client:
         ws = _bootstrap(client)
         teach_and_confirm_chen_baseline(store, ws)
@@ -275,7 +282,5 @@ def test_reset_tonjit_also_returns_chens_referral_preferences_to_baseline(store:
         assert response.json()["removed_chen_referral_preferences"] >= 1
 
         assert store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY) is None
-        # Nothing is auto-recreated -- there is no confirmed baseline left
-        # to have a gap in, so there is no opportunity either, exactly like
-        # a brand-new workspace that has never seen Chen teach anything.
-        assert clarification_opportunities(store, ws, CHEN_ID) == []
+        # Nothing is auto-recreated; the boundary is simply unresolved again.
+        assert len(clarification_opportunities(store, ws, CHEN_ID)) == 1

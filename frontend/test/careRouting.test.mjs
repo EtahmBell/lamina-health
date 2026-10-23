@@ -39,7 +39,7 @@ test('the heading is "Recommended care path" -- never "Care routing", "Patient f
 test('specialty and modality render as two separate lines -- never combined into one opaque phrase', () => {
   const fn = recommendationView()
   assert.match(fn, /<h3>\{consultation\.care_routing\.specialty\}<\/h3>/)
-  assert.match(fn, /<p className="care-routing-modality">\{consultation\.care_routing\.recommended_modality === 'in_person' \? 'In-person evaluation recommended' : 'E-consult recommended'\}<\/p>/)
+  assert.match(fn, /<p className="care-routing-modality">\{consultation\.care_routing\.recommended_modality === 'in_person' \? 'In-person is appropriate for this presentation' : 'E-consult recommended'\}<\/p>/)
 })
 
 /* ------------------------------------------------- Part C: no edit mode */
@@ -259,23 +259,24 @@ test('every physician shown in routing/options is inspectable by clicking their 
 
 /* --------------------------------------------------------------- Part Q */
 
-test('Chen\'s review surface is renamed "Needs your review" -- never "Incoming requests"', () => {
-  const fn = slice(referralSource, 'function IncomingRequestsControl', 'export function ChenPatientsPage')
-  assert.match(fn, /Needs your review <span>\{referrals\.length\}<\/span>/)
-  assert.doesNotMatch(fn, /Incoming requests/)
+test('routing consolidation pass, Part I: a referral to review is a row in Chen\'s one "Patients with next steps" worklist -- no separate "Needs your review"/"Incoming requests" surface remains', () => {
+  assert.doesNotMatch(referralSource, /function IncomingRequestsControl/)
+  assert.doesNotMatch(referralSource, /<h2>Needs your review<\/h2>/)
+  assert.doesNotMatch(referralSource, /Incoming requests <span>/)
 })
 
 test('Chen\'s Needs your review shows the shared priority chip per row, reading the referring physician\'s own selection -- never a numeric acuity score, never something this view changes', () => {
-  const fn = slice(referralSource, 'function IncomingRequestsControl', 'export function ChenPatientsPage')
-  assert.match(fn, /<PriorityChip priority=\{referral\.priority\} \/>/)
+  const fn = slice(referralSource, 'function NextStepRows', 'function chenNextSteps')
+  assert.match(fn, /<PriorityChip priority=\{item\.priority\} \/>/)
 })
 
 /* --------------------------------------------------------------- Part S */
 
-test('the Tonjit row in Needs your review shows exactly ONE status chip (priority), a quiet modality label, and the resolved-item summary -- the redundant "Ready for review" badge is gone', () => {
-  const fn = slice(referralSource, 'return <div className="incoming-requests"', 'export function RequestReviewModal')
+test('the Tonjit next-step row shows exactly ONE status chip (priority), a quiet modality label, and the resolved-item detail -- never a redundant "Ready for review" badge', () => {
+  const fn = slice(referralSource, 'function NextStepRows', 'function chenNextSteps')
   assert.doesNotMatch(fn, /Ready for review/)
-  assert.match(fn, /<span className="incoming-request-modality">· \{referral\.modality === 'econsult' \? 'E-consult' : 'Visit'\}<\/span>/)
+  assert.match(fn, /<span className="incoming-request-modality">· \{item\.modality === 'econsult' \? 'E-consult' : 'Visit'\}<\/span>/)
+  assert.match(fn, /\{item\.detail\}/)
 })
 
 /* --------------------------------------------------------- Part 6 (polish) */

@@ -28,6 +28,8 @@
 html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
 body { background: var(--background); -webkit-font-smoothing: antialiased; }
 button { font: inherit; }
+/* Routing consolidation pass, Part V/W: every form control inherits Lamina typography -- never the browser default font in a textarea/input/select. */
+input, textarea, select { font: inherit; color: inherit; }
 button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 /* Reference weight correction: browsers render bare <strong>/<b> at UA bold (700),
  * materially heavier than the reference's semi-bold (550-600) convention. Any rule
@@ -1374,7 +1376,7 @@ button.lam-row:hover { background: #fff9f1; }
    subtree entirely) -- see ModalPortal.tsx. That structural escape is the
    real fix for charts/content painting above a modal; isolation here is
    just cheap, self-contained belt-and-suspenders on the modal itself. */
-.post-flow-overlay { position: fixed; inset: 0; z-index: 60; isolation: isolate; display: flex; align-items: center; justify-content: center; background: rgb(36 30 24 / 45%); padding: 24px; }
+.post-flow-overlay { position: fixed; inset: 0; z-index: 60; isolation: isolate; display: flex; align-items: center; justify-content: center; background: rgb(36 30 24 / 38%); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); padding: 24px; }
 .post-flow-dialog { position: relative; isolation: isolate; width: min(100%, 560px); max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background-color: var(--surface); padding: 30px 32px; box-shadow: 0 24px 60px rgb(36 52 71 / 18%); }
 .post-flow-close { position: absolute; top: 16px; right: 18px; font-size: 1.1rem; line-height: 1; color: var(--text-secondary); }
 .post-flow-dialog h2 { margin: 4px 0 18px; font-size: 1.1rem; }
@@ -2681,3 +2683,65 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .training-case-context { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-muted, rgb(0 0 0 / 2%)); }
 .training-case-context p:last-child { margin: 4px 0 0; }
 .referral-preference-modal-dialog { width: min(100%, 640px); max-height: 86vh; overflow-y: auto; }
+
+/* ======================================== Routing + learning consolidation pass */
+/* "Why this match": four short, provenance-backed lines on the match card. */
+.why-this-match { margin: 14px 0 4px; }
+.why-this-match .section-label { margin: 0 0 8px; }
+.why-this-match-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.why-this-match-list li { display: grid; gap: 2px; }
+.why-this-match-list strong { color: var(--clinical); font-size: .72rem; font-weight: 600; }
+.why-this-match-list span { color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.match-evidence-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 12px; }
+.match-evidence-list li { display: grid; gap: 2px; border-top: 1px solid rgb(222 216 206 / 60%); padding-top: 10px; }
+.match-evidence-list li:first-child { border-top: 0; padding-top: 0; }
+.match-evidence-category { color: var(--clinical); font-size: .66rem; font-weight: 600; letter-spacing: .02em; }
+.match-evidence-summary { color: var(--text-primary); font-size: .7rem; line-height: 1.5; }
+.match-evidence-source { color: var(--text-secondary); font-size: .6rem; }
+
+/* Specialist "Patients with next steps". */
+.next-step-row .lam-row-main { display: grid; gap: 3px; }
+.next-step-meta { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.next-step-detail { color: var(--text-secondary); font-size: .64rem; line-height: 1.45; }
+.next-step-agent-note { margin: 10px 4px 0; color: var(--text-secondary); font-size: .64rem; }
+
+/* Train: learning control center. */
+.train-section { margin-top: 26px; }
+.train-section > .section-label { margin-bottom: 10px; }
+.clarification-card-list { display: grid; gap: 12px; }
+.clarification-card { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 12px; background: var(--surface); padding: 18px 20px; transition: box-shadow 400ms ease; }
+.clarification-card.focused { box-shadow: 0 0 0 3px rgb(182 106 69 / 18%); }
+.clarification-card h3 { margin: 6px 0 8px; font-size: 1.02rem; }
+.clarification-card p { margin: 0 0 10px; color: var(--text-secondary); font-size: .72rem; line-height: 1.55; }
+.clarification-source { display: inline-block; color: var(--accent-hover); font-size: .58rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.clarification-reason { border-left: 2px solid var(--border); padding-left: 10px; }
+.clarification-reason strong { display: block; margin-bottom: 2px; color: var(--clinical); font-size: .62rem; font-weight: 600; }
+.train-teach-section .referral-preference-section { margin: 0; padding: 0; border: 0; }
+.train-teach-section .referral-preference-section h2 { margin: 0 0 4px; color: var(--text-secondary); font-family: var(--font-ui); font-size: .6rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.lamina-textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fffdf9; padding: 10px 12px; color: var(--text-primary); font: inherit; font-size: .74rem; line-height: 1.5; resize: vertical; }
+.lamina-textarea::placeholder { color: #a5a69f; }
+.lamina-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgb(184 92 50 / 10%); }
+.referral-pref-example { margin: 0 0 10px; color: var(--text-secondary); font-size: .64rem; font-style: italic; line-height: 1.5; }
+.referral-pref-example span { margin-right: 6px; font-style: normal; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: .56rem; }
+.train-internal-tools { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 12px; color: var(--text-secondary); font-size: .64rem; }
+.train-internal-tools summary { cursor: pointer; font-weight: 600; }
+.train-internal-tools p { margin: 8px 0; }
+.train-history-row { grid-template-columns: 150px 80px 1fr; }
+
+/* Clarification modal: stays over the current page; the dialog itself is fully opaque. */
+.clarification-dialog { width: min(100%, 540px); opacity: 1; }
+.clarification-dialog .clarification-question { margin: 6px 0 10px; font-size: 1.15rem; }
+.clarification-body { margin: 0 0 12px; color: var(--text-secondary); font-size: .72rem; line-height: 1.55; }
+.clarification-dialog .clarification-reason { margin: 0 0 16px; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+.clarification-answers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 10px; }
+.clarification-answer { min-height: 40px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--clinical); cursor: pointer; font-size: .74rem; font-weight: 500; }
+.clarification-answer:hover:not(:disabled) { border-color: var(--mineral-subtle); }
+.clarification-answer.selected { border-color: var(--mineral-deep); background: var(--mineral-surface); color: var(--mineral-deep); }
+.clarification-add-context { margin: 2px 0 8px; }
+.clarification-context { display: grid; gap: 6px; margin: 6px 0 10px; }
+.clarification-context > span { color: var(--clinical); font-size: .68rem; font-weight: 600; }
+.clarification-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
+.clarification-actions .muted-note { margin: 0; font-size: .62rem; }
+.chat-correction { display: grid; gap: 8px; margin-top: 8px; }
+.chat-correction .button-secondary { justify-self: start; }
+@media (max-width: 600px) { .train-history-row { grid-template-columns: 1fr; } .clarification-answers { grid-template-columns: 1fr 1fr 1fr; } }

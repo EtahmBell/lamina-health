@@ -7,7 +7,7 @@ from backend.models import (
     PhysicianProfile,
 )
 
-from .care_routing import build_candidate_routes, build_care_routing
+from .care_routing import build_candidate_routes, build_care_routing, build_physician_fits
 from .conversation import build_consultation_messages
 from .physician_agent import evaluate_physician
 
@@ -91,6 +91,10 @@ def consult_network(
         alternatives=alternatives,
         consultation=evaluations,
         disclaimer="Synthetic demonstration only. This record supports referral orchestration and is not medical advice or a quality ranking.",
-        care_routing=build_care_routing(context, confirmed_modality),
-        candidate_routes=build_candidate_routes(context, confirmed_modality),
+        # Routing consolidation pass, Part B: three distinct computations --
+        # patient need, physician-case fit, and route fit -- each a pure
+        # function of the same confirmed inputs.
+        care_routing=build_care_routing(context, confirmed_modality, overrides),
+        candidate_routes=build_candidate_routes(context, confirmed_modality, overrides),
+        physician_fits=build_physician_fits(context, confirmed_modality, overrides, interest_titles),
     )

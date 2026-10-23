@@ -19,15 +19,17 @@ const slice = (source, from, to) => source.slice(source.indexOf(from), source.in
 
 // ---------------------------------------------------------------- Part 5: example, not stored data
 
-test('the source-text textarea starts empty and only ever shows the demo text as a placeholder, never a pre-populated value', () => {
+test('the source-text textarea starts empty and is truly empty again after confirm/discard; placeholder is just "Type here…"', () => {
   assert.match(referralPreferences, /const \[sourceText, setSourceText\] = useState\(''\)/)
   assert.match(referralPreferences, /value=\{sourceText\}/)
   assert.doesNotMatch(referralPreferences, /value=\{sourceText \|\| placeholder/)
-  assert.match(referralPreferences, /placeholder=\{\s*placeholder \?\? \(/)
+  assert.match(referralPreferences, /placeholder = TEACHING_PLACEHOLDER/)
+  assert.match(referralPreferences, /setDraft\(null\); setSourceText\(''\)/)
 })
 
-test('a small "Example" label sits above the textarea, so it reads as illustrative, never as already-stored input', () => {
-  assert.match(referralPreferences, /referral-pref-example-label">Example</)
+test('the example is quiet helper text below the textarea, never the textarea\'s value or its placeholder', () => {
+  assert.match(referralPreferences, /\{example && <p className="referral-pref-example"><span>Example<\/span>“\{example\}”<\/p>\}/)
+  assert.match(referralPreferences, /export const TEACHING_PLACEHOLDER = 'Type here…'/)
 })
 
 // ---------------------------------------------------------------- Part 6: confirmation moment
@@ -60,8 +62,9 @@ test('the interpretation review UI renders each modality rule as its own labeled
   assert.match(readOnly, /: rules\.modality !== 'unspecified' && <div className="referral-pref-group">/)
 })
 
-test('EMPTY_RULES includes modality_rules so a fresh draft never crashes on the new field', () => {
-  assert.match(referralPreferences, /modality_rules: \[\],?\s*\}/)
+test('a fresh draft is rendered from the backend\'s own structured rules (including modality_rules), never a client-side empty template', () => {
+  assert.match(referralPreferences, /useState<StructuredReferralPreference>\(draft\.structured_rules\)/)
+  assert.match(referralPreferences, /rules\.modality_rules\.length > 0/)
 })
 
 // ---------------------------------------------------------------- Part 3: Before referral sections never duplicate

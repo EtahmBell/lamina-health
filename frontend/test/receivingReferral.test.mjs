@@ -5,6 +5,7 @@ import { derivePhases, restorePhase } from '../src/referralPhases.ts'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const referralSource = readFileSync(new URL('../src/Referral.tsx', import.meta.url), 'utf8')
+const worklist = readFileSync(new URL('../src/specialistWorklist.ts', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 
@@ -112,29 +113,29 @@ test('a real accept-referral API call and a physician-scoped referrals query exi
 
 /* --------------------------------------------------------- Incoming requests */
 
-test('IncomingRequestsControl renders the real referral count, never a hardcoded number', () => {
-  const fn = slice(referralSource, 'function IncomingRequestsControl', 'export function RequestReviewModal')
-  assert.match(fn, /Needs your review <span>\{referrals\.length\}<\/span>/)
-  assert.doesNotMatch(fn, />\s*1\s*<\/span>/, 'the count must come from referrals.length, not a literal 1')
+test('the separate incoming-requests control is gone -- a referral to review is a next-step row in the one worklist', () => {
+  assert.doesNotMatch(referralSource, /function IncomingRequestsControl|<IncomingRequestsControl/)
 })
 
-test('the incoming popover shows patient name, the real referring physician (Lucy), specialty, priority, and a real resolved-count summary -- no redundant second status badge (routing/triage UX pass, Part S)', () => {
-  const fn = slice(referralSource, 'function IncomingRequestsControl', 'export function RequestReviewModal')
-  assert.match(fn, /patientName\(referral\.patient_id\)/)
-  assert.match(fn, /\{referral\.specialty\} referral from \{PCP_NAME\}/)
-  assert.match(fn, /<PriorityChip priority=\{referral\.priority\} \/>/)
-  assert.doesNotMatch(fn, /Ready for review/, 'the redundant status badge was removed -- the whole section is already called Needs your review')
-  assert.match(fn, /resolvedSummary\(resolvedCountFor\(referral\)\)/)
-  assert.match(fn, /onClick=\{\(\) => onReview\(referral\)\}>Review/)
+test('a referral next step shows patient name, the real referring physician (Lucy), specialty, priority, modality, and a real resolved-count detail', () => {
+  const rows = slice(referralSource, 'function NextStepRows', 'function chenNextSteps')
+  assert.match(rows, /patientName\(item\.patientId\)/)
+  assert.match(rows, /<PriorityChip priority=\{item\.priority\} \/>/)
+  assert.doesNotMatch(rows, /Ready for review/)
+  assert.match(rows, /onClick=\{\(\) => onOpen\(item\)\}/)
+  const builder = slice(referralSource, 'function chenNextSteps', 'export function RequestReviewModal')
+  assert.match(builder, /referralReviewStep\(referral, now, PCP_NAME\)/)
+  assert.match(worklist, /detail: `\$\{referral\.specialty\} referral from \$\{referringName\}/)
+  assert.match(worklist, /event\.event_type === 'information_attached'/)
 })
 
 test('resolvedCountFor derives the resolved-item count from real information_attached events, never a hardcoded "1"', () => {
   assert.match(referralSource, /const resolvedCountFor = \(referral: Referral\) =>\s*\n\s*referral\.coordination_events\.filter\(\(event\) => event\.event_type === 'information_attached'\)\.length/)
 })
 
-test('ChenPatientsPage hides the Incoming requests control entirely when there are zero submitted referrals -- no noisy empty card', () => {
+test('ChenPatientsPage only adds referral rows for real submitted referrals -- no noisy empty card', () => {
   const fn = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
-  assert.match(fn, /\{incoming && incoming\.length > 0 && <IncomingRequestsControl/)
+  assert.match(fn, /const incomingRows: WorklistRowData\[\] = \(incoming \?\? \[\]\)/)
 })
 
 test('ChenPatientsPage queries submitted referrals and ALL of Chen\'s own referrals from the real backend, scoped to Dr. Chen, never a frontend fixture', () => {

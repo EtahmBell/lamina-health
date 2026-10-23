@@ -201,25 +201,18 @@ def test_draft_preference_never_affects_requirements_only_confirming_does(store:
     assert not any(item.key == "recent_renal_function" for item in requirements_after)
 
 
-def test_requirement_override_for_referral_never_falls_back_to_the_static_fixture_for_chen_diabetes(
+def test_requirement_override_for_referral_uses_the_practice_footprint_until_chen_confirms(
     store: WorkflowStore,
 ) -> None:
-    """Unit-level proof of requirement_override_for_referral (the one real
-    call site backend/api/referrals.py uses to create a live referral):
-    with no confirmed preference at all, it returns an explicit `[]` for
-    Dr. Chen's diabetes case family -- never `None` (which would let
-    requirements_for()'s own static-fixture fallback silently substitute
-    REFERRAL_REQUIREMENTS_BY_KEY's recent_hba1c/current_medications/
-    recent_renal_function items). requirements_for() ITSELF is deliberately
-    left with its original, unconditional fallback -- see its own
-    docstring -- so this guard lives only at this one call site, never
-    inside that shared pure function."""
-    ws = "ws-requirement-override-guard"
-    assert requirement_override_for_referral(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY) == []
-    # An unrelated physician with no confirmed-preference system of their
-    # own is completely unaffected (Part J's own invariant, preserved) --
-    # None, not [], so requirements_for()'s own fixture fallback still
-    # applies for them exactly as it always has.
+    """Routing consolidation pass, Part O/Y: physicians must not have to
+    teach Lamina before it is useful. With nothing confirmed, the override
+    is `None`, so requirements_for()'s practice-footprint baseline applies;
+    once Chen confirms his own preference, that confirmed preference is
+    what's used instead (confirmed > footprint)."""
+    ws = "ws-requirement-override-baseline"
+    assert requirement_override_for_referral(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY) is None
+    baseline = requirements_for(CHEN_ID, CHEN_SEED_CASE_FAMILY, None)
+    assert any(item.key == "recent_renal_function" for item in baseline)
     assert requirement_override_for_referral(store, ws, "physician-jung", "ckd_hypertension") is None
 
     teach_and_confirm_chen_baseline(store, ws)
@@ -227,44 +220,36 @@ def test_requirement_override_for_referral_never_falls_back_to_the_static_fixtur
     assert any(item.key == "recent_hba1c" for item in confirmed_items)
 
 
-def test_the_causal_demo_story_requirements_become_operational_only_after_chen_confirms(
+def test_a_confirmed_preference_supersedes_the_footprint_baseline_on_a_real_referral(
     store: WorkflowStore,
 ) -> None:
-    """The most important test in this file: a referral to Dr. Chen created
-    BEFORE he has taught/confirmed anything must not carry his specific
-    diabetes receiving requirements -- those requirements must only appear
-    once he actually teaches and confirms his own NLP referral preference,
-    proving the "physician teaches -> representation changes -> agent
-    behavior changes" causal story is real, not an auto-migrated fixture
-    pretending to be it."""
+    """Before Chen teaches anything, a referral carries his practice-
+    footprint requirements (so the renal-function coordination works with
+    no training). After he confirms a preference that drops renal function,
+    a fresh referral reflects HIS confirmed preference, never the footprint
+    -- physician teaching still changes agent behavior."""
     with TestClient(app) as client:
         _bootstrap(client)
-
-        # RESET -> evaluate/create a Tonjit referral BEFORE Chen teaches anything.
         before_referral = client.post(
             f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
         ).json()
         before_keys = {item["key"] for item in before_referral["receiving_requirements"]}
-        assert "recent_hba1c" not in before_keys
-        assert "current_medications" not in before_keys
-        assert "recent_renal_function" not in before_keys
+        assert {"recent_hba1c", "current_medications", "recent_renal_function"} <= before_keys
 
-        # Clear that referral (same reset the real demo uses between rehearsals)
-        # so a fresh, equivalent referral can be created for the same pair.
         client.post("/api/workspace/demo/reset/tonjit")
-
-        # TEACH + CONFIRM Chen's real NLP referral preference.
-        client.post(_preference_url("/interpret"), json={"source_text": SOURCE_TEXT})
+        client.post(_preference_url("/interpret"), json={
+            "source_text": "For diabetes referrals, I usually need a recent A1c and current diabetes medications."
+        })
         draft = client.get(_preference_url()).json()[0]
         confirmed = client.post(_preference_url(f"/{draft['id']}/confirm")).json()
-        assert confirmed["source"] == "physician_authored_nlp"  # never "migrated_fixture"
+        assert confirmed["source"] == "physician_authored_nlp"
 
-        # Evaluate/create a fresh, equivalent referral AFTER confirming.
         after_referral = client.post(
             f"/api/patients/{TONJIT_PATIENT_ID}/referrals", json={"receiving_physician_id": CHEN_ID}
         ).json()
     after_keys = {item["key"] for item in after_referral["receiving_requirements"]}
-    assert {"recent_hba1c", "current_medications", "recent_renal_function"} <= after_keys
+    assert "recent_hba1c" in after_keys
+    assert "recent_renal_function" not in after_keys
 
 
 def test_confirming_a_new_preference_supersedes_the_prior_confirmed_one(store: WorkflowStore) -> None:
@@ -375,22 +360,21 @@ def test_tonjit_default_behavior_is_unchanged_by_seeding_chens_confirmed_prefere
 # ---------------------------------------------------------------- Part Q: Practice Representation
 
 
-def test_practice_representation_shows_the_generic_baseline_before_chen_teaches_anything(
+def test_practice_representation_shows_the_footprint_baseline_before_chen_teaches_anything(
     store: WorkflowStore,
 ) -> None:
-    """Demo-coherence causality fix: before Chen has confirmed any referral
-    preference, Practice Representation must show only his generic,
-    always-true profile baseline (specialty-level accepts_signals/
-    required_workup) -- never the specific NLP-structured requirements
-    (recent HbA1c with a freshness window, current medications, recent
-    renal function) as if he had already confirmed them."""
+    """Routing consolidation pass, Part O/Y: before Chen confirms anything,
+    Practice Representation shows exactly the practice-footprint
+    requirements his agent actually applies (required vs helpful) -- never
+    a confirmed-preference provenance he never gave."""
     with TestClient(app) as client:
         _bootstrap(client)
         representation = client.get("/api/workspace/physician/agent-representation?perspective=chen").json()
     sections = representation["sections"]
-    assert "Recent HbA1c" not in sections["referral_requirements"]
-    assert not any("current medication" in item.casefold() for item in sections["referral_requirements"])
-    assert not any("renal function" in item.casefold() for item in sections["referral_requirements"])
+    assert "Recent HbA1c" in sections["referral_requirements"]
+    assert any("renal function" in item.casefold() for item in sections["referral_requirements"])
+    assert not any("glucose" in item.casefold() for item in sections["referral_requirements"])
+    assert any("glucose" in item.casefold() for item in sections["preferred_workup"])
     assert sections["modality_preference"] is None
     assert sections["referral_preference_provenance"] == []
 

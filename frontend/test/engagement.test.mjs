@@ -128,17 +128,13 @@ test('question source labeling matches the four documented categories', () => {
 
 /* ------------------------------------------------------------ home agent card */
 
-test('the agent banner (post-8B rename of the Your Agent card) never shows a referral score, ranking, or quality metric, and maps its CTA from canonical state/action only', () => {
-  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
+test('the agent banner never shows a referral score, ranking, or quality metric, and its CTA reflects passive learning plus optional control -- never mandatory training', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', '/** INTERNAL DEMO TOOLING ONLY')
   assert.doesNotMatch(card, /score|ranking|quality/i)
   assert.match(card, /Make your agent more like you\./)
-  assert.doesNotMatch(card, /unfinished training/i)
-  const mapping = slice(engagement, 'function agentBannerPlan', 'export function HomeAgentCard')
-  assert.match(mapping, /training\.action === 'continue_setup'/)
-  assert.match(mapping, /training\.action === 'resume_training' && activeId/)
-  assert.match(mapping, /training\.action === 'start_training' && activeId/)
-  assert.match(mapping, /training\.action === 'review_training' && reviewId/)
-  assert.doesNotMatch(mapping, /\d+ of \d+/, 'never a finite "x of y" completion count for the open-ended representation')
+  assert.match(card, /Your agent learns from your work and the guidance you confirm\./)
+  assert.doesNotMatch(card, /Continue setup|Answer \$\{|quick questions|\d+ of \d+/i)
+  assert.doesNotMatch(engagement, /function agentBannerPlan/)
 })
 
 test('the quick-training modal is its own session track, isolated from the full My Agent -> Train flow, except when it is genuinely serving the one-time initialization sequence', () => {
@@ -153,18 +149,21 @@ test('the quick modal reads its progress from the backend-computed answered_coun
   assert.match(modal, /setAnsweredCount\(response\.answered_count \?\? answeredCount \+ 1\)/, 'per-answer progress comes from the backend response, not a local index increment')
 })
 
-test('HomeAgentCard threads the real viewing persona into the quick-training modal, never a hardcoded identity', () => {
-  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
-  assert.match(card, /<QuickTrainingModal personaId=\{personaId\}/)
-  assert.doesNotMatch(card, /<QuickTrainingModal personaId="lucy"/, 'the specialist Dashboard must not open a quick session for the PCP persona')
+test('routing consolidation pass, Part X: the Dashboard agent CTA never launches the legacy question sequence -- a real pending clarification opens Train focused on it, otherwise View My Agent', () => {
+  const card = slice(engagement, 'export function HomeAgentCard', '/** INTERNAL DEMO TOOLING ONLY')
+  assert.doesNotMatch(card, /QuickTrainingModal|setTrainingOpen/)
+  assert.match(card, /const pendingClarification = overview\.learning_opportunities\[0\] \?\? null/)
+  assert.match(card, /1 clarification needs your input\./)
+  assert.match(card, /navigate\(clarificationFocusPath\(trainPath, pendingClarification\.id\)\)\}>Review/)
+  assert.match(card, /navigate\(viewAgentPath\)\}>View My Agent/)
 })
 
-test('Home (both personas) renders the Your Agent card from AgentOverview, with a quiet link to My Agent', () => {
+test('Home (both personas) renders the Your Agent card from AgentOverview', () => {
   assert.match(homePageFn(), /getAgentOverview\('lucy'\)\.then\(setOverview\)/)
-  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" matchesReady=\{currentWork\.length\} records=\{records\} personaId="lucy" onTrainingUpdated=\{\(\) => getAgentOverview\('lucy'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\} \/>/)
+  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" records=\{records\} \/>/)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.match(specialistHome, /getAgentOverview\('iain'\)\.then\(setOverview\)/)
-  assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" personaId="iain" onTrainingUpdated=\{\(\) => getAgentOverview\('iain'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\} \/>/)
+  assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" \/>/)
 })
 
 test('the full Network Pulse feed section is gone from Home; only the compact 2-item highlight preview remains', () => {
@@ -848,73 +847,26 @@ test('Needs you (post-8B rename of Current Work) has a calm, compact empty state
   assert.match(specialistHome, /Nothing needs you right now\./)
 })
 
-test('genuinely caught up (no training plan, case interests present, profile complete) renders no CTA button at all — just quiet up-to-date support text', () => {
+test('with nothing pending, the card says how the agent learns and offers View My Agent -- never "Training is up to date" homework framing', () => {
   const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
-  assert.match(card, /\{prompt \? prompt\.body : 'Training is up to date\.'\}/)
-  assert.match(card, /\{prompt && prompt\.kind === 'quick-training' && <button/, 'the quick-training CTA only renders for that prompt kind')
-  assert.match(card, /\{prompt && prompt\.kind === 'navigate' && <button/, 'the navigate CTA only renders for that prompt kind')
+  assert.doesNotMatch(card, /Training is up to date/)
+  assert.match(card, /\{pendingClarification\s*\n?\s*\?/)
 })
 
-test('the improvement prompt is selected by a deterministic, state-driven helper -- training plan, then case interests, then profile completeness, then genuinely caught up', () => {
-  assert.match(engagement, /export function selectImprovementPrompt\(/)
-  assert.match(engagement, /if \(plan\) \{/)
-  assert.match(engagement, /const caseInterestCount = profile\.interests\.filter\(\(item\) => item\.interest_type === 'case_interest'\)\.length/)
-  assert.match(engagement, /if \(caseInterestCount === 0\) \{/)
-  assert.match(engagement, /if \(profile\.completeness\.completed_section_count < profile\.completeness\.total_section_count\) \{/)
-})
 
-test('the improvement-prompt type is an open union, not an enum hardcoded to exactly three prompt kinds', () => {
-  assert.match(engagement, /export type ImprovementPromptKind = 'quick-training' \| 'navigate'/)
-  assert.match(engagement, /export type ImprovementPrompt = \{/)
-})
 
-test('the referral-preferences prompt sits between case interests and profile completeness, only while eligible and unconfirmed, and never adds a second banner', () => {
-  const fn = slice(engagement, 'export function selectImprovementPrompt', 'type DigestTile')
-  assert.match(fn, /if \(referralPreferences\?\.eligible && referralPreferences\.confirmedCount === 0\) \{/)
-  assert.match(fn, /ctaLabel: 'Add referral preferences'/)
-  const caseInterestsIndex = fn.indexOf("key: 'case-interests'")
-  const referralPrefIndex = fn.indexOf("key: 'referral-preferences'")
-  const profileCompleteIndex = fn.indexOf("key: 'complete-profile'")
-  assert.ok(caseInterestsIndex < referralPrefIndex && referralPrefIndex < profileCompleteIndex)
-})
 
-test('"Add case interests" navigates directly to the existing Profile -> Clinical & Case Interests editing experience, never a new Dashboard editor', () => {
-  assert.match(engagement, /href: `\$\{profilePath\}\?tab=interests`/)
-  assert.doesNotMatch(engagement, /CaseInterestEditor|DashboardInterestEditor/i)
-})
 
-test('HomeAgentCard reuses the existing getProfessionalProfile fetch (threaded through a reusable loadProfile, re-run on training completion too) and reuses professionalProfilePath for the profile-completeness/case-interests destinations', () => {
-  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
-  assert.match(card, /const loadProfile = \(\) => \{ getProfessionalProfile\(personaId\)\.then\(setProfile\)\.catch\(\(\) => \{\}\) \}/)
-  assert.match(card, /useEffect\(loadProfile, \[personaId\]\)/)
-  assert.match(card, /const profilePath = personaId === 'owner' \? '\/me\/profile' : professionalProfilePath\(personaId\)/)
-})
 
 /* --------------------------------------------------------------- Part F-I */
 
-test('root cause fix: completing quick training now invalidates/refetches both the card\'s own profile AND the parent-owned overview/training state -- onFinished no longer just closes the modal', () => {
-  const card = slice(engagement, 'export function HomeAgentCard', 'const FEED_TYPE_LABELS')
-  assert.match(card, /onFinished=\{\(\) => \{ setTrainingOpen\(false\); loadProfile\(\); onTrainingUpdated\?\.\(\) \}\}/)
-  assert.match(card, /onTrainingUpdated\?: \(\) => void/)
-})
 
-test('every HomeAgentCard caller (Lucy, Chen, Iain) passes onTrainingUpdated, refetching its own overview the moment training completes -- the parent actually receives the completion event', () => {
-  assert.match(app, /onTrainingUpdated=\{\(\) => getAgentOverview\('lucy'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\}/)
+test('every HomeAgentCard caller (Lucy, Chen, Iain) uses the same props -- no persona-specific training callback remains', () => {
   const referralSource = readFileSync(new URL('../src/Referral.tsx', import.meta.url), 'utf8')
-  assert.match(referralSource, /onTrainingUpdated=\{\(\) => getAgentOverview\('chen'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\}/)
-  assert.match(specialist, /onTrainingUpdated=\{\(\) => getAgentOverview\('iain'\)\.then\(setOverview\)\.catch\(\(\) => \{\}\)\}/)
+  for (const source of [app, referralSource, specialist]) assert.doesNotMatch(source, /onTrainingUpdated=/)
 })
 
-test('the improvement prompt is never randomly rotated -- selectImprovementPrompt is a pure deterministic function of real state, with no Math.random/rotation-index anywhere in it', () => {
-  const fn = engagement.slice(engagement.indexOf('export function selectImprovementPrompt'), engagement.indexOf('type DigestTile'))
-  assert.doesNotMatch(fn, /Math\.random|rotationIndex|% prompts\.length|Date\.now\(\) %/)
-})
 
-test('the resume/continue-setup state uses plan.label/plan.support directly (dynamic, already computed by agentBannerPlan) rather than one hardcoded "Answer 3 quick questions" string for every training action', () => {
-  const fn = engagement.slice(engagement.indexOf('export function selectImprovementPrompt'), engagement.indexOf('if (!profile) return null'))
-  assert.match(fn, /ctaLabel: plan\.label/)
-  assert.match(fn, /body: plan\.support/)
-})
 
 test('Lucy and Iain Home share the same dashboard architecture: Your Agent card + compact activity + optional network highlights, no separate specialist design', () => {
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
@@ -1079,24 +1031,23 @@ test('Overview has exactly one training-reminder surface, with no separate dupli
   assert.doesNotMatch(panel, /<InitializationCard/, 'Overview no longer renders the separate setup card alongside the reminder')
 })
 
-test('the training reminder adapts its headline to real initialization state -- setup-oriented when incomplete, ongoing-teaching when initialized -- never fabricating counts, with no separate eyebrow label', () => {
+test('the Overview reminder describes passive learning plus optional control -- never a count, never setup homework', () => {
   const reminder = slice(engagement, 'function TrainingReminderGlyph', 'function AgentNetworkActivity')
-  assert.match(reminder, /const plan = agentBannerPlan\(overview\.training, trainPath\)/, 'reuses the real, state-driven CTA logic rather than inventing new copy')
-  assert.match(reminder, /overview\.initialization\.initialized/)
-  assert.match(reminder, /Build your agent's starting picture of your practice\./)
-  assert.match(reminder, /Your agent keeps learning how you make referral and care decisions\./)
-  assert.match(reminder, /\{plan\.support\}/, 'the supporting line is the real plan.support string, not a hardcoded fabricated count')
-  assert.doesNotMatch(reminder, /<p className="eyebrow">/, 'no separate eyebrow focal point -- the headline alone carries the framing')
+  assert.match(reminder, /Your agent keeps learning from your work\./)
+  assert.match(reminder, /It asks only when your judgment adds something it can't safely infer\./)
+  assert.match(reminder, /navigate\(agentTrainTabPath\(trainPath\)\)\}>Open Train/)
+  assert.doesNotMatch(reminder, /Build your agent's starting picture|plan\.support|\d+ of \d+/)
+  assert.doesNotMatch(reminder, /<p className="eyebrow">/)
 })
 
 test('the training reminder is a single copper mini-hero card with a radiating-rings glyph, adapted from (not copying) the Dashboard banner technique', () => {
   const reminder = slice(engagement, 'function TrainingReminderGlyph', 'function AgentNetworkActivity')
   assert.match(reminder, /<TrainingReminderGlyph \/>/)
-  assert.equal((reminder.match(/<section className="training-reminder">/g) ?? []).length, 2, 'one single surface per render path (up-to-date vs plan), never a split side box')
-  assert.doesNotMatch(reminder, /className="training-reminder-action"/, 'no second bordered sub-panel like the Dashboard banner\'s .agent-banner-action')
-  assert.match(styles, /\.training-reminder \{[^}]*border: 1px solid var\(--agent-copper-soft\)/, 'the semantic My Agent copper token, not a bespoke rgb() literal or the Dashboard banner\'s mineral/sage tones')
-  assert.doesNotMatch(styles, /\.training-reminder \{[^}]*var\(--sage/, 'never the Dashboard banner\'s sage/mineral background')
-  assert.match(styles, /\.training-reminder-ring \{[^}]*border: 1px solid var\(--agent-copper\)/, 'copper rings via the semantic token, adapted from .agent-banner-ring\'s mineral rings')
+  assert.equal((reminder.match(/<section className="training-reminder">/g) ?? []).length, 1, 'one single surface, never a split side box')
+  assert.doesNotMatch(reminder, /className="training-reminder-action"/)
+  assert.match(styles, /\.training-reminder \{[^}]*border: 1px solid var\(--agent-copper-soft\)/)
+  assert.doesNotMatch(styles, /\.training-reminder \{[^}]*var\(--sage/)
+  assert.match(styles, /\.training-reminder-ring \{[^}]*border: 1px solid var\(--agent-copper\)/)
 })
 
 test('My Agent has its own semantic copper token system, separate from the global mineral/accent tokens', () => {

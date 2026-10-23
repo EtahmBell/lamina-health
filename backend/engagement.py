@@ -1634,18 +1634,32 @@ def base_practice_representation(persona_id: str) -> dict:
     # every physician gets); only THIS representation surface omits it
     # until there's a real confirmed preference to show instead.
     from backend.referral_preferences import SUPERSEDES_STATIC_REQUIREMENTS_FIXTURE
+    from backend.referrals.requirements import REFERRAL_REQUIREMENTS_BY_KEY
 
     case_family = next(
         (family for (pid, family) in SUPERSEDES_STATIC_REQUIREMENTS_FIXTURE if pid == physician_id), None
     )
     receiving_requirements_known = case_family is None
+    # Routing consolidation pass, Part O/Y: where a physician's practice
+    # footprint defines operational receiving requirements, show exactly
+    # those (required vs helpful) -- the representation must match what
+    # the agent actually applies before any confirmed preference.
+    footprint = next(
+        (items for (pid, _family), items in REFERRAL_REQUIREMENTS_BY_KEY.items() if pid == physician_id), None
+    )
+    if footprint is not None and receiving_requirements_known:
+        required_items = [item.label for item in footprint if item.required]
+        helpful_items = [item.label for item in footprint if not item.required]
+    else:
+        required_items = profile.required_workup if receiving_requirements_known else []
+        helpful_items = profile.required_workup if receiving_requirements_known else []
     return {
         "specialty": profile.specialty,
         "clinical_focus": profile.focus_areas,
         "good_fit": profile.accepts_signals,
         "not_a_fit": [],
-        "referral_requirements": profile.required_workup if receiving_requirements_known else [],
-        "preferred_workup": profile.required_workup if receiving_requirements_known else [],
+        "referral_requirements": required_items,
+        "preferred_workup": helpful_items,
         "access_facts": [f"Approximately {profile.availability_days} days"],
         "explicit_rules": profile.explicit_rules,
         "modality_preference": None,
