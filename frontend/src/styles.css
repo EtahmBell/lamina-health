@@ -29,7 +29,8 @@ html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
 body { background: var(--background); -webkit-font-smoothing: antialiased; }
 button { font: inherit; }
 /* Routing consolidation pass, Part V/W: every form control inherits Lamina typography -- never the browser default font in a textarea/input/select. */
-input, textarea, select { font: inherit; color: inherit; }
+input, textarea, select { font: inherit; font-family: var(--font-ui); color: inherit; }
+input::placeholder, textarea::placeholder { font: inherit; color: #a5a69f; }
 button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 /* Reference weight correction: browsers render bare <strong>/<b> at UA bold (700),
  * materially heavier than the reference's semi-bold (550-600) convention. Any rule
@@ -2745,3 +2746,22 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .chat-correction { display: grid; gap: 8px; margin-top: 8px; }
 .chat-correction .button-secondary { justify-self: start; }
 @media (max-width: 600px) { .train-history-row { grid-template-columns: 1fr; } .clarification-answers { grid-template-columns: 1fr 1fr 1fr; } }
+
+/* ======================================================== Final demo hardening */
+/* Train: compact "From your recent work" summary; Review opens the modal. */
+.clarification-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 12px; background: var(--surface); padding: 14px 18px; }
+.clarification-summary p { margin: 0; color: var(--clinical); font-size: .78rem; font-weight: 500; }
+/* Clarifications modal: the existing card treatment, inside a fully opaque dialog. */
+.clarification-modal-heading { margin: 0 0 4px; }
+.clarification-pager { margin: 0 0 10px; color: var(--text-secondary); font-size: .62rem; }
+.clarification-card.in-modal { box-shadow: none; }
+.clarification-source-detail { font-style: italic; }
+.clarification-pager-actions { display: flex; justify-content: space-between; margin-top: 12px; }
+/* Explicit app typography for the targeted form surfaces (Ask the Network,
+   Train, clarification, Test, referral preferences) and their buttons. */
+.ask-network-card textarea, .ask-network-card select, .ask-network-card button,
+.train-tab-v2 textarea, .train-tab-v2 input, .train-tab-v2 button,
+.clarification-dialog textarea, .clarification-dialog button,
+.chat-tab-grid input, .chat-tab-grid textarea, .chat-tab-grid button,
+.referral-preference-section textarea, .referral-preference-section select, .referral-preference-section button { font-family: var(--font-ui); }
+.ask-network-card textarea, .lamina-textarea, .chat-composer input { font-size: .74rem; line-height: 1.5; }

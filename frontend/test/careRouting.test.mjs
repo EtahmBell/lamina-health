@@ -390,7 +390,7 @@ test('the finding-an-appointment phases show the same shared priority chip and t
 /* --------------------------------------------------------------- Part X */
 
 test('existing Tonjit flow is preserved -- createReferral/preflight/duplicate-guard call sites are unchanged beyond the new trailing priority/modality args', () => {
-  assert.match(referralSource, /const created = await createReferral\(patientId, receivingPhysicianId, priority, modality\)/)
+  assert.match(referralSource, /const created = await createReferralOnce\(patientId, receivingPhysicianId, priority, modality\)/)
   assert.match(referralSource, /const preflighted = await runReferralPreflight\(created\.id as number\)/)
 })
 

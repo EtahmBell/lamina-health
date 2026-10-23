@@ -724,12 +724,12 @@ test('the parent card toggles .handoff-wash from onWashChange, and resets it on 
   assert.match(app, /const \[washActive, setWashActive\] = useState\(false\)/)
   assert.match(app, /\$\{washActive \? 'handoff-wash' : ''\}/)
   assert.match(app, /onWashChange=\{setWashActive\}/)
-  assert.match(referralSource, /onWashChange\?\.\(false\)\s*\n\s*\/\/ eslint-disable-next-line react-hooks\/exhaustive-deps\s*\n\s*\}, \[\]\)/)
+  assert.match(referralSource, /onWashChange\?\.\(false\)\s*\n\s*\}\s*\n\s*\/\/ eslint-disable-next-line react-hooks\/exhaustive-deps\s*\n\s*\}, \[\]\)/)
 })
 
 test('no backend calls happen anywhere in start() other than the single create+preflight pair before the phase loop begins', () => {
   const startSource = referralSource.slice(referralSource.indexOf('const start = async'), referralSource.indexOf('if (status === \'error\')'))
-  const createCalls = startSource.match(/createReferral\(/g) ?? []
+  const createCalls = startSource.match(/createReferralOnce\(/g) ?? []
   const preflightCalls = startSource.match(/runReferralPreflight\(/g) ?? []
   assert.equal(createCalls.length, 1)
   assert.equal(preflightCalls.length, 1)

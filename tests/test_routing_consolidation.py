@@ -40,7 +40,7 @@ from backend.referrals import accept_referral, build_referral, find_scheduling_o
 from backend.referrals.scheduling import open_slots, synthetic_chen_availability
 from backend.synthetic_data import PATIENTS, PHYSICIAN_CHEN, PHYSICIANS_BY_PATIENT, TONJIT_PATIENT_ID, resolve_case_rules
 from backend.workflow import WorkflowStore
-from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
+from tests._chen_demo_fixture import document_chen_consultation, teach_and_confirm_chen_baseline
 
 CHEN_ID = PHYSICIAN_CHEN.id
 MAYA_ID = "physician-ramanathan"
@@ -317,6 +317,7 @@ def test_renal_coordination_works_with_no_manual_training(store: WorkflowStore) 
 
 
 def test_clarification_cards_carry_source_and_reason(store: WorkflowStore) -> None:
+    document_chen_consultation(store, "ws-card")
     card = clarification_opportunities(store, "ws-card", CHEN_ID)[0]
     for key in ("source", "source_label", "reason", "yes_statement", "no_statement", "depends_prompt"):
         assert card[key]
@@ -328,6 +329,7 @@ def test_a_clarification_draft_is_not_operational_until_confirmed_and_keeps_requ
     with TestClient(app) as client:
         ws = _bootstrap(client)
         teach_and_confirm_chen_baseline(store, ws)
+        document_chen_consultation(store, ws)
         card = clarification_opportunities(store, ws, CHEN_ID)[0]
         draft = client.post(f"{url}/interpret", json={"source_text": card["yes_statement"], "clarifies": "modality"}).json()
         assert draft["status"] == "draft"
@@ -350,6 +352,7 @@ def test_a_modality_only_clarification_never_drops_the_requirement_baseline(stor
     url = "/api/workspace/physician/chen/referral-preferences"
     with TestClient(app) as client:
         ws = _bootstrap(client)
+        document_chen_consultation(store, ws)
         card = clarification_opportunities(store, ws, CHEN_ID)[0]
         draft = client.post(f"{url}/interpret", json={"source_text": card["no_statement"], "clarifies": "modality"}).json()
         client.post(f"{url}/{draft['id']}/confirm")

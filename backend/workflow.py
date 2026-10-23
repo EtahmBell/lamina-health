@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import json
 import secrets
 import sqlite3
@@ -875,6 +877,51 @@ class WorkflowStore:
             )
         return final
 
+    def create_referral_unless_active(
+        self,
+        workspace_id: str,
+        referral: Referral,
+        find_active: Callable[[list[Referral]], Referral | None],
+    ) -> tuple[Referral, bool]:
+        """Atomic get-or-create (demo hardening pass, Part J): the "is there
+        already an active referral for this patient + receiving physician?"
+        check and the insert run inside ONE `BEGIN IMMEDIATE` transaction,
+        which takes SQLite's write lock up front -- so two concurrent
+        equivalent requests serialize, and the second sees the first's row
+        and returns it instead of inserting a duplicate. Returns
+        (referral, created)."""
+        now = self._now()
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT referral_json FROM referrals WHERE workspace_id=? AND patient_id=? ORDER BY id",
+                (workspace_id, referral.patient_id),
+            ).fetchall()
+            active = find_active([Referral.model_validate_json(row["referral_json"]) for row in rows])
+            if active is not None:
+                db.commit()
+                return active, False
+            base = referral.model_copy(update={"created_at": now, "updated_at": now})
+            cursor = db.execute(
+                """INSERT INTO referrals(
+                     workspace_id, patient_id, status, referral_json, created_at, updated_at
+                   ) VALUES (?, ?, ?, '', ?, ?)""",
+                (workspace_id, base.patient_id, base.status.value, now, now),
+            )
+            final = base.model_copy(update={"id": int(cursor.lastrowid)})
+            db.execute(
+                "UPDATE referrals SET referral_json=? WHERE workspace_id=? AND id=?",
+                (final.model_dump_json(), workspace_id, final.id),
+            )
+            db.commit()
+            return final, True
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def update_referral(self, workspace_id: str, referral: Referral) -> Referral:
         if referral.id is None:
             raise ValueError("update_referral requires a persisted referral (id is None)")
@@ -986,6 +1033,18 @@ class WorkflowStore:
                 (workspace_id, referral_id),
             ).fetchone()
         return ConsultationEncounter.model_validate_json(row["encounter_json"]) if row else None
+
+    def list_encounters_for_physician(self, workspace_id: str, physician_id: str) -> list[ConsultationEncounter]:
+        """Every encounter this physician documented in this workspace --
+        the authoritative "recent work" evidence that clarification
+        eligibility reads (demo hardening pass, Part B)."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT encounter_json FROM consultation_encounters WHERE workspace_id=? ORDER BY id ASC",
+                (workspace_id,),
+            ).fetchall()
+        encounters = [ConsultationEncounter.model_validate_json(row["encounter_json"]) for row in rows]
+        return [encounter for encounter in encounters if encounter.physician_id == physician_id]
 
     def list_encounters_for_patient(self, workspace_id: str, patient_id: str) -> list[ConsultationEncounter]:
         """Every documented encounter for this patient, chronologically

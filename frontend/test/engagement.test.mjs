@@ -132,7 +132,8 @@ test('the agent banner never shows a referral score, ranking, or quality metric,
   const card = slice(engagement, 'export function HomeAgentCard', '/** INTERNAL DEMO TOOLING ONLY')
   assert.doesNotMatch(card, /score|ranking|quality/i)
   assert.match(card, /Make your agent more like you\./)
-  assert.match(card, /Your agent learns from your work and the guidance you confirm\./)
+  assert.match(card, /<h3>Your agent<\/h3>/)
+  assert.match(card, /Your agent is learning from your work\./)
   assert.doesNotMatch(card, /Continue setup|Answer \$\{|quick questions|\d+ of \d+/i)
   assert.doesNotMatch(engagement, /function agentBannerPlan/)
 })
@@ -149,11 +150,11 @@ test('the quick modal reads its progress from the backend-computed answered_coun
   assert.match(modal, /setAnsweredCount\(response\.answered_count \?\? answeredCount \+ 1\)/, 'per-answer progress comes from the backend response, not a local index increment')
 })
 
-test('routing consolidation pass, Part X: the Dashboard agent CTA never launches the legacy question sequence -- a real pending clarification opens Train focused on it, otherwise View My Agent', () => {
+test('the Dashboard agent CTA never launches the legacy question sequence -- a real pending clarification goes straight to the clarification modal, otherwise View My Agent', () => {
   const card = slice(engagement, 'export function HomeAgentCard', '/** INTERNAL DEMO TOOLING ONLY')
   assert.doesNotMatch(card, /QuickTrainingModal|setTrainingOpen/)
   assert.match(card, /const pendingClarification = overview\.learning_opportunities\[0\] \?\? null/)
-  assert.match(card, /1 clarification needs your input\./)
+  assert.match(card, /\{clarificationCountLabel\(overview\.learning_opportunities\.length, true\)\}\./)
   assert.match(card, /navigate\(clarificationFocusPath\(trainPath, pendingClarification\.id\)\)\}>Review/)
   assert.match(card, /navigate\(viewAgentPath\)\}>View My Agent/)
 })

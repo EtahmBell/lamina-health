@@ -29,7 +29,10 @@ _CHEN_LOCATION = "Oakland, CA"
 # -- 10:30 tagged as UTC rendered several hours earlier in US local time).
 # No real timezone handling is introduced; this simply stops mislabeling a
 # clinic-local time as UTC.
-_CHEN_OFFSETS = ((15, 15, 30), (17, 14, 0), (20, 9, 0))
+# Demo hardening pass, Part K: aligned with Chen's displayed visit access
+# (PHYSICIAN_ACCESS_PROFILES: "Approximately 10 days") -- the first offered
+# slot is ~10 days out, never only 15-20 day options after "~10 days".
+_CHEN_OFFSETS = ((10, 15, 30), (12, 14, 0), (15, 9, 0))
 
 
 def synthetic_chen_availability(now: datetime | None = None) -> list[AppointmentSlot]:

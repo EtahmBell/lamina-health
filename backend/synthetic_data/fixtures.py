@@ -256,7 +256,8 @@ PHYSICIAN_CHEN = PhysicianProfile(
     ],
     insurance_networks=["Lamina Demo PPO", "Bay Demo HMO"],
     location="Oakland, CA",
-    availability_days=15,
+    # Demo hardening pass, Part K: matches his visit access profile (~10 days).
+    availability_days=10,
 )
 
 PHYSICIANS = [

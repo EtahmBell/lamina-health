@@ -53,9 +53,9 @@ test('the training modal backdrop dims the page, never the modal content itself 
 
 // ---------------------------------------------------------------- three teaching modes
 
-test('Train is a learning control center -- Needs your input, Tell your agent something, Learning history -- never "Question 1 of 10" or quick-question homework', () => {
+test('Train is a learning control center -- From your recent work, Tell your agent something, Learning history -- never "Question 1 of 10" or quick-question homework', () => {
   const fn = slice(engagement, 'export function TrainTab', 'export function ChatTab')
-  const order = ['>Needs your input<', 'heading="Tell your agent something"', '>Learning history<']
+  const order = ['>From your recent work<', 'heading="Tell your agent something"', '>Learning history<']
   const positions = order.map((marker) => fn.indexOf(marker))
   assert.ok(positions.every((position) => position >= 0), 'all three sections present')
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'in this order')
@@ -70,23 +70,25 @@ test('"Tell your agent something" reuses ReferralPreferenceSection -- the existi
   assert.match(fn, /canTeach && personaId && <section className="train-section train-teach-section">/)
 })
 
-test('Needs your input lists only real clarification opportunities from the backend, each with its source and reason -- never a fabricated backlog', () => {
+test('From your recent work summarizes only real unresolved clarifications -- a count and Review, never the full card inline, never a fabricated backlog', () => {
   const fn = slice(engagement, 'export function TrainTab', 'export function ChatTab')
   assert.match(fn, /const open = learningOpportunities\.filter/)
-  assert.match(fn, /\{item\.source_label \?\? 'From recent work'\}/)
-  assert.match(fn, /\{item\.reason && <p className="clarification-reason"><strong>Why Lamina is asking<\/strong>\{item\.reason\}<\/p>\}/)
+  assert.match(fn, /<p>\{clarificationCountLabel\(open\.length\)\}<\/p>/)
+  assert.match(fn, /onClick=\{\(\) => setModalItems\(open\)\}>Review/)
+  assert.doesNotMatch(fn, /className=\{`clarification-card /)
   assert.doesNotMatch(fn, /14 signals|11 resolved|fabricat/i)
 })
 
-test('answering a clarification opens the ClarificationModal over the current page, framed with the real question -- nothing is operational until the physician confirms', () => {
+test('Review opens the ClarificationModal over the current page with the real question -- nothing is operational until the physician confirms', () => {
   const fn = slice(engagement, 'export function TrainTab', 'export function ChatTab')
-  assert.match(fn, /<ClarificationModal\s+personaId=\{personaId\}\s+opportunity=\{clarifying\}/)
+  assert.match(fn, /<ClarificationModal\s+personaId=\{personaId\}\s+opportunities=\{modalItems\}/)
   const modal = slice(engagement, 'function ClarificationModal', 'const PREFERENCE_HISTORY_LABELS')
   assert.match(modal, /<ModalPortal>/)
   assert.match(modal, /\{opportunity\.clarifying_question\}/)
-  assert.match(modal, /interpretReferralPreference\(personaId, composed, 'modality'\)/)
-  assert.doesNotMatch(modal, /confirmReferralPreference/)
-  assert.match(modal, /<PreferenceDraftReview/)
+  const flow = slice(engagement, 'function ClarificationAnswerFlow', 'function ClarificationModal')
+  assert.match(flow, /interpretReferralPreference\(personaId, composed, 'modality'\)/)
+  assert.doesNotMatch(flow, /confirmReferralPreference/)
+  assert.match(flow, /<PreferenceDraftReview/)
 })
 
 // ---------------------------------------------------------------- "what your agent learned this week"
@@ -96,7 +98,7 @@ test('the learned-this-week card sits above the practice-representation detail, 
   const learnedIndex = fn.indexOf('What your agent learned this week')
   const detailIndex = fn.indexOf('How your agent currently represents your practice')
   assert.ok(learnedIndex > -1 && detailIndex > -1 && learnedIndex < detailIndex)
-  assert.match(fn, /One clarification needs your input/)
+  assert.match(fn, /\{clarificationCountLabel\(overview\.learning_opportunities\.length\)\}/)
   assert.doesNotMatch(fn, /[Aa]gent [Ss]core/)
 })
 

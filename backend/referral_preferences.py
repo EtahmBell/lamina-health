@@ -569,6 +569,10 @@ def clarification_opportunities(
     would change how cases are routed. Deterministic and demo-scoped; never
     a general learning-ranking engine.
 
+    Eligible only after Chen has documented a completed consultation (the
+    authoritative "recent work" event); never at referral creation,
+    acceptance, or scheduling.
+
     The e-consult boundary qualifies: Dr. Chen's practice history includes
     focused diabetes medication questions answered by e-consult (an
     authorized practice-history signal), route fit cannot recommend
@@ -590,12 +594,23 @@ def clarification_opportunities(
     ]
     if not econsult_history:
         return []
+    # Demo hardening pass, Part B: the boundary only becomes a question once
+    # Chen's own recent work raises it -- a documented Endocrinology
+    # consultation he completed. A referral being created, accepted, or
+    # scheduled is NOT work that reveals anything about his e-consult
+    # practice, so none of those make this eligible.
+    if not any(
+        encounter.status == "completed" and encounter.specialty == "Endocrinology"
+        for encounter in workflow_store.list_encounters_for_physician(workspace_id, physician_id)
+    ):
+        return []
     return [
         {
             "id": "chen-econsult-modality-gap",
             "case_family": CHEN_SEED_CASE_FAMILY,
             "source": "recent_work",
             "source_label": "From recent work",
+            "source_detail": "Raised after a diabetes consultation you documented.",
             "title": "Your agent has seen focused diabetes medication questions it could route by e-consult.",
             "body": (
                 "Your agent has seen several focused diabetes medication questions but does not yet "

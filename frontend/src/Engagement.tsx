@@ -115,6 +115,11 @@ export const settingsPath = '/settings'
  * consolidation pass, Part T/X: Dashboard and Overview "Review" CTAs land
  * here, never in a generic question sequence). */
 export const agentTrainTabPath = (trainPath: string) => `${trainPath.replace(/\/train$/, '')}?tab=train`
+/** One phrasing of the real unresolved-clarification count, shared by the
+ * Dashboard, Overview, and Train (demo hardening pass, Part E/I) -- never a
+ * fabricated number. */
+export const clarificationCountLabel = (count: number, fromRecentWork = false) =>
+  `${count} clarification${count === 1 ? '' : 's'}${fromRecentWork ? ' from recent work' : ''} need${count === 1 ? 's' : ''} your input`
 export const clarificationFocusPath = (trainPath: string, clarificationId: string) => `${agentTrainTabPath(trainPath)}&focus=${encodeURIComponent(clarificationId)}`
 
 /** Shared by both physician-profile shells (the NPPES directory page and the
@@ -252,14 +257,15 @@ export function HomeAgentCard({ overview, navigate, trainPath, viewAgentPath, re
       </div>
     </div>
     <div className="agent-banner-action">
-      <h3>Make your agent more like you.</h3>
       {pendingClarification
         ? <>
-          <p className="agent-banner-support">1 clarification needs your input.</p>
+          <h3>Make your agent more like you.</h3>
+          <p className="agent-banner-support">{clarificationCountLabel(overview.learning_opportunities.length, true)}.</p>
           <button className="button-primary" onClick={() => navigate(clarificationFocusPath(trainPath, pendingClarification.id))}>Review <span>→</span></button>
         </>
         : <>
-          <p className="agent-banner-support">Your agent learns from your work and the guidance you confirm.</p>
+          <h3>Your agent</h3>
+          <p className="agent-banner-support">Your agent is learning from your work.</p>
           <button className="button-primary" onClick={() => navigate(viewAgentPath)}>View My Agent <span>→</span></button>
         </>}
     </div>
@@ -1841,7 +1847,7 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
       {opportunity
         ? <>
           <p>Most new signals were resolved using your existing representation.</p>
-          <p className="agent-learned-count">One clarification needs your input</p>
+          <p className="agent-learned-count">{clarificationCountLabel(overview.learning_opportunities.length)}</p>
           <button className="button-primary" onClick={() => navigate(clarificationFocusPath(trainPath, opportunity.id))}>Review <span>→</span></button>
         </>
         : <p className="agent-empty-note">Nothing needs your input right now.</p>}
@@ -2070,30 +2076,22 @@ const canTeachInNaturalLanguage = (personaId?: PhysicianIdentity) => personaId =
 
 type ClarificationAnswer = 'yes' | 'no' | 'depends'
 
-/** A clarification card's answer flow (routing consolidation pass, Part
- * Q): Yes / No / Depends for speed, natural language for nuance. Yes/No
- * may add optional context; Depends opens "What does it depend on?". The
- * answer goes through the SAME interpret -> proposed learning -> confirm
- * pipeline as anything typed (never a second NLP system), and nothing is
- * operational until the physician confirms. Stays over the current page:
- * X, backdrop, and Escape all dismiss whenever nothing is in flight. */
-function ClarificationModal({ personaId, opportunity, navigate, onClose, onConfirmed }: {
-  personaId: PhysicianIdentity; opportunity: LearningOpportunity; navigate: Navigate
-  onClose: () => void; onConfirmed: () => void
+/** The answer flow for ONE clarification (routing consolidation pass,
+ * Part Q): Yes / No / Depends for speed, natural language for nuance.
+ * Yes/No may add optional context; Depends opens "What does it depend
+ * on?". The answer goes through the SAME interpret -> proposed learning ->
+ * confirm pipeline as anything typed (never a second NLP system), and
+ * nothing is operational until the physician confirms. */
+function ClarificationAnswerFlow({ personaId, opportunity, busy, setBusy, onConfirmed }: {
+  personaId: PhysicianIdentity; opportunity: LearningOpportunity
+  busy: boolean; setBusy: (value: boolean) => void; onConfirmed: () => void
 }) {
   const quickAnswers = Boolean(opportunity.yes_statement && opportunity.no_statement)
   const [answer, setAnswer] = useState<ClarificationAnswer | null>(quickAnswers ? null : 'depends')
   const [contextOpen, setContextOpen] = useState(!quickAnswers)
   const [context, setContext] = useState('')
   const [draft, setDraft] = useState<PhysicianReferralPreference | null>(null)
-  const [done, setDone] = useState(false)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, busy])
   const depends = answer === 'depends'
   const statement = answer === 'yes' ? opportunity.yes_statement : answer === 'no' ? opportunity.no_statement : null
   const composed = depends ? context.trim() : [statement, context.trim()].filter(Boolean).join(' ')
@@ -2109,42 +2107,80 @@ function ClarificationModal({ personaId, opportunity, navigate, onClose, onConfi
       setBusy(false)
     }
   }
+  if (draft) return <PreferenceDraftReview personaId={personaId} draft={draft} onDraftChange={setDraft} onConfirmed={onConfirmed} onDiscarded={() => setDraft(null)} />
+  return <>
+    <p className="clarification-body">{opportunity.supporting_text}</p>
+    {quickAnswers && <div className="clarification-answers" role="group" aria-label="Your answer">
+      {(['yes', 'no', 'depends'] as const).map((value) => <button key={value} type="button" aria-pressed={answer === value} className={`clarification-answer ${answer === value ? 'selected' : ''}`} disabled={busy} onClick={() => choose(value)}>{value === 'yes' ? 'Yes' : value === 'no' ? 'No' : 'Depends'}</button>)}
+    </div>}
+    {answer && !depends && !contextOpen && <button type="button" className="text-button clarification-add-context" onClick={() => setContextOpen(true)}>Add context <span>→</span></button>}
+    {contextOpen && answer && <label className="clarification-context">
+      <span>{depends ? (opportunity.depends_prompt ?? 'What does it depend on?') : 'Add context (optional)'}</span>
+      <textarea className="lamina-textarea" rows={3} value={context} placeholder={TEACHING_PLACEHOLDER} onChange={(event) => setContext(event.target.value)} autoFocus />
+    </label>}
+    {error && <p className="demo-reset-error" role="alert">{error}</p>}
+    <div className="clarification-actions">
+      <button type="button" className="button-primary" disabled={!answer || !composed || busy} onClick={() => void interpret()}>{busy ? 'Interpreting…' : 'Continue'} <span>→</span></button>
+      <p className="muted-note">Nothing changes until you confirm the proposed learning.</p>
+    </div>
+  </>
+}
+
+/** Clarifications from recent work, in ONE overlay over the current page
+ * (demo hardening pass, Part D): each clarification is shown with the
+ * existing card treatment ("i of N", previous/next when there is more than
+ * one); Answer swaps that card into the answer flow in place. X, Escape,
+ * and backdrop click all close whenever nothing is in flight. Never a
+ * route change, never the legacy training screen. */
+function ClarificationModal({ personaId, opportunities, initialId, navigate, onClose, onConfirmed }: {
+  personaId: PhysicianIdentity; opportunities: LearningOpportunity[]; initialId?: string | null; navigate: Navigate
+  onClose: () => void; onConfirmed: (id: string) => void
+}) {
+  const [index, setIndex] = useState(() => Math.max(0, opportunities.findIndex((item) => item.id === initialId)))
+  const [answering, setAnswering] = useState(false)
+  const [confirmedId, setConfirmedId] = useState<string | null>(null)
+  const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, busy])
+  const unanswered = opportunities.filter((item) => !confirmedIds.has(item.id))
+  const opportunity = unanswered[Math.min(index, unanswered.length - 1)]
+  const go = (next: number) => { setIndex(next); setAnswering(false) }
   return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
-    <div className="post-flow-dialog clarification-dialog" role="dialog" aria-modal="true" aria-label={opportunity.clarifying_question}>
+    <div className="post-flow-dialog clarification-dialog" role="dialog" aria-modal="true" aria-label="Clarifications from your recent work">
       <button className="text-button post-flow-close" onClick={onClose} disabled={busy} aria-label="Close">×</button>
-      {done
+      <p className="eyebrow clarification-modal-heading">Clarifications from your recent work</p>
+      {confirmedId
         ? <div className="referral-pref-success" role="status">
           <p className="profile-save-note">✓ Added to how your agent represents your practice.</p>
           <div className="referral-pref-success-actions">
+            {unanswered.length > 0 && <button type="button" className="text-button" onClick={() => { setConfirmedId(null); go(0) }}>Next clarification →</button>}
             <button type="button" className="text-button" onClick={() => navigate(agentTrainTabPath(trainingPath(personaId)).replace('?tab=train', '?tab=overview'))}>View your agent →</button>
             <button type="button" className="button-primary" onClick={onClose}>Done</button>
           </div>
         </div>
-        : draft
-          ? <>
-            <p className="clarification-source">{opportunity.source_label ?? 'From recent work'}</p>
-            <h2 className="clarification-question">{opportunity.clarifying_question}</h2>
-            <PreferenceDraftReview personaId={personaId} draft={draft} onDraftChange={setDraft} onConfirmed={() => { setDone(true); onConfirmed() }} onDiscarded={() => setDraft(null)} />
-          </>
-          : <>
-            <p className="clarification-source">{opportunity.source_label ?? 'From recent work'}</p>
-            <h2 className="clarification-question">{opportunity.clarifying_question}</h2>
-            <p className="clarification-body">{opportunity.supporting_text}</p>
-            {opportunity.reason && <p className="clarification-reason"><strong>Why Lamina is asking</strong>{opportunity.reason}</p>}
-            {quickAnswers && <div className="clarification-answers" role="group" aria-label="Your answer">
-              {(['yes', 'no', 'depends'] as const).map((value) => <button key={value} type="button" aria-pressed={answer === value} className={`clarification-answer ${answer === value ? 'selected' : ''}`} disabled={busy} onClick={() => choose(value)}>{value === 'yes' ? 'Yes' : value === 'no' ? 'No' : 'Depends'}</button>)}
-            </div>}
-            {answer && !depends && !contextOpen && <button type="button" className="text-button clarification-add-context" onClick={() => setContextOpen(true)}>Add context <span>→</span></button>}
-            {contextOpen && answer && <label className="clarification-context">
-              <span>{depends ? (opportunity.depends_prompt ?? 'What does it depend on?') : 'Add context (optional)'}</span>
-              <textarea className="lamina-textarea" rows={3} value={context} placeholder={TEACHING_PLACEHOLDER} onChange={(event) => setContext(event.target.value)} autoFocus />
-            </label>}
-            {error && <p className="demo-reset-error" role="alert">{error}</p>}
-            <div className="clarification-actions">
-              <button type="button" className="button-primary" disabled={!answer || !composed || busy} onClick={() => void interpret()}>{busy ? 'Interpreting…' : 'Continue'} <span>→</span></button>
-              <p className="muted-note">Nothing changes until you confirm the proposed learning.</p>
-            </div>
-          </>}
+        : opportunity && <>
+          <p className="clarification-pager">{Math.min(index, unanswered.length - 1) + 1} of {unanswered.length}</p>
+          <div className="clarification-card in-modal">
+            <span className="clarification-source">{opportunity.source_label ?? 'From recent work'}</span>
+            <h3>{opportunity.clarifying_question}</h3>
+            {answering
+              ? <ClarificationAnswerFlow key={opportunity.id} personaId={personaId} opportunity={opportunity} busy={busy} setBusy={setBusy} onConfirmed={() => { setConfirmedId(opportunity.id); setConfirmedIds((prev) => new Set(prev).add(opportunity.id)); onConfirmed(opportunity.id) }} />
+              : <>
+                <p>{opportunity.body}</p>
+                {opportunity.source_detail && <p className="clarification-source-detail">{opportunity.source_detail}</p>}
+                {opportunity.reason && <p className="clarification-reason"><strong>Why Lamina is asking</strong>{opportunity.reason}</p>}
+                <button className="button-primary" onClick={() => setAnswering(true)}>Answer <span>→</span></button>
+              </>}
+          </div>
+          {unanswered.length > 1 && <div className="clarification-pager-actions">
+            <button type="button" className="text-button" disabled={busy || index === 0} onClick={() => go(index - 1)}>← Previous</button>
+            <button type="button" className="text-button" disabled={busy || index >= unanswered.length - 1} onClick={() => go(index + 1)}>Next →</button>
+          </div>}
+        </>}
     </div>
   </div></ModalPortal>
 }
@@ -2167,20 +2203,24 @@ export function TrainTab({ trainProjection, navigate, trainPath, personaId, lear
   focusId?: string | null
   onLearningChanged?: () => void
 }) {
-  const [clarifying, setClarifying] = useState<LearningOpportunity | null>(null)
+  // Demo hardening pass, Part C/D/E: a focus id (from the Dashboard or
+  // Overview Review CTA) opens the clarifications modal immediately.
+  // The modal's items are snapshotted when it opens, so confirming the last
+  // clarification still shows its success state instead of unmounting.
+  const [modalItems, setModalItems] = useState<LearningOpportunity[] | null>(null)
+  const focusHandled = useRef(false)
   const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set())
   const [toolingOpen, setToolingOpen] = useState(false)
   const [preferenceHistory, setPreferenceHistory] = useState<PhysicianReferralPreference[]>([])
-  const focusRef = useRef<HTMLDivElement>(null)
   const canTeach = canTeachInNaturalLanguage(personaId)
   const loadHistory = () => { if (personaId && canTeach) listReferralPreferences(personaId).then(setPreferenceHistory).catch(() => {}) }
   useEffect(loadHistory, [personaId]) // eslint-disable-line react-hooks/exhaustive-deps
   const open = learningOpportunities.filter((item) => !resolvedIds.has(item.id))
   useEffect(() => {
-    if (!focusId || !focusRef.current) return
-    focusRef.current.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' })
-    focusRef.current.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
-  }, [focusId, open.length])
+    if (!focusId || focusHandled.current || open.length === 0 || !canTeach) return
+    focusHandled.current = true
+    setModalItems(open)
+  }, [focusId, open.length, canTeach]) // eslint-disable-line react-hooks/exhaustive-deps
   const learningChanged = () => { loadHistory(); onLearningChanged?.() }
   const history = preferenceHistory.filter((item) => item.status !== 'draft')
   const sessions = trainProjection?.recent_training_history ?? []
@@ -2188,17 +2228,14 @@ export function TrainTab({ trainProjection, navigate, trainPath, personaId, lear
     <h2>Train</h2>
     <p className="panel-intro">Your agent learns from your work. It only asks when your judgment adds something it can't safely infer, and you can always teach it directly.</p>
 
-    <section className="train-section" aria-labelledby="train-needs-input">
-      <p className="section-label" id="train-needs-input">Needs your input</p>
+    <section className="train-section train-recent-work" aria-labelledby="train-recent-work">
+      <p className="section-label" id="train-recent-work">From your recent work</p>
       {open.length === 0
         ? <p className="agent-empty-note">Nothing needs your input right now.</p>
-        : <div className="clarification-card-list">{open.map((item) => <div key={item.id} ref={item.id === focusId ? focusRef : undefined} className={`clarification-card ${item.id === focusId ? 'focused' : ''}`}>
-          <span className="clarification-source">{item.source_label ?? 'From recent work'}</span>
-          <h3>{item.clarifying_question}</h3>
-          <p>{item.body}</p>
-          {item.reason && <p className="clarification-reason"><strong>Why Lamina is asking</strong>{item.reason}</p>}
-          <button className="button-primary" disabled={!canTeach} onClick={() => setClarifying(item)}>Answer <span>→</span></button>
-        </div>)}</div>}
+        : <div className="clarification-summary">
+          <p>{clarificationCountLabel(open.length)}</p>
+          <button className="button-primary" disabled={!canTeach} onClick={() => setModalItems(open)}>Review <span>→</span></button>
+        </div>}
     </section>
 
     {canTeach && personaId && <section className="train-section train-teach-section">
@@ -2238,12 +2275,13 @@ export function TrainTab({ trainProjection, navigate, trainPath, personaId, lear
     </details>}
 
     {toolingOpen && personaId && <QuickTrainingModal personaId={personaId} onClose={() => setToolingOpen(false)} onFinished={() => setToolingOpen(false)} initializationNeeded={trainProjection?.state === 'initialization_needed'} />}
-    {clarifying && personaId && <ClarificationModal
+    {modalItems && personaId && <ClarificationModal
       personaId={personaId}
-      opportunity={clarifying}
+      opportunities={modalItems}
+      initialId={focusId}
       navigate={navigate}
-      onClose={() => setClarifying(null)}
-      onConfirmed={() => { setResolvedIds((prev) => new Set(prev).add(clarifying.id)); learningChanged() }}
+      onClose={() => setModalItems(null)}
+      onConfirmed={(id) => { setResolvedIds((prev) => new Set(prev).add(id)); learningChanged() }}
     />}
   </div>
 }

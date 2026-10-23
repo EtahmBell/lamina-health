@@ -511,7 +511,7 @@ export type LearningOpportunity = {
    * natural-language meaning of each quick answer -- still interpreted and
    * confirmed through the same referral-preference pipeline. */
   source?: 'recent_work' | 'recent_referrals' | 'profile'
-  source_label?: string; reason?: string
+  source_label?: string; source_detail?: string; reason?: string
   response_type?: 'yes_no_depends'
   yes_statement?: string; no_statement?: string; depends_prompt?: string
 }

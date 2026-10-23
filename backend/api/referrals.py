@@ -143,7 +143,13 @@ def create_referral(
         previous_referral_id=previous_episode.id if previous_episode else None,
         requirement_override=requirement_override,
     )
-    return workflow_store.create_referral(workspace_id, referral)
+    # Demo hardening pass, Part J: the cheap check above handles ordinary
+    # repeats; this atomic get-or-create is the authoritative guard against
+    # two concurrent equivalent requests both passing it.
+    saved, _created = workflow_store.create_referral_unless_active(
+        workspace_id, referral, lambda rows: find_active_referral_for_pair(rows, receiving_physician.id)
+    )
+    return saved
 
 
 @router.get("/referrals/{referral_id}", response_model=Referral)

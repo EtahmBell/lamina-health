@@ -1201,7 +1201,13 @@ function RecommendationView({
    * fade the candidate-switcher above already uses (one stable surface
    * morphing, never a hard remount flash). Respects reduced motion.
    */
+  // Demo hardening pass, Part J: a second click while the switch into
+  // referral mode is in flight is ignored (the button is also disabled).
+  const [startingReferral, setStartingReferral] = useState(false)
   const startReferral = () => {
+    if (startingReferral) return
+    setStartingReferral(true)
+    window.setTimeout(() => setStartingReferral(false), 1000)
     if (prefersReducedMotion()) { setViewMode('referral'); return }
     setSwapping(true)
     window.setTimeout(() => {
@@ -1418,7 +1424,7 @@ function RecommendationView({
             </div>
           : activeReferral
             ? <p className="referral-locked-note">A referral is already active with {activeReferralPhysicianLabel}.</p>
-            : <button className="button-primary" onClick={startReferral}>{selectedModality === 'econsult' ? 'Start e-consult request' : 'Start referral'} <span>→</span></button>
+            : <button className="button-primary" disabled={startingReferral} onClick={startReferral}>{selectedModality === 'econsult' ? 'Start e-consult request' : 'Start referral'} <span>→</span></button>
         : <><button className="button-primary" onClick={() => setReferralStarted(true)}>Start referral <span>→</span></button>{referralStarted && <div className="referral-prepared" role="status"><strong>Referral prepared for demo</strong><span>Destination: {cleanName(selected.physician_name)} · {selected.specialty}</span><span>Workup: {selected.required_workup.join(' · ') || 'None specified'}</span><span>No referral was transmitted.</span></div>}</>}</div>
     </article>
 

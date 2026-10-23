@@ -177,6 +177,23 @@ function PhaseContent({ phase, receivingPhysicianName, patientLabel, scheduling,
  *   the resulting real phases over several seconds purely as frontend
  *   presentation pacing -- the backend call itself is never delayed (Part E/F/Y).
  */
+/** Demo hardening pass, Part J: one in-flight create per patient +
+ * receiving physician. A second mount (React StrictMode re-runs mount
+ * effects in development) or a fast double click shares the SAME request
+ * instead of sending another. The backend's atomic get-or-create remains
+ * the authoritative guard; this just avoids the redundant request. */
+const referralCreationsInFlight = new Map<string, Promise<Referral>>()
+
+export function createReferralOnce(patientId: string, receivingPhysicianId: string, priority?: ReferralPriority, modality?: CareModality): Promise<Referral> {
+  const key = `${patientId}::${receivingPhysicianId}`
+  const pending = referralCreationsInFlight.get(key)
+  if (pending) return pending
+  const request = createReferral(patientId, receivingPhysicianId, priority, modality)
+    .finally(() => referralCreationsInFlight.delete(key))
+  referralCreationsInFlight.set(key, request)
+  return request
+}
+
 export function ReferralCoordinationSurface({
   patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange, onReferralChange, onReviewedChange, priority, modality,
 }: {
@@ -301,10 +318,15 @@ export function ReferralCoordinationSurface({
     }).catch(() => {})
   }
 
-  useEffect(() => () => {
-    cancelled.current = true
-    timers.current.forEach((id) => window.clearTimeout(id))
-    onWashChange?.(false)
+  useEffect(() => {
+    // A StrictMode remount reuses this ref after the simulated unmount's
+    // cleanup -- reset it so the remounted surface isn't treated as gone.
+    cancelled.current = false
+    return () => {
+      cancelled.current = true
+      timers.current.forEach((id) => window.clearTimeout(id))
+      onWashChange?.(false)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -377,7 +399,7 @@ export function ReferralCoordinationSurface({
     setStatus('running'); setError(null); setVisiblePhase({ kind: 'preparing' })
     const minimumPreparingDisplay = sleep(PHASE_HOLD_MS.preparing)
     try {
-      const created = await createReferral(patientId, receivingPhysicianId, priority, modality)
+      const created = await createReferralOnce(patientId, receivingPhysicianId, priority, modality)
       const preflighted = await runReferralPreflight(created.id as number)
       await minimumPreparingDisplay
       if (cancelled.current) return

@@ -28,7 +28,7 @@ from backend.referral_preferences import (
     preference_modality_label,
 )
 from backend.workflow import WorkflowStore
-from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
+from tests._chen_demo_fixture import document_chen_consultation, teach_and_confirm_chen_baseline
 
 CHEN_ID = "physician-chen"
 
@@ -188,6 +188,7 @@ def test_the_clarifying_question_is_short_enough_to_never_wrap_into_a_heavy_mult
 ) -> None:
     ws = "ws-short-clarifying-question"
     teach_and_confirm_chen_baseline(store, ws)
+    document_chen_consultation(store, ws)
     opportunity = clarification_opportunities(store, ws, CHEN_ID)[0]
     assert len(opportunity["clarifying_question"]) <= 60
     assert "comfortable" not in opportunity["clarifying_question"].casefold()

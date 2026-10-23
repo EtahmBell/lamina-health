@@ -20,7 +20,7 @@ from backend.models import StructuredReferralPreference
 from backend.professional_services import AgentChatService, ResponsesApiClient
 from backend.referral_preferences import CHEN_SEED_CASE_FAMILY, clarification_opportunities
 from backend.workflow import WorkflowStore
-from tests._chen_demo_fixture import teach_and_confirm_chen_baseline
+from tests._chen_demo_fixture import document_chen_consultation, teach_and_confirm_chen_baseline
 
 CHEN_ID = "physician-chen"
 
@@ -66,6 +66,8 @@ def test_the_clarification_arises_from_work_without_any_manual_teaching(store: W
     handled by e-consult), not from a question bank and not gated on his
     having taught anything first -- and it says why Lamina is asking."""
     ws = "ws-demo-coherence-gap-from-work"
+    assert clarification_opportunities(store, ws, CHEN_ID) == []  # no work yet
+    document_chen_consultation(store, ws)
     opportunities = clarification_opportunities(store, ws, CHEN_ID)
     assert len(opportunities) == 1
     card = opportunities[0]
@@ -78,6 +80,7 @@ def test_the_clarification_arises_from_work_without_any_manual_teaching(store: W
 def test_the_econsult_gap_still_surfaces_after_chen_confirms_his_baseline_preference(store: WorkflowStore) -> None:
     ws = "ws-demo-coherence-gap"
     teach_and_confirm_chen_baseline(store, ws)
+    document_chen_consultation(store, ws)
     opportunities = clarification_opportunities(store, ws, CHEN_ID)
     assert len(opportunities) == 1
     assert opportunities[0]["id"] == "chen-econsult-modality-gap"
@@ -87,6 +90,7 @@ def test_the_econsult_gap_still_surfaces_after_chen_confirms_his_baseline_prefer
 def test_the_opportunity_never_frames_this_as_an_agent_error(store: WorkflowStore) -> None:
     ws = "ws-demo-coherence-safety-language"
     teach_and_confirm_chen_baseline(store, ws)
+    document_chen_consultation(store, ws)
     opportunity = clarification_opportunities(store, ws, CHEN_ID)[0]
     blob = (opportunity["title"] + opportunity["body"] + opportunity["supporting_text"]).casefold()
     for forbidden in ("wrong", "mistake", "error", "incorrect"):
@@ -96,6 +100,7 @@ def test_the_opportunity_never_frames_this_as_an_agent_error(store: WorkflowStor
 def test_confirming_a_modality_preference_resolves_the_opportunity(store: WorkflowStore) -> None:
     ws = "ws-demo-coherence-resolve"
     teach_and_confirm_chen_baseline(store, ws)
+    document_chen_consultation(store, ws)
     assert len(clarification_opportunities(store, ws, CHEN_ID)) == 1
 
     seed = store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
@@ -115,6 +120,7 @@ def test_a_draft_clarification_does_not_resolve_the_opportunity(store: WorkflowS
     """Part K: a draft never silently changes representation."""
     ws = "ws-demo-coherence-draft-no-op"
     teach_and_confirm_chen_baseline(store, ws)
+    document_chen_consultation(store, ws)
     structured = StructuredReferralPreference(modality="either")
     store.create_referral_preference(
         ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "draft only", structured.model_dump_json(), "physician_authored_nlp"
@@ -125,8 +131,9 @@ def test_a_draft_clarification_does_not_resolve_the_opportunity(store: WorkflowS
 def test_overview_exposes_the_learning_opportunity_for_chen_but_not_other_physicians(store: WorkflowStore) -> None:
     with TestClient(app) as client:
         ws = _bootstrap(client)
-        before_teaching = client.get("/api/workspace/physician/agent-overview?perspective=chen").json()
-        assert len(before_teaching["learning_opportunities"]) == 1
+        before_consultation = client.get("/api/workspace/physician/agent-overview?perspective=chen").json()
+        assert before_consultation["learning_opportunities"] == []
+        document_chen_consultation(store, ws)
 
         teach_and_confirm_chen_baseline(store, ws)
         chen_overview = client.get("/api/workspace/physician/agent-overview?perspective=chen").json()
@@ -268,6 +275,7 @@ def test_reset_tonjit_also_returns_chens_referral_preferences_to_baseline(store:
     with TestClient(app) as client:
         ws = _bootstrap(client)
         teach_and_confirm_chen_baseline(store, ws)
+        document_chen_consultation(store, ws)
         assert len(clarification_opportunities(store, ws, CHEN_ID)) == 1
 
         structured = StructuredReferralPreference(modality="either")
@@ -282,5 +290,7 @@ def test_reset_tonjit_also_returns_chens_referral_preferences_to_baseline(store:
         assert response.json()["removed_chen_referral_preferences"] >= 1
 
         assert store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY) is None
-        # Nothing is auto-recreated; the boundary is simply unresolved again.
-        assert len(clarification_opportunities(store, ws, CHEN_ID)) == 1
+        # Demo hardening pass, Part Q: reset also clears the consultation
+        # that made the boundary eligible, so nothing appears until the
+        # replayed demo documents a consultation again.
+        assert clarification_opportunities(store, ws, CHEN_ID) == []

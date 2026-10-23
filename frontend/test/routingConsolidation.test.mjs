@@ -185,28 +185,29 @@ test('ordinary Train never shows "Question 1 of 10", and the question bank is in
   assert.doesNotMatch(slice(engagement, 'function QuickTrainingModal', 'export function TrainingPage'), /Question \{Math\.min/)
 })
 
-test('clarification cards show where they came from and why Lamina is asking', () => {
-  const train = slice(engagement, 'export function TrainTab', '/* ------------------------------------------------------------------ My Agent: Chat */')
-  assert.match(train, /<span className="clarification-source">\{item\.source_label \?\? 'From recent work'\}<\/span>/)
-  assert.match(train, /Why Lamina is asking/)
+test('clarification cards (in the modal) show where they came from and why Lamina is asking', () => {
+  const modal = slice(engagement, 'function ClarificationModal', 'const PREFERENCE_HISTORY_LABELS')
+  assert.match(modal, /<span className="clarification-source">\{opportunity\.source_label \?\? 'From recent work'\}<\/span>/)
+  assert.match(modal, /Why Lamina is asking/)
+  assert.match(modal, /<div className="clarification-card in-modal">/)
 })
 
 test('Yes/No allow optional context; Depends opens "What does it depend on?" with a natural-language field', () => {
-  const modal = slice(engagement, 'function ClarificationModal', 'const PREFERENCE_HISTORY_LABELS')
-  assert.match(modal, /\(\['yes', 'no', 'depends'\] as const\)/)
-  assert.match(modal, /if \(value === 'depends'\) setContextOpen\(true\)/)
-  assert.match(modal, /answer && !depends && !contextOpen && <button type="button" className="text-button clarification-add-context"/)
-  assert.match(modal, />Add context <span>→<\/span>/)
-  assert.match(modal, /opportunity\.depends_prompt \?\? 'What does it depend on\?'/)
-  assert.match(modal, /'Add context \(optional\)'/)
-  assert.match(modal, /disabled=\{!answer \|\| !composed \|\| busy\}/, 'Depends cannot continue without the natural-language detail')
+  const flow = slice(engagement, 'function ClarificationAnswerFlow', 'function ClarificationModal')
+  assert.match(flow, /\(\['yes', 'no', 'depends'\] as const\)/)
+  assert.match(flow, /if \(value === 'depends'\) setContextOpen\(true\)/)
+  assert.match(flow, /answer && !depends && !contextOpen && <button type="button" className="text-button clarification-add-context"/)
+  assert.match(flow, />Add context <span>→<\/span>/)
+  assert.match(flow, /opportunity\.depends_prompt \?\? 'What does it depend on\?'/)
+  assert.match(flow, /'Add context \(optional\)'/)
+  assert.match(flow, /disabled=\{!answer \|\| !composed \|\| busy\}/, 'Depends cannot continue without the natural-language detail')
 })
 
 test('a clarification answer is interpreted, shown as a proposed learning, and only operational after confirmation', () => {
-  const modal = slice(engagement, 'function ClarificationModal', 'const PREFERENCE_HISTORY_LABELS')
-  assert.match(modal, /interpretReferralPreference\(personaId, composed, 'modality'\)/)
-  assert.match(modal, /<PreferenceDraftReview personaId=\{personaId\} draft=\{draft\}/)
-  assert.match(modal, /Nothing changes until you confirm the proposed learning\./)
+  const flow = slice(engagement, 'function ClarificationAnswerFlow', 'function ClarificationModal')
+  assert.match(flow, /interpretReferralPreference\(personaId, composed, 'modality'\)/)
+  assert.match(flow, /<PreferenceDraftReview personaId=\{personaId\} draft=\{draft\}/)
+  assert.match(flow, /Nothing changes until you confirm the proposed learning\./)
   const review = slice(preferences, 'export function PreferenceDraftReview', 'export const TEACHING_PLACEHOLDER')
   assert.match(review, /await confirmReferralPreference\(personaId, draft\.id\)/)
   assert.match(review, />Looks right</)
@@ -233,11 +234,11 @@ test('Test is a non-mutating sandbox; "Not quite" routes a correction through th
   assert.match(engagement, /submitAgentChatFeedback\(personaId, message\.id, value\)/, 'the feedback itself is still recorded as evidence')
 })
 
-test('Overview "What your agent learned this week" Review opens Train with that clarification focused', () => {
+test('Overview and Dashboard Review open Train with the clarification modal already open -- no hunting for the card', () => {
   assert.match(engagement, /export const clarificationFocusPath = \(trainPath: string, clarificationId: string\) => `\$\{agentTrainTabPath\(trainPath\)\}&focus=\$\{encodeURIComponent\(clarificationId\)\}`/)
   const train = slice(engagement, 'export function TrainTab', '/* ------------------------------------------------------------------ My Agent: Chat */')
-  assert.match(train, /ref=\{item\.id === focusId \? focusRef : undefined\}/)
-  assert.match(train, /focusRef\.current\.scrollIntoView/)
+  assert.match(train, /if \(!focusId \|\| focusHandled\.current \|\| open\.length === 0 \|\| !canTeach\) return/)
+  assert.match(train, /setModalItems\(open\)/)
   for (const source of [app, referralSource]) assert.match(source, /focusId=\{params(\?)?\.get\('focus'\)/)
 })
 
@@ -255,9 +256,11 @@ test('the clarification modal stays over the current page with a dimmed, blurred
   assert.match(slice(engagement, 'function QuickTrainingModal', 'export function TrainingPage'), /<ModalPortal><div className="post-flow-overlay"/)
 })
 
-test('form controls inherit Lamina typography', () => {
-  assert.match(styles, /^input, textarea, select \{ font: inherit; color: inherit; \}$/m)
+test('form controls use Lamina typography', () => {
+  assert.match(styles, /^input, textarea, select \{ font: inherit; font-family: var\(--font-ui\); color: inherit; \}$/m)
+  assert.match(styles, /^input::placeholder, textarea::placeholder \{ font: inherit;/m)
   assert.match(styles, /\.lamina-textarea \{[^}]*font: inherit/)
+  assert.match(styles, /\.ask-network-card textarea, \.ask-network-card select/)
 })
 
 test('the Dashboard agent CTA never launches the legacy mandatory 10-question sequence', () => {

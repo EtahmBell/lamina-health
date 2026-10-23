@@ -40,3 +40,25 @@ def teach_and_confirm_chen_baseline(workflow_store: WorkflowStore, workspace_id:
     snapshot_id = representation_snapshot_id(workflow_store, workspace_id, "chen")
     workflow_store.set_referral_preference_snapshot(workspace_id, created["id"], snapshot_id)
     return workflow_store.referral_preference(workspace_id, created["id"])
+
+
+def document_chen_consultation(workflow_store: WorkflowStore, workspace_id: str, referral_id: int = 900) -> None:
+    """Demo hardening pass, Part B: the authoritative "recent work" event
+    for the e-consult clarification -- a completed Endocrinology encounter
+    Dr. Chen documented for Tonjit. Mirrors what the synthetic encounter
+    simulation persists; cleared by the Tonjit demo reset like any other
+    Tonjit encounter."""
+    from backend.models import ConsultationEncounter
+    from backend.synthetic_data import TONJIT_PATIENT_ID
+
+    workflow_store.create_encounter(workspace_id, ConsultationEncounter(
+        referral_id=referral_id,
+        patient_id=TONJIT_PATIENT_ID,
+        physician_id=CHEN_ID,
+        specialty="Endocrinology",
+        occurred_at="2026-10-20T10:00:00",
+        assessment="Synthetic assessment.",
+        plan="Synthetic plan.",
+        follow_up="Synthetic follow-up.",
+        created_at="2026-10-20T10:00:00",
+    ))

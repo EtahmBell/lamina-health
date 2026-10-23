@@ -79,7 +79,7 @@ test('Practice Representation labels the two Before-referral columns "Required b
 // ---------------------------------------------------------------- Part 11: learned-this-week copy
 
 test('the learned-this-week card uses "One clarification needs your input", not the casual "1 thing needs your judgment"', () => {
-  assert.match(engagement, /One clarification needs your input/)
+  assert.match(engagement, /`\$\{count\} clarification\$\{count === 1 \? '' : 's'\}/)
   assert.doesNotMatch(engagement, /1 thing needs your judgment/)
 })
 
