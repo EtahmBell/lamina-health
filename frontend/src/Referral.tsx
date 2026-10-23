@@ -1779,7 +1779,7 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
         <p>{CHEN_SPECIALTY} · Represents your practice to referring physician agents.</p>
       </div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{CHEN_AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" />}
+      {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" onRepresentationChanged={() => { getAgentOverview('chen').then(setOverview).catch(() => {}); getPracticeRepresentation('chen').then(setRepresentation).catch(() => {}) }} />}
       {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" learningOpportunities={overview.learning_opportunities} focusId={params?.get('focus') ?? null} onLearningChanged={() => getAgentOverview('chen').then(setOverview).catch(() => {})} />}
       {tab === 'test' && <ChatTab personaId="chen" agentName={agentName} navigate={navigate} trainPath={trainingPath('chen')} />}
     </>}

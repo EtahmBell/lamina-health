@@ -179,7 +179,7 @@ test('/chen/agent uses Chen\'s own real identity/representation data, never Lucy
 
 test('/chen/agent reuses the exact same Overview/Train/Test tabs and shared panels as Lucy\'s and Iain\'s My Agent -- no Chen-specific version', () => {
   const fn = slice(referralSource, 'export function ChenAgentPage', 'export function ChenNetworkPage')
-  assert.match(fn, /<AgentOverviewPanel overview=\{overview\} representation=\{representation\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} personaId="chen" \/>/)
+  assert.match(fn, /<AgentOverviewPanel overview=\{overview\} representation=\{representation\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} personaId="chen" onRepresentationChanged=/)
   assert.match(fn, /<TrainTab trainProjection=\{trainProjection\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} personaId="chen" learningOpportunities=\{overview\.learning_opportunities\} focusId=\{params\?\.get\('focus'\) \?\? null\}/)
   assert.match(fn, /<ChatTab personaId="chen" agentName=\{agentName\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} \/>/)
   assert.doesNotMatch(referralSource, /function ChenOverviewPanel|function ChenTrainTab|function ChenChatTab/)

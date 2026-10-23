@@ -2095,6 +2095,7 @@ class WorkflowStore:
         source_text: str,
         structured_rules_json: str,
         source: str,
+        supersedes_id: str | None = None,
     ) -> dict:
         preference_id = f"pref-{secrets.token_hex(8)}"
         now = self._now()
@@ -2102,11 +2103,11 @@ class WorkflowStore:
             db.execute(
                 """INSERT INTO physician_referral_preferences(
                      id, workspace_id, physician_id, case_family, source_text,
-                     structured_rules_json, status, source, created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)""",
+                     structured_rules_json, status, source, supersedes_id, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)""",
                 (
                     preference_id, workspace_id, physician_id, case_family, source_text,
-                    structured_rules_json, source, now, now,
+                    structured_rules_json, source, supersedes_id, now, now,
                 ),
             )
         return self.referral_preference(workspace_id, preference_id)

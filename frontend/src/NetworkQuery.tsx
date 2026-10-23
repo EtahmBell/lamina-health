@@ -8,7 +8,6 @@ import { useState } from 'react'
 import {
   askNetwork,
   type AskNetworkResult,
-  type NetworkBroadcastMatch,
   type NetworkPhysicianAgentMatch,
 } from './api.ts'
 import { DEMO_PATIENTS } from './demoPatients.ts'
@@ -29,27 +28,43 @@ const PERSONA_BY_PHYSICIAN_ID: Record<string, string> = {
 
 const ASKABLE_PATIENTS = DEMO_PATIENTS.filter((patient) => patient.implemented && !patient.owner)
 
-function PhysicianAgentResultCard({ match, navigate, onAskAgent }: {
+/** One physician-agent match (My Agent cleanup pass, Part J/M): WHY THIS
+ * MATCH as labeled, evidence-backed reasons -- never a bullet wall, never a
+ * numeric value. A directly relevant post from this physician may ground
+ * the result; unrelated network posts are never listed. Ask agent only
+ * renders when a real Lamina agent persona exists for the physician. */
+function PhysicianAgentResultCard({ match, navigate, onAskAgent, onViewInFeed }: {
   match: NetworkPhysicianAgentMatch; navigate: Navigate; onAskAgent: (match: NetworkPhysicianAgentMatch) => void
+  onViewInFeed: (postId: string) => void
 }) {
   const personaId = PERSONA_BY_PHYSICIAN_ID[match.physician_id]
+  const reasons = match.match_reasons ?? match.reasons.map((reason) => {
+    const [label, ...rest] = reason.split(': ')
+    return { kind: 'specialty' as const, label: rest.length ? label : 'Match', detail: rest.length ? rest.join(': ') : reason }
+  })
   return <div className="ask-network-agent-card">
-    <strong>{match.physician_name}'s Agent</strong>
-    <small>{match.specialty}</small>
-    {match.reasons.length > 0 && <ul className="ask-network-reasons">{match.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+    <div className="ask-network-agent-head">
+      <div>
+        <strong className="ask-network-agent-name">{match.physician_name}'s Agent</strong>
+        <small className="ask-network-agent-specialty">{match.specialty}</small>
+      </div>
+      {match.strength && <span className={`ask-network-strength ${match.strength}`}>{match.strength === 'strong' ? 'Strong match' : 'Relevant match'}</span>}
+    </div>
+    {reasons.length > 0 && <>
+      <p className="section-label ask-network-why">Why this match</p>
+      <ul className="ask-network-reason-list">{reasons.map((reason) => <li key={`${reason.kind}-${reason.label}`} className={reason.kind === 'before_referral' ? 'supporting' : undefined}>
+        <span className="ask-network-reason-label">{reason.label}</span>
+        <span className="ask-network-reason-detail">{reason.detail}</span>
+      </li>)}</ul>
+    </>}
+    {(match.grounded_in ?? []).map((post) => <p className="ask-network-grounding" key={post.post_id}>
+      <span>Grounded in “{post.title}”</span>
+      <button type="button" className="text-button" onClick={() => onViewInFeed(post.post_id)}>View source in Feed →</button>
+    </p>)}
     <div className="ask-network-card-actions">
-      {personaId && <button type="button" className="text-button" onClick={() => onAskAgent(match)}>Ask her/his agent →</button>}
+      {personaId && <button type="button" className="text-button" onClick={() => onAskAgent(match)}>Ask agent →</button>}
       {personaId && <button type="button" className="text-button" onClick={() => navigate(networkProfilePath('lucy', personaId))}>View profile →</button>}
     </div>
-  </div>
-}
-
-function BroadcastResultCard({ broadcast, onViewInFeed }: { broadcast: NetworkBroadcastMatch; onViewInFeed: (postId: string) => void }) {
-  return <div className="ask-network-broadcast-card">
-    <strong>{broadcast.physician_name}</strong>
-    <small>"{broadcast.title}"</small>
-    <p>{broadcast.snippet}</p>
-    <button type="button" className="text-button" onClick={() => onViewInFeed(broadcast.post_id)}>View in Feed →</button>
   </div>
 }
 
@@ -78,6 +93,7 @@ export function AskNetworkCard({ navigate, onViewInFeed }: { navigate: Navigate;
     ...match.confirmed_good_fit.map((item) => `Confirmed referral preference: ${item}`),
     ...match.confirmed_case_interests.map((item) => `Confirmed case interest: ${item}`),
     ...(match.modality_preference ? [`Confirmed modality preference: ${match.modality_preference}`] : []),
+    ...(match.grounded_in ?? []).map((post) => `Network post (attributed context): ${post.title}`),
   ]
 
   return <section className="ask-network-card">
@@ -101,13 +117,7 @@ export function AskNetworkCard({ navigate, onViewInFeed }: { navigate: Navigate;
         <h4>Physician agents</h4>
         {result.physician_agents.length === 0
           ? <p className="ask-network-empty">No confirmed physician representation matched that question yet.</p>
-          : result.physician_agents.map((match) => <PhysicianAgentResultCard key={match.physician_id} match={match} navigate={navigate} onAskAgent={setDrawerMatch} />)}
-      </div>
-      <div className="ask-network-result-group">
-        <h4>Relevant network updates</h4>
-        {result.broadcasts.length === 0
-          ? <p className="ask-network-empty">No relevant network updates yet.</p>
-          : result.broadcasts.map((broadcast) => <BroadcastResultCard key={broadcast.post_id} broadcast={broadcast} onViewInFeed={onViewInFeed} />)}
+          : result.physician_agents.map((match) => <PhysicianAgentResultCard key={match.physician_id} match={match} navigate={navigate} onAskAgent={setDrawerMatch} onViewInFeed={onViewInFeed} />)}
       </div>
     </div>}
 

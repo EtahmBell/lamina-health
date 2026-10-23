@@ -43,6 +43,7 @@ import {
   updateProposedLearning,
   type AgentChatResponse,
   type AgentNetwork,
+  type AgentNetworkActivityItem,
   type AgentOverview,
   type AgentTestCase,
   type ConsultationRecord,
@@ -1775,6 +1776,29 @@ function TrainingReminder({ navigate, trainPath }: { navigate: Navigate; trainPa
  * metrics. Renders an honest empty state rather than inventing placeholder
  * activity when there's no consultation history yet.
  */
+/** Activity Dr. X's agent performed in the network (My Agent cleanup
+ * pass, Part G): real coordination from persisted referral events, plus
+ * the explicitly synthetic routing fixture, labeled as such. Workflow
+ * activity is never presented as learning. */
+function NetworkActivityList({ items, navigate, patientsPath }: { items: AgentNetworkActivityItem[]; navigate: Navigate; patientsPath: string }) {
+  return <section className="agent-network-activity">
+    <h2 className="band-heading">Your agent in the network</h2>
+    <p className="practice-subheading">Recent activity</p>
+    <ul className="network-activity-list">{items.map((item) => <li key={item.id} className="network-activity-item">
+      <div>
+        <strong>{item.title}</strong>
+        <span className="network-activity-detail">{item.detail}</span>
+        {item.outcomes.map((outcome) => <span className="network-activity-outcome" key={outcome}>✓ {outcome}</span>)}
+        {item.synthetic_fixture && <small className="network-activity-synthetic">Synthetic demo activity</small>}
+      </div>
+      {item.patient_id && <button type="button" className="text-button" onClick={() => navigate(`${patientsPath}/${item.patient_id}`)}>View coordination →</button>}
+      {!item.patient_id && item.patient_ids && <button type="button" className="text-button" onClick={() => navigate(`${patientsPath}?highlight=${item.patient_ids?.join(',')}`)}>View activity →</button>}
+    </li>)}</ul>
+  </section>
+}
+
+const patientsPathFor = (personaId: PhysicianIdentity) => (personaId === 'chen' ? '/chen/patients' : personaId === 'iain' ? '/specialist/patients' : '/patients')
+
 function AgentNetworkActivity({ records }: { records: ConsultationRecord[] }) {
   if (records.length === 0) return <section className="agent-network-activity">
     <h2 className="band-heading">Your agent in the network</h2>
@@ -1820,10 +1844,13 @@ function AgentNetworkActivity({ records }: { records: ConsultationRecord[] }) {
  * the detailed representation (clinical focus, practice rules). Scrolling the page
  * should read as one coherent picture of the agent, not a stack of unrelated cards.
  */
-export function AgentOverviewPanel({ overview, representation, navigate, trainPath, personaId, consultationRecords = [], extra }: {
+export function AgentOverviewPanel({ overview, representation, navigate, trainPath, personaId, consultationRecords = [], extra, onRepresentationChanged }: {
   overview: AgentOverview | null; representation: PracticeRepresentation | null
   navigate: Navigate; trainPath: string; personaId: PhysicianIdentity; consultationRecords?: ConsultationRecord[]; extra?: ReactNode
+  /** Re-fetch overview + representation after a confirmed edit. */
+  onRepresentationChanged?: () => void
 }) {
+  const [editingPreferenceId, setEditingPreferenceId] = useState<string | null>(null)
   if (!overview) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
   const training = overview.training
   const reviewHref = training.state === 'review_pending' && training.review_session_id ? `${trainPath}?review=${training.review_session_id}` : null
@@ -1835,7 +1862,9 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
       <p className="agent-portrait-text">{overview.portrait}</p>
     </section>
     <hr className="agent-overview-divider" />
-    <AgentNetworkActivity records={consultationRecords} />
+    {(overview.network_activity ?? []).length > 0
+      ? <NetworkActivityList items={overview.network_activity ?? []} navigate={navigate} patientsPath={patientsPathFor(personaId)} />
+      : <AgentNetworkActivity records={consultationRecords} />}
     <hr className="agent-overview-divider" />
     {/* Demo coherence pass, Part H/I/Y: at most the one real, currently-open
      * clarification opportunity -- never a fabricated analytics backlog.
@@ -1844,14 +1873,22 @@ export function AgentOverviewPanel({ overview, representation, navigate, trainPa
      * shown that the backend doesn't actually produce. */}
     <section className="agent-learned-this-week-card">
       <p className="eyebrow">What your agent learned this week</p>
+      {/* My Agent cleanup pass, Part F/O: ONLY real changes to this
+       * physician's confirmed representation, each correctable via the
+       * safe edit flow -- never patient/workflow events. */}
+      {(overview.recent_learnings ?? []).length > 0 && <ul className="learned-this-week-list">{(overview.recent_learnings ?? []).map((learning) => <li key={learning.id}>
+        <span>{learning.summary}</span>
+        {canTeachInNaturalLanguage(personaId) && <button type="button" className="text-button" onClick={() => setEditingPreferenceId(learning.preference_id)}>Review / Edit →</button>}
+      </li>)}</ul>}
       {opportunity
         ? <>
           <p>Most new signals were resolved using your existing representation.</p>
           <p className="agent-learned-count">{clarificationCountLabel(overview.learning_opportunities.length)}</p>
           <button className="button-primary" onClick={() => navigate(clarificationFocusPath(trainPath, opportunity.id))}>Review <span>→</span></button>
         </>
-        : <p className="agent-empty-note">Nothing needs your input right now.</p>}
+        : (overview.recent_learnings ?? []).length === 0 && <p className="agent-empty-note">Nothing needs your input right now.</p>}
     </section>
+    {editingPreferenceId && <EditLearningModal personaId={personaId} preferenceId={editingPreferenceId} onClose={() => setEditingPreferenceId(null)} onConfirmed={() => onRepresentationChanged?.()} />}
     <hr className="agent-overview-divider" />
     <div className="agent-detail-divider">
       <h2>How your agent currently represents your practice</h2>
@@ -1993,6 +2030,17 @@ export function PracticeTab({ representation, personaId, portrait, reviewHref, n
     { label: 'Helpful when available', items: sections.preferred_workup },
   ].filter((group) => group.items.length > 0)
 
+  // My Agent cleanup pass, Part E: no standalone Practice Rules list. Each
+  // confirmed rule is shown where it belongs -- accept-type rules under
+  // "Usually a good fit", redirect rules under "Usually not a fit", and
+  // anything else as care-pathway guidance within Referral fit.
+  const ACCEPT_RULE = /^(?:Accepts?:?\s*|Prioritize\s+)/i
+  const REDIRECT_RULE = /^Generally prefers routed elsewhere:\s*/i
+  const ruleGoodFit = sections.explicit_rules.filter((rule) => ACCEPT_RULE.test(rule)).map((rule) => rule.replace(/^Accepts?:\s*/i, '').replace(/\.$/, ''))
+  const ruleNotFit = sections.explicit_rules.filter((rule) => REDIRECT_RULE.test(rule)).map((rule) => rule.replace(REDIRECT_RULE, '').replace(/\.$/, ''))
+  const carePathway = sections.explicit_rules.filter((rule) => !ACCEPT_RULE.test(rule) && !REDIRECT_RULE.test(rule))
+  const fitGood = [...new Set([...goodFit, ...ruleGoodFit])]
+  const fitNot = [...new Set([...notFit, ...ruleNotFit])]
   const ruleLabels = new Set(sections.explicit_rules.map(normalizeLabel))
   const extraLearnings = sections.confirmed_learnings.filter((item) => !ruleLabels.has(normalizeLabel(item.statement)))
 
@@ -2015,12 +2063,13 @@ export function PracticeTab({ representation, personaId, portrait, reviewHref, n
       </div>)}
     </section>}
 
-    {(goodFit.length > 0 || notFit.length > 0) && <section className="practice-section practice-section-fit">
+    {(fitGood.length > 0 || fitNot.length > 0 || carePathway.length > 0) && <section className="practice-section practice-section-fit">
       <h3 className="practice-section-heading">Referral fit</h3>
       <div className="practice-fit-columns">
-        {goodFit.length > 0 && <div className="practice-fit-column good"><p className="practice-subheading">Usually a good fit</p><ul className="practice-fit-list">{goodFit.map((item) => <li key={item}><span aria-hidden="true">✓</span> {item}</li>)}</ul></div>}
-        {notFit.length > 0 && <div className="practice-fit-column not-fit"><p className="practice-subheading">Usually not a fit</p><ul className="practice-fit-list">{notFit.map((item) => <li key={item}><span aria-hidden="true">—</span> {item}</li>)}</ul></div>}
+        {fitGood.length > 0 && <div className="practice-fit-column good"><p className="practice-subheading">Usually a good fit</p><ul className="practice-fit-list">{fitGood.map((item) => <li key={item}><span aria-hidden="true">✓</span> {item}</li>)}</ul></div>}
+        {fitNot.length > 0 && <div className="practice-fit-column not-fit"><p className="practice-subheading">Usually not a fit</p><ul className="practice-fit-list">{fitNot.map((item) => <li key={item}><span aria-hidden="true">—</span> {item}</li>)}</ul></div>}
       </div>
+      {carePathway.length > 0 && <div className="practice-care-pathway"><p className="practice-subheading">Care pathway</p><ul className="practice-fit-list">{carePathway.map((item) => <li key={item}><span aria-hidden="true">→</span> {item}</li>)}</ul></div>}
     </section>}
 
     {(workupGroups.length > 0 || sections.access_facts.length > 0 || sections.modality_preference) && <section className="practice-section practice-section-workup">
@@ -2030,12 +2079,6 @@ export function PracticeTab({ representation, personaId, portrait, reviewHref, n
         {sections.access_facts.length > 0 && <div className="practice-workup-block"><p className="practice-subheading">Access</p><p className="practice-access-line">{sections.access_facts.join(' · ')}</p></div>}
         {sections.modality_preference && <div className="practice-workup-block"><p className="practice-subheading">Modality preference</p><p className="practice-access-line">{sections.modality_preference}</p></div>}
       </div>
-    </section>}
-
-    {sections.explicit_rules.length > 0 && <section className="practice-section practice-section-rules">
-      <h3 className="practice-section-heading">Practice rules</h3>
-      <p className="practice-subcopy">Confirmed guidance your agent uses when representing how you practice. Not set in stone -- revise anytime.</p>
-      <ExpandableList items={sections.explicit_rules.map((item) => <RuleRow key={item} text={item} trainPath={practiceTrainPath} navigate={navigate} />)} />
     </section>}
 
     {extraLearnings.length > 0 && <section className="practice-section practice-section-learnings">
@@ -2068,6 +2111,70 @@ function trainHistorySummaryLine(entry: TrainingHistoryEntry) {
 
 export function findPendingReviewHistoryEntry(history: TrainingHistoryEntry[]): TrainingHistoryEntry | null {
   return history.find((item) => item.proposed_count > item.confirmed_count + item.edited_count + item.rejected_count) ?? null
+}
+
+/** Edit a CONFIRMED learning safely (My Agent cleanup pass, Part C/O):
+ * the physician revises the confirmed statement in natural language, the
+ * SAME interpreter proposes a structured draft that supersedes it, and
+ * nothing changes operationally until "Looks right". Closing early leaves
+ * the confirmed version in force; history keeps every version. */
+function EditLearningModal({ personaId, preferenceId, onClose, onConfirmed }: {
+  personaId: PhysicianIdentity; preferenceId: string; onClose: () => void; onConfirmed: () => void
+}) {
+  const [preference, setPreference] = useState<PhysicianReferralPreference | null | undefined>(undefined)
+  const [text, setText] = useState('')
+  const [draft, setDraft] = useState<PhysicianReferralPreference | null>(null)
+  const [done, setDone] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    listReferralPreferences(personaId).then((items) => {
+      const found = items.find((item) => item.id === preferenceId && item.status === 'confirmed') ?? null
+      setPreference(found)
+      if (found) setText(found.source_text)
+    }).catch(() => setPreference(null))
+  }, [personaId, preferenceId])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, busy])
+  const interpret = async () => {
+    if (!preference || !text.trim() || busy) return
+    setBusy(true); setError('')
+    try {
+      setDraft(await interpretReferralPreference(personaId, text.trim(), undefined, preference.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not interpret that edit.')
+    } finally { setBusy(false) }
+  }
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <div className="post-flow-dialog clarification-dialog edit-learning-dialog" role="dialog" aria-modal="true" aria-label="Edit confirmed learning">
+      <button className="text-button post-flow-close" onClick={onClose} disabled={busy} aria-label="Close">×</button>
+      <p className="eyebrow">Edit confirmed learning</p>
+      {preference === undefined && <p className="muted-note">Opening…</p>}
+      {preference === null && <p className="muted-note">This learning is no longer the confirmed version. Open the latest one from Learning history.</p>}
+      {preference && (done
+        ? <div className="referral-pref-success" role="status">
+          <p className="profile-save-note">✓ Updated. The previous version is kept in your learning history.</p>
+          <div className="referral-pref-success-actions"><button type="button" className="button-primary" onClick={onClose}>Done</button></div>
+        </div>
+        : draft
+          ? <PreferenceDraftReview personaId={personaId} draft={draft} onDraftChange={setDraft} onConfirmed={() => { setDone(true); onConfirmed() }} onDiscarded={() => setDraft(null)} />
+          : <>
+            <p className="clarification-body">Currently confirmed · {relativeDayLabel(preference.confirmed_at ?? preference.updated_at)}. Your agent keeps using this version until you confirm an edit.</p>
+            <label className="clarification-context">
+              <span>Edit in your own words</span>
+              <textarea className="lamina-textarea" rows={4} value={text} placeholder={TEACHING_PLACEHOLDER} onChange={(event) => setText(event.target.value)} />
+            </label>
+            {error && <p className="demo-reset-error" role="alert">{error}</p>}
+            <div className="clarification-actions">
+              <button type="button" className="button-primary" disabled={busy || !text.trim()} onClick={() => void interpret()}>{busy ? 'Interpreting…' : 'Interpret'} <span>→</span></button>
+              <p className="muted-note">Nothing changes until you confirm the proposed learning.</p>
+            </div>
+          </>)}
+    </div>
+  </div></ModalPortal>
 }
 
 /** Physicians whose agent has a receiving-physician representation the
@@ -2186,7 +2293,7 @@ function ClarificationModal({ personaId, opportunities, initialId, navigate, onC
 }
 
 const PREFERENCE_HISTORY_LABELS: Record<string, string> = {
-  confirmed: 'Confirmed', superseded: 'Confirmed, later refined', rejected: 'Rejected',
+  confirmed: 'Confirmed', superseded: 'Superseded by a later version', rejected: 'Rejected',
 }
 
 /** Train as a learning control center (routing consolidation pass, Part
@@ -2211,6 +2318,7 @@ export function TrainTab({ trainProjection, navigate, trainPath, personaId, lear
   const focusHandled = useRef(false)
   const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set())
   const [toolingOpen, setToolingOpen] = useState(false)
+  const [editingPreferenceId, setEditingPreferenceId] = useState<string | null>(null)
   const [preferenceHistory, setPreferenceHistory] = useState<PhysicianReferralPreference[]>([])
   const canTeach = canTeachInNaturalLanguage(personaId)
   const loadHistory = () => { if (personaId && canTeach) listReferralPreferences(personaId).then(setPreferenceHistory).catch(() => {}) }
@@ -2252,18 +2360,17 @@ export function TrainTab({ trainProjection, navigate, trainPath, personaId, lear
 
     <section className="train-section" aria-labelledby="train-history">
       <p className="section-label" id="train-history">Learning history</p>
-      {history.length === 0 && sessions.length === 0
+      {/* My Agent cleanup pass, Part C/D: only real representation
+       * artifacts. The currently confirmed version is editable; superseded
+       * and rejected versions stay as read-only, auditable history. */}
+      {history.length === 0
         ? <p className="agent-empty-note">No confirmed, corrected, or rejected learnings yet.</p>
         : <div className="train-history">
-          {history.map((item) => <div className="train-history-row" key={item.id}>
+          {history.map((item) => <div className={`train-history-row ${item.status}`} key={item.id}>
             <strong>{PREFERENCE_HISTORY_LABELS[item.status] ?? item.status}</strong>
             <span>{relativeDayLabel(item.confirmed_at ?? item.updated_at)}</span>
             <small>{item.source_text}</small>
-          </div>)}
-          {sessions.map((entry) => <div className="train-history-row" key={entry.session_id}>
-            <strong>Structured questions</strong>
-            <span>{relativeDayLabel(entry.started_at)}</span>
-            <small>{trainHistorySummaryLine(entry)}</small>
+            {item.status === 'confirmed' && <button type="button" className="text-button train-history-edit" onClick={() => setEditingPreferenceId(item.id)}>Edit →</button>}
           </div>)}
         </div>}
     </section>
@@ -2272,7 +2379,16 @@ export function TrainTab({ trainProjection, navigate, trainPath, personaId, lear
       <summary>Internal demo tooling</summary>
       <p>Structured bootstrap question bank, for internal setup and testing. Not part of a physician's normal workflow.</p>
       <button type="button" className="text-button" onClick={() => setToolingOpen(true)}>Open question bank <span>→</span></button>
+      {sessions.length > 0 && <div className="train-history train-session-log">
+        <p className="section-label">Question-bank sessions</p>
+        {sessions.map((entry) => <div className="train-history-row" key={entry.session_id}>
+          <strong>Structured questions</strong>
+          <span>{relativeDayLabel(entry.started_at)}</span>
+          <small>{trainHistorySummaryLine(entry)}</small>
+        </div>)}
+      </div>}
     </details>}
+    {editingPreferenceId && personaId && <EditLearningModal personaId={personaId} preferenceId={editingPreferenceId} onClose={() => setEditingPreferenceId(null)} onConfirmed={learningChanged} />}
 
     {toolingOpen && personaId && <QuickTrainingModal personaId={personaId} onClose={() => setToolingOpen(false)} onFinished={() => setToolingOpen(false)} initializationNeeded={trainProjection?.state === 'initialization_needed'} />}
     {modalItems && personaId && <ClarificationModal

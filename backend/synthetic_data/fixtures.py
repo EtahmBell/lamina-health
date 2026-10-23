@@ -589,6 +589,18 @@ def resolve_case_rules(
     )
 
 
+# EXPLICIT SYNTHETIC DEMO ACTIVITY (My Agent cleanup pass, Part G): the
+# background requests Dr. Chen's agent routed without his involvement. No
+# workflow backs these in this demo -- they are labeled synthetic wherever
+# surfaced and are static, so every reset returns the same baseline. Same
+# three patients/modalities the Dashboard's "3 requests routed
+# automatically" entry already shows (frontend CHEN_AUTO_ROUTED_PATIENT_IDS).
+SYNTHETIC_AUTO_ROUTED_REQUESTS: list[dict[str, str]] = [
+    {"patient_id": CHEN_ROBERT_PATIENT_ID, "receiving_physician_id": "physician-chen", "modality": "econsult"},
+    {"patient_id": CHEN_AISHA_PATIENT_ID, "receiving_physician_id": "physician-chen", "modality": "in_person"},
+    {"patient_id": CHEN_MAYA_PATIENT_ID, "receiving_physician_id": "physician-chen", "modality": "in_person"},
+]
+
 DEMO_NETWORK_PHYSICIANS = [
     PhysicianProfile(
         id="physician-cha",

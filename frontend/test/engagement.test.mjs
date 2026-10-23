@@ -810,10 +810,10 @@ test("Iain's Cardiorenal disease case interest survives alongside the identical 
   assert.deepEqual(lucyGrouped, [], "Lucy's duplicate clinical_interest must remain suppressed against Clinical Focus")
 })
 
-test('referral fit only renders when the backend provides meaningful good-fit/not-a-fit values, never raw signal codes', () => {
+test('referral fit only renders when there are meaningful fit values or placed rules, never raw signal codes', () => {
   const page = practiceTabFn()
   assert.match(page, /isRawSignalCode/)
-  assert.match(page, /\(goodFit\.length > 0 \|\| notFit\.length > 0\) && <section className="practice-section practice-section-fit">/)
+  assert.match(page, /\(fitGood\.length > 0 \|\| fitNot\.length > 0 \|\| carePathway\.length > 0\) && <section className="practice-section practice-section-fit">/)
 })
 
 test('Before-referral sections are mutually exclusive by construction (required-only vs helpful-only), never collapsed via a runtime duplicate check', () => {
@@ -823,11 +823,12 @@ test('Before-referral sections are mutually exclusive by construction (required-
   assert.match(page, /sections\.access_facts\.join\(' · '\)/)
 })
 
-test('Practice Rules render as a quiet, scalable list', () => {
+test('there is no standalone Practice Rules section -- each confirmed rule is placed in a structured section', () => {
   const page = practiceTabFn()
-  assert.match(page, /Practice rules/)
-  assert.match(page, /<ExpandableList items=\{sections\.explicit_rules/)
-  assert.match(engagement, /Show all \$\{items\.length\} rules/)
+  assert.doesNotMatch(page, /Practice rules|practice-section-rules/)
+  assert.match(page, /const ruleGoodFit = sections\.explicit_rules\.filter/)
+  assert.match(page, /const ruleNotFit = sections\.explicit_rules\.filter/)
+  assert.match(page, /<p className="practice-subheading">Care pathway<\/p>/)
 })
 
 test('no disconnected completeness disclaimer remains on Practice since no completeness metric is shown', () => {

@@ -35,6 +35,7 @@ _CASE_FAMILY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "type_2_diabetes": ("diabetes", "a1c", "hba1c", "glycemic", "glucose"),
     "ckd_hypertension": ("kidney", "renal", "ckd", "hypertension", "blood pressure"),
     "iron_deficiency_anemia": ("anemia", "anaemia", "iron deficiency", "iron-deficiency"),
+    "thyroid": ("thyroid", "tsh", "free t4", "graves", "hypothyroid", "hyperthyroid"),
 }
 
 _REQUIREMENT_KEY_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -42,6 +43,8 @@ _REQUIREMENT_KEY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "current_medications": ("medication",),
     "recent_renal_function": ("kidney function", "renal function", "creatinine", "egfr"),
     "glucose_log": ("glucose log", "cgm", "continuous glucose"),
+    "recent_tsh": ("tsh",),
+    "recent_free_t4": ("free t4", "ft4"),
 }
 
 
@@ -65,13 +68,23 @@ def _freshness_days(sentence: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+_LEADING_ARTICLE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
+
+
+def _requirement_label(phrase: str) -> str:
+    """Sentence-case the phrase WITHOUT lowercasing the rest, so clinical
+    abbreviations survive ("Most recent TSH", never "Most recent tsh")."""
+    text = _LEADING_ARTICLE.sub("", phrase.strip())
+    return text[:1].upper() + text[1:]
+
+
 def _requirement_key_and_label(phrase: str) -> tuple[str, str]:
     lower = phrase.casefold()
     for key, keywords in _REQUIREMENT_KEY_KEYWORDS.items():
         if any(keyword in lower for keyword in keywords):
-            return key, phrase.strip().capitalize()
+            return key, _requirement_label(phrase)
     slug = re.sub(r"[^a-z0-9]+", "_", lower).strip("_") or "requirement"
-    return f"custom_{slug}", phrase.strip().capitalize()
+    return f"custom_{slug}", _requirement_label(phrase)
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -81,11 +94,18 @@ def _split_sentences(text: str) -> list[str]:
 def _extract_list_phrases(sentence: str) -> list[str]:
     """Split "a recent A1c, current diabetes medications, and recent kidney
     function" into separate item phrases."""
-    body = re.sub(r"^.*?(?:need|want|require)s?\s+", "", sentence, flags=re.IGNORECASE)
-    body = body.rstrip(".!? ")
+    body = re.sub(r"^.*?(?:need|want|require|prefer)s?\s+", "", sentence, flags=re.IGNORECASE)
+    body = _BEFORE_REVIEW_CLAUSE.sub("", body.rstrip(".!? "))
     body = re.sub(r"\band\b", ",", body, flags=re.IGNORECASE)
     return [part.strip() for part in body.split(",") if part.strip()]
 
+
+# "...available before review" / "...before referral" qualifies WHEN an item
+# is wanted; it is never itself an item.
+_BEFORE_REVIEW_CLAUSE = re.compile(
+    r"\s*,?\s*(?:(?:is|are)\s+)?(?:available\s+)?before\s+(?:review|referral|the visit)\b.*$", re.IGNORECASE
+)
+_PREFERRED_BEFORE_REVIEW = re.compile(r"\bprefer\b.*\bbefore\s+(?:review|referral|the visit)\b", re.IGNORECASE)
 
 _HELPFUL_AVAILABILITY_CLAUSE = re.compile(
     r"\s*,?\s*(?:is|are)\s+(?:useful|helpful)\s+when\s+available", re.IGNORECASE
@@ -106,7 +126,11 @@ def _extract_helpful_item_phrases(sentence: str) -> list[str]:
     trimmed = _HELPFUL_AVAILABILITY_CLAUSE.sub("", sentence)
     trimmed = _HELPFUL_NOT_REQUIRED_CLAUSE.sub("", trimmed)
     trimmed = _HELPFUL_OPTIONAL_CLAUSE.sub("", trimmed)
-    return _extract_list_phrases(trimmed)
+    phrases = _extract_list_phrases(trimmed)
+    return [_LEADING_RECENCY_QUALIFIER.sub("", phrase) if phrase.casefold().startswith("the most recent ") else phrase for phrase in phrases]
+
+
+_LEADING_RECENCY_QUALIFIER = re.compile(r"^the\s+(?=most recent\b)", re.IGNORECASE)
 
 
 _LEADING_CONDITIONAL_PATTERN = re.compile(r"^\s*if\s+(.+?),\s*(.+)$", re.IGNORECASE)
@@ -163,10 +187,13 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
             if condition:
                 modality_rules.append({"modality": "in_person", "condition": condition})
             continue
+        # "I prefer X before review" names wanted information without
+        # making it a hard requirement -- interpreted as helpful; the
+        # physician can move it to required during review.
         is_helpful_sentence = any(
             phrase in sentence_lower
             for phrase in ("useful when available", "aren't required", "are not required", "optional", "not required")
-        )
+        ) or bool(_PREFERRED_BEFORE_REVIEW.search(sentence))
         if any(keyword in sentence_lower for keyword in ("need", "require", "want")) and not is_helpful_sentence:
             for phrase in _extract_list_phrases(sentence):
                 key, label = _requirement_key_and_label(phrase)
@@ -237,7 +264,7 @@ _INTERPRET_SCHEMA = {
     "properties": {
         "case_family": {
             "type": "string",
-            "enum": ["type_2_diabetes", "ckd_hypertension", "iron_deficiency_anemia"],
+            "enum": ["type_2_diabetes", "ckd_hypertension", "iron_deficiency_anemia", "thyroid"],
         },
         "good_fit": {"type": "array", "items": {"type": "string"}},
         "required": {
@@ -484,6 +511,92 @@ def confirmed_requirement_items(
     return preference_requirement_items(_structured_from_row(row)) or None
 
 
+_STRUCTURED_SECTIONS = ("good_fit", "required", "helpful", "redirect")
+_MODALITY_FIELDS = ("modality", "modality_notes", "modality_rules")
+
+
+def merge_revision(
+    confirmed_row: dict[str, Any], interpreted: StructuredReferralPreference
+) -> StructuredReferralPreference:
+    """Editing a confirmed preference (My Agent cleanup pass, Part C/O):
+    sections the ORIGINAL statement authored are replaced by the edited
+    interpretation; sections it never mentioned (e.g. requirements carried
+    over when a clarification was merged onto an earlier preference) are
+    preserved, so an edit can never silently drop unrelated confirmed
+    guidance. Pure; the result is only ever a draft."""
+    current = _structured_from_row(confirmed_row)
+    authored = deterministic_interpret(confirmed_row["source_text"], confirmed_row["case_family"])
+    update: dict[str, Any] = {}
+    for section in _STRUCTURED_SECTIONS:
+        edited = getattr(interpreted, section)
+        if edited or getattr(authored, section):
+            update[section] = edited
+    if interpreted.modality != "unspecified" or authored.modality != "unspecified" or interpreted.modality_rules:
+        update.update({field: getattr(interpreted, field) for field in _MODALITY_FIELDS})
+    return current.model_copy(update=update)
+
+
+def _learning_lines(previous: StructuredReferralPreference | None, current: StructuredReferralPreference) -> list[str]:
+    """What actually changed in the confirmed representation -- never a
+    restatement of carried-over guidance."""
+    before = previous or StructuredReferralPreference()
+    lines: list[str] = []
+    for rule in current.modality_rules:
+        if rule not in before.modality_rules:
+            condition = rule.condition[:1].lower() + rule.condition[1:]
+            lines.append(
+                f"Clarified that e-consult can be appropriate when {condition}."
+                if rule.modality == "econsult"
+                else f"Confirmed that in-person evaluation is preferred when {condition}."
+            )
+    new_required = [item.label for item in current.required if item.key not in {old.key for old in before.required}]
+    new_helpful = [item.label for item in current.helpful if item.key not in {old.key for old in before.helpful}]
+    if new_required:
+        lines.append(f"Confirmed as required before review: {', '.join(new_required)}.")
+    if new_helpful:
+        lines.append(f"Confirmed as helpful before review: {', '.join(new_helpful)}.")
+    lines.extend(f"Confirmed a good fit: {item.rstrip('.')}." for item in current.good_fit if item not in before.good_fit)
+    lines.extend(f"Confirmed generally routed elsewhere: {item.rstrip('.')}." for item in current.redirect if item not in before.redirect)
+    return lines
+
+
+def recent_representation_learnings(
+    workflow_store: WorkflowStore, workspace_id: str, physician_id: str, days: int = 7
+) -> list[dict[str, Any]]:
+    """"What your agent learned this week" (My Agent cleanup pass, Part F):
+    ONLY changes to this physician's own confirmed representation inside
+    the window -- each currently confirmed preference diffed against the
+    version that was operational before it. Patient/workflow events (a
+    requirement satisfied during a referral, a scheduled visit) are never
+    here; they are network activity. Nothing is invented to fill space."""
+    from datetime import UTC, datetime, timedelta
+
+    cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+    rows = workflow_store.list_referral_preferences(workspace_id, physician_id)
+    by_id = {row["id"]: row for row in rows}
+    learnings: list[dict[str, Any]] = []
+    for row in rows:
+        if row["status"] != "confirmed" or (row.get("confirmed_at") or "") < cutoff:
+            continue
+        family_history = sorted(
+            (other for other in rows
+             if other["case_family"] == row["case_family"] and other["id"] != row["id"]
+             and other.get("confirmed_at") and other["confirmed_at"] <= row["confirmed_at"]),
+            key=lambda other: other["confirmed_at"],
+        )
+        predecessor = by_id.get(row.get("supersedes_id") or "") or (family_history[-1] if family_history else None)
+        previous = _structured_from_row(predecessor) if predecessor else None
+        for index, line in enumerate(_learning_lines(previous, _structured_from_row(row))):
+            learnings.append({
+                "id": f"{row['id']}-{index}",
+                "preference_id": row["id"],
+                "case_family": row["case_family"],
+                "summary": line,
+                "confirmed_at": row["confirmed_at"],
+            })
+    return learnings
+
+
 def merge_modality_clarification(
     confirmed_row: dict[str, Any] | None, interpreted: StructuredReferralPreference
 ) -> StructuredReferralPreference:
@@ -665,11 +778,24 @@ def confirmed_referral_preference_sections(
     explicit_rules: list[str] = []
     modality_label: str | None = None
     provenance: list[str] = []
+    from backend.referrals.requirements import REFERRAL_REQUIREMENTS_BY_KEY
+
+    confirmed_families = set()
     for row in rows:
         structured = _structured_from_row(row)
+        confirmed_families.add(row["case_family"])
         good_fit.extend(structured.good_fit)
-        required_labels.extend(item.label for item in structured.required)
-        helpful_labels.extend(item.label for item in structured.helpful)
+        # My Agent cleanup pass: a confirmed preference that says nothing
+        # about requirements (e.g. a modality-only clarification) leaves the
+        # practice-footprint baseline operational -- so it must stay visible
+        # here too, exactly matching confirmed_requirement_items().
+        if structured.required or structured.helpful:
+            required_labels.extend(item.label for item in structured.required)
+            helpful_labels.extend(item.label for item in structured.helpful)
+        else:
+            footprint = REFERRAL_REQUIREMENTS_BY_KEY.get((physician_id, row["case_family"]), [])
+            required_labels.extend(item.label for item in footprint if item.required)
+            helpful_labels.extend(item.label for item in footprint if not item.required)
         # Demo UX + semantic polish pass, Part 3: never restate the same
         # good-fit sentence here -- it is already shown under "Referral
         # fit." Only a genuinely distinct redirect-to-another-specialty
@@ -687,6 +813,12 @@ def confirmed_referral_preference_sections(
         provenance.append(
             f"Confirmed on {when} from a physician-authored referral preference."
         )
+    # Case families with an operational footprint but no confirmed
+    # preference keep showing that footprint.
+    for (footprint_physician, family), footprint in REFERRAL_REQUIREMENTS_BY_KEY.items():
+        if footprint_physician == physician_id and family not in confirmed_families:
+            required_labels.extend(item.label for item in footprint if item.required)
+            helpful_labels.extend(item.label for item in footprint if not item.required)
     return {
         "good_fit": list(dict.fromkeys(good_fit)),
         # Demo UX + semantic polish pass, Part 3: "Required before review"

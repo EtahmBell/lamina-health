@@ -2764,4 +2764,48 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .clarification-dialog textarea, .clarification-dialog button,
 .chat-tab-grid input, .chat-tab-grid textarea, .chat-tab-grid button,
 .referral-preference-section textarea, .referral-preference-section select, .referral-preference-section button { font-family: var(--font-ui); }
-.ask-network-card textarea, .lamina-textarea, .chat-composer input { font-size: .74rem; line-height: 1.5; }
+/* My Agent cleanup pass, Part B: ONE shared form-control typography, identical
+   to the Ask the Network textarea (Inter, .74rem, 1.5 line-height, 400). The
+   selectors deliberately out-rank `.referral-preference-section textarea` and
+   `.post-flow-dialog textarea`, whose `font: inherit` shorthand used to reset
+   the Train/clarification textareas back to 16px / normal line-height. */
+.ask-network-card textarea, .ask-network-card select,
+.referral-preference-section textarea.lamina-textarea, .post-flow-dialog textarea.lamina-textarea,
+textarea.lamina-textarea, .chat-composer input { font-family: var(--font-ui); font-size: .74rem; line-height: 1.5; font-weight: 400; letter-spacing: normal; }
+.lamina-textarea::placeholder, .ask-network-card textarea::placeholder, .chat-composer input::placeholder { font: inherit; color: #a5a69f; }
+
+/* ======================================================== My Agent + Network cleanup */
+/* Ask the Network: WHY THIS MATCH, never a bullet wall. */
+.ask-network-agent-card { padding: 14px 16px; }
+.ask-network-agent-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ask-network-agent-name { display: block; color: var(--clinical); font-family: var(--font-display); font-size: .92rem; font-weight: 500; }
+.ask-network-agent-specialty { display: block; margin-top: 2px; color: var(--text-secondary); font-family: var(--font-ui); font-size: .64rem; }
+.ask-network-strength { flex: 0 0 auto; border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; color: var(--text-secondary); font-family: var(--font-ui); font-size: .58rem; font-weight: 600; white-space: nowrap; }
+.ask-network-strength.strong { border-color: rgb(83 110 125 / 35%); background: var(--mineral-surface); color: var(--mineral-deep); }
+.ask-network-why { margin: 12px 0 6px; }
+.ask-network-reason-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.ask-network-reason-list li { display: grid; gap: 1px; font-family: var(--font-ui); }
+.ask-network-reason-label { color: var(--clinical); font-size: .62rem; font-weight: 600; }
+.ask-network-reason-detail { color: var(--text-secondary); font-size: .64rem; line-height: 1.45; }
+.ask-network-reason-list li.supporting { border-top: 1px solid rgb(222 216 206 / 60%); padding-top: 7px; }
+.ask-network-grounding { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; margin: 10px 0 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: .62rem; font-style: italic; }
+.ask-network-grounding .text-button { font-style: normal; }
+.ask-network-card-actions { display: flex; gap: 14px; margin-top: 10px; }
+.ask-network-card-actions .text-button, .ask-network-grounding .text-button { font-family: var(--font-ui); }
+/* Overview: network activity and this week's representation learnings. */
+.network-activity-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.network-activity-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 12px 14px; }
+.network-activity-item > div { display: grid; gap: 3px; }
+.network-activity-item strong { color: var(--clinical); font-size: .74rem; font-weight: 600; }
+.network-activity-detail { color: var(--text-secondary); font-size: .66rem; }
+.network-activity-outcome { color: var(--success); font-size: .64rem; }
+.network-activity-synthetic { color: var(--text-secondary); font-size: .56rem; font-style: italic; }
+.learned-this-week-list { list-style: none; margin: 6px 0 10px; padding: 0; display: grid; gap: 8px; }
+.learned-this-week-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--clinical); font-size: .72rem; line-height: 1.5; }
+.learned-this-week-list .text-button { flex: 0 0 auto; }
+.practice-care-pathway { margin-top: 14px; }
+.train-history-row { grid-template-columns: 170px 80px 1fr auto; }
+.train-history-row.superseded strong, .train-history-row.rejected strong { color: var(--text-secondary); font-weight: 500; }
+.train-history-edit { align-self: center; }
+.train-session-log { margin-top: 12px; }
+@media (max-width: 600px) { .network-activity-item { flex-direction: column; } .learned-this-week-list li { flex-direction: column; } .train-history-row { grid-template-columns: 1fr; } }

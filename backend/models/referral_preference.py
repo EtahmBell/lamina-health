@@ -20,7 +20,7 @@ from .consultation import StrictModel
 from .referral import ReferralRequirement
 
 ReferralPreferenceCaseFamily = Literal[
-    "ckd_hypertension", "iron_deficiency_anemia", "type_2_diabetes"
+    "ckd_hypertension", "iron_deficiency_anemia", "type_2_diabetes", "thyroid"
 ]
 ReferralPreferenceModality = Literal["in_person", "econsult", "either", "unspecified"]
 
@@ -107,6 +107,11 @@ class ReferralPreferenceInterpretRequest(StrictModel):
     source_text: str = Field(min_length=1, max_length=4000)
     case_family: ReferralPreferenceCaseFamily | None = None
     clarifies: Literal["modality"] | None = None
+    # My Agent cleanup pass, Part C/O: editing a CONFIRMED preference. The
+    # edit is interpreted into a new DRAFT that supersedes `revises` only
+    # once the physician confirms it; the confirmed version stays
+    # operational (and in history) until then.
+    revises: str | None = None
 
 
 class ReferralPreferenceEditRequest(StrictModel):

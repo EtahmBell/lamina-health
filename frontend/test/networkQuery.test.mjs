@@ -32,15 +32,18 @@ test('patient context is optional and explicitly scoped -- "None" by default, wi
   assert.match(networkQuery, /Only information relevant to this question is used to consult physician agents\./)
 })
 
-test('a physician-agent result offers Ask their agent and View profile, never a dead/fabricated action', () => {
-  const card = slice(networkQuery, 'function PhysicianAgentResultCard', 'function BroadcastResultCard')
-  assert.match(card, /onClick=\{\(\) => onAskAgent\(match\)\}>Ask her\/his agent/)
+test('a physician-agent result offers a neutral Ask agent and View profile, never a dead/fabricated action', () => {
+  const card = slice(networkQuery, 'function PhysicianAgentResultCard', 'export function AskNetworkCard')
+  assert.match(card, /\{personaId && <button type="button" className="text-button" onClick=\{\(\) => onAskAgent\(match\)\}>Ask agent →<\/button>\}/)
   assert.match(card, /onClick=\{\(\) => navigate\(networkProfilePath\('lucy', personaId\)\)\}>View profile/)
+  assert.doesNotMatch(networkQuery, /Ask her\/his agent/)
 })
 
-test('a broadcast result offers View in Feed, grounded in a real post id', () => {
-  const card = slice(networkQuery, 'function BroadcastResultCard', 'export function AskNetworkCard')
-  assert.match(card, /onClick=\{\(\) => onViewInFeed\(broadcast\.post_id\)\}>View in Feed/)
+test('a directly relevant post grounds its physician\'s result with View source in Feed, using the real post id', () => {
+  const card = slice(networkQuery, 'function PhysicianAgentResultCard', 'export function AskNetworkCard')
+  assert.match(card, /\(match\.grounded_in \?\? \[\]\)\.map\(\(post\) =>/)
+  assert.match(card, /onClick=\{\(\) => onViewInFeed\(post\.post_id\)\}>View source in Feed/)
+  assert.doesNotMatch(networkQuery, /function BroadcastResultCard/)
 })
 
 test('Ask Their Agent reuses a right-side drawer, never navigating away from the page', () => {

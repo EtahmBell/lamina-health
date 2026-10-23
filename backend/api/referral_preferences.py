@@ -19,6 +19,7 @@ from backend.models import (
 from backend.referral_preferences import (
     ensure_seed_preferences,
     merge_modality_clarification,
+    merge_revision,
     referral_preference_interpretation_service,
 )
 from backend.representation import representation_snapshot_id
@@ -75,10 +76,20 @@ def interpret_preference(
     resolved the text."""
     physician_id = _physician_id(persona_id)
     specialty = PERSONAS[persona_id]["specialty"]
+    revised = None
+    if request.revises is not None:
+        revised = workflow_store.referral_preference(workspace_id, request.revises)
+        if revised is None or revised["physician_id"] != physician_id or revised["status"] != "confirmed":
+            raise HTTPException(status_code=409, detail="Only a currently confirmed preference can be edited")
     case_family, structured, _provider = referral_preference_interpretation_service.interpret(
-        request.source_text, specialty, request.case_family
+        request.source_text, specialty, revised["case_family"] if revised else request.case_family
     )
-    if request.clarifies == "modality":
+    if revised is not None:
+        # An edit stays in the edited preference's own case family and
+        # supersedes it only on confirmation (confirm_preference).
+        case_family = revised["case_family"]
+        structured = merge_revision(revised, structured)
+    elif request.clarifies == "modality":
         structured = merge_modality_clarification(
             workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family), structured
         )
@@ -89,6 +100,7 @@ def interpret_preference(
         source_text=request.source_text,
         structured_rules_json=structured.model_dump_json(),
         source="physician_authored_nlp",
+        supersedes_id=revised["id"] if revised else None,
     )
     return _as_model(created)
 

@@ -522,7 +522,16 @@ export type AgentOverview = {
   more_training_available: boolean
   next_action: TrainingAction
   learning_opportunities: LearningOpportunity[]
+  /** Changes to the physician's own confirmed representation this week --
+   * never patient/workflow events (those are `network_activity`). */
+  recent_learnings?: RepresentationLearning[]
+  network_activity?: AgentNetworkActivityItem[]
   ranking_effect: 'none'
+}
+export type RepresentationLearning = { id: string; preference_id: string; case_family: string; summary: string; confirmed_at: string }
+export type AgentNetworkActivityItem = {
+  id: string; kind: 'coordination' | 'tasks' | 'routing'; title: string; detail: string; outcomes: string[]
+  patient_id: string | null; patient_ids?: string[]; synthetic_fixture: boolean
 }
 export type OwnedTrainingQuestion = Omit<TrainingQuestion, 'physician_persona'> & { physician_persona: string }
 export type OwnedTrainingSession = Omit<TrainingSession, 'persona_id' | 'questions'> & {
@@ -590,10 +599,20 @@ export type BroadcastProvenanceType = 'physician_authored' | 'physician_approved
 
 /** Part I/J/S: a bounded, explainable "Ask the Network" query -- never a
  * generic search engine, never a magic 0-100 physician score. */
+/** One labeled, evidence-backed reason in a network match (My Agent
+ * cleanup pass, Part J) -- never a numeric value. */
+export type NetworkMatchReason = {
+  kind: 'specialty' | 'similar_history' | 'practice_focus' | 'case_interest' | 'referral_preference' | 'modality' | 'before_referral'
+  label: string; detail: string
+}
 export type NetworkPhysicianAgentMatch = {
   physician_id: string; physician_name: string; specialty: string; agent_name: string
   reasons: string[]; confirmed_case_interests: string[]; confirmed_good_fit: string[]
   modality_preference: string | null
+  match_reasons?: NetworkMatchReason[]
+  strength?: 'strong' | 'relevant'
+  /** This physician's own posts that directly ground the match. */
+  grounded_in?: { post_id: string; title: string; provenance_type: BroadcastProvenanceType }[]
 }
 export type NetworkBroadcastMatch = {
   post_id: string; physician_persona: string; physician_name: string
@@ -871,8 +890,12 @@ export const listReferralPreferences = (personaId: PhysicianIdentity) => request
 /** `clarifies: 'modality'` (Part Q) refines only the modality boundary a
  * clarification asked about, merged onto the confirmed preference server-
  * side -- still a draft until confirmed. */
-export const interpretReferralPreference = (personaId: PhysicianIdentity, sourceText: string, clarifies?: 'modality') => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/interpret`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clarifies ? { source_text: sourceText, clarifies } : { source_text: sourceText }),
+/** `revises` (My Agent cleanup pass, Part C): edit a CONFIRMED preference
+ * -- the interpretation becomes a draft that supersedes it only once the
+ * physician confirms. */
+export const interpretReferralPreference = (personaId: PhysicianIdentity, sourceText: string, clarifies?: 'modality', revises?: string) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/interpret`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ source_text: sourceText, ...(clarifies ? { clarifies } : {}), ...(revises ? { revises } : {}) }),
 })
 export const editReferralPreference = (personaId: PhysicianIdentity, preferenceId: string, structuredRules: StructuredReferralPreference) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/${encodeURIComponent(preferenceId)}`, {
   method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ structured_rules: structuredRules }),

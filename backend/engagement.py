@@ -1705,7 +1705,16 @@ def project_practice_representation(
     instead of a second one existing alongside it."""
     base = base_practice_representation(persona_id)
     if confirmed_referral_preference_sections:
-        base = {**base, **confirmed_referral_preference_sections}
+        # My Agent cleanup pass: an empty overlay list never blanks
+        # fixture-derived knowledge (e.g. a modality-only confirmation must
+        # not erase the base good-fit/rule statements).
+        base = {
+            **base,
+            **{
+                key: value for key, value in confirmed_referral_preference_sections.items()
+                if not isinstance(value, list) or value or key == "referral_preference_provenance"
+            },
+        }
     confirmed = [item for item in learnings if item["status"] == "confirmed"]
     suggested = [item for item in learnings if item["status"] == "suggested"]
     existing = existing_learnings or []

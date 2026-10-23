@@ -46,6 +46,11 @@ _STOPWORDS = {
 }
 
 
+# Words too generic to make a network post "directly relevant" grounding for
+# one physician's match (My Agent cleanup pass, Part K).
+_GROUNDING_STOPWORDS = {"referral", "referrals", "guidance", "updated", "network", "patients", "lately"}
+
+
 def _tokens(text: str) -> set[str]:
     return {word for word in re.findall(r"[a-z]{3,}", text.casefold()) if word not in _STOPWORDS}
 
@@ -66,19 +71,40 @@ def _physician_agent_candidate(
     profile = _PHYSICIANS_BY_ID[physician_id]
     persona = PERSONAS[persona_id]
     reasons: list[str] = []
+    # My Agent cleanup pass, Part J: the same evidence as `reasons`, but
+    # structured as labeled reasons the UI renders as WHY THIS MATCH --
+    # each one backed by a real profile/representation field, never a
+    # numeric value.
+    match_reasons: list[dict[str, str]] = []
+    evidence_tokens: set[str] = set()
 
     specialty_tokens = _tokens(profile.specialty) | _tokens(profile.subspecialty)
     if specialty_tokens & question_tokens:
         reasons.append(f"Specialty: {profile.specialty} ({profile.subspecialty})")
+        match_reasons.append({"kind": "specialty", "label": "Specialty fit", "detail": f"{profile.specialty} · {profile.subspecialty}"})
+        evidence_tokens |= specialty_tokens & question_tokens
+
+    similar = [case.label for case in profile.historical_cases if _tokens(case.label) & question_tokens]
+    if similar:
+        match_reasons.append({"kind": "similar_history", "label": "Similar patient history", "detail": "; ".join(similar)})
+        evidence_tokens |= {token for label in similar for token in _tokens(label)} & question_tokens
+
+    focus = [area for area in profile.focus_areas if _tokens(area) & question_tokens]
+    if focus:
+        match_reasons.append({"kind": "practice_focus", "label": "Practice focus", "detail": ", ".join(focus)})
+        evidence_tokens |= {token for area in focus for token in _tokens(area)} & question_tokens
 
     interest_overlays = workflow_store.physician_interests(workspace_id, persona_id) if persona_id in EDITABLE_PERSONAS else []
     confirmed_case_interests = [
         item["title"] for item in physician_interests(persona_id, interest_overlays)
         if item["interest_type"] == "case_interest" and item["confirmed"]
     ]
-    for interest in confirmed_case_interests:
-        if _tokens(interest) & question_tokens:
-            reasons.append(f"Confirmed case interest: {interest}")
+    matched_interests = [interest for interest in confirmed_case_interests if _tokens(interest) & question_tokens]
+    for interest in matched_interests:
+        reasons.append(f"Confirmed case interest: {interest}")
+    if matched_interests:
+        match_reasons.append({"kind": "case_interest", "label": "Confirmed case interest", "detail": ", ".join(matched_interests)})
+        evidence_tokens |= {token for interest in matched_interests for token in _tokens(interest)} & question_tokens
 
     referral_sections = confirmed_referral_preference_sections(workflow_store, workspace_id, physician_id)
     confirmed_good_fit: list[str] = []
@@ -89,17 +115,27 @@ def _physician_agent_candidate(
         for item in confirmed_good_fit:
             if _tokens(item) & question_tokens:
                 reasons.append(f"Confirmed referral preference: {item}")
+                match_reasons.append({"kind": "referral_preference", "label": "Confirmed referral preference", "detail": item})
+                evidence_tokens |= _tokens(item) & question_tokens
         if modality_preference and ({"econsult", "virtual", "person"} & question_tokens):
             reasons.append(f"Confirmed modality preference: {modality_preference}")
+            match_reasons.append({"kind": "modality", "label": "Modality preference", "detail": modality_preference})
 
     if not reasons:
         return None
+    # Supporting context, never a match reason on its own: what this
+    # physician wants before referral (confirmed preference > profile).
+    before_referral = (referral_sections or {}).get("referral_requirements") or profile.required_workup
+    if before_referral:
+        match_reasons.append({"kind": "before_referral", "label": "Before referral", "detail": " + ".join(before_referral)})
     return {
         "physician_id": physician_id,
         "physician_name": profile.name.replace(" (synthetic)", ""),
         "specialty": profile.specialty,
         "agent_name": persona["agent_name"],
         "reasons": reasons,
+        "match_reasons": match_reasons,
+        "evidence_tokens": sorted(evidence_tokens),
         "confirmed_case_interests": confirmed_case_interests,
         "confirmed_good_fit": confirmed_good_fit,
         "modality_preference": modality_preference,
@@ -163,6 +199,24 @@ def ask_network(
         is not None
     ]
     broadcasts = _broadcast_matches(workflow_store, workspace_id, question_tokens)
+    # My Agent cleanup pass, Part K/L: posts still inform results -- but only
+    # as attributed grounding inside the matched physician's OWN result
+    # (their post, directly about the question), never as a second results
+    # feed. Strength is relative: the match(es) whose evidence covers the
+    # most of the question are "strong", the rest "relevant".
+    grounding_tokens = question_tokens - _GROUNDING_STOPWORDS
+    best_coverage = max((len(match["evidence_tokens"]) for match in physician_agents), default=0)
+    for match in physician_agents:
+        persona_id = PERSONA_BY_PHYSICIAN_ID.get(match["physician_id"])
+        match["grounded_in"] = [
+            {"post_id": item["post_id"], "title": item["title"], "provenance_type": item["provenance_type"]}
+            for item in broadcasts
+            if item["physician_persona"] == persona_id
+            and (_tokens(item["title"]) | _tokens(item["snippet"])) & grounding_tokens
+        ]
+        kinds = {reason["kind"] for reason in match["match_reasons"]} - {"before_referral"}
+        match["strength"] = "strong" if len(match["evidence_tokens"]) == best_coverage and len(kinds) >= 2 else "relevant"
+        del match["evidence_tokens"]
 
     routing: dict[str, Any] | None = None
     if patient is not None:

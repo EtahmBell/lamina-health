@@ -20,11 +20,13 @@ from backend.agent_experience import (
 from backend.demo_workspace import DemoWorkspace, MutableDemoWorkspace
 from backend.models import CoordinationChatAnswer
 from backend.network_chat import answer_general_practice_question
+from backend.agent_network_activity import agent_network_activity
 from backend.network_query import ask_network
 from backend.referral_preferences import (
     clarification_opportunities,
     confirmed_referral_preference_sections,
     ensure_seed_preferences,
+    recent_representation_learnings,
 )
 from backend.engagement import (
     DEPENDS_OPTION,
@@ -738,6 +740,12 @@ def agent_overview(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
         "more_training_available": training["more_training_available"],
         "next_action": training["action"],
         "learning_opportunities": learning_opportunities,
+        # My Agent cleanup pass, Part F/G: representation learning and
+        # network/workflow activity are separate on purpose.
+        "recent_learnings": (
+            recent_representation_learnings(workflow_store, workspace_id, physician_id) if physician_id else []
+        ),
+        "network_activity": agent_network_activity(workflow_store, workspace_id, physician_id),
         "ranking_effect": "none",
     }
 
