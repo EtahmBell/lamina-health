@@ -35,6 +35,7 @@ from backend.referral_preferences import (
     CHEN_SEED_CASE_FAMILY,
     ReferralPreferenceInterpretationService,
     clarification_opportunities,
+    effective_confirmed_rules,
 )
 from backend.referrals import accept_referral, build_referral, find_scheduling_options
 from backend.referrals.scheduling import open_slots, synthetic_chen_availability
@@ -328,13 +329,14 @@ def test_a_clarification_draft_is_not_operational_until_confirmed_and_keeps_requ
     url = "/api/workspace/physician/chen/referral-preferences"
     with TestClient(app) as client:
         ws = _bootstrap(client)
-        teach_and_confirm_chen_baseline(store, ws)
+        baseline = teach_and_confirm_chen_baseline(store, ws)
         document_chen_consultation(store, ws)
         card = clarification_opportunities(store, ws, CHEN_ID)[0]
         draft = client.post(f"{url}/interpret", json={"source_text": card["yes_statement"], "clarifies": "modality"}).json()
         assert draft["status"] == "draft"
-        # Merged onto the confirmed preference: requirements are carried over.
-        assert {item["key"] for item in draft["structured_rules"]["required"]} >= {"recent_renal_function"}
+        # Learning-history semantics pass: the clarification contributes only
+        # the modality boundary; the requirements stay with the baseline.
+        assert draft["structured_rules"]["required"] == []
         assert {rule["modality"] for rule in draft["structured_rules"]["modality_rules"]} == {"econsult", "in_person"}
         # A draft changes nothing.
         assert len(clarification_opportunities(store, ws, CHEN_ID)) == 1
@@ -344,8 +346,10 @@ def test_a_clarification_draft_is_not_operational_until_confirmed_and_keeps_requ
 
         client.post(f"{url}/{draft['id']}/confirm")
         assert clarification_opportunities(store, ws, CHEN_ID) == []
-        confirmed = store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
-    assert "recent_renal_function" in confirmed["structured_rules_json"]
+    assert store.referral_preference(ws, baseline["id"])["status"] == "confirmed"
+    effective = effective_confirmed_rules(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
+    assert "recent_renal_function" in {item.key for item in effective.required}
+    assert {rule.modality for rule in effective.modality_rules} == {"econsult", "in_person"}
 
 
 def test_a_modality_only_clarification_never_drops_the_requirement_baseline(store: WorkflowStore) -> None:

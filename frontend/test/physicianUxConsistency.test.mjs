@@ -128,7 +128,7 @@ test('a proposal names its case family and separates what it adds from guidance 
   assert.match(preferences, /type_2_diabetes: 'Diabetes referrals'/)
   assert.match(review, /CASE_FAMILY_LABELS\[draft\.case_family\]/)
   assert.match(review, /splitAgainstConfirmed\(draft\.structured_rules, draft\.supersedes_id \? null : confirmedInFamily\)/)
-  assert.match(review, /Your existing guidance stays in place:/)
+  assert.match(review, /Already part of how your agent represents you:/)
 })
 
 test('an empty (or no-op) interpretation can never be confirmed from the proposal', () => {

@@ -123,9 +123,13 @@ def test_editing_a_clarification_never_drops_carried_over_requirements(store: Wo
             "source_text": "E-consult is fine when the question is focused and the recent A1c is available.",
             "revises": clarified["id"],
         }).json()
-    rules = draft["structured_rules"]
-    assert {item["key"] for item in rules["required"]} >= {"recent_renal_function", "recent_hba1c"}
-    assert [rule["modality"] for rule in rules["modality_rules"]] == ["econsult"]
+        client.post(f"{PREFERENCES}/{draft['id']}/confirm")
+    # The requirements belong to the baseline learning, which the edit of the
+    # clarification never touches -- they stay operational.
+    assert [rule["modality"] for rule in draft["structured_rules"]["modality_rules"]] == ["econsult"]
+    keys = {item.key for item in requirement_override_for_referral(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY) if item.required}
+    assert keys >= {"recent_renal_function", "recent_hba1c"}
+    assert store.referral_preference(ws, clarified["id"])["status"] == "superseded"
 
 
 # ------------------------------------------------------------- LEARNED THIS WEEK 13-15

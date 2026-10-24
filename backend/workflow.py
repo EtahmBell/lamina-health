@@ -2195,7 +2195,7 @@ class WorkflowStore:
                    FROM physician_referral_preferences
                    WHERE workspace_id=? AND physician_id=? AND case_family=?
                      AND status='confirmed'
-                   ORDER BY confirmed_at DESC LIMIT 1""",
+                   ORDER BY confirmed_at DESC, rowid DESC LIMIT 1""",
                 (workspace_id, physician_id, case_family),
             ).fetchone()
         return dict(row) if row else None
@@ -2208,7 +2208,7 @@ class WorkflowStore:
                 f"""SELECT {self._REFERRAL_PREFERENCE_COLUMNS}
                    FROM physician_referral_preferences
                    WHERE workspace_id=? AND physician_id=? AND status='confirmed'
-                   ORDER BY case_family, confirmed_at DESC""",
+                   ORDER BY case_family, confirmed_at, rowid""",
                 (workspace_id, physician_id),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -2216,28 +2216,51 @@ class WorkflowStore:
     def confirm_referral_preference(
         self, workspace_id: str, preference_id: str, representation_snapshot_id: str | None
     ) -> dict | None:
-        """Confirming a draft supersedes the prior confirmed preference for the
-        same (physician, case_family) rather than mutating it (Part I) --
-        historical evaluations/referrals stay attributable to the
-        representation state that produced them."""
+        """Confirming never mutates an earlier learning (Part I) -- historical
+        evaluations/referrals stay attributable to the representation state
+        that produced them.
+
+        Learning-history semantics pass: new teachings are ADDITIVE. An
+        earlier confirmed learning is superseded only when (a) this draft
+        explicitly revises it (`supersedes_id`, the Edit flow), or (b) every
+        representation path it contributed is now contributed by later
+        confirmed learnings (see referral_preferences.shadowed_preference_ids).
+        Sharing a case family, specialty, or disease never implies it."""
+        from backend.referral_preferences import shadowed_preference_ids
+
         draft = self.referral_preference(workspace_id, preference_id)
         if draft is None or draft["status"] != "draft":
             return None
         now = self._now()
+        # Microsecond precision so learnings confirmed within the same second
+        # still layer in confirmation order.
+        confirmed_at = datetime.now(UTC).isoformat()
         with self._connect() as db:
-            db.execute(
-                """UPDATE physician_referral_preferences
-                   SET status='superseded', updated_at=?
-                   WHERE workspace_id=? AND physician_id=? AND case_family=? AND status='confirmed'""",
-                (now, workspace_id, draft["physician_id"], draft["case_family"]),
-            )
             db.execute(
                 """UPDATE physician_referral_preferences
                    SET status='confirmed', confirmed_at=?, updated_at=?,
                        representation_snapshot_id_at_confirmation=?
                    WHERE workspace_id=? AND id=? AND status='draft'""",
-                (now, now, representation_snapshot_id, workspace_id, preference_id),
+                (confirmed_at, now, representation_snapshot_id, workspace_id, preference_id),
             )
+            superseded = {draft["supersedes_id"]} if draft.get("supersedes_id") else set()
+            family = [
+                dict(row) for row in db.execute(
+                    f"""SELECT {self._REFERRAL_PREFERENCE_COLUMNS}
+                       FROM physician_referral_preferences
+                       WHERE workspace_id=? AND physician_id=? AND case_family=? AND status='confirmed'
+                       ORDER BY confirmed_at, rowid""",
+                    (workspace_id, draft["physician_id"], draft["case_family"]),
+                ).fetchall()
+            ]
+            superseded |= shadowed_preference_ids([row for row in family if row["id"] not in superseded])
+            superseded.discard(preference_id)
+            for old_id in superseded:
+                db.execute(
+                    """UPDATE physician_referral_preferences SET status='superseded', updated_at=?
+                       WHERE workspace_id=? AND id=? AND status='confirmed'""",
+                    (now, workspace_id, old_id),
+                )
         return self.referral_preference(workspace_id, preference_id)
 
     def set_referral_preference_snapshot(

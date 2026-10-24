@@ -77,6 +77,7 @@ import {
 import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { AgentAvatar, agentTone, type AgentAvatarTone } from './AgentAvatar.tsx'
+import { AgentTypingIndicator, useConversationFollow, withMinimumTyping } from './agentChat.tsx'
 import { ModalPortal } from './ModalPortal.tsx'
 import { PreferenceDraftReview, ReferralPreferenceSection, TEACHING_PLACEHOLDER } from './ReferralPreferences.tsx'
 
@@ -2416,6 +2417,10 @@ type ChatMessage = {
   id: string; role: 'physician' | 'agent'; text: string
   response?: AgentChatResponse; feedbackState?: 'reflects' | 'not_quite'
   focusedSeed?: FocusedTrainingSeed | null
+  /** Chat UX pass: an agent message awaiting its answer, rendered as the
+   * typing indicator in the slot the answer will replace. `key` stays the
+   * same across that replacement (the answer gets its own server `id`). */
+  pending?: boolean; key?: string
 }
 
 /** "Not quite" in Test (routing consolidation pass, Part U): the
@@ -2452,6 +2457,7 @@ function ChatMessageBubble({ message, agentName, tone, onFeedback, onStartFocuse
   busy: boolean; personaId: PhysicianIdentity
 }) {
   if (message.role === 'physician') return <p className="chat-message physician">{message.text}</p>
+  if (message.pending) return <AgentTypingIndicator agentName={agentName} tone={tone} />
   const response = message.response
   return <div className="chat-message agent">
     <span className="chat-agent-label"><AgentAvatar tone={tone} /> {agentName}</span>
@@ -2487,6 +2493,9 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
   const [error, setError] = useState('')
   const [promptRotation, setPromptRotation] = useState(0)
   const tone = agentTone(personaId)
+  const threadRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLFormElement>(null)
+  const follow = useConversationFollow(threadRef, composerRef)
   useEffect(() => { getAgentTestCases(personaId).then(setCases).catch(() => {}) }, [personaId])
   const visiblePrompts = Array.from(
     { length: Math.min(VISIBLE_STARTER_PROMPT_COUNT, CHAT_STARTER_PROMPTS.length) },
@@ -2502,12 +2511,20 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
     const trimmed = text.trim()
     if (!trimmed || busy) return
     setBusy(true); setError('')
-    setMessages((prev) => [...prev, { id: `u-${crypto.randomUUID()}`, role: 'physician', text: trimmed }])
+    const pendingId = `pending-${crypto.randomUUID()}`
+    setMessages((prev) => [...prev,
+      { id: `u-${crypto.randomUUID()}`, role: 'physician', text: trimmed },
+      { id: pendingId, key: pendingId, role: 'agent', text: '', pending: true },
+    ])
     setInput('')
+    follow.begin()
     try {
-      const response = await chatWithAgent(personaId, { mode, message: trimmed, controlled_test_case_id: testCaseId, origin: mode === 'synthetic_case' ? 'synthetic_demo' : 'practice' })
-      setMessages((prev) => [...prev, { id: response.response_id, role: 'agent', text: response.answer, response }])
+      const response = await withMinimumTyping(chatWithAgent(personaId, { mode, message: trimmed, controlled_test_case_id: testCaseId, origin: mode === 'synthetic_case' ? 'synthetic_demo' : 'practice' }))
+      setMessages((prev) => prev.map((item) => (item.id === pendingId ? { id: response.response_id, key: pendingId, role: 'agent', text: response.answer, response } : item)))
+      follow.complete()
     } catch (err) {
+      setMessages((prev) => prev.filter((item) => item.id !== pendingId))
+      follow.fail()
       setError(err instanceof Error ? err.message : 'Could not reach your agent')
     } finally { setBusy(false) }
   }
@@ -2538,14 +2555,13 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
       <h2>Test how your agent currently represents you.</h2>
       <p className="panel-intro">See how your current representation behaves on a hypothetical case. Testing never changes your agent; only a correction you confirm does.</p>
       <p className="chat-boundary-note">Synthetic · no PHI. Use synthetic or hypothetical cases in this demo.</p>
-      {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
+      {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite" ref={threadRef}>
         {activeCase && <div className="chat-case-context"><span className="section-label">Synthetic case</span><strong>{activeCase.title}</strong><ul className="clinical-list">{activeCase.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
-        {messages.map((message) => <ChatMessageBubble key={message.id} message={message} agentName={agentName} tone={tone} onFeedback={feedback} onStartFocused={startFocused} busy={busy} personaId={personaId} />)}
-        {busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar tone={tone} /> {agentName}</span><p className="chat-typing-dots" aria-label={`${agentName} is answering`}><span /><span /><span /></p></div>}
+        {messages.map((message) => <ChatMessageBubble key={message.key ?? message.id} message={message} agentName={agentName} tone={tone} onFeedback={feedback} onStartFocused={startFocused} busy={busy} personaId={personaId} />)}
       </div>}
       {error && <p className="demo-reset-error" role="alert">{error}</p>}
       <div className="chat-starter-prompts">{visiblePrompts.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" disabled={busy} onClick={() => sendStarterPrompt(prompt)}>{prompt}</button>)}</div>
-      <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input, 'practice_question') }}>
+      <form className="chat-composer" ref={composerRef} onSubmit={(event) => { event.preventDefault(); void send(input, 'practice_question') }}>
         <label htmlFor="chat-input" className="sr-only">Ask your agent about your practice</label>
         <input id="chat-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask your agent about your practice…" disabled={busy} />
         <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
@@ -2643,7 +2659,7 @@ const NETWORK_AGENT_STARTER_PROMPTS = [
   'What information makes a referral most useful to you?',
 ]
 
-type NetworkAgentChatMessage = { id: string; role: 'physician' | 'agent'; content: string; basedOn: string[]; unconfirmed: boolean }
+type NetworkAgentChatMessage = { id: string; role: 'physician' | 'agent'; content: string; basedOn: string[]; unconfirmed: boolean; pending?: boolean }
 
 export function NetworkAskAgentModal({ controlledId, physicianName, onClose, groundedIn }: { controlledId: string; physicianName: string; onClose: () => void; groundedIn?: string[] }) {
   const [messages, setMessages] = useState<NetworkAgentChatMessage[]>([])
@@ -2652,6 +2668,9 @@ export function NetworkAskAgentModal({ controlledId, physicianName, onClose, gro
   const [error, setError] = useState('')
   const [promptsOpen, setPromptsOpen] = useState(false)
   const cancelled = useRef(false)
+  const threadRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLFormElement>(null)
+  const follow = useConversationFollow(threadRef, composerRef)
   // Reset on (re)mount: StrictMode mounts, cleans up, and remounts in dev.
   useEffect(() => { cancelled.current = false; return () => { cancelled.current = true } }, [])
   useEffect(() => {
@@ -2664,13 +2683,22 @@ export function NetworkAskAgentModal({ controlledId, physicianName, onClose, gro
     const trimmed = question.trim()
     if (!trimmed || busy) return
     setBusy(true); setError(''); setInput('')
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'physician', content: trimmed, basedOn: [], unconfirmed: false }])
+    const pendingId = crypto.randomUUID()
+    setMessages((prev) => [...prev,
+      { id: crypto.randomUUID(), role: 'physician', content: trimmed, basedOn: [], unconfirmed: false },
+      { id: pendingId, role: 'agent', content: '', basedOn: [], unconfirmed: false, pending: true },
+    ])
+    follow.begin()
     try {
-      const result = await askNetworkAgent(controlledId, trimmed)
+      const result = await withMinimumTyping(askNetworkAgent(controlledId, trimmed))
       if (cancelled.current) return
-      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'agent', content: result.answer, basedOn: result.based_on, unconfirmed: result.requires_physician_input }])
+      setMessages((prev) => prev.map((item) => (item.id === pendingId ? { id: pendingId, role: 'agent', content: result.answer, basedOn: result.based_on, unconfirmed: result.requires_physician_input } : item)))
+      follow.complete()
     } catch (sendError) {
-      if (!cancelled.current) setError(sendError instanceof Error ? sendError.message : 'Could not reach the agent.')
+      if (cancelled.current) return
+      setMessages((prev) => prev.filter((item) => item.id !== pendingId))
+      follow.fail()
+      setError(sendError instanceof Error ? sendError.message : 'Could not reach the agent.')
     } finally {
       if (!cancelled.current) setBusy(false)
     }
@@ -2686,19 +2714,20 @@ export function NetworkAskAgentModal({ controlledId, physicianName, onClose, gro
         <p className="section-label">Grounded in</p>
         <ul>{groundedIn.map((item) => <li key={item}>{item}</li>)}</ul>
       </div>}
-      {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite">
+      {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite" ref={threadRef}>
         {messages.map((message) => message.role === 'physician'
           ? <p className="chat-message physician" key={message.id}>{message.content}</p>
-          : <div className="chat-message agent" key={message.id}>
+          : message.pending
+            ? <AgentTypingIndicator key={message.id} agentName={`${physicianName}'s Agent`} tone="blue" />
+            : <div className="chat-message agent" key={message.id}>
             <span className="chat-agent-label"><AgentAvatar tone="blue" /> {physicianName}'s Agent</span>
             <p>{message.content}</p>
             {message.unconfirmed && <p className="chat-uncertainty">Not yet confirmed by {physicianName}.</p>}
             {message.basedOn.length > 0 && <p className="chat-grounding">Based on: {message.basedOn.join(', ')}</p>}
           </div>)}
-        {busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar tone="blue" /> {physicianName}'s Agent</span><p className="chat-typing-dots" aria-label={`${physicianName}'s Agent is answering`}><span /><span /><span /></p></div>}
       </div>}
       {error && <p className="demo-reset-error" role="alert">{error}</p>}
-      <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input) }}>
+      <form className="chat-composer" ref={composerRef} onSubmit={(event) => { event.preventDefault(); void send(input) }}>
         <label htmlFor="network-ask-agent-input" className="sr-only">Ask {physicianName}'s Agent</label>
         <input id="network-ask-agent-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask a question…" disabled={busy} />
         <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
@@ -2932,12 +2961,14 @@ function toneForAgent(id: string): AgentAvatarTone {
  * resize, and any height change inside the rail (suggestions opening,
  * messages arriving). */
 function PhysicianAgentChatRail({ physicianId, physicianName, agentName, rep }: { physicianId: string; physicianName: string; agentName: string; rep: PracticeRepresentation['sections'] }) {
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'agent'; text: string }>>([])
+  const [messages, setMessages] = useState<Array<{ id: string; role: 'user' | 'agent'; text: string; pending?: boolean }>>([])
   const [input, setInput] = useState('')
   const [typing, setTyping] = useState(false)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [pinned, setPinned] = useState(false)
   const tone = toneForAgent(physicianId)
+  const conversationRef = useRef<HTMLDivElement>(null)
+  const follow = useConversationFollow(conversationRef)
 
   const railRef = useCallback((node: HTMLElement | null) => {
     if (!node) return
@@ -2958,13 +2989,17 @@ function PhysicianAgentChatRail({ physicianId, physicianName, agentName, rep }: 
   const ask = (question: string) => {
     const trimmed = question.trim()
     if (!trimmed || typing) return
-    setMessages((prev) => [...prev, { role: 'user', text: trimmed }])
+    // Chat UX pass: the answer replaces the typing indicator in its own slot.
+    const pendingId = crypto.randomUUID()
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text: trimmed }, { id: pendingId, role: 'agent', text: '', pending: true }])
     setInput('')
     setSuggestionsOpen(false)
     setTyping(true)
+    follow.begin()
     window.setTimeout(() => {
-      setMessages((prev) => [...prev, { role: 'agent', text: buildAgentPreviewAnswer(trimmed, physicianName, rep) }])
+      setMessages((prev) => prev.map((item) => (item.id === pendingId ? { id: pendingId, role: 'agent', text: buildAgentPreviewAnswer(trimmed, physicianName, rep) } : item)))
       setTyping(false)
+      follow.complete()
     }, 650)
   }
 
@@ -2979,16 +3014,17 @@ function PhysicianAgentChatRail({ physicianId, physicianName, agentName, rep }: 
       </div>
       <p className="member-chat-helper">Ask about referral fit, preferred workup, or how this practice approaches a case.</p>
 
-      <div className="member-chat-conversation" role="log" aria-live="polite">
+      <div className="member-chat-conversation" role="log" aria-live="polite" ref={conversationRef}>
         {messages.length === 0 && !typing && <p className="member-chat-empty">Ask a question below to see how {agentName} responds.</p>}
-        {messages.map((message, index) => <p key={index} className={`member-chat-message ${message.role}`}>
-          {message.role === 'agent' && <span className="member-chat-message-avatar"><AgentAvatar tone={tone} /></span>}
-          <span>{message.text}</span>
-        </p>)}
-        {typing && <p className="member-chat-message agent typing">
-          <span className="member-chat-message-avatar"><AgentAvatar tone={tone} /></span>
-          <span className="chat-typing-dots" aria-label={`${agentName} is answering`}><span /><span /><span /></span>
-        </p>}
+        {messages.map((message) => message.pending
+          ? <p key={message.id} className="member-chat-message agent typing">
+            <span className="member-chat-message-avatar"><AgentAvatar tone={tone} /></span>
+            <span className="chat-typing-dots" role="status" aria-label={`${agentName} is responding`}><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" /></span>
+          </p>
+          : <p key={message.id} className={`member-chat-message ${message.role}`}>
+            {message.role === 'agent' && <span className="member-chat-message-avatar"><AgentAvatar tone={tone} /></span>}
+            <span>{message.text}</span>
+          </p>)}
       </div>
 
       <div className="member-chat-suggestions">

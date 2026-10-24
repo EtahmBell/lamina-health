@@ -18,8 +18,9 @@ from backend.models import (
 )
 from backend.referral_preferences import (
     ensure_seed_preferences,
+    effective_confirmed_rules,
+    layer_preferences,
     merge_modality_clarification,
-    merge_addition,
     merge_revision,
     referral_preference_interpretation_service,
 )
@@ -91,15 +92,12 @@ def interpret_preference(
         case_family = revised["case_family"]
         structured = merge_revision(revised, structured)
     elif request.clarifies == "modality":
-        structured = merge_modality_clarification(
-            workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family), structured
-        )
-    else:
-        # NLP pass, Part O: a new teaching adds to this case family's
-        # confirmed preference rather than replacing it on confirmation.
-        structured = merge_addition(
-            workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family), structured
-        )
+        # A clarification answer contributes ONLY the modality boundary it
+        # was asked about.
+        structured = merge_modality_clarification(None, structured)
+    # Learning-history semantics pass: every other new teaching is its own
+    # learning with its own contribution -- additive to, never a copy of,
+    # the learnings already confirmed (see layer_preferences).
     created = workflow_store.create_referral_preference(
         workspace_id,
         physician_id,
@@ -147,8 +145,8 @@ def confirm_preference(persona_id: str, preference_id: str, workspace_id: Mutabl
     if rules == StructuredReferralPreference():
         raise HTTPException(status_code=409, detail="Nothing was interpreted to confirm")
     if existing["status"] == "draft" and not existing.get("supersedes_id"):
-        current = workflow_store.confirmed_referral_preference(workspace_id, physician_id, existing["case_family"])
-        if current is not None and _structured(current) == rules:
+        current = effective_confirmed_rules(workflow_store, workspace_id, physician_id, existing["case_family"])
+        if current is not None and layer_preferences(current, rules) == current:
             raise HTTPException(status_code=409, detail="This adds nothing new to the confirmed preference")
     confirmed = workflow_store.confirm_referral_preference(workspace_id, preference_id, None)
     if confirmed is None:

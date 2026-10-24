@@ -54,9 +54,21 @@ export function isEmptyInterpretation(rules: StructuredReferralPreference): bool
     && rules.redirect.length === 0 && rules.modality === 'unspecified' && rules.modality_rules.length === 0
 }
 
-/** A new teaching's draft carries the case family's already-confirmed
- * guidance (backend merge_addition), so the proposal separates what THIS
- * statement adds from what is simply kept. */
+/** Learning-history semantics pass: a case family can hold several active
+ * learnings, so "already confirmed" is all of them together. */
+export function combineConfirmed(items: StructuredReferralPreference[]): StructuredReferralPreference | null {
+  if (items.length === 0) return null
+  return items.reduce((all, rules) => ({
+    ...all,
+    good_fit: [...all.good_fit, ...rules.good_fit], redirect: [...all.redirect, ...rules.redirect],
+    required: [...all.required, ...rules.required], helpful: [...all.helpful, ...rules.helpful],
+    modality_rules: [...all.modality_rules, ...rules.modality_rules],
+    modality: rules.modality !== 'unspecified' ? rules.modality : all.modality,
+  }))
+}
+
+/** What THIS statement adds, versus guidance it merely restates (already
+ * part of the physician's confirmed representation). */
 export function splitAgainstConfirmed(rules: StructuredReferralPreference, confirmed: StructuredReferralPreference | null): { added: StructuredReferralPreference; keptLabels: string[] } {
   if (!confirmed) return { added: rules, keptLabels: [] }
   const confirmedItems = new Set([...confirmed.required, ...confirmed.helpful].map((item) => `${item.key}:${item.required}`))
@@ -201,9 +213,9 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
   const [confirmedInFamily, setConfirmedInFamily] = useState<StructuredReferralPreference | null>(null)
   useEffect(() => {
     if (draft.supersedes_id) return
-    listReferralPreferences(personaId).then((items) => setConfirmedInFamily(
-      items.find((item) => item.status === 'confirmed' && item.case_family === draft.case_family && item.id !== draft.id)?.structured_rules ?? null,
-    )).catch(() => {})
+    listReferralPreferences(personaId).then((items) => setConfirmedInFamily(combineConfirmed(
+      items.filter((item) => item.status === 'confirmed' && item.case_family === draft.case_family && item.id !== draft.id).map((item) => item.structured_rules),
+    ))).catch(() => {})
   }, [personaId, draft.id, draft.case_family, draft.supersedes_id])
   const { added, keptLabels } = splitAgainstConfirmed(draft.structured_rules, draft.supersedes_id ? null : confirmedInFamily)
   // Part N: never offer to confirm an empty learning (or one that adds
@@ -257,7 +269,7 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
       : nothingToConfirm && keptLabels.length > 0
         ? <p className="muted-note">This doesn’t add anything new to what your agent already knows -- try adding more detail.</p>
         : <ReadOnlyInterpretation rules={added} />}
-    {!editing && keptLabels.length > 0 && !nothingToConfirm && <p className="referral-pref-kept">Your existing guidance stays in place: {keptLabels.join(', ')}.</p>}
+    {!editing && keptLabels.length > 0 && !nothingToConfirm && <p className="referral-pref-kept">Already part of how your agent represents you: {keptLabels.join(', ')}.</p>}
     {error && <p className="demo-reset-error" role="alert">{error}</p>}
     <div className="referral-pref-review-actions">
       {editing

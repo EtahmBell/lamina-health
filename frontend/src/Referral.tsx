@@ -5,6 +5,7 @@ import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkHighlights, trainingPath, TrainTab, WorklistRows, type WorklistRowData } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
+import { AgentTypingIndicator, useConversationFollow, withMinimumTyping } from './agentChat.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { physicianInitials } from './networkRoster.ts'
 import { ModalPortal } from './ModalPortal.tsx'
@@ -874,7 +875,7 @@ export function chenSuggestedPrompts(patientLabel: string, referringPhysicianNam
   ]
 }
 
-type LocalChatMessage = { id: string; role: 'physician' | 'agent'; content: string; basedOn: string[]; requiresPhysicianInput: boolean }
+type LocalChatMessage = { id: string; role: 'physician' | 'agent'; content: string; basedOn: string[]; requiresPhysicianInput: boolean; pending?: boolean }
 
 /**
  * Patient-scoped physician-agent-to-physician-agent coordination chat
@@ -908,24 +909,35 @@ export function CoordinationChatCard({
   // Reset on (re)mount: StrictMode mounts, cleans up, and remounts in dev.
   useEffect(() => { cancelled.current = false; return () => { cancelled.current = true } }, [])
 
-  useEffect(() => {
-    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight
-  }, [messages, busy])
+  // Chat UX pass: the shared follow behavior replaces "jump the thread to
+  // the bottom on every change" -- it reveals the active exchange within
+  // this card's own scrolling thread, and respects manual scrolling.
+  const composerRef = useRef<HTMLFormElement>(null)
+  const follow = useConversationFollow(threadRef, composerRef)
 
   const send = async (question: string) => {
     const trimmed = question.trim()
     if (!trimmed || busy || !referral.id) return
     setBusy(true); setError(''); setInput('')
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'physician', content: trimmed, basedOn: [], requiresPhysicianInput: false }])
+    const pendingId = crypto.randomUUID()
+    setMessages((prev) => [...prev,
+      { id: crypto.randomUUID(), role: 'physician', content: trimmed, basedOn: [], requiresPhysicianInput: false },
+      { id: pendingId, role: 'agent', content: '', basedOn: [], requiresPhysicianInput: false, pending: true },
+    ])
+    follow.begin()
     try {
-      const result = await askPhysicianAgent(referral.id, requestingPhysicianId, trimmed)
+      const result = await withMinimumTyping(askPhysicianAgent(referral.id, requestingPhysicianId, trimmed))
       if (cancelled.current) return
-      setMessages((prev) => [...prev, {
-        id: crypto.randomUUID(), role: 'agent', content: result.answer,
+      setMessages((prev) => prev.map((item) => (item.id === pendingId ? {
+        id: pendingId, role: 'agent', content: result.answer,
         basedOn: result.based_on, requiresPhysicianInput: result.requires_physician_input,
-      }])
+      } : item)))
+      follow.complete()
     } catch (sendError) {
-      if (!cancelled.current) setError(sendError instanceof Error ? sendError.message : 'Could not reach the agent.')
+      if (cancelled.current) return
+      setMessages((prev) => prev.filter((item) => item.id !== pendingId))
+      follow.fail()
+      setError(sendError instanceof Error ? sendError.message : 'Could not reach the agent.')
     } finally {
       if (!cancelled.current) setBusy(false)
     }
@@ -937,16 +949,17 @@ export function CoordinationChatCard({
     {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite" ref={threadRef}>
       {messages.map((message) => message.role === 'physician'
         ? <p className="chat-message physician" key={message.id}>{message.content}</p>
-        : <div className="chat-message agent" key={message.id}>
+        : message.pending
+          ? <AgentTypingIndicator key={message.id} agentName={`${representedPhysicianName}'s Agent`} tone={representedTone} />
+          : <div className="chat-message agent" key={message.id}>
           <span className="chat-agent-label"><AgentAvatar tone={representedTone} /> {representedPhysicianName}'s Agent</span>
           <p>{message.content}</p>
           {message.requiresPhysicianInput && <p className="chat-uncertainty">This requires {representedPhysicianName}'s input directly.</p>}
           {message.basedOn.length > 0 && <p className="chat-grounding">Based on: {message.basedOn.join(', ')}</p>}
         </div>)}
-      {busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar tone={representedTone} /> {representedPhysicianName}'s Agent</span><p className="chat-typing-dots" aria-label={`${representedPhysicianName}'s Agent is answering`}><span /><span /><span /></p></div>}
     </div>}
     {error && <p className="demo-reset-error" role="alert">{error}</p>}
-    <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input) }}>
+    <form className="chat-composer" ref={composerRef} onSubmit={(event) => { event.preventDefault(); void send(input) }}>
       <label htmlFor={`coordination-chat-input-${referral.id}`} className="sr-only">Ask {representedPhysicianName}'s Agent</label>
       <input id={`coordination-chat-input-${referral.id}`} value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask a question…" disabled={busy} />
       <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
@@ -1800,7 +1813,7 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
       </div></section>
       <nav className="agent-tabs" aria-label="My Agent sections">{CHEN_AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => selectTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
       {tab === 'overview' && <AgentOverviewPanel overview={overview} representation={representation} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" onRepresentationChanged={() => { getAgentOverview('chen').then(setOverview).catch(() => {}); getPracticeRepresentation('chen').then(setRepresentation).catch(() => {}) }} />}
-      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" learningOpportunities={overview.learning_opportunities} focusId={params?.get('focus') ?? null} onLearningChanged={() => getAgentOverview('chen').then(setOverview).catch(() => {})} />}
+      {tab === 'train' && <TrainTab trainProjection={trainProjection} navigate={navigate} trainPath={trainingPath('chen')} personaId="chen" learningOpportunities={overview.learning_opportunities} focusId={params?.get('focus') ?? null} onLearningChanged={() => { getAgentOverview('chen').then(setOverview).catch(() => {}); getPracticeRepresentation('chen').then(setRepresentation).catch(() => {}) }} />}
       {tab === 'test' && <ChatTab personaId="chen" agentName={agentName} navigate={navigate} trainPath={trainingPath('chen')} />}
     </>}
   </main>

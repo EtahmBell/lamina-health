@@ -170,7 +170,7 @@ def test_draft_preference_never_affects_requirements_only_confirming_does(store:
     before = confirmed_requirement_items(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
     assert before is None  # not yet confirmed in this isolated workspace
 
-    teach_and_confirm_chen_baseline(store, ws)
+    baseline = teach_and_confirm_chen_baseline(store, ws)
     seeded = confirmed_requirement_items(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
     assert any(item.key == "recent_renal_function" for item in seeded)
 
@@ -180,9 +180,11 @@ def test_draft_preference_never_affects_requirements_only_confirming_does(store:
         helpful=[],
         modality="in_person",
     )
+    # Dropping a requirement is a revision of the learning that added it
+    # (learning-history semantics pass: new teachings are additive).
     created = store.create_referral_preference(
         ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "test: drop renal function requirement",
-        structured.model_dump_json(), "physician_authored_nlp",
+        structured.model_dump_json(), "physician_authored_nlp", supersedes_id=baseline["id"],
     )
     assert created["status"] == "draft"
 
@@ -252,13 +254,28 @@ def test_a_confirmed_preference_supersedes_the_footprint_baseline_on_a_real_refe
     assert "recent_renal_function" not in after_keys
 
 
-def test_confirming_a_new_preference_supersedes_the_prior_confirmed_one(store: WorkflowStore) -> None:
-    ws = "ws-supersede"
-    teach_and_confirm_chen_baseline(store, ws)
-    seed = store.confirmed_referral_preference(ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
+def test_confirming_a_non_overlapping_preference_is_additive(store: WorkflowStore) -> None:
+    """Learning-history semantics pass: sharing a case family is never
+    enough to supersede -- only overlapping contributions or an explicit
+    revision are."""
+    ws = "ws-additive"
+    seed = teach_and_confirm_chen_baseline(store, ws)
     structured = StructuredReferralPreference(good_fit=["Edited good fit."], modality="econsult")
     created = store.create_referral_preference(
-        ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "edited", structured.model_dump_json(), "physician_authored_nlp"
+        ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "added", structured.model_dump_json(), "physician_authored_nlp"
+    )
+    store.confirm_referral_preference(ws, created["id"], None)
+    assert store.referral_preference(ws, seed["id"])["status"] == "confirmed"
+    assert store.referral_preference(ws, created["id"])["status"] == "confirmed"
+
+
+def test_confirming_an_explicit_revision_supersedes_the_prior_confirmed_one(store: WorkflowStore) -> None:
+    ws = "ws-supersede"
+    seed = teach_and_confirm_chen_baseline(store, ws)
+    structured = StructuredReferralPreference(good_fit=["Edited good fit."], modality="econsult")
+    created = store.create_referral_preference(
+        ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "edited", structured.model_dump_json(), "physician_authored_nlp",
+        supersedes_id=seed["id"],
     )
     store.confirm_referral_preference(ws, created["id"], None)
     reloaded_seed = store.referral_preference(ws, seed["id"])
@@ -507,7 +524,7 @@ def test_evaluation_harness_demonstrates_behavior_change_before_and_after_a_conf
     structured.required = [item for item in structured.required if item.key != "recent_renal_function"]
     created = store.create_referral_preference(
         ws, CHEN_ID, CHEN_SEED_CASE_FAMILY, "renal no longer required",
-        structured.model_dump_json(), "physician_authored_nlp",
+        structured.model_dump_json(), "physician_authored_nlp", supersedes_id=seed["id"],
     )
     store.confirm_referral_preference(ws, created["id"], None)
 

@@ -650,10 +650,9 @@ def confirmed_case_rules_override(
     """A pure read -- never seeds/mutates (callers that need Chen's migrated
     preference seeded call ensure_seed_preferences() first; see its
     docstring for why that must not happen here)."""
-    row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family)
-    if row is None:
+    structured = effective_confirmed_rules(workflow_store, workspace_id, physician_id, case_family)
+    if structured is None:
         return None
-    structured = _structured_from_row(row)
     fallback = _fallback_case_rules(physician_id, case_family)
     return case_rules_from_preference(physician_id, case_family, structured, fallback)
 
@@ -665,10 +664,10 @@ def confirmed_requirement_items(
     says nothing about requirements (e.g. a modality-only clarification) --
     either way the baseline still applies, mirroring
     case_rules_from_preference()'s own `or fallback` behavior."""
-    row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family)
-    if row is None:
+    structured = effective_confirmed_rules(workflow_store, workspace_id, physician_id, case_family)
+    if structured is None:
         return None
-    return effective_requirement_items(physician_id, case_family, _structured_from_row(row)) or None
+    return effective_requirement_items(physician_id, case_family, structured) or None
 
 
 def effective_requirement_items(
@@ -701,19 +700,21 @@ _TEXT_SECTIONS = ("good_fit", "redirect")
 _MODALITY_FIELDS = ("modality", "modality_notes", "modality_rules")
 
 
-def merge_addition(
-    confirmed_row: dict[str, Any] | None, interpreted: StructuredReferralPreference
+def layer_preferences(
+    base: StructuredReferralPreference | None, top: StructuredReferralPreference
 ) -> StructuredReferralPreference:
-    """A NEW teaching in a case family that already has a confirmed
-    preference (NLP pass, Part O): confirming supersedes that row, so the
-    draft must carry everything it already says. New items are added (an
-    item restated with a different strength moves to its new section);
-    nothing else is dropped, and modality only changes when the new
-    statement actually states one. Removing guidance is an Edit, never a
-    side effect of teaching something new. Pure; the result is a draft."""
-    if confirmed_row is None:
-        return interpreted
-    current = _structured_from_row(confirmed_row)
+    """Learning-history semantics pass: how several confirmed learnings in
+    one case family combine into the physician's current representation.
+    Each learning keeps its own row (its own contribution); later learnings
+    layer on top. Items are keyed (a restated item -- even with a different
+    strength -- replaces the earlier one), text guidance is unioned, and
+    modality only changes when the later learning actually states one.
+    Removing guidance is an Edit, never a side effect of teaching something
+    new. Pure."""
+    if base is None:
+        return top
+    current = base
+    interpreted = top
     new_keys = {item.key for section in _ITEM_SECTIONS for item in getattr(interpreted, section)}
     update: dict[str, Any] = {
         section: [
@@ -727,6 +728,56 @@ def merge_addition(
     if interpreted.modality != "unspecified" or interpreted.modality_rules:
         update.update({field: getattr(interpreted, field) for field in _MODALITY_FIELDS})
     return current.model_copy(update=update)
+
+
+def contribution_paths(structured: StructuredReferralPreference) -> set[str]:
+    """The representation paths one learning contributes: each requirement
+    item (by key, whatever its strength), each fit/redirect statement, and
+    the modality guidance as a whole. Two learnings interact only where
+    these overlap -- never merely because they share a case family,
+    specialty, or disease."""
+    paths = {f"item:{item.key}" for section in _ITEM_SECTIONS for item in getattr(structured, section)}
+    paths |= {f"good_fit:{text}" for text in structured.good_fit}
+    paths |= {f"redirect:{text}" for text in structured.redirect}
+    if structured.modality != "unspecified" or structured.modality_rules:
+        paths.add("modality")
+    return paths
+
+
+def shadowed_preference_ids(confirmed_in_order: list[dict[str, Any]]) -> set[str]:
+    """Confirmed learnings (one case family, oldest first) whose EVERY
+    contribution is now made by later confirmed learnings -- i.e. fully
+    replaced, so they are no longer part of the current representation and
+    belong in history as superseded. A learning with any path still its
+    own stays active; non-overlapping learnings are always additive."""
+    shadowed: set[str] = set()
+    later: set[str] = set()
+    for row in reversed(confirmed_in_order):
+        paths = contribution_paths(_structured_from_row(row))
+        if paths and paths <= later:
+            shadowed.add(row["id"])
+        later |= paths
+    return shadowed
+
+
+def effective_confirmed_rules(
+    workflow_store: WorkflowStore, workspace_id: str, physician_id: str, case_family: str
+) -> StructuredReferralPreference | None:
+    """The physician's current confirmed representation for one case family:
+    every active learning, layered in confirmation order. `None` when
+    nothing is confirmed. A pure read."""
+    rows = [
+        row for row in workflow_store.confirmed_referral_preferences_for_physician(workspace_id, physician_id)
+        if row["case_family"] == case_family
+    ]
+    return _compose(rows)
+
+
+def _compose(rows_in_order: list[dict[str, Any]]) -> StructuredReferralPreference | None:
+    effective: StructuredReferralPreference | None = None
+    for row in rows_in_order:
+        effective = layer_preferences(effective, _structured_from_row(row))
+    return effective
 
 
 def merge_revision(
@@ -798,20 +849,22 @@ def recent_representation_learnings(
 
     cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
     rows = workflow_store.list_referral_preferences(workspace_id, physician_id)
-    by_id = {row["id"]: row for row in rows}
     learnings: list[dict[str, Any]] = []
     for row in rows:
         if row["status"] != "confirmed" or (row.get("confirmed_at") or "") < cutoff:
             continue
-        family_history = sorted(
+        # The representation as it stood just before this learning: every
+        # earlier-confirmed learning in the family, layered (learnings are
+        # additive, so the predecessor alone is not the prior state).
+        earlier = sorted(
             (other for other in rows
              if other["case_family"] == row["case_family"] and other["id"] != row["id"]
-             and other.get("confirmed_at") and other["confirmed_at"] <= row["confirmed_at"]),
+             and other.get("confirmed_at") and other["confirmed_at"] < row["confirmed_at"]),
             key=lambda other: other["confirmed_at"],
         )
-        predecessor = by_id.get(row.get("supersedes_id") or "") or (family_history[-1] if family_history else None)
-        previous = _structured_from_row(predecessor) if predecessor else None
-        for index, line in enumerate(_learning_lines(previous, _structured_from_row(row))):
+        previous = _compose(earlier)
+        current = layer_preferences(previous, _structured_from_row(row))
+        for index, line in enumerate(_learning_lines(previous, current)):
             learnings.append({
                 "id": f"{row['id']}-{index}",
                 "preference_id": row["id"],
@@ -891,10 +944,9 @@ def requirement_override_for_referral(
 def confirmed_modality(
     workflow_store: WorkflowStore, workspace_id: str, physician_id: str, case_family: str
 ) -> str | None:
-    row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family)
-    if row is None:
+    structured = effective_confirmed_rules(workflow_store, workspace_id, physician_id, case_family)
+    if structured is None:
         return None
-    structured = _structured_from_row(row)
     return None if structured.modality == "unspecified" else structured.modality
 
 
@@ -923,8 +975,8 @@ def clarification_opportunities(
     always see why Lamina is asking. No prior patient is ever named."""
     if physician_id != PHYSICIAN_CHEN.id:
         return []
-    row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, CHEN_SEED_CASE_FAMILY)
-    if row is not None and _structured_from_row(row).modality != "unspecified":
+    effective = effective_confirmed_rules(workflow_store, workspace_id, physician_id, CHEN_SEED_CASE_FAMILY)
+    if effective is not None and effective.modality != "unspecified":
         return []
     econsult_history = [
         case for case in PHYSICIAN_CHEN.historical_cases
@@ -1005,10 +1057,14 @@ def confirmed_referral_preference_sections(
     provenance: list[str] = []
     from backend.referrals.requirements import REFERRAL_REQUIREMENTS_BY_KEY
 
-    confirmed_families = set()
+    # Learning-history semantics pass: one case family may hold several
+    # active learnings; the representation is their layered composition.
+    families: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        structured = _structured_from_row(row)
-        confirmed_families.add(row["case_family"])
+        families.setdefault(row["case_family"], []).append(row)
+    confirmed_families = set(families)
+    for family, family_rows in families.items():
+        structured = _compose(family_rows) or StructuredReferralPreference()
         good_fit.extend(structured.good_fit)
         # My Agent cleanup pass: a confirmed preference that says nothing
         # about requirements (e.g. a modality-only clarification) leaves the
@@ -1016,7 +1072,7 @@ def confirmed_referral_preference_sections(
         # here too, exactly matching confirmed_requirement_items().
         # NLP pass, Part O: the SAME effective items referral readiness uses
         # -- a helpful-only teaching never hides the baseline requirements.
-        effective = effective_requirement_items(physician_id, row["case_family"], structured)
+        effective = effective_requirement_items(physician_id, family, structured)
         required_labels.extend(item.label for item in effective if item.required)
         helpful_labels.extend(item.label for item in effective if not item.required)
         # Demo UX + semantic polish pass, Part 3: never restate the same
@@ -1031,11 +1087,12 @@ def confirmed_referral_preference_sections(
         label = preference_modality_label(structured)
         if label:
             modality_label = label
-        confirmed_at = row.get("confirmed_at") or ""
-        when = confirmed_at.split("T", 1)[0] if confirmed_at else "an earlier date"
-        provenance.append(
-            f"Confirmed on {when} from a physician-authored referral preference."
-        )
+        for source_row in family_rows:
+            confirmed_at = source_row.get("confirmed_at") or ""
+            when = confirmed_at.split("T", 1)[0] if confirmed_at else "an earlier date"
+            provenance.append(
+                f"Confirmed on {when} from a physician-authored referral preference."
+            )
     # Case families with an operational footprint but no confirmed
     # preference keep showing that footprint.
     for (footprint_physician, family), footprint in REFERRAL_REQUIREMENTS_BY_KEY.items():

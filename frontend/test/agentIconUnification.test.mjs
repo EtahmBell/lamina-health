@@ -74,8 +74,9 @@ test('Lucy\'s My Agent hero is unchanged', () => {
 test('the My Agent Test tab derives its own-agent avatar tone from personaId -- Chen\'s/Iain\'s chat bubble is copper, not hardcoded blue', () => {
   const chatTab = slice(engagement, 'export function ChatTab', engagement.length)
   assert.match(chatTab, /const tone = agentTone\(personaId\)/)
-  assert.match(chatTab, /<ChatMessageBubble key=\{message\.id\} message=\{message\} agentName=\{agentName\} tone=\{tone\}/)
-  assert.match(chatTab, /\{busy && <div className="chat-message agent typing"><span className="chat-agent-label"><AgentAvatar tone=\{tone\} \/>/)
+  assert.match(chatTab, /<ChatMessageBubble key=\{message\.key \?\? message\.id\} message=\{message\} agentName=\{agentName\} tone=\{tone\}/)
+  // The typing indicator is rendered by the bubble itself with the same tone.
+  assert.match(engagement, /if \(message\.pending\) return <AgentTypingIndicator agentName=\{agentName\} tone=\{tone\} \/>/)
 })
 
 test('ChatMessageBubble accepts and renders the passed-in tone, never its own hardcoded default', () => {

@@ -30,6 +30,7 @@ from backend.referral_preferences import (
     ReferralPreferenceInterpretationService,
     clarification_opportunities,
     deterministic_interpret,
+    effective_confirmed_rules,
     requirement_override_for_referral,
 )
 from backend.referrals.requirements import evaluate_requirements
@@ -221,11 +222,14 @@ def test_confirming_adds_to_the_representation_without_overwriting_anything(stor
         learnings = client.get("/api/workspace/physician/agent-overview?perspective=chen").json()["recent_learnings"]
 
     rules = confirmed["structured_rules"]
-    # Existing diabetes requirements, modality guidance, and the new items.
-    assert {item["key"] for item in rules["required"]} == {"recent_hba1c", "current_medications", "recent_renal_function"}
-    assert {(item["key"], item["label"]) for item in rules["helpful"]} >= EXPECTED_HELPFUL
-    assert rules["modality_rules"] == clarified["structured_rules"]["modality_rules"]
-    assert rules["modality"] == clarified["structured_rules"]["modality"]
+    # The learning holds only its own contribution (learning-history pass)...
+    assert rules["required"] == [] and rules["modality_rules"] == []
+    assert {(item["key"], item["label"]) for item in rules["helpful"]} == EXPECTED_HELPFUL
+    # ...and the representation is every active learning layered together.
+    effective = effective_confirmed_rules(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
+    assert {item.key for item in effective.required} == {"recent_hba1c", "current_medications", "recent_renal_function"}
+    assert [rule.model_dump() for rule in effective.modality_rules] == clarified["structured_rules"]["modality_rules"]
+    assert effective.modality == clarified["structured_rules"]["modality"]
     # Operational behavior: renal function is still a requirement.
     operational = requirement_override_for_referral(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
     assert {item.key for item in operational if item.required} >= {"recent_renal_function", "recent_hba1c"}
@@ -237,7 +241,9 @@ def test_confirming_adds_to_the_representation_without_overwriting_anything(stor
     # Learning history + version + learned this week.
     statuses = {item["source_text"]: item["status"] for item in history if item["source_text"] == MEDICATION_HISTORY}
     assert statuses == {MEDICATION_HISTORY: "confirmed"}
-    assert store.referral_preference(ws, baseline["id"])["status"] == "superseded"
+    # Additive: no earlier learning was superseded.
+    for earlier in (baseline, clarified):
+        assert store.referral_preference(ws, earlier["id"])["status"] == "confirmed"
     assert confirmed["representation_snapshot_id_at_confirmation"] != snapshot_before
     assert any("Prior diabetes medication trials" in item["summary"] for item in learnings)
 
@@ -264,8 +270,10 @@ def test_the_confirmed_learning_is_editable_through_the_versioned_flow(store: Wo
         }).json()
         assert edit["supersedes_id"] == learned["id"]
         edited = client.post(f"{PREFERENCES}/{edit['id']}/confirm").json()
-    required = {item["key"] for item in edited["structured_rules"]["required"]}
-    helpful = {item["key"] for item in edited["structured_rules"]["helpful"]}
+    assert "diabetes_medication_discontinuation_reason" in {item["key"] for item in edited["structured_rules"]["required"]}
+    effective = effective_confirmed_rules(store, ws, CHEN_ID, CHEN_SEED_CASE_FAMILY)
+    required = {item.key for item in effective.required}
+    helpful = {item.key for item in effective.helpful}
     # The edit moves THIS learning's items to required; the baseline survives.
     assert {"diabetes_medication_discontinuation_reason", "recent_renal_function"} <= required
     assert "diabetes_medication_discontinuation_reason" not in helpful

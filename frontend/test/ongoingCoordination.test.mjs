@@ -221,7 +221,9 @@ test('chat remains available after scheduling and after consult_returned -- neve
 test('the chat thread is a bounded, scrollable viewport that auto-scrolls to the newest message on send, never an ever-growing rail (Part 19)', () => {
   const fn = coordinationChatCard()
   assert.match(fn, /threadRef = useRef<HTMLDivElement>\(null\)/)
-  assert.match(fn, /threadRef\.current\.scrollTop = threadRef\.current\.scrollHeight/)
+  // Chat UX pass: the shared follow behavior reveals the active exchange
+  // inside this bounded thread (and respects manual scrolling).
+  assert.match(fn, /const follow = useConversationFollow\(threadRef, composerRef\)/)
   assert.match(styles, /\.coordination-chat-card \.chat-thread \{[^}]*max-height: 320px;[^}]*overflow-y: auto;/)
 })
 
