@@ -17,7 +17,7 @@ const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to))
 
 test('the API client calls one narrow, structured Ask the Network endpoint -- never an arbitrary prose response', () => {
-  assert.match(api, /export const askNetwork = \(question: string, patientId\?: string\) => request<AskNetworkResult>\('\/api\/workspace\/network\/ask'/)
+  assert.match(api, /export const askNetwork = \(question: string, patientId\?: string, perspective: DemoPhysicianPerspective = 'lucy'\) => request<AskNetworkResult>\('\/api\/workspace\/network\/ask'/)
   assert.match(api, /physician_agents: NetworkPhysicianAgentMatch\[\]/)
   assert.match(api, /broadcasts: NetworkBroadcastMatch\[\]/)
   assert.match(api, /routing: NetworkRoutingEvidence \| null/)
@@ -35,7 +35,7 @@ test('patient context is optional and explicitly scoped -- "None" by default, wi
 test('a physician-agent result offers a neutral Ask agent and View profile, never a dead/fabricated action', () => {
   const card = slice(networkQuery, 'function PhysicianAgentResultCard', 'export function AskNetworkCard')
   assert.match(card, /\{personaId && <button type="button" className="text-button" onClick=\{\(\) => onAskAgent\(match\)\}>Ask agent →<\/button>\}/)
-  assert.match(card, /onClick=\{\(\) => navigate\(networkProfilePath\('lucy', personaId\)\)\}>View profile/)
+  assert.match(card, /onClick=\{\(\) => navigate\(networkProfilePath\(perspective, personaId\)\)\}>View profile/)
   assert.doesNotMatch(networkQuery, /Ask her\/his agent/)
 })
 
@@ -62,14 +62,14 @@ test('the drawer shows a restrained "Grounded in" list and never hidden chain-of
 test('Colleagues keeps its existing layout and gains a restrained right rail, never a giant hero banner', () => {
   const tab = slice(physicianNetwork, 'export function MyNetworkTab', 'function PhysicianProfilePage')
   assert.match(tab, /<div className="network-colleagues-layout">/)
-  assert.match(tab, /<ActiveNetworkRail navigate=\{navigate\} onViewInFeed=\{/)
+  assert.match(tab, /<ActiveNetworkRail navigate=\{navigate\} perspective=\{perspective\} onViewInFeed=\{/)
   // The existing hero/suggestions/roster content is still rendered, not replaced.
   assert.match(tab, /<NetworkHero onAdd=\{/)
   assert.match(tab, /Most connected in your network/)
 })
 
 test('"View in Feed" switches the Network tab to Feed and clears focus after use, never a separate detail route', () => {
-  const page = slice(app, 'function LucyNetworkPage', 'function HomePage')
+  const page = slice(physicianNetwork, 'export function PhysicianNetworkPage', '/** UX polish pass, Part A/B')
   assert.match(page, /const viewInFeed = \(postId: string\) => \{ setFocusPostId\(postId\); selectTab\('feed'\) \}/)
   assert.doesNotMatch(app, /function FeedPostDetailPage|\/feed\/:postId/)
 })

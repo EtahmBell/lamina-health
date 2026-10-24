@@ -41,6 +41,42 @@ function RequirementRow({ item, onToggleRequired, onRemove }: {
   </li>
 }
 
+/** NLP pass, Part N: the case family a proposal applies to, in physician
+ * language -- so a proposal always says WHERE the learning applies. */
+export const CASE_FAMILY_LABELS: Record<string, string> = {
+  type_2_diabetes: 'Diabetes referrals', ckd_hypertension: 'Kidney disease and hypertension referrals',
+  iron_deficiency_anemia: 'Iron-deficiency anemia referrals', thyroid: 'Thyroid referrals',
+}
+
+/** Nothing structured at all -- such a proposal can never be confirmed. */
+export function isEmptyInterpretation(rules: StructuredReferralPreference): boolean {
+  return rules.good_fit.length === 0 && rules.required.length === 0 && rules.helpful.length === 0
+    && rules.redirect.length === 0 && rules.modality === 'unspecified' && rules.modality_rules.length === 0
+}
+
+/** A new teaching's draft carries the case family's already-confirmed
+ * guidance (backend merge_addition), so the proposal separates what THIS
+ * statement adds from what is simply kept. */
+export function splitAgainstConfirmed(rules: StructuredReferralPreference, confirmed: StructuredReferralPreference | null): { added: StructuredReferralPreference; keptLabels: string[] } {
+  if (!confirmed) return { added: rules, keptLabels: [] }
+  const confirmedItems = new Set([...confirmed.required, ...confirmed.helpful].map((item) => `${item.key}:${item.required}`))
+  const isKept = (item: ReferralRequirementItem) => confirmedItems.has(`${item.key}:${item.required}`)
+  const sameRule = (rule: ModalityRule) => confirmed.modality_rules.some((other) => other.modality === rule.modality && other.condition === rule.condition)
+  const added: StructuredReferralPreference = {
+    ...rules,
+    good_fit: rules.good_fit.filter((item) => !confirmed.good_fit.includes(item)),
+    required: rules.required.filter((item) => !isKept(item)),
+    helpful: rules.helpful.filter((item) => !isKept(item)),
+    redirect: rules.redirect.filter((item) => !confirmed.redirect.includes(item)),
+    modality_rules: rules.modality_rules.filter((rule) => !sameRule(rule)),
+    modality: rules.modality === confirmed.modality ? 'unspecified' : rules.modality,
+  }
+  const keptLabels = [
+    ...rules.required.filter(isKept), ...rules.helpful.filter(isKept),
+  ].map((item) => item.label)
+  return { added, keptLabels }
+}
+
 function ReadOnlyInterpretation({ rules }: { rules: StructuredReferralPreference }) {
   return <div className="referral-pref-interpretation">
     {rules.good_fit.length > 0 && <div className="referral-pref-group">
@@ -159,6 +195,20 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
   const [editedRules, setEditedRules] = useState<StructuredReferralPreference>(draft.structured_rules)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // The case family's currently confirmed preference (if any), to show what
+  // this proposal adds versus keeps. A revision (Edit) is shown whole: it
+  // is a full replacement version, where removals matter as much as adds.
+  const [confirmedInFamily, setConfirmedInFamily] = useState<StructuredReferralPreference | null>(null)
+  useEffect(() => {
+    if (draft.supersedes_id) return
+    listReferralPreferences(personaId).then((items) => setConfirmedInFamily(
+      items.find((item) => item.status === 'confirmed' && item.case_family === draft.case_family && item.id !== draft.id)?.structured_rules ?? null,
+    )).catch(() => {})
+  }, [personaId, draft.id, draft.case_family, draft.supersedes_id])
+  const { added, keptLabels } = splitAgainstConfirmed(draft.structured_rules, draft.supersedes_id ? null : confirmedInFamily)
+  // Part N: never offer to confirm an empty learning (or one that adds
+  // nothing to what is already confirmed).
+  const nothingToConfirm = isEmptyInterpretation(draft.structured_rules) || (keptLabels.length > 0 && isEmptyInterpretation(added))
 
   const confirm = async () => {
     if (busy) return
@@ -201,9 +251,13 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
   return <div className="referral-pref-review-card">
     <p className={`eyebrow referral-pref-status-${draft.status}`}>{draft.status === 'draft' ? 'Proposed learning · not yet operational' : draft.status}</p>
     <h3>We interpreted this as</h3>
+    {CASE_FAMILY_LABELS[draft.case_family] && <p className="section-label referral-pref-case-family">{CASE_FAMILY_LABELS[draft.case_family]}</p>}
     {editing
       ? <StructuredRulesEditor rules={editedRules} onChange={setEditedRules} />
-      : <ReadOnlyInterpretation rules={draft.structured_rules} />}
+      : nothingToConfirm && keptLabels.length > 0
+        ? <p className="muted-note">This doesn’t add anything new to what your agent already knows -- try adding more detail.</p>
+        : <ReadOnlyInterpretation rules={added} />}
+    {!editing && keptLabels.length > 0 && !nothingToConfirm && <p className="referral-pref-kept">Your existing guidance stays in place: {keptLabels.join(', ')}.</p>}
     {error && <p className="demo-reset-error" role="alert">{error}</p>}
     <div className="referral-pref-review-actions">
       {editing
@@ -212,7 +266,7 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
           <button type="button" className="text-button" disabled={busy} onClick={() => { setEditedRules(draft.structured_rules); setEditing(false) }}>Cancel</button>
         </>
         : <>
-          <button type="button" className="button-primary" disabled={busy} onClick={() => void confirm()}>Looks right</button>
+          {!nothingToConfirm && <button type="button" className="button-primary" disabled={busy} onClick={() => void confirm()}>Looks right</button>}
           <button type="button" className="text-button" disabled={busy} onClick={() => setEditing(true)}>Edit interpretation</button>
           <button type="button" className="text-button" disabled={busy} onClick={() => void startOver()}>Start over</button>
         </>}

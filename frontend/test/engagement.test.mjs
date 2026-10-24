@@ -50,12 +50,12 @@ test('specialist patients page is an honest empty state, not a fabricated panel'
   assert.match(specialist, /Cases where your agent participates appear under Cases\./)
 })
 
-test('specialist network page is derived from the feed, never Lucy\'s private roster endpoint', () => {
+test('specialist network page is the shared page over Iain\'s OWN roster, never Lucy\'s', () => {
   const dispatch = routing()
-  assert.match(dispatch, /path === '\/specialist\/network'/)
-  const networkPage = slice(specialist, 'function dedupePhysicians', specialist.length)
-  assert.match(networkPage, /getNetworkFeed\('iain'\)/)
-  assert.doesNotMatch(networkPage, /getAgentNetwork/)
+  assert.match(dispatch, /path === '\/specialist\/network'\)[\s\S]{0,200}<PhysicianNetworkPage perspective="iain"/)
+  assert.doesNotMatch(specialist, /function SpecialistNetworkPage|function SpecialistMyNetworkTab/)
+  assert.match(network, /getAgentNetwork\(perspective\)\.then\(setNetwork\)/)
+  assert.match(readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8'), /export const getAgentNetwork = \(perspective: DemoPhysicianPerspective = 'lucy'\) => request<AgentNetwork>\(physicianPerspectivePath\('\/api\/workspace\/network', perspective\)\)/)
 })
 
 /* ---------------------------------------------------------------- training */
@@ -895,19 +895,16 @@ test('the Network sidebar icon is a simple thin-line people/group mark, not the 
 })
 
 test('Network defaults to Colleagues and only ?tab=feed opens Feed, for every persona (demo coherence pass, Part S: Colleagues is the main-nav landing surface, not Feed)', () => {
-  const lucyShell = slice(app, 'function LucyNetworkPage', 'function HomePage')
-  assert.match(lucyShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
-  assert.match(lucyShell, /\? <MyNetworkTab navigate=\{navigate\} onViewInFeed=\{viewInFeed\} \/>/)
-  assert.match(lucyShell, /: <NetworkFeedTab personaId="lucy" navigate=\{navigate\} focusPostId=\{focusPostId\} onFocused=\{\(\) => setFocusPostId\(null\)\} \/>/)
-  const specialistShell = slice(specialist, 'export function SpecialistNetworkPage', specialist.length)
-  assert.match(specialistShell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
-  assert.match(specialistShell, /tab === 'my-network' \? <SpecialistMyNetworkTab navigate=\{navigate\} \/> : <NetworkFeedTab personaId="iain" navigate=\{navigate\} \/>/)
+  const shell = slice(network, 'export function PhysicianNetworkPage', '/** UX polish pass, Part A/B')
+  assert.match(shell, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
+  assert.match(shell, /\? <MyNetworkTab navigate=\{navigate\} perspective=\{perspective\} onViewInFeed=\{viewInFeed\} \/>/)
+  assert.match(shell, /: <NetworkFeedTab personaId=\{perspective\} navigate=\{navigate\} focusPostId=\{focusPostId\} onFocused=\{\(\) => setFocusPostId\(null\)\} \/>/)
 })
 
 test('legacy /network/updates and /specialist/network/updates alias to the Feed tab, never a separate feed page', () => {
   const dispatch = routing()
-  assert.match(dispatch, /path === '\/network\/updates'[\s\S]{0,160}LucyNetworkPage navigate=\{navigate\} params=\{new URLSearchParams\('tab=feed'\)\}/)
-  assert.match(dispatch, /path === '\/specialist\/network\/updates'[\s\S]{0,160}SpecialistNetworkPage navigate=\{navigate\} params=\{new URLSearchParams\('tab=feed'\)\}/)
+  assert.match(dispatch, /path === '\/network\/updates'[\s\S]{0,160}PhysicianNetworkPage perspective="lucy" navigate=\{navigate\} params=\{new URLSearchParams\('tab=feed'\)\}/)
+  assert.match(dispatch, /path === '\/specialist\/network\/updates'[\s\S]{0,200}PhysicianNetworkPage perspective="iain" navigate=\{navigate\} params=\{new URLSearchParams\('tab=feed'\)\}/)
   assert.doesNotMatch(engagement, /export function FullNetworkFeedPage/, 'the old standalone full-feed page implementation is gone')
 })
 
@@ -917,9 +914,9 @@ test('Home "View network" lands on Network -> Feed, not a standalone feed route'
 
 test('My Network retains the existing search/add/list behavior; the graph is deliberately gone (Dashboard+Network polish pass)', () => {
   assert.match(network, /export function MyNetworkTab/)
-  assert.match(network, /getAgentNetwork\(\)\.then\(setNetwork\)/)
+  assert.match(network, /getAgentNetwork\(perspective\)\.then\(setNetwork\)/)
   assert.match(network, /searchProviders\(filters\)/)
-  assert.match(network, /addNetworkMember\(profile\.npi\)/)
+  assert.match(network, /addNetworkMember\(profile\.npi, perspective\)/)
   assert.doesNotMatch(network, /NetworkGraph/)
 })
 
@@ -1192,7 +1189,7 @@ test('no generic Network KPI/analytics block was added -- My Agent already owns 
 test('every suggested connection resolves to a real profile -- the directory page, when there is no public-agent profile -- never a dead link', () => {
   const card = slice(network, 'function SuggestedConnectionCard', 'function SuggestedConnections')
   assert.doesNotMatch(card, /\{persona && <button/, 'the View profile link must not be conditionally omitted')
-  assert.match(card, /navigate\(persona \? networkProfilePath\('lucy', persona\) : `\/network\/\$\{suggestion\.npi\}`\)/)
+  assert.match(card, /navigate\(persona \? networkProfilePath\(perspective, persona\) : directoryProfilePath\(perspective, suggestion\.npi\)\)/)
 })
 
 test('the "not yet on Lamina" directory page never implies an agent exists before the physician has joined, and the card has no grey eyebrow label at all', () => {

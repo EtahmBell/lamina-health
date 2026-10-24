@@ -8,15 +8,22 @@ import {
   searchProviders,
   type AgentNetwork,
   type AgentStatus,
+  type DemoPhysicianPerspective,
   type PhysicianNetworkProfile,
   type ProviderSearchResponse,
 } from './api.ts'
 import { ENGAGEMENT_PERSONA_BY_NPI } from './demoIdentity.ts'
-import { networkProfilePath, NetworkAskAgentModal, NetworkRelationshipAction, useNetworkRelationship } from './Engagement.tsx'
+import { networkProfilePath, NetworkAskAgentModal, NetworkFeedTab, NetworkRelationshipAction, NetworkTabs, useNetworkRelationship, type NetworkTab } from './Engagement.tsx'
 import { ActiveNetworkRail } from './NetworkQuery.tsx'
 import { connectionLine, physicianDisplayName, physicianInitials, rankedNetworkList, type NetworkRelationship } from './networkRoster.ts'
 
 type Navigate = (path: string) => void
+
+/** Physician UX consistency pass, Part B: every claimed physician's Network
+ * lives under their own route prefix, but renders the SAME page. */
+export const networkBasePath = (perspective: DemoPhysicianPerspective) => (perspective === 'iain' ? '/specialist/network' : perspective === 'chen' ? '/chen/network' : '/network')
+/** A directory (NPPES-style) physician profile within the viewer's own shell. */
+export const directoryProfilePath = (perspective: DemoPhysicianPerspective, npi: string) => `${networkBasePath(perspective)}/${npi}`
 
 type SuggestedConnection = {
   npi: string; name: string; specialty: string; location: string; reason: string
@@ -30,12 +37,25 @@ type SuggestedConnection = {
  * Suggested connections section when real consultation-derived candidates (see
  * buildSuggestions below) don't reach three on their own.
  */
-const CURATED_SUGGESTIONS: SuggestedConnection[] = [
-  { npi: '9900000012', name: 'Dr. Tiffany Sanchez', specialty: 'Gastroenterology', location: 'Oakland, CA', reason: 'A specialty your agent’s referral patterns often route toward.' },
-  { npi: '9900000023', name: 'Dr. Maya Ramanathan', specialty: 'Endocrinology', location: 'Oakland, CA', reason: 'Works with complex diabetes referrals.' },
-  { npi: '9900000024', name: 'Dr. Nina Park', specialty: 'Obstetrics & Gynecology', location: 'Berkeley, CA', reason: 'Shares your interest in care coordination.' },
-  { npi: '9900000002', name: 'Dr. Matthew Onadeko', specialty: 'Cardiology', location: 'San Francisco, CA', reason: 'Relevant to resistant-hypertension referral patterns.' },
-]
+const CURATED_SUGGESTIONS: Record<DemoPhysicianPerspective, SuggestedConnection[]> = {
+  lucy: [
+    { npi: '9900000012', name: 'Dr. Tiffany Sanchez', specialty: 'Gastroenterology', location: 'Oakland, CA', reason: 'A specialty your agent’s referral patterns often route toward.' },
+    { npi: '9900000023', name: 'Dr. Maya Ramanathan', specialty: 'Endocrinology', location: 'Oakland, CA', reason: 'Works with complex diabetes referrals.' },
+    { npi: '9900000024', name: 'Dr. Nina Park', specialty: 'Obstetrics & Gynecology', location: 'Berkeley, CA', reason: 'Shares your interest in care coordination.' },
+    { npi: '9900000002', name: 'Dr. Matthew Onadeko', specialty: 'Cardiology', location: 'San Francisco, CA', reason: 'Relevant to resistant-hypertension referral patterns.' },
+  ],
+  // Same honest specialty-relevance framing, from each specialist's side.
+  chen: [
+    { npi: '9900000001', name: 'Dr. Iain Jung', specialty: 'Nephrology', location: 'Oakland, CA', reason: 'Relevant to diabetic kidney disease co-management.' },
+    { npi: '9900000002', name: 'Dr. Matthew Onadeko', specialty: 'Cardiology', location: 'San Francisco, CA', reason: 'Relevant to cardiometabolic referral patterns.' },
+    { npi: '9900000012', name: 'Dr. Tiffany Sanchez', specialty: 'Gastroenterology', location: 'Oakland, CA', reason: 'A specialty that often shares patients with diabetes care.' },
+  ],
+  iain: [
+    { npi: '9900000005', name: 'Dr. Noah Chen', specialty: 'Endocrinology', location: 'Oakland, CA', reason: 'Relevant to diabetic kidney disease co-management.' },
+    { npi: '9900000002', name: 'Dr. Matthew Onadeko', specialty: 'Cardiology', location: 'San Francisco, CA', reason: 'Relevant to resistant-hypertension and cardiorenal referrals.' },
+    { npi: '9900000024', name: 'Dr. Nina Park', specialty: 'Obstetrics & Gynecology', location: 'Berkeley, CA', reason: 'Relevant to hypertension-in-pregnancy referrals.' },
+  ],
+}
 
 /** Real, consultation-derived suggestions first (a physician-agent your agent has
  * actually interacted with, but isn't yet a confirmed colleague) -- this is the
@@ -43,7 +63,7 @@ const CURATED_SUGGESTIONS: SuggestedConnection[] = [
  * Never a fabricated count: the reason only ever states what's directly on the
  * relationship record. Falls back to the curated list above to fill out to
  * `limit`, skipping anyone already a colleague or already surfaced. */
-function buildSuggestions(network: AgentNetwork | null, memberNpis: Set<string>, limit: number): SuggestedConnection[] {
+function buildSuggestions(network: AgentNetwork | null, memberNpis: Set<string>, limit: number, perspective: DemoPhysicianPerspective = 'lucy'): SuggestedConnection[] {
   const seen = new Set(memberNpis)
   const suggestions: SuggestedConnection[] = []
   if (network) {
@@ -63,7 +83,7 @@ function buildSuggestions(network: AgentNetwork | null, memberNpis: Set<string>,
       })
     }
   }
-  for (const candidate of CURATED_SUGGESTIONS) {
+  for (const candidate of CURATED_SUGGESTIONS[perspective]) {
     if (suggestions.length >= limit) break
     if (seen.has(candidate.npi)) continue
     seen.add(candidate.npi)
@@ -93,8 +113,8 @@ function StatusBadge({ status }: { status: AgentStatus }) {
 
 /** A clean colleague-finder result card — avatar, identity block, status, and a
  * stacked action column. No truncation, no cramped mini-table. */
-function DirectoryResult({ profile, navigate, inNetwork, busy, onAdd, onRemove }: {
-  profile: PhysicianNetworkProfile; navigate: Navigate; inNetwork: boolean; busy: boolean
+function DirectoryResult({ profile, navigate, perspective, inNetwork, busy, onAdd, onRemove }: {
+  profile: PhysicianNetworkProfile; navigate: Navigate; perspective: DemoPhysicianPerspective; inNetwork: boolean; busy: boolean
   onAdd: () => void; onRemove: () => void
 }) {
   const name = physicianDisplayName(profile.display_name)
@@ -112,7 +132,7 @@ function DirectoryResult({ profile, navigate, inNetwork, busy, onAdd, onRemove }
       {inNetwork
         ? <button className="text-button quiet-remove" disabled={busy} onClick={onRemove}>Remove colleague</button>
         : <button className="button-primary add-to-network" disabled={busy} onClick={onAdd}>Add colleague <span>→</span></button>}
-      <button className="text-button" onClick={() => navigate(`/network/${profile.npi}`)}>View profile →</button>
+      <button className="text-button" onClick={() => navigate(directoryProfilePath(perspective, profile.npi))}>View profile →</button>
     </div>
   </div>
 }
@@ -123,12 +143,12 @@ function DirectoryResult({ profile, navigate, inNetwork, busy, onAdd, onRemove }
  * real public agent persona, currently active) additionally gets a quiet
  * "Ask their agent" action, opening the same drawer the rest of the
  * network uses -- never shown for an unclaimed/external-directory identity. */
-function ConnectionRow({ member, navigate }: { member: NetworkRelationship; navigate: Navigate }) {
+function ConnectionRow({ member, navigate, perspective }: { member: NetworkRelationship; navigate: Navigate; perspective: DemoPhysicianPerspective }) {
   const [askOpen, setAskOpen] = useState(false)
   const personaId = ENGAGEMENT_PERSONA_BY_NPI[member.npi]
   const eligible = member.status === 'active' && Boolean(personaId)
   return <div className="lam-row connection-row">
-    <button className="connection-row-main" onClick={() => navigate(`/network/${member.npi}`)}>
+    <button className="connection-row-main" onClick={() => navigate(directoryProfilePath(perspective, member.npi))}>
       <span className="lam-row-mark directory-avatar">{member.initials}</span>
       <span className="lam-row-main">
         <strong>{member.name}</strong>
@@ -202,8 +222,8 @@ function NetworkHero({ onAdd }: { onAdd: () => void }) {
  * primary Add action, a quiet View profile link when a real profile exists, and
  * a compact "Why suggested?" disclosure so the reason stays available without
  * crowding the card by default. */
-function SuggestedConnectionCard({ suggestion, navigate, busy, onAdd }: {
-  suggestion: SuggestedConnection; navigate: Navigate; busy: boolean; onAdd: () => void
+function SuggestedConnectionCard({ suggestion, navigate, perspective, busy, onAdd }: {
+  suggestion: SuggestedConnection; navigate: Navigate; perspective: DemoPhysicianPerspective; busy: boolean; onAdd: () => void
 }) {
   const [showReason, setShowReason] = useState(false)
   const persona = ENGAGEMENT_PERSONA_BY_NPI[suggestion.npi]
@@ -222,7 +242,7 @@ function SuggestedConnectionCard({ suggestion, navigate, busy, onAdd }: {
        * physicians the agent has actually encountered but who have no public
        * agent of their own -- still resolves via the directory/NPPES-style page,
        * which works for any npi in the provider network. */}
-      <button className="text-button" onClick={() => navigate(persona ? networkProfilePath('lucy', persona) : `/network/${suggestion.npi}`)}>View profile →</button>
+      <button className="text-button" onClick={() => navigate(persona ? networkProfilePath(perspective, persona) : directoryProfilePath(perspective, suggestion.npi))}>View profile →</button>
     </div>
   </div>
 }
@@ -232,8 +252,8 @@ function SuggestedConnectionCard({ suggestion, navigate, busy, onAdd }: {
  * fabricated interaction counts. Shows 3 by default with a local expand, never a
  * second page. An honest quiet state when nothing is available -- never forced
  * placeholders (see MyNetworkTab for the empty-pool case). */
-function SuggestedConnections({ suggestions, navigate, pendingNpi, onAdd }: {
-  suggestions: SuggestedConnection[]; navigate: Navigate; pendingNpi: string | null; onAdd: (npi: string) => void
+function SuggestedConnections({ suggestions, navigate, perspective, pendingNpi, onAdd }: {
+  suggestions: SuggestedConnection[]; navigate: Navigate; perspective: DemoPhysicianPerspective; pendingNpi: string | null; onAdd: (npi: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   if (suggestions.length === 0) return <section className="suggested-connections">
@@ -248,6 +268,7 @@ function SuggestedConnections({ suggestions, navigate, pendingNpi, onAdd }: {
       key={suggestion.npi}
       suggestion={suggestion}
       navigate={navigate}
+      perspective={perspective}
       busy={pendingNpi === suggestion.npi}
       onAdd={() => onAdd(suggestion.npi)}
     />)}</div>
@@ -259,8 +280,8 @@ function SuggestedConnections({ suggestions, navigate, pendingNpi, onAdd }: {
  * admin table. Top = title/explanation/disclaimer, search controls, then clean
  * result cards (DirectoryResult) whether the list came from a real query or the
  * default synthetic demo physicians. */
-function AddColleagueModal({ navigate, onClose, memberNpis, onChanged }: {
-  navigate: Navigate; onClose: () => void; memberNpis: Set<string>; onChanged: () => void
+function AddColleagueModal({ navigate, perspective, onClose, memberNpis, onChanged }: {
+  navigate: Navigate; perspective: DemoPhysicianPerspective; onClose: () => void; memberNpis: Set<string>; onChanged: () => void
 }) {
   const [filters, setFilters] = useState({ q: '', specialty: '', location: '' })
   const [response, setResponse] = useState<ProviderSearchResponse | null>(null)
@@ -314,24 +335,29 @@ function AddColleagueModal({ navigate, onClose, memberNpis, onChanged }: {
         key={profile.npi}
         profile={profile}
         navigate={navigate}
+        perspective={perspective}
         inNetwork={memberNpis.has(profile.npi)}
         busy={pendingNpi === profile.npi}
-        onAdd={() => void changeMembership(profile.npi, () => addNetworkMember(profile.npi))}
-        onRemove={() => void changeMembership(profile.npi, () => removeNetworkMember(profile.npi))}
+        onAdd={() => void changeMembership(profile.npi, () => addNetworkMember(profile.npi, perspective))}
+        onRemove={() => void changeMembership(profile.npi, () => removeNetworkMember(profile.npi, perspective))}
       />)}{results.length === 0 && response?.directory_status !== 'unavailable' && response?.directory_status !== 'invalid_query' && <div className="empty-state"><NetworkGlyph /><h2>No physicians found</h2><p>Try fewer terms or search by a city, state, or specialty.</p></div>}{hiddenResults > 0 && <button className="text-button results-expand" onClick={() => setShowAllResults(true)}>Show {hiddenResults} more result{hiddenResults === 1 ? '' : 's'} →</button>}</div>}
     </div>
   </div>
 }
 
-/** Network → My Network content for Lucy (the only persona with a workspace-scoped roster today — see Pass 7C report). Restructured (Network+Feed refinement pass) into a hero, a ranked "Most connected" top 5, and an inline-expandable full list -- no specialty grouping, no graph/visualization. */
-export function MyNetworkTab({ navigate, onViewInFeed }: { navigate: Navigate; onViewInFeed?: (postId: string) => void }) {
+/** Network → Colleagues content for every claimed physician (physician UX
+ * consistency pass: Chen and Iain previously had their own feed-derived
+ * forks). A hero, suggestions, a ranked "Most connected" top 5, and an
+ * inline-expandable full list -- identity changes the data (roster,
+ * suggestions, routes), never the structure. */
+export function MyNetworkTab({ navigate, onViewInFeed, perspective = 'lucy' }: { navigate: Navigate; onViewInFeed?: (postId: string) => void; perspective?: DemoPhysicianPerspective }) {
   const [network, setNetwork] = useState<AgentNetwork | null>(null)
   const [networkError, setNetworkError] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [showAllColleagues, setShowAllColleagues] = useState(false)
   const [pendingSuggestionNpi, setPendingSuggestionNpi] = useState<string | null>(null)
 
-  const loadNetwork = () => getAgentNetwork().then(setNetwork).catch((loadError: Error) => setNetworkError(loadError.message))
+  const loadNetwork = () => getAgentNetwork(perspective).then(setNetwork).catch((loadError: Error) => setNetworkError(loadError.message))
   useEffect(() => { void loadNetwork() }, [])
 
   const ranked = network ? rankedNetworkList(network) : []
@@ -341,11 +367,11 @@ export function MyNetworkTab({ navigate, onViewInFeed }: { navigate: Navigate; o
     ...(network?.nodes.filter((node) => node.in_network).map((node) => node.npi) || []),
     ...(network?.members.map((member) => member.npi) || []),
   ])
-  const suggestions = buildSuggestions(network, memberNpis, 6)
+  const suggestions = buildSuggestions(network, memberNpis, 6, perspective)
 
   const addSuggestion = async (npi: string) => {
     setPendingSuggestionNpi(npi)
-    try { await addNetworkMember(npi); loadNetwork() }
+    try { await addNetworkMember(npi, perspective); loadNetwork() }
     finally { setPendingSuggestionNpi(null) }
   }
 
@@ -357,7 +383,7 @@ export function MyNetworkTab({ navigate, onViewInFeed }: { navigate: Navigate; o
      * layout only applies to the Colleagues tab. */}
     <div className="network-colleagues-layout">
       <div className="network-colleagues-main">
-        {network && <SuggestedConnections suggestions={suggestions} navigate={navigate} pendingNpi={pendingSuggestionNpi} onAdd={addSuggestion} />}
+        {network && <SuggestedConnections suggestions={suggestions} navigate={navigate} perspective={perspective} pendingNpi={pendingSuggestionNpi} onAdd={addSuggestion} />}
 
         <section className="network-primary-section">
           {networkError && <div className="error-banner" role="alert">Network relationships unavailable: {networkError}</div>}
@@ -369,22 +395,44 @@ export function MyNetworkTab({ navigate, onViewInFeed }: { navigate: Navigate; o
           </div>}
           {ranked.length > 0 && <>
             <h2 className="network-section-title">Most connected in your network</h2>
-            <div className="lam-list">{top.map((member) => <ConnectionRow key={member.npi} member={member} navigate={navigate} />)}</div>
+            <div className="lam-list">{top.map((member) => <ConnectionRow key={member.npi} member={member} navigate={navigate} perspective={perspective} />)}</div>
             {rest.length > 0 && <>
               <button className="text-button network-see-all" aria-expanded={showAllColleagues} onClick={() => setShowAllColleagues((value) => !value)}>{showAllColleagues ? 'Hide full list ↑' : 'See all colleagues ↓'}</button>
               <div className={`network-full-list ${showAllColleagues ? 'open' : ''}`}>
-                <div className="lam-list">{rest.map((member) => <ConnectionRow key={member.npi} member={member} navigate={navigate} />)}</div>
+                <div className="lam-list">{rest.map((member) => <ConnectionRow key={member.npi} member={member} navigate={navigate} perspective={perspective} />)}</div>
               </div>
             </>}
             <p className="network-roster-note">{ranked.length} physician{ranked.length === 1 ? '' : 's'} in your network.</p>
           </>}
         </section>
       </div>
-      <ActiveNetworkRail navigate={navigate} onViewInFeed={(postId) => onViewInFeed?.(postId)} />
+      <ActiveNetworkRail navigate={navigate} perspective={perspective} onViewInFeed={(postId) => onViewInFeed?.(postId)} />
     </div>
 
-    {addOpen && <AddColleagueModal navigate={navigate} onClose={() => setAddOpen(false)} memberNpis={memberNpis} onChanged={loadNetwork} />}
+    {addOpen && <AddColleagueModal navigate={navigate} perspective={perspective} onClose={() => setAddOpen(false)} memberNpis={memberNpis} onChanged={loadNetwork} />}
   </div>
+}
+
+/** The ONE Network page (physician UX consistency pass, Part B) -- Lucy,
+ * Chen, and Iain previously each had their own copy. Colleagues is the
+ * default tab; Feed is shown when explicitly requested (?tab=feed, including
+ * the legacy /updates aliases). "View source in Feed" switches tabs in
+ * place and focuses the post, never a separate detail route. */
+export function PhysicianNetworkPage({ navigate, params, perspective }: { navigate: Navigate; params?: URLSearchParams; perspective: DemoPhysicianPerspective }) {
+  const tabParam = params?.get('tab') ?? null
+  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
+  const [focusPostId, setFocusPostId] = useState<string | null>(null)
+  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
+  const base = networkBasePath(perspective)
+  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? `${base}?tab=feed` : `${base}?tab=my-network`) }
+  const viewInFeed = (postId: string) => { setFocusPostId(postId); selectTab('feed') }
+  return <main className="page-shell physician-directory-page">
+    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
+    <NetworkTabs tab={tab} onSelect={selectTab} />
+    {tab === 'my-network'
+      ? <MyNetworkTab navigate={navigate} perspective={perspective} onViewInFeed={viewInFeed} />
+      : <NetworkFeedTab personaId={perspective} navigate={navigate} focusPostId={focusPostId} onFocused={() => setFocusPostId(null)} />}
+  </main>
 }
 
 /** UX polish pass, Part A/B: an unclaimed external-directory physician with
@@ -402,18 +450,18 @@ export type DirectoryOnlyProfile = { physicianId: string; name: string; specialt
  * Claim.tsx. This page only links into it (§31/§32: one claim experience,
  * never a second one built inside Physician Network).
  */
-export function PhysicianProfilePage({ npi, directoryProfile, navigate }: { npi?: string; directoryProfile?: DirectoryOnlyProfile; navigate: Navigate }) {
+export function PhysicianProfilePage({ npi, directoryProfile, navigate, perspective = 'lucy' }: { npi?: string; directoryProfile?: DirectoryOnlyProfile; navigate: Navigate; perspective?: DemoPhysicianPerspective }) {
   const [profile, setProfile] = useState<PhysicianNetworkProfile | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { if (npi) getProvider(npi).then(setProfile).catch((loadError: Error) => setError(loadError.message)) }, [npi])
-  const relationship = useNetworkRelationship(profile?.npi ?? null)
+  const relationship = useNetworkRelationship(profile?.npi ?? null, perspective)
 
   if (directoryProfile) {
     const name = physicianDisplayName(directoryProfile.name)
     const initials = name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')
     return <main className="page-shell physician-profile-page">
-      <button className="text-button back-link" onClick={() => navigate('/network')}>← Network</button>
+      <button className="text-button back-link" onClick={() => navigate(networkBasePath(perspective))}>← Network</button>
       <section className="provider-profile-hero">
         <div className="profile-identity"><span className="directory-avatar large">{initials}</span><div><p className="eyebrow">Directory physician</p><h1>{name}</h1><p>{directoryProfile.specialty}</p></div></div>
         {/* Reuses the existing "reserved" status language verbatim (see
@@ -439,19 +487,19 @@ export function PhysicianProfilePage({ npi, directoryProfile, navigate }: { npi?
     </main>
   }
 
-  if (!profile) return <main className="page-shell physician-profile-page"><button className="text-button back-link" onClick={() => navigate('/network')}>← Network</button>{error ? <div className="error-banner">{error}</div> : <div className="directory-loading"><NetworkGlyph active /><p>Opening physician profile…</p></div>}</main>
+  if (!profile) return <main className="page-shell physician-profile-page"><button className="text-button back-link" onClick={() => navigate(networkBasePath(perspective))}>← Network</button>{error ? <div className="error-banner">{error}</div> : <div className="directory-loading"><NetworkGlyph active /><p>Opening physician profile…</p></div>}</main>
 
   const synthetic = profile.source === 'SYNTHETIC'
   const copy = statusCopy[profile.agent.status]
   const name = physicianDisplayName(profile.display_name)
   const claimPath = `/claim/provider/${encodeURIComponent(profile.npi)}`
   return <main className="page-shell physician-profile-page">
-    <button className="text-button back-link" onClick={() => navigate('/network')}>← Network</button>
+    <button className="text-button back-link" onClick={() => navigate(networkBasePath(perspective))}>← Network</button>
     <section className="provider-profile-hero"><div className="profile-identity"><span className="directory-avatar large">{name.replace(/Dr\.\s*/i, '').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('')}</span><div><p className="eyebrow">{synthetic ? 'Controlled synthetic physician' : 'NPPES physician profile'}</p><h1>{name}</h1><p>{profile.specialty}</p></div></div><div className="profile-hero-status"><StatusBadge status={profile.agent.status} /><NetworkRelationshipAction npi={profile.npi} relationship={relationship} /></div></section>
     <div className="profile-facts"><div><span>Practice location</span><strong>{profile.city || 'Not listed'}{profile.state ? `, ${profile.state}` : ''}</strong></div><div><span>Organisation</span><strong>{profile.organization || 'Not listed in directory'}</strong></div><div><span>NPI</span><strong>{profile.npi}</strong></div>{profile.phone && <div><span>Practice phone</span><strong>{profile.phone}</strong></div>}</div>
     <div className={`profile-provenance ${synthetic ? 'synthetic' : ''}`}><strong>{synthetic ? 'Synthetic demo profile' : 'Public directory record'}</strong><p>{profile.directory_disclaimer}</p></div>
     {error && <div className="error-banner" role="alert">{error}</div>}
-    {ENGAGEMENT_PERSONA_BY_NPI[profile.npi] && <section className="professional-profile-link-card"><div><p className="eyebrow">Professional identity</p><h2>How their agent represents their practice</h2></div><button className="button-secondary" onClick={() => navigate(networkProfilePath('lucy', ENGAGEMENT_PERSONA_BY_NPI[profile.npi]))}>View professional profile →</button></section>}
+    {ENGAGEMENT_PERSONA_BY_NPI[profile.npi] && <section className="professional-profile-link-card"><div><p className="eyebrow">Professional identity</p><h2>How their agent represents their practice</h2></div><button className="button-secondary" onClick={() => navigate(networkProfilePath(perspective, ENGAGEMENT_PERSONA_BY_NPI[profile.npi]))}>View professional profile →</button></section>}
 
     <section className="agent-activation-card"><header><div><h2>{copy.label}</h2><p>{copy.detail}</p></div><NetworkGlyph active={profile.agent.status === 'active'} /></header>
       {profile.agent.status === 'reserved' && profile.claimable

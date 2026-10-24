@@ -130,7 +130,9 @@ test('the highlight fades after approximately 2.5 seconds, via a plain timeout t
 
 test('only the row for a newly-started medication gets the highlight class -- never the whole Current medications section, never an unrelated row like Metformin', () => {
   const page = patientPage()
-  assert.match(page, /<li key=\{item\} className=\{change && medicationHighlight \? 'medication-row-highlight' : ''\}>/)
+  // Physician UX consistency pass, Part E: the highlight is an inline
+  // highlighter span on the changed row's own text, not the whole row box.
+  assert.match(page, /\{change && medicationHighlight \? <mark className="change-highlight medication-row-highlight">\{text\}<\/mark> : text\}/)
   assert.doesNotMatch(page, /<section className=\{medicationHighlight/, 'the highlight must not be applied at the section level anymore')
 })
 

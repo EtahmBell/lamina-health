@@ -162,6 +162,10 @@ class AskNetworkInput(BaseModel):
 
     question: str = Field(min_length=1, max_length=500)
     patient_id: str | None = None
+    # Physician UX consistency pass: the asking physician (any claimed
+    # physician uses the same Ask the Network card) -- never matched to
+    # their own question.
+    perspective: str = "lucy"
 
 
 class CandidateReviewInput(BaseModel):
@@ -709,7 +713,7 @@ def agent_overview(workspace_id: DemoWorkspace, persona_id: ControlledPersona) -
     published_updates = workflow_store.practice_updates(
         workspace_id, persona_id, "published"
     )
-    network_physicians = workflow_store.network_members(workspace_id)
+    network_physicians = workflow_store.network_members(workspace_id, persona_id)
     physician_id = PERSONAS[persona_id]["physician_id"]
     learning_opportunities = (
         clarification_opportunities(workflow_store, workspace_id, physician_id) if physician_id else []
@@ -1597,7 +1601,9 @@ def network_feed(
     workspace_id: DemoWorkspace, persona_id: ControlledPersona
 ) -> dict:
     records = workflow_store.history(workspace_id, limit=200)
-    members = workflow_store.network_members(workspace_id)
+    # Physician UX consistency pass: each physician's feed follows their OWN
+    # roster (previously every physician's feed followed Lucy's roster).
+    members = workflow_store.network_members(workspace_id, persona_id)
     # A physician always sees their own posts in their own feed -- related_personas
     # deliberately excludes the viewer (it answers "who else is related to me", not
     # "what can I see"), so self-authored content is added back in here.
@@ -1776,4 +1782,9 @@ def ask_network_endpoint(request: AskNetworkInput, workspace_id: DemoWorkspace) 
             raise HTTPException(404, "Synthetic patient not found")
         patient = _with_derived_medications(load_patient(request.patient_id), workspace_id)
         candidate_physician_ids = [item.id for item in PHYSICIANS_BY_PATIENT[request.patient_id]]
-    return ask_network(workflow_store, workspace_id, request.question, patient, candidate_physician_ids)
+    if request.perspective not in EDITABLE_PERSONAS:
+        raise HTTPException(404, "Controlled demo physician not found")
+    return ask_network(
+        workflow_store, workspace_id, request.question, patient, candidate_physician_ids,
+        exclude_physician_id=PERSONAS[request.perspective]["physician_id"],
+    )

@@ -41,6 +41,40 @@ _DEFAULT_NETWORK_MEMBER_NPIS = (
     "9900000027",  # Dr. Amina Rahman -- Pulmonology
 )
 
+# Physician UX consistency pass, Part B: every claimed physician gets the SAME
+# Colleagues experience, so each needs their OWN roster (previously Chen's and
+# Iain's Colleagues tabs were derived from Lucy's workspace roster). Same
+# storage table and lazy-seed rules -- the roster is simply keyed by
+# (workspace, physician) instead of workspace alone. Same selection rule as
+# above: network-only expansion physicians, chosen for specialty relevance.
+_DEFAULT_NETWORK_MEMBER_NPIS_BY_PERSONA = {
+    "lucy": _DEFAULT_NETWORK_MEMBER_NPIS,
+    "chen": (
+        "9900000011",  # Dr. Lianne Cha -- Primary Care
+        "9900000023",  # Dr. Maya Ramanathan -- Endocrinology
+        "9900000024",  # Dr. Nina Park -- Obstetrics & Gynecology
+        "9900000018",  # Dr. Josh Miller -- Rheumatology
+        "9900000028",  # Dr. Natalie Rosen -- Hematology/Oncology
+        "9900000016",  # Dr. Chris Mithel -- Dermatology
+        "9900000022",  # Dr. Dan Nakajima -- Pulmonology (Sleep medicine)
+    ),
+    "iain": (
+        "9900000011",  # Dr. Lianne Cha -- Primary Care
+        "9900000023",  # Dr. Maya Ramanathan -- Endocrinology
+        "9900000028",  # Dr. Natalie Rosen -- Hematology/Oncology
+        "9900000015",  # Dr. Hamidou Guechtouli -- Infectious Disease
+        "9900000027",  # Dr. Amina Rahman -- Pulmonology
+        "9900000018",  # Dr. Josh Miller -- Rheumatology
+    ),
+}
+NETWORK_ROSTER_PERSONAS = frozenset(_DEFAULT_NETWORK_MEMBER_NPIS_BY_PERSONA)
+
+
+def network_roster_scope(workspace_id: str, persona_id: str = "lucy") -> str:
+    """Lucy's roster keeps the bare workspace key (unchanged storage for the
+    existing PCP demo); every other physician's roster is namespaced."""
+    return workspace_id if persona_id == "lucy" else f"{workspace_id}::{persona_id}"
+
 
 class WorkflowStore:
     LEGACY_WORKSPACE_ID = "legacy-local-workspace"
@@ -629,6 +663,10 @@ class WorkflowStore:
             ).fetchall()
             workspace_ids = [row["workspace_id"] for row in rows]
             for workspace_id in workspace_ids:
+                for persona_id in NETWORK_ROSTER_PERSONAS - {"lucy"}:
+                    scope = network_roster_scope(workspace_id, persona_id)
+                    db.execute("DELETE FROM network_members WHERE workspace_id=?", (scope,))
+                    db.execute("DELETE FROM network_seed_state WHERE workspace_id=?", (scope,))
                 for table in (
                     "patient_activity",
                     "consultations",
@@ -2534,7 +2572,7 @@ class WorkflowStore:
             ).rowcount
         return self.practice_update(workspace_id, persona_id, update_id) if updated else None
 
-    def network_members(self, workspace_id: str) -> list[dict]:
+    def network_members(self, workspace_id: str, persona_id: str = "lucy") -> list[dict]:
         """Physician relationships the clinician recorded, oldest first.
 
         Membership is a workspace relationship only. It is deliberately separate
@@ -2546,18 +2584,21 @@ class WorkflowStore:
         no rows at all for the workspace; once seeded (or once a physician
         explicitly removes every colleague down to zero), it is not re-seeded.
         """
+        scope = network_roster_scope(workspace_id, persona_id)
         with self._connect() as db:
             rows = db.execute(
                 """SELECT npi, added_at FROM network_members WHERE workspace_id=?
                    ORDER BY added_at, npi""",
-                (workspace_id,),
+                (scope,),
             ).fetchall()
-            if not rows and not self._workspace_seeded(db, workspace_id):
-                self._seed_default_network_members(db, workspace_id)
+            if not rows and not self._workspace_seeded(db, scope):
+                self._seed_default_network_members(
+                    db, scope, _DEFAULT_NETWORK_MEMBER_NPIS_BY_PERSONA.get(persona_id, ())
+                )
                 rows = db.execute(
                     """SELECT npi, added_at FROM network_members WHERE workspace_id=?
                        ORDER BY added_at, npi""",
-                    (workspace_id,),
+                    (scope,),
                 ).fetchall()
         return [dict(row) for row in rows]
 
@@ -2567,9 +2608,11 @@ class WorkflowStore:
         ).fetchone()
         return row is not None
 
-    def _seed_default_network_members(self, db: sqlite3.Connection, workspace_id: str) -> None:
+    def _seed_default_network_members(
+        self, db: sqlite3.Connection, workspace_id: str, npis: tuple[str, ...] = _DEFAULT_NETWORK_MEMBER_NPIS
+    ) -> None:
         base = self._now()
-        for offset, npi in enumerate(_DEFAULT_NETWORK_MEMBER_NPIS):
+        for offset, npi in enumerate(npis):
             seeded_at = (
                 datetime.now(UTC) - timedelta(days=90 - offset * 7)
             ).isoformat().replace("+00:00", "Z")
@@ -2584,13 +2627,14 @@ class WorkflowStore:
             (workspace_id, base),
         )
 
-    def add_network_member(self, workspace_id: str, npi: str) -> dict:
+    def add_network_member(self, workspace_id: str, npi: str, persona_id: str = "lucy") -> dict:
         """Idempotent: re-adding an existing relationship keeps the original date.
 
         Also marks the workspace as past the lazy-seed point (see `network_members`)
         so an explicit add never races with — or is later undone by — auto-seeding,
         and so removing every colleague down to zero never silently re-seeds them.
         """
+        workspace_id = network_roster_scope(workspace_id, persona_id)
         with self._connect() as db:
             db.execute(
                 "INSERT INTO network_seed_state(workspace_id, seeded_at) VALUES (?, ?) "
@@ -2609,7 +2653,8 @@ class WorkflowStore:
             ).fetchone()
         return dict(row)
 
-    def remove_network_member(self, workspace_id: str, npi: str) -> bool:
+    def remove_network_member(self, workspace_id: str, npi: str, persona_id: str = "lucy") -> bool:
+        workspace_id = network_roster_scope(workspace_id, persona_id)
         with self._connect() as db:
             return (
                 db.execute(

@@ -49,7 +49,7 @@ test('Chen Profile, Agent, and Network routes are registered in the SPA dispatch
   assert.match(dispatch, /path === '\/chen\/profile'[\s\S]{0,160}ProfessionalProfilePage personaId="chen"/)
   assert.match(dispatch, /path === '\/chen\/agent'\)[\s\S]{0,160}ChenAgentPage/)
   assert.match(dispatch, /path === '\/chen\/agent\/train'[\s\S]{0,200}TrainingPage personaId="chen"/)
-  assert.match(dispatch, /path === '\/chen\/network'\)[\s\S]{0,160}ChenNetworkPage/)
+  assert.match(dispatch, /path === '\/chen\/network'\)[\s\S]{0,160}<PhysicianNetworkPage perspective="chen"/)
 })
 
 test('Chen Patients and Incoming Requests routes still work (now alongside a real Dashboard route)', () => {

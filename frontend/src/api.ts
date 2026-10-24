@@ -631,8 +631,8 @@ export type AskNetworkResult = {
   broadcasts: NetworkBroadcastMatch[]
   routing: NetworkRoutingEvidence | null
 }
-export const askNetwork = (question: string, patientId?: string) => request<AskNetworkResult>('/api/workspace/network/ask', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, patient_id: patientId }),
+export const askNetwork = (question: string, patientId?: string, perspective: DemoPhysicianPerspective = 'lucy') => request<AskNetworkResult>('/api/workspace/network/ask', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, patient_id: patientId, perspective }),
 })
 export type NetworkFeed = {
   items: NetworkFeedItem[]; relationship_sources: string[]
@@ -902,7 +902,7 @@ export const editReferralPreference = (personaId: PhysicianIdentity, preferenceI
 })
 export const confirmReferralPreference = (personaId: PhysicianIdentity, preferenceId: string) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/${encodeURIComponent(preferenceId)}/confirm`, { method: 'POST' })
 export const rejectReferralPreference = (personaId: PhysicianIdentity, preferenceId: string) => request<PhysicianReferralPreference>(`${referralPreferencesBase(personaId)}/${encodeURIComponent(preferenceId)}/reject`, { method: 'POST' })
-export const getAgentNetwork = () => request<AgentNetwork>('/api/workspace/network')
+export const getAgentNetwork = (perspective: DemoPhysicianPerspective = 'lucy') => request<AgentNetwork>(physicianPerspectivePath('/api/workspace/network', perspective))
 export const getSpecialistWorkspace = () => request<SpecialistWorkspace>('/api/workspace/specialist')
 export const getSpecialistCases = () => request<SpecialistCaseSummary[]>('/api/workspace/specialist/cases')
 export const getSpecialistCase = (consultationRecordId: number) => request<SpecialistCaseDetail>(`/api/workspace/specialist/cases/${consultationRecordId}`)
@@ -977,11 +977,11 @@ export const publishProfessionalPost = (perspective: DemoPhysicianPerspective, p
 export const dismissProfessionalPost = (perspective: DemoPhysicianPerspective, postId: number) => request<ProfessionalPost>(physicianPerspectivePath(`/api/workspace/physician/posts/${postId}/dismiss`, perspective), { method: 'PUT' })
 export const getNetworkFeed = (perspective: DemoPhysicianPerspective) => request<NetworkFeed>(physicianPerspectivePath('/api/workspace/network/feed', perspective))
 export const getNetworkPhysicianProfile = (controlledId: string) => request<NetworkPhysicianProfile>(`/api/workspace/network/physicians/${encodeURIComponent(controlledId)}/profile`)
-export const addNetworkMember = (npi: string) => request<NetworkMember>('/api/workspace/network/members', {
+export const addNetworkMember = (npi: string, perspective: DemoPhysicianPerspective = 'lucy') => request<NetworkMember>(physicianPerspectivePath('/api/workspace/network/members', perspective), {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ npi }),
 })
-export const removeNetworkMember = async (npi: string) => {
-  await request<void>(`/api/workspace/network/members/${encodeURIComponent(npi)}`, { method: 'DELETE' })
+export const removeNetworkMember = async (npi: string, perspective: DemoPhysicianPerspective = 'lucy') => {
+  await request<void>(physicianPerspectivePath(`/api/workspace/network/members/${encodeURIComponent(npi)}`, perspective), { method: 'DELETE' })
 }
 export const updateAgentLearning = (key: string, action: 'confirm' | 'edit' | 'reject', statement?: string) => request<AgentLearning>(`/api/workspace/agent/learnings/${encodeURIComponent(key)}`, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, statement }),

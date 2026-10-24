@@ -13,7 +13,6 @@ import {
   updateSpecialistCalibration,
   type AgentOverview,
   type NetworkFeed,
-  type NetworkFeedItem,
   type PracticeRepresentation,
   type ProfessionalPost,
   type SpecialistCaseDetail,
@@ -24,7 +23,7 @@ import {
 } from './api.ts'
 import { eventDomId } from './agentActivity.ts'
 import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
-import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkTabs, TrainTab, networkProfilePath, trainingPath, type AgentActivityRow, type NetworkTab } from './Engagement.tsx'
+import { AgentActivityList, AgentOverviewPanel, ChatTab, findPendingReviewHistoryEntry, HomeAgentCard, NetworkHighlights, TrainTab, trainingPath, type AgentActivityRow } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 
@@ -379,49 +378,3 @@ export function SpecialistPatientsPage({ navigate }: { navigate: Navigate }) {
   </main>
 }
 
-/* ---------------------------------------------------------------- Network */
-
-function dedupePhysicians(items: NetworkFeedItem[]) {
-  const seen = new Map<string, NetworkFeedItem['physician']>()
-  for (const item of items) seen.set(item.physician.id, item.physician)
-  return [...seen.values()]
-}
-
-/**
- * Iain's "My Network" stays feed-derived rather than the graph/explicit-roster/NPPES-add
- * experience Lucy gets: `/api/workspace/network*` takes no persona parameter and is built
- * entirely around the PCP's own referral history, so there is no backend-supported
- * "Iain's network graph" to wire up here. See Pass 7C report.
- */
-function SpecialistMyNetworkTab({ navigate }: { navigate: Navigate }) {
-  const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [error, setError] = useState('')
-  useEffect(() => { getNetworkFeed('iain').then(setFeed).catch((err: Error) => setError(err.message)) }, [])
-  const physicians = feed ? dedupePhysicians(feed.items) : []
-  return <div className="my-network-tab">
-    <p className="network-intro">Physicians relevant to your practice — explicitly added to your network, or whose agents have interacted with yours.</p>
-    {error && <div className="error-banner" role="alert">{error}</div>}
-    {!feed && !error && <p className="muted-note">Loading network…</p>}
-    {feed && physicians.length === 0 && <div className="empty-state history-empty"><NetworkMark /><h2>No relevant physicians yet</h2><p>Physicians appear here once your agent participates in a network consultation, or once a professional connection is added.</p></div>}
-    {physicians.length > 0 && <div className="lam-list">{physicians.map((physician) => <button className="lam-row" key={physician.id} onClick={() => navigate(networkProfilePath('iain', physician.id))}>
-      <span className="lam-row-mark patient-row-avatar">{physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')}</span>
-      <span className="lam-row-main"><strong>{physician.name}</strong><span>{physician.specialty}</span><small>{physician.location}</small></span>
-      <span className="lam-row-action">View professional profile <b>→</b></span>
-    </button>)}</div>}
-  </div>
-}
-
-/** Feed is the default/primary tab — a colleague directory is secondary. */
-export function SpecialistNetworkPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
-  const tabParam = params?.get('tab') ?? null
-  // Demo coherence pass, Part S: a fresh main-nav Network entry lands on
-  // Colleagues by default, matching Lucy's/Chen's own Network pages.
-  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
-  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
-  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/specialist/network?tab=feed' : '/specialist/network?tab=my-network') }
-  return <main className="page-shell physician-directory-page">
-    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
-    <NetworkTabs tab={tab} onSelect={selectTab} />
-    {tab === 'my-network' ? <SpecialistMyNetworkTab navigate={navigate} /> : <NetworkFeedTab personaId="iain" navigate={navigate} />}
-  </main>
-}

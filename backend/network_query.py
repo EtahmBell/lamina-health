@@ -184,6 +184,7 @@ def ask_network(
     question: str,
     patient: PatientRecord | None = None,
     candidate_physician_ids: list[str] | None = None,
+    exclude_physician_id: str | None = None,
 ) -> dict[str, Any]:
     """`patient`/`candidate_physician_ids` (Part J), when supplied, add
     structured routing evidence from the SAME care-routing/candidate-
@@ -195,7 +196,8 @@ def ask_network(
     physician_agents = [
         match
         for physician_id in dict.fromkeys(physician_ids)
-        if (match := _physician_agent_candidate(workflow_store, workspace_id, physician_id, question_tokens))
+        if physician_id != exclude_physician_id
+        and (match := _physician_agent_candidate(workflow_store, workspace_id, physician_id, question_tokens))
         is not None
     ]
     broadcasts = _broadcast_matches(workflow_store, workspace_id, question_tokens)

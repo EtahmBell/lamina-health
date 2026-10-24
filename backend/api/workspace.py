@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.demo_identity import PCP_AGENT_ID, PCP_NAME
@@ -11,7 +11,7 @@ from backend.network_projection import project_agent_network
 from backend.provider_network import provider_network
 from backend.provider_network.service import ProviderNotFoundError
 from backend.synthetic_data import PATIENTS, PRIMARY_PATIENT_ID, TONJIT_PATIENT_ID
-from backend.workflow import workflow_store
+from backend.workflow import NETWORK_ROSTER_PERSONAS, workflow_store
 
 router = APIRouter(prefix="/api/workspace", tags=["clinician-workspace"])
 
@@ -123,35 +123,64 @@ def reset_tonjit_demo(workspace_id: MutableDemoWorkspace) -> dict:
     return result
 
 
+def _roster_perspective(perspective: str) -> str:
+    if perspective not in NETWORK_ROSTER_PERSONAS:
+        raise HTTPException(404, "Controlled demo physician not found")
+    return perspective
+
+
 @router.get("/network")
-def agent_network(workspace_id: DemoWorkspace) -> dict:
+def agent_network(workspace_id: DemoWorkspace, perspective: str = Query(default="lucy")) -> dict:
+    """Physician UX consistency pass, Part B: the same projection for every
+    claimed physician -- only the data differs. Consultation-derived edges
+    come from the PCP agent's completed consultations, so they belong to
+    Lucy's perspective; a specialist's Colleagues are their own roster."""
+    from backend.engagement import PERSONAS
+
+    perspective = _roster_perspective(perspective)
+    if perspective == "lucy":
+        return project_agent_network(
+            workflow_store.history(workspace_id, limit=200),
+            provider_network,
+            workflow_store.network_members(workspace_id),
+        )
+    persona = PERSONAS[perspective]
     return project_agent_network(
-        workflow_store.history(workspace_id, limit=200),
+        [],
         provider_network,
-        workflow_store.network_members(workspace_id),
+        workflow_store.network_members(workspace_id, perspective),
+        center={
+            "id": persona["agent_id"], "name": persona["agent_name"],
+            "specialty": persona["specialty"], "location": persona["location"],
+            "status": "active", "source": "Configured synthetic demo profile",
+        },
+        exclude_physician_id=persona["physician_id"],
     )
 
 
 @router.get("/network/members")
-def network_members(workspace_id: DemoWorkspace) -> list[dict]:
-    return workflow_store.network_members(workspace_id)
+def network_members(workspace_id: DemoWorkspace, perspective: str = Query(default="lucy")) -> list[dict]:
+    return workflow_store.network_members(workspace_id, _roster_perspective(perspective))
 
 
 @router.post("/network/members", status_code=201)
 def add_network_member(
-    request: NetworkMemberRequest, workspace_id: MutableDemoWorkspace
+    request: NetworkMemberRequest, workspace_id: MutableDemoWorkspace, perspective: str = Query(default="lucy")
 ) -> dict:
     """Records a referral relationship. Agent activation state is untouched."""
+    perspective = _roster_perspective(perspective)
     try:
         provider_network.get(request.npi)
     except ProviderNotFoundError as error:
         raise HTTPException(404, "Physician profile not found") from error
-    return workflow_store.add_network_member(workspace_id, request.npi)
+    return workflow_store.add_network_member(workspace_id, request.npi, perspective)
 
 
 @router.delete("/network/members/{npi}", status_code=204)
-def remove_network_member(npi: str, workspace_id: MutableDemoWorkspace) -> None:
-    if not workflow_store.remove_network_member(workspace_id, npi):
+def remove_network_member(
+    npi: str, workspace_id: MutableDemoWorkspace, perspective: str = Query(default="lucy")
+) -> None:
+    if not workflow_store.remove_network_member(workspace_id, npi, _roster_perspective(perspective)):
         raise HTTPException(404, "Physician is not in your network")
 
 

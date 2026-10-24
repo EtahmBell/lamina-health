@@ -47,8 +47,8 @@ test('a directory result can be added to, and removed from, the network', () => 
   const result = slice(network, 'function DirectoryResult', 'function ConnectionRow')
   assert.match(result, /Add colleague/)
   assert.match(result, /inNetwork[\s\S]*Remove colleague/)
-  assert.match(directory(), /addNetworkMember\(profile\.npi\)/)
-  assert.match(directory(), /removeNetworkMember\(profile\.npi\)/)
+  assert.match(directory(), /addNetworkMember\(profile\.npi, perspective\)/)
+  assert.match(directory(), /removeNetworkMember\(profile\.npi, perspective\)/)
   assert.match(directory(), /await action\(\); onChanged\(\)/, 'membership reloads canonical state via the parent-owned loadNetwork')
 })
 

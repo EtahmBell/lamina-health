@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { acceptReferral, askPhysicianAgent, createAgentCorrection, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationEvent, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME, TONJIT_ID } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
-import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, networkProfilePath, NetworkTabs, trainingPath, TrainTab, WorklistRows, type NetworkTab, type WorklistRowData } from './Engagement.tsx'
+import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkHighlights, trainingPath, TrainTab, WorklistRows, type WorklistRowData } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
+import { physicianInitials } from './networkRoster.ts'
 import { ModalPortal } from './ModalPortal.tsx'
-import { ActiveNetworkRail } from './NetworkQuery.tsx'
 import { acceptedReferralStep, attentionOrder, CHEN_SEEDED_NEXT_STEPS, handledByAgentOrStaff, referralReviewStep, topAttention, type NextStepItem } from './specialistWorklist.ts'
 import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
@@ -195,10 +195,15 @@ export function createReferralOnce(patientId: string, receivingPhysicianId: stri
 }
 
 export function ReferralCoordinationSurface({
-  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange, onReferralChange, onReviewedChange, priority, modality,
+  patientId, patientLabel, receivingPhysicianId, receivingPhysicianName, restoredReferral, onWashChange, onReferralChange, onReviewedChange, priority, modality, onViewReceivingProfile,
 }: {
   patientId: string; patientLabel: string; receivingPhysicianId: string; receivingPhysicianName: string
   restoredReferral: Referral | null
+  /** Physician UX consistency pass, Part G: opens the receiving physician's
+   * PUBLIC network profile (the same route/page used everywhere else) --
+   * never their private My Agent, never the agent chat. Omitted when the
+   * physician has no Lamina profile. */
+  onViewReceivingProfile?: () => void
   /** Care-routing demo pass, Part E: the physician-confirmed priority at the
    * moment "Start referral" is clicked -- read once here (a brand-new
    * referral is only ever created once, in the mount effect below), never
@@ -480,7 +485,19 @@ export function ReferralCoordinationSurface({
         <p className="section-label">Recent specialty care</p>
         <details className="specialty-episode" open={episodeOpen} onToggle={(event) => setEpisodeOpen(event.currentTarget.open)}>
           <summary className="specialty-episode-summary">
-            <span className="specialty-episode-title">{referral.specialty} with {receivingPhysicianName}</span>
+            {/* Part F/G/I: one flex row, every item centered on the same
+             * axis. The avatar/name open the physician's profile and cancel
+             * the summary's own toggle (preventDefault on the click also
+             * covers Enter/Space, which dispatch a click on the button), so
+             * profile and episode expansion never trigger each other. */}
+            <span className="specialty-episode-identity">
+              {onViewReceivingProfile
+                ? <button type="button" className="specialty-episode-avatar directory-avatar" tabIndex={-1} aria-hidden="true" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onViewReceivingProfile() }}>{physicianInitials(receivingPhysicianName)}</button>
+                : <span className="specialty-episode-avatar directory-avatar" aria-hidden="true">{physicianInitials(receivingPhysicianName)}</span>}
+              <span className="specialty-episode-title">{referral.specialty} with {onViewReceivingProfile
+                ? <button type="button" className="specialty-episode-physician" aria-label={`View ${receivingPhysicianName}'s profile`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onViewReceivingProfile() }}>{receivingPhysicianName}</button>
+                : receivingPhysicianName}</span>
+            </span>
             <span className="status-label success">✓ Consultation complete</span>
             <span className="specialty-episode-chevron" aria-hidden="true">{episodeOpen ? '−' : '+'}</span>
           </summary>
@@ -888,7 +905,8 @@ export function CoordinationChatCard({
   const cancelled = useRef(false)
   const threadRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => () => { cancelled.current = true }, [])
+  // Reset on (re)mount: StrictMode mounts, cleans up, and remounts in dev.
+  useEffect(() => { cancelled.current = false; return () => { cancelled.current = true } }, [])
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight
@@ -1003,7 +1021,8 @@ export function RequestReviewModal({
   const [error, setError] = useState('')
   const [capacity, setCapacity] = useState<AccessProfile | null>(null)
   const cancelled = useRef(false)
-  useEffect(() => () => { cancelled.current = true }, [])
+  // Reset on (re)mount: StrictMode mounts, cleans up, and remounts in dev.
+  useEffect(() => { cancelled.current = false; return () => { cancelled.current = true } }, [])
   // Routing/triage UX pass, Part T: makes visible that Lamina already
   // triaged this request before Chen ever opens it -- never a numeric
   // acuity score, just the same structured facts the routing UI uses
@@ -1215,7 +1234,8 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
   const [capacity, setCapacity] = useState<AccessProfile | null>(null)
   const cancelled = useRef(false)
 
-  useEffect(() => () => { cancelled.current = true }, [])
+  // Reset on (re)mount: StrictMode mounts, cleans up, and remounts in dev.
+  useEffect(() => { cancelled.current = false; return () => { cancelled.current = true } }, [])
   // Routing/triage UX pass, Part U/V: the "finding an appointment" intro
   // phases below surface the SAME expected-access fact the routing UI uses
   // elsewhere -- triage already decided priority/modality/access band;
@@ -1786,53 +1806,3 @@ export function ChenAgentPage({ navigate, params }: { navigate: Navigate; params
   </main>
 }
 
-/** Mirrors SpecialistMyNetworkTab's exact shape (Specialist.tsx), generalized
- * to Chen's perspective -- "Colleagues" (Part J): physicians explicitly added
- * to his network, or whose agents have interacted with his, deduped by id.
- * Demo coherence pass, Part T: gains the SAME right-rail Active Network
- * experience Lucy's Colleagues tab has -- the shared ActiveNetworkRail
- * component, never a second persona-specific implementation. */
-function ChenMyNetworkTab({ navigate, onViewInFeed }: { navigate: Navigate; onViewInFeed?: (postId: string) => void }) {
-  const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [error, setError] = useState('')
-  useEffect(() => { getNetworkFeed('chen').then(setFeed).catch((err: Error) => setError(err.message)) }, [])
-  const physicians = feed ? [...new Map(feed.items.map((item) => [item.physician.id, item.physician])).values()] : []
-  return <div className="my-network-tab">
-    <div className="network-colleagues-layout">
-      <div className="network-colleagues-main">
-        <p className="network-intro">Physicians relevant to your practice — explicitly added to your network, or whose agents have interacted with yours.</p>
-        {error && <div className="error-banner" role="alert">{error}</div>}
-        {!feed && !error && <p className="muted-note">Loading network…</p>}
-        {feed && physicians.length === 0 && <div className="empty-state history-empty"><LaminaMark /><h2>No relevant physicians yet</h2><p>Physicians appear here once your agent participates in a network interaction, or once a professional connection is added.</p></div>}
-        {physicians.length > 0 && <div className="lam-list">{physicians.map((physician) => <button className="lam-row" key={physician.id} onClick={() => navigate(networkProfilePath('chen', physician.id))}>
-          <span className="lam-row-mark patient-row-avatar">{physician.name.replace('Dr. ', '').split(/\s+/).map((part) => part[0]).slice(0, 2).join('')}</span>
-          <span className="lam-row-main"><strong>{physician.name}</strong><span>{physician.specialty}</span><small>{physician.location}</small></span>
-          <span className="lam-row-action">View professional profile <b>→</b></span>
-        </button>)}</div>}
-      </div>
-      <ActiveNetworkRail navigate={navigate} onViewInFeed={(postId) => onViewInFeed?.(postId)} />
-    </div>
-  </div>
-}
-
-/** Dr. Chen's Network page (Part J): the same Colleagues/Feed tab structure
- * as Lucy's and Iain's own Network pages -- reused, not a unique Chen
- * network. Routes resolve back into Chen's own perspective (networkProfilePath
- * 'chen'), never Lucy's or Iain's. */
-export function ChenNetworkPage({ navigate, params }: { navigate: Navigate; params?: URLSearchParams }) {
-  const tabParam = params?.get('tab') ?? null
-  // Demo coherence pass, Part S: a fresh main-nav Network entry lands on
-  // Colleagues by default, matching Lucy's own Network page.
-  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
-  const [focusPostId, setFocusPostId] = useState<string | null>(null)
-  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
-  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/chen/network?tab=feed' : '/chen/network?tab=my-network') }
-  const viewInFeed = (postId: string) => { setFocusPostId(postId); selectTab('feed') }
-  return <main className="page-shell physician-directory-page">
-    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
-    <NetworkTabs tab={tab} onSelect={selectTab} />
-    {tab === 'my-network'
-      ? <ChenMyNetworkTab navigate={navigate} onViewInFeed={viewInFeed} />
-      : <NetworkFeedTab personaId="chen" navigate={navigate} focusPostId={focusPostId} onFocused={() => setFocusPostId(null)} />}
-  </main>
-}

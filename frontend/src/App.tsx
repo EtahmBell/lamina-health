@@ -13,12 +13,12 @@ import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, TONJIT_ID, cleanName, patientName } from './demoIdentity.ts'
 import { CHEN_PATIENT_IDS, DEMO_PATIENTS, type DemoPatientSummary, type PatientStage } from './demoPatients.ts'
-import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkFeedTab, NetworkHighlights, NetworkPhysicianProfilePage, NetworkTabs, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, WorklistRows, type NetworkTab } from './Engagement.tsx'
+import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkHighlights, NetworkPhysicianProfilePage, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, WorklistRows } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
-import { MyNetworkTab, PhysicianProfilePage, type DirectoryOnlyProfile } from './PhysicianNetwork.tsx'
-import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistNetworkPage, SpecialistPatientsPage } from './Specialist.tsx'
+import { PhysicianNetworkPage, PhysicianProfilePage, type DirectoryOnlyProfile } from './PhysicianNetwork.tsx'
+import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenNetworkPage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
+import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { EVIDENCE_CATEGORY_LABELS, matchEvidence, whyThisMatch } from './matchExplanation.ts'
 import { ModalPortal } from './ModalPortal.tsx'
@@ -207,26 +207,11 @@ function eventTimestamp(value: string) {
   return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(', ', ' · ')
 }
 
-/** Feed is the default/primary tab — a colleague directory is secondary. */
-function LucyNetworkPage({ navigate, params }: { navigate: Navigate; params: URLSearchParams }) {
-  const tabParam = params.get('tab')
-  // Demo coherence pass, Part S: a fresh main-nav Network entry (no ?tab=)
-  // lands on Colleagues by default -- Feed is only shown when explicitly
-  // requested (?tab=feed, including the legacy /network/updates alias).
-  const [tab, setTab] = useState<NetworkTab>(tabParam === 'feed' ? 'feed' : 'my-network')
-  const [focusPostId, setFocusPostId] = useState<string | null>(null)
-  useEffect(() => { setTab(tabParam === 'feed' ? 'feed' : 'my-network') }, [tabParam])
-  const selectTab = (next: NetworkTab) => { setTab(next); window.history.replaceState({}, '', next === 'feed' ? '/network?tab=feed' : '/network?tab=my-network') }
-  // Active-network pass, Part M: a relevant-broadcast result's "View in Feed"
-  // switches tabs and focuses the referenced post, never a separate detail route.
-  const viewInFeed = (postId: string) => { setFocusPostId(postId); selectTab('feed') }
-  return <main className="page-shell physician-directory-page">
-    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians, practices, and professional updates connected through your Lamina network.</p></div></header>
-    <NetworkTabs tab={tab} onSelect={selectTab} />
-    {tab === 'my-network'
-      ? <MyNetworkTab navigate={navigate} onViewInFeed={viewInFeed} />
-      : <NetworkFeedTab personaId="lucy" navigate={navigate} focusPostId={focusPostId} onFocused={() => setFocusPostId(null)} />}
-  </main>
+/** A `?back=` return path (e.g. a patient page linking to a physician's
+ * public profile). Only same-app absolute paths are honored. */
+const safeBackPath = (params: URLSearchParams, fallback: string) => {
+  const back = params.get('back')
+  return back && back.startsWith('/') && !back.startsWith('//') ? back : fallback
 }
 
 /** Dashboard-scoped patient row. Deliberately built from `records` (already fetched
@@ -1268,6 +1253,9 @@ function RecommendationView({
       restoredReferral={activeReferral}
       priority={priority}
       modality={selectedModality}
+      onViewReceivingProfile={ROUTING_PHYSICIAN_PERSONA[selected.physician_id]
+        ? () => navigate(`${networkProfilePath('lucy', ROUTING_PHYSICIAN_PERSONA[selected.physician_id])}?back=${encodeURIComponent(window.location.pathname + window.location.search)}`)
+        : undefined}
     />
     // Reload-flash fix (bug-fix pass, Part Q/O): on a restored consult_returned
     // referral, the child withholds onReviewedChange until the real handoff
@@ -1953,10 +1941,20 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
               <h3>Current medications</h3>
               <ul className="clinical-list">{patient.medications.map((item) => {
                 const change = patient.recent_medication_changes.find((entry) => entry.medication === item && entry.action === 'start')
-                return <li key={item} className={change && medicationHighlight ? 'medication-row-highlight' : ''}>
+                // Physician UX consistency pass, Part E: the change reads as
+                // a highlighter mark on the clinical text itself (an inline
+                // <mark> that wraps line-by-line), never a boxed row. The
+                // text sits in a block wrapper so the mark stays inline
+                // inside the flex list item.
+                const text = <>
                   {item}
                   {change?.medication_class && <small className="medication-class"> · {change.medication_class}</small>}
                   {change && <small className={`medication-provenance ${medicationHighlight ? 'medication-provenance-enter' : ''}`}>Started by {change.specialty}</small>}
+                </>
+                return <li key={item}>
+                  <div className="medication-row-text">
+                    {change && medicationHighlight ? <mark className="change-highlight medication-row-highlight">{text}</mark> : text}
+                  </div>
                 </li>
               })}</ul>
               {/* A discontinuation never appears in the list above at all
@@ -2044,9 +2042,9 @@ export default function App() {
   if (path === '/profile' || path === '/profile/professional') return <ProductShell navigate={navigate} section="profile"><ProfessionalProfilePage personaId="lucy" navigate={navigate} params={params} /></ProductShell>
   if (path === '/settings') return <SettingsPage navigate={navigate} />
   if (path === '/settings/agent-evaluations') return <AgentEvaluationsPage navigate={navigate} />
-  if (path === '/network/updates') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
+  if (path === '/network/updates') return <ProductShell navigate={navigate} section="network"><PhysicianNetworkPage perspective="lucy" navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
   const networkProfileControlledId = path.match(/^\/network\/profile\/([^/]+)$/)?.[1]
-  if (networkProfileControlledId) return <ProductShell navigate={navigate} section="network"><NetworkPhysicianProfilePage controlledId={networkProfileControlledId} navigate={navigate} backPath="/home" perspective="lucy" params={params} /></ProductShell>
+  if (networkProfileControlledId) return <ProductShell navigate={navigate} section="network"><NetworkPhysicianProfilePage controlledId={networkProfileControlledId} navigate={navigate} backPath={safeBackPath(params, '/home')} perspective="lucy" params={params} /></ProductShell>
   const historyPatientId = path.match(/^\/consultations\/patient\/([^/]+)$/)?.[1]
   if (historyPatientId) return <PatientConsultationsPage patientId={historyPatientId} navigate={navigate} />
   const recordId = path.match(/^\/consultations\/(\d+)$/)?.[1]
@@ -2065,8 +2063,10 @@ export default function App() {
   if (path === '/specialist/agent/train') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><TrainingPage personaId="iain" agentName={SPECIALIST_AGENT_NAME} navigate={navigate} exitPath="/specialist/agent?tab=train" params={params} /></ProductShell>
   if (path === '/specialist/profile') return <ProductShell navigate={navigate} section="specialist-agent" perspective="specialist"><ProfessionalProfilePage personaId="iain" navigate={navigate} params={params} /></ProductShell>
   if (path === '/specialist/patients') return <ProductShell navigate={navigate} section="specialist-patients" perspective="specialist"><SpecialistPatientsPage navigate={navigate} /></ProductShell>
-  if (path === '/specialist/network') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={params} /></ProductShell>
-  if (path === '/specialist/network/updates') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><SpecialistNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
+  if (path === '/specialist/network') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><PhysicianNetworkPage perspective="iain" navigate={navigate} params={params} /></ProductShell>
+  if (path === '/specialist/network/updates') return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><PhysicianNetworkPage perspective="iain" navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
+  const specialistNetworkNpi = path.match(/^\/specialist\/network\/(\d+)$/)?.[1]
+  if (specialistNetworkNpi) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><PhysicianProfilePage npi={specialistNetworkNpi} navigate={navigate} perspective="iain" /></ProductShell>
   const specialistNetworkProfileId = path.match(/^\/specialist\/network\/profile\/([^/]+)$/)?.[1]
   if (specialistNetworkProfileId) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkPhysicianProfilePage controlledId={specialistNetworkProfileId} navigate={navigate} backPath="/specialist/home" perspective="iain" params={params} /></ProductShell>
   if (path === '/chen' || path === '/chen/home') return <ProductShell navigate={navigate} section="chen-home" perspective="chen"><ChenHomePage navigate={navigate} /></ProductShell>
@@ -2076,11 +2076,13 @@ export default function App() {
   if (path === '/chen/profile') return <ProductShell navigate={navigate} section="chen-profile" perspective="chen"><ProfessionalProfilePage personaId="chen" navigate={navigate} params={params} /></ProductShell>
   if (path === '/chen/agent') return <ProductShell navigate={navigate} section="chen-agent" perspective="chen"><ChenAgentPage navigate={navigate} params={params} /></ProductShell>
   if (path === '/chen/agent/train') return <ProductShell navigate={navigate} section="chen-agent" perspective="chen"><TrainingPage personaId="chen" agentName={CHEN_AGENT_NAME} navigate={navigate} exitPath="/chen/agent?tab=train" params={params} /></ProductShell>
-  if (path === '/chen/network') return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><ChenNetworkPage navigate={navigate} params={params} /></ProductShell>
-  if (path === '/chen/network/updates') return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><ChenNetworkPage navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
+  if (path === '/chen/network') return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><PhysicianNetworkPage perspective="chen" navigate={navigate} params={params} /></ProductShell>
+  if (path === '/chen/network/updates') return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><PhysicianNetworkPage perspective="chen" navigate={navigate} params={new URLSearchParams('tab=feed')} /></ProductShell>
+  const chenNetworkNpi = path.match(/^\/chen\/network\/(\d+)$/)?.[1]
+  if (chenNetworkNpi) return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><PhysicianProfilePage npi={chenNetworkNpi} navigate={navigate} perspective="chen" /></ProductShell>
   const chenNetworkProfileId = path.match(/^\/chen\/network\/profile\/([^/]+)$/)?.[1]
   if (chenNetworkProfileId) return <ProductShell navigate={navigate} section="chen-network" perspective="chen"><NetworkPhysicianProfilePage controlledId={chenNetworkProfileId} navigate={navigate} backPath="/chen/patients" perspective="chen" params={params} /></ProductShell>
-  if (path === '/network') return <ProductShell navigate={navigate} section="network"><LucyNetworkPage navigate={navigate} params={params} /></ProductShell>
+  if (path === '/network') return <ProductShell navigate={navigate} section="network"><PhysicianNetworkPage perspective="lucy" navigate={navigate} params={params} /></ProductShell>
   // UX polish pass, Part A/B: an unclaimed external-directory physician (no
   // real NPI/backend record) opens the SAME PhysicianProfilePage shell as a
   // real claimable NPI identity -- just via a local lookup instead of a

@@ -19,6 +19,7 @@ from backend.models import (
 from backend.referral_preferences import (
     ensure_seed_preferences,
     merge_modality_clarification,
+    merge_addition,
     merge_revision,
     referral_preference_interpretation_service,
 )
@@ -93,6 +94,12 @@ def interpret_preference(
         structured = merge_modality_clarification(
             workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family), structured
         )
+    else:
+        # NLP pass, Part O: a new teaching adds to this case family's
+        # confirmed preference rather than replacing it on confirmation.
+        structured = merge_addition(
+            workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family), structured
+        )
     created = workflow_store.create_referral_preference(
         workspace_id,
         physician_id,
@@ -133,6 +140,16 @@ def confirm_preference(persona_id: str, preference_id: str, workspace_id: Mutabl
     existing = workflow_store.referral_preference(workspace_id, preference_id)
     if existing is None or existing["physician_id"] != physician_id:
         raise HTTPException(status_code=404, detail="Referral preference not found")
+    # NLP pass, Part N/28: an empty interpretation -- or a new teaching that
+    # adds nothing to the already-confirmed preference -- is never made
+    # operational as a "learning".
+    rules = _structured(existing)
+    if rules == StructuredReferralPreference():
+        raise HTTPException(status_code=409, detail="Nothing was interpreted to confirm")
+    if existing["status"] == "draft" and not existing.get("supersedes_id"):
+        current = workflow_store.confirmed_referral_preference(workspace_id, physician_id, existing["case_family"])
+        if current is not None and _structured(current) == rules:
+            raise HTTPException(status_code=409, detail="This adds nothing new to the confirmed preference")
     confirmed = workflow_store.confirm_referral_preference(workspace_id, preference_id, None)
     if confirmed is None:
         raise HTTPException(status_code=409, detail="Only a draft preference can be confirmed")

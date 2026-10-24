@@ -94,8 +94,9 @@ def _split_sentences(text: str) -> list[str]:
 def _extract_list_phrases(sentence: str) -> list[str]:
     """Split "a recent A1c, current diabetes medications, and recent kidney
     function" into separate item phrases."""
-    body = re.sub(r"^.*?(?:need|want|require|prefer)s?\s+", "", sentence, flags=re.IGNORECASE)
+    body = re.sub(r"^.*?(?:need|want|require|prefer|like)s?\s+(?:to\s+(?:have|see|know)\s+)?", "", sentence, flags=re.IGNORECASE)
     body = _BEFORE_REVIEW_CLAUSE.sub("", body.rstrip(".!? "))
+    body = _TRAILING_AVAILABILITY_CLAUSE.sub("", body)
     body = re.sub(r"\band\b", ",", body, flags=re.IGNORECASE)
     return [part.strip() for part in body.split(",") if part.strip()]
 
@@ -133,6 +134,157 @@ def _extract_helpful_item_phrases(sentence: str) -> list[str]:
 _LEADING_RECENCY_QUALIFIER = re.compile(r"^the\s+(?=most recent\b)", re.IGNORECASE)
 
 
+# Physician UX consistency + NLP pass, Part M: how STRONGLY the physician
+# wants an item is a property of the sentence's own wording, decided once
+# per sentence. Explicit hard-gate language is REQUIRED; hedged/availability
+# language is HELPFUL; a bare "need/require/want" stays REQUIRED (unchanged).
+_HARD_REQUIREMENT_CUES = re.compile(
+    r"\b(?:require[sd]?|must(?:\s+have)?|(?:do\s+not|don't|dont)\s+send\s+(?:it\s+|them\s+)?(?:until|without)|"
+    r"won't\s+(?:review|see|accept)\s+without|(?:can't|cannot|can\s+not)\s+review\s+without|"
+    r"before\s+i\s+can\s+(?:review|see|accept))\b",
+    re.IGNORECASE,
+)
+_NEGATED_REQUIREMENT = re.compile(r"\b(?:not\s+required|aren't\s+required|isn't\s+required|optional)\b", re.IGNORECASE)
+_REDIRECT_PHRASES = re.compile(
+    r"routed\s+elsewhere|prefer\s+to\s+redirect|refer\s+elsewhere|\bredirect|do\s+not\s+usually\s+see|don't\s+usually\s+see",
+    re.IGNORECASE,
+)
+_SOFT_REQUIREMENT_CUES = re.compile(r"\b(?:need|needs|needed|want|wants)\b", re.IGNORECASE)
+_HELPFUL_CUES = re.compile(
+    r"\b(?:i'?d\s+like|i\s+would\s+like|would\s+like|i\s+like|helpful|helps|useful|appreciate|nice\s+to\s+have|optional|"
+    r"not\s+required|aren't\s+required|isn't\s+required|prefer(?:red|s)?|ideally|"
+    r"(?:when|if|where)\s+(?:it'?s\s+|that(?:\s+information)?\s+is\s+|this\s+is\s+|they'?re\s+|it\s+is\s+)?(?:available|known|possible|documented))\b",
+    re.IGNORECASE,
+)
+_AVAILABILITY_CUES = re.compile(
+    r"\b(?:when|if|where)\s+(?:it'?s\s+|that(?:\s+information)?\s+is\s+|this\s+is\s+|they'?re\s+|it\s+is\s+)?(?:available|known|possible|documented)\b",
+    re.IGNORECASE,
+)
+
+
+def _sentence_strength(sentence: str) -> str | None:
+    """`required`, `helpful`, or `None` (the sentence states no
+    information preference at all). An explicit "not required"/"optional"
+    is helpful; otherwise hard-gate language wins; a hedge ("I'd like",
+    "when available", "helps to know") downgrades the ordinary need/want
+    verbs to helpful. A redirect sentence is never an information
+    preference ("I prefer to redirect X" is not a helpful item)."""
+    if _REDIRECT_PHRASES.search(sentence):
+        return None
+    if _NEGATED_REQUIREMENT.search(sentence):
+        return "helpful"
+    if _HARD_REQUIREMENT_CUES.search(sentence):
+        return "required"
+    if _HELPFUL_CUES.search(sentence) or _PREFERRED_BEFORE_REVIEW.search(sentence):
+        return "helpful"
+    if _SOFT_REQUIREMENT_CUES.search(sentence):
+        return "required"
+    return None
+
+
+# Part K/L: prior-treatment history as a semantic CATEGORY, not a drug list.
+# A "therapy phrase" is any noun phrase headed by a generic therapy word
+# ("diabetes medications", "GLP-1 medications", "biologic therapy"), or
+# whatever was "tried/used ... before" ("antihypertensives").
+_THERAPY_HEAD = re.compile(
+    r"\b(?:medications?|meds|medicines?|drugs?|therap(?:y|ies)|treatments?|agents?|regimens?)\b", re.IGNORECASE
+)
+_PRIOR_TRIAL_CUES = re.compile(
+    r"\b(?:tried|trialed|trialled|previously|prior|previous|past|history\s+of|have\s+had|has\s+had|they'?ve\s+had|had\s+(?:prior|previous)|"
+    r"used\s+(?:\w+\s+){0,3}before|been\s+on|failed|failures?|before)\b",
+    re.IGNORECASE,
+)
+_TRIED_OBJECT = re.compile(
+    r"\b(?:tried|trialed|trialled|used|taken|been\s+on|failed)\s+(?:other\s+|any\s+|some\s+)?([a-z0-9][\w/+-]*(?:\s+[a-z0-9][\w/+-]*)?)\s+before\b",
+    re.IGNORECASE,
+)
+_DISCONTINUATION_CUES = re.compile(
+    r"\b(?:why\b.*\b(?:stopped|discontinued|stopping|discontinuing|switched|quit|changed)|"
+    r"reasons?\b.*\b(?:stopped|discontinued|stopping|discontinuing|discontinuation|switched|changed)|"
+    r"discontinu\w*\s+reasons?|failures?|intoleran\w*|adverse\s+(?:effects?|reactions?)|side\s+effects?|"
+    r"lack\s+of\s+(?:effect|efficacy|response)|didn'?t\s+work)\b",
+    re.IGNORECASE,
+)
+_INTOLERANCE_CUES = re.compile(r"\b(?:intoleran\w*|adverse\s+(?:effects?|reactions?)|side\s+effects?)\b", re.IGNORECASE)
+# Words that end a therapy qualifier when walking left from the therapy
+# word: verbs, determiners, and history/timing words -- never part of the
+# therapy's own name ("tried | diabetes medications", "prior | biologic").
+_QUALIFIER_STOPWORDS = {
+    "a", "an", "the", "other", "any", "some", "their", "these", "those", "his", "her", "its", "all", "of", "on", "with",
+    "and", "or", "for", "to", "about", "include", "including", "know", "like", "documented", "been", "had", "have", "has",
+    "tried", "trialed", "trialled", "used", "taken", "failed", "previously", "prior", "previous", "past", "current",
+    "they've", "theyve", "who've", "whove", "patients", "patient", "they", "if", "when", "which", "what", "why",
+}
+_KNOWN_PLURAL_SINGULAR = {"meds": "medication", "diabetes": "diabetes"}
+
+
+def _singular(word: str) -> str:
+    lower = word.casefold()
+    if lower in _KNOWN_PLURAL_SINGULAR:
+        return _KNOWN_PLURAL_SINGULAR[lower]
+    if lower.endswith("ies"):
+        return word[:-3] + "y"
+    if lower.endswith("s") and not lower.endswith("ss"):
+        return word[:-1]
+    return word
+
+
+def _therapy_subject(sentence: str) -> str | None:
+    """The therapy the sentence is about, singular ("diabetes medication",
+    "antihypertensive", "GLP-1 medication", "biologic therapy", or the
+    generic "medication"): the first therapy word plus the qualifier words
+    immediately to its left, or else whatever was "tried ... before"."""
+    words = re.findall(r"[\w'/+-]+", sentence)
+    for index, word in enumerate(words):
+        if _THERAPY_HEAD.fullmatch(word):
+            qualifiers: list[str] = []
+            for previous in reversed(words[max(0, index - 2):index]):
+                if previous.casefold() in _QUALIFIER_STOPWORDS:
+                    break
+                qualifiers.insert(0, previous)
+            return " ".join([*qualifiers, _singular(word)])
+    tried = _TRIED_OBJECT.search(sentence)
+    if tried:
+        parts = [part for part in tried.group(1).split() if part.casefold() not in _QUALIFIER_STOPWORDS]
+        if parts:
+            parts[-1] = _singular(parts[-1])
+            return " ".join(parts)
+    return None
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.casefold()).strip("_")
+
+
+def _prior_treatment_items(sentence: str, strength: str) -> list[ReferralRequirement] | None:
+    """Prior-treatment history + reason discontinued, when the sentence is
+    about them. `None` when it isn't (the ordinary list extraction then
+    applies)."""
+    discontinuation = bool(_DISCONTINUATION_CUES.search(sentence))
+    prior = bool(_PRIOR_TRIAL_CUES.search(sentence))
+    subject = _therapy_subject(sentence)
+    if subject is None or not (prior or discontinuation) or not (discontinuation or _TRIED_OBJECT.search(sentence) or re.search(r"\b(?:prior|previous|past)\b", sentence, re.IGNORECASE)):
+        return None
+    required = strength == "required"
+    when_known = "" if required else ", when known"
+    plural = subject if subject.endswith(("therapy", "treatment")) else f"{subject} trials"
+    items = [ReferralRequirement(key=f"prior_{_slug(subject)}_trials", label=f"Prior {plural}", required=required, freshness_days=None)]
+    if discontinuation:
+        including = " (including intolerance or side effects)" if _INTOLERANCE_CUES.search(sentence) else ""
+        items.append(ReferralRequirement(
+            key=f"{_slug(subject)}_discontinuation_reason",
+            label=f"Reason each {subject} was stopped{including}{when_known}",
+            required=required, freshness_days=None,
+        ))
+    return items
+
+
+_TRAILING_AVAILABILITY_CLAUSE = re.compile(
+    r"\s*,?\s*(?:if\s+possible|(?:when|if|where)\s+(?:it'?s\s+|that(?:\s+information)?\s+is\s+|this\s+is\s+|they'?re\s+|it\s+is\s+)?(?:available|known|documented))\b.*$",
+    re.IGNORECASE,
+)
+
+
 _LEADING_CONDITIONAL_PATTERN = re.compile(r"^\s*if\s+(.+?),\s*(.+)$", re.IGNORECASE)
 _TRAILING_CONDITIONAL_PATTERN = re.compile(r"(.+?)\b(?:when|if)\b\s+(.+)$", re.IGNORECASE)
 
@@ -166,6 +318,9 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
     redirect: list[str] = []
     modality_rules: list[dict[str, str]] = []
     modality = "unspecified"
+    # Curly apostrophes ("I’d", "it’s") are ordinary physician typing --
+    # every cue below is written with a straight one.
+    source_text = source_text.replace("\u2019", "'").replace("\u2018", "'")
     lower = source_text.casefold()
 
     for sentence in _split_sentences(source_text):
@@ -190,11 +345,16 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
         # "I prefer X before review" names wanted information without
         # making it a hard requirement -- interpreted as helpful; the
         # physician can move it to required during review.
-        is_helpful_sentence = any(
-            phrase in sentence_lower
-            for phrase in ("useful when available", "aren't required", "are not required", "optional", "not required")
-        ) or bool(_PREFERRED_BEFORE_REVIEW.search(sentence))
-        if any(keyword in sentence_lower for keyword in ("need", "require", "want")) and not is_helpful_sentence:
+        strength = _sentence_strength(sentence)
+        is_helpful_sentence = strength == "helpful"
+        concept_items = _prior_treatment_items(sentence, strength) if strength else None
+        if concept_items:
+            target = required if strength == "required" else helpful
+            for item in concept_items:
+                if not any(existing.key == item.key for existing in target):
+                    target.append(item)
+            continue
+        if strength == "required":
             for phrase in _extract_list_phrases(sentence):
                 key, label = _requirement_key_and_label(phrase)
                 if not any(item.key == key for item in required):
@@ -508,29 +668,94 @@ def confirmed_requirement_items(
     row = workflow_store.confirmed_referral_preference(workspace_id, physician_id, case_family)
     if row is None:
         return None
-    return preference_requirement_items(_structured_from_row(row)) or None
+    return effective_requirement_items(physician_id, case_family, _structured_from_row(row)) or None
+
+
+def effective_requirement_items(
+    physician_id: str, case_family: str, structured: StructuredReferralPreference
+) -> list[ReferralRequirement]:
+    """What the agent actually asks for once a preference is confirmed --
+    shared by referral readiness and the Overview so they can never
+    disagree (NLP pass, Part O). A preference that authors its own REQUIRED
+    list defines the requirements exactly (as before). One that only adds
+    helpful information (e.g. "I'd like the reason prior medications were
+    stopped, when available") never removes the practice-footprint
+    baseline: baseline required items stay required, baseline helpful
+    items stay, and the new helpful items are added."""
+    if structured.required:
+        return preference_requirement_items(structured)
+    from backend.referrals.requirements import REFERRAL_REQUIREMENTS_BY_KEY
+
+    footprint = REFERRAL_REQUIREMENTS_BY_KEY.get((physician_id, case_family), [])
+    authored_keys = {item.key for item in structured.helpful}
+    return [
+        *(item for item in footprint if item.required),
+        *(item for item in footprint if not item.required and item.key not in authored_keys),
+        *structured.helpful,
+    ]
 
 
 _STRUCTURED_SECTIONS = ("good_fit", "required", "helpful", "redirect")
+_ITEM_SECTIONS = ("required", "helpful")
+_TEXT_SECTIONS = ("good_fit", "redirect")
 _MODALITY_FIELDS = ("modality", "modality_notes", "modality_rules")
+
+
+def merge_addition(
+    confirmed_row: dict[str, Any] | None, interpreted: StructuredReferralPreference
+) -> StructuredReferralPreference:
+    """A NEW teaching in a case family that already has a confirmed
+    preference (NLP pass, Part O): confirming supersedes that row, so the
+    draft must carry everything it already says. New items are added (an
+    item restated with a different strength moves to its new section);
+    nothing else is dropped, and modality only changes when the new
+    statement actually states one. Removing guidance is an Edit, never a
+    side effect of teaching something new. Pure; the result is a draft."""
+    if confirmed_row is None:
+        return interpreted
+    current = _structured_from_row(confirmed_row)
+    new_keys = {item.key for section in _ITEM_SECTIONS for item in getattr(interpreted, section)}
+    update: dict[str, Any] = {
+        section: [
+            *(item for item in getattr(current, section) if item.key not in new_keys),
+            *getattr(interpreted, section),
+        ]
+        for section in _ITEM_SECTIONS
+    }
+    for section in _TEXT_SECTIONS:
+        update[section] = list(dict.fromkeys([*getattr(current, section), *getattr(interpreted, section)]))
+    if interpreted.modality != "unspecified" or interpreted.modality_rules:
+        update.update({field: getattr(interpreted, field) for field in _MODALITY_FIELDS})
+    return current.model_copy(update=update)
 
 
 def merge_revision(
     confirmed_row: dict[str, Any], interpreted: StructuredReferralPreference
 ) -> StructuredReferralPreference:
-    """Editing a confirmed preference (My Agent cleanup pass, Part C/O):
-    sections the ORIGINAL statement authored are replaced by the edited
-    interpretation; sections it never mentioned (e.g. requirements carried
-    over when a clarification was merged onto an earlier preference) are
-    preserved, so an edit can never silently drop unrelated confirmed
-    guidance. Pure; the result is only ever a draft."""
+    """Editing a confirmed preference (My Agent cleanup pass, Part C/O): the
+    items the ORIGINAL statement authored are replaced by the edited
+    interpretation; everything else the confirmed row carries (guidance
+    merged in from earlier teachings or clarifications) is preserved, so an
+    edit can never silently drop unrelated confirmed guidance. Pure; the
+    result is only ever a draft."""
     current = _structured_from_row(confirmed_row)
     authored = deterministic_interpret(confirmed_row["source_text"], confirmed_row["case_family"])
-    update: dict[str, Any] = {}
-    for section in _STRUCTURED_SECTIONS:
-        edited = getattr(interpreted, section)
-        if edited or getattr(authored, section):
-            update[section] = edited
+    replaced_keys = {
+        item.key for source in (authored, interpreted) for section in _ITEM_SECTIONS for item in getattr(source, section)
+    }
+    update: dict[str, Any] = {
+        section: [
+            *(item for item in getattr(current, section) if item.key not in replaced_keys),
+            *getattr(interpreted, section),
+        ]
+        for section in _ITEM_SECTIONS
+    }
+    for section in _TEXT_SECTIONS:
+        authored_text = set(getattr(authored, section))
+        update[section] = list(dict.fromkeys([
+            *(item for item in getattr(current, section) if item not in authored_text),
+            *getattr(interpreted, section),
+        ]))
     if interpreted.modality != "unspecified" or authored.modality != "unspecified" or interpreted.modality_rules:
         update.update({field: getattr(interpreted, field) for field in _MODALITY_FIELDS})
     return current.model_copy(update=update)
@@ -789,13 +1014,11 @@ def confirmed_referral_preference_sections(
         # about requirements (e.g. a modality-only clarification) leaves the
         # practice-footprint baseline operational -- so it must stay visible
         # here too, exactly matching confirmed_requirement_items().
-        if structured.required or structured.helpful:
-            required_labels.extend(item.label for item in structured.required)
-            helpful_labels.extend(item.label for item in structured.helpful)
-        else:
-            footprint = REFERRAL_REQUIREMENTS_BY_KEY.get((physician_id, row["case_family"]), [])
-            required_labels.extend(item.label for item in footprint if item.required)
-            helpful_labels.extend(item.label for item in footprint if not item.required)
+        # NLP pass, Part O: the SAME effective items referral readiness uses
+        # -- a helpful-only teaching never hides the baseline requirements.
+        effective = effective_requirement_items(physician_id, row["case_family"], structured)
+        required_labels.extend(item.label for item in effective if item.required)
+        helpful_labels.extend(item.label for item in effective if not item.required)
         # Demo UX + semantic polish pass, Part 3: never restate the same
         # good-fit sentence here -- it is already shown under "Referral
         # fit." Only a genuinely distinct redirect-to-another-specialty

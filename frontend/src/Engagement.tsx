@@ -129,19 +129,19 @@ export const clarificationFocusPath = (trainPath: string, clarificationId: strin
  * PhysicianNetwork.tsx, which this mirrors), never a second local membership
  * model. Lives here (not PhysicianNetwork.tsx) because that file already
  * imports from this one; importing back would cycle. */
-export function useNetworkRelationship(npi: string | null) {
+export function useNetworkRelationship(npi: string | null, perspective: DemoPhysicianPerspective = 'lucy') {
   const [network, setNetwork] = useState<AgentNetwork | null>(null)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { getAgentNetwork().then(setNetwork).catch(() => {}) }, [])
+  useEffect(() => { getAgentNetwork(perspective).then(setNetwork).catch(() => {}) }, [perspective])
   const memberNpis = useMemo(() => new Set([
     ...(network?.nodes.filter((node) => node.in_network).map((node) => node.npi) ?? []),
     ...(network?.members.map((member) => member.npi) ?? []),
   ]), [network])
   const loaded = network !== null
   const inNetwork = npi != null && memberNpis.has(npi)
-  const refresh = () => getAgentNetwork().then(setNetwork).catch(() => {})
-  const add = async () => { if (!npi) return; setBusy(true); try { await addNetworkMember(npi); await refresh() } finally { setBusy(false) } }
-  const remove = async () => { if (!npi) return; setBusy(true); try { await removeNetworkMember(npi); await refresh() } finally { setBusy(false) } }
+  const refresh = () => getAgentNetwork(perspective).then(setNetwork).catch(() => {})
+  const add = async () => { if (!npi) return; setBusy(true); try { await addNetworkMember(npi, perspective); await refresh() } finally { setBusy(false) } }
+  const remove = async () => { if (!npi) return; setBusy(true); try { await removeNetworkMember(npi, perspective); await refresh() } finally { setBusy(false) } }
   return { loaded, inNetwork, busy, add, remove }
 }
 
@@ -2652,7 +2652,8 @@ export function NetworkAskAgentModal({ controlledId, physicianName, onClose, gro
   const [error, setError] = useState('')
   const [promptsOpen, setPromptsOpen] = useState(false)
   const cancelled = useRef(false)
-  useEffect(() => () => { cancelled.current = true }, [])
+  // Reset on (re)mount: StrictMode mounts, cleans up, and remounts in dev.
+  useEffect(() => { cancelled.current = false; return () => { cancelled.current = true } }, [])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -2722,7 +2723,7 @@ export function NetworkPhysicianProfilePage({ controlledId, navigate, backPath, 
   // OWN profile, not another physician's).
   const [askAgentOpen, setAskAgentOpen] = useState(false)
   useEffect(() => { setData(null); setError(''); getNetworkPhysicianProfile(controlledId).then(setData).catch((err: Error) => setError(err.message)) }, [controlledId])
-  const relationship = useNetworkRelationship(data?.physician.npi ?? null)
+  const relationship = useNetworkRelationship(data?.physician.npi ?? null, perspective)
   // Only the physician's own "View as others see it" link adds ?preview=1 --
   // an ordinary visitor reaching this exact same public URL never sees the bar.
   const isPreview = params?.get('preview') === '1'

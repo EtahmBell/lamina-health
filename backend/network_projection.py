@@ -41,6 +41,8 @@ def project_agent_network(
     records: list[dict],
     providers: ProviderNetwork,
     members: Sequence[dict] = (),
+    center: dict | None = None,
+    exclude_physician_id: str | None = None,
 ) -> dict:
     """Only saved structured consult outcomes create edges; roster alone creates none.
 
@@ -107,6 +109,10 @@ def project_agent_network(
 
     nodes = []
     for footprint in ALL_PHYSICIANS:
+        # Physician UX consistency pass: a physician never appears in their
+        # own Colleagues list.
+        if footprint.id == exclude_physician_id:
+            continue
         npi = SYNTHETIC_PHYSICIAN_NPIS[footprint.id]
         profile = providers.get(npi)
         nodes.append({
@@ -138,7 +144,7 @@ def project_agent_network(
 
     graph_npis = {node["npi"] for node in nodes}
     return {
-        "center": CENTER_AGENT,
+        "center": center or CENTER_AGENT,
         "nodes": nodes,
         "edges": [
             relationships[footprint.id]

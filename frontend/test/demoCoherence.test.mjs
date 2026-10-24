@@ -125,16 +125,16 @@ test('readiness copy is never hardcoded to claim the agent is untrained', () => 
 // ---------------------------------------------------------------- Network default + Chen parity
 
 test('every persona\'s Network page defaults to Colleagues, never Feed, on a fresh visit', () => {
-  for (const [label, source, fn] of [
-    ['Lucy', app, slice(app, 'function LucyNetworkPage', 'function HomePage')],
-    ['Iain', specialist, slice(specialist, 'export function SpecialistNetworkPage', specialist.length)],
-    ['Chen', referral, slice(referral, 'export function ChenNetworkPage', referral.length)],
-  ]) {
-    assert.match(fn, /tabParam === 'feed' \? 'feed' : 'my-network'/, `${label} Network page defaults to Colleagues`)
+  // Physician UX consistency pass: one shared page, so one default.
+  const shared = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
+  assert.match(slice(shared, 'export function PhysicianNetworkPage', shared.length), /tabParam === 'feed' \? 'feed' : 'my-network'/)
+  for (const perspective of ['lucy', 'iain', 'chen']) {
+    assert.match(app, new RegExp(`<PhysicianNetworkPage perspective="${perspective}" navigate=\\{navigate\\} params=\\{params\\} />`), `${perspective} Network uses the shared page`)
   }
 })
 
 test('Chen\'s Colleagues tab gets the same ActiveNetworkRail as Lucy\'s, not a persona-specific fork', () => {
-  const chenTab = slice(referral, 'function ChenMyNetworkTab', 'export function ChenNetworkPage')
-  assert.match(chenTab, /<ActiveNetworkRail navigate=\{navigate\} onViewInFeed=\{/)
+  const shared = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(referral, /function ChenMyNetworkTab/)
+  assert.match(slice(shared, 'export function MyNetworkTab', 'export function PhysicianNetworkPage'), /<ActiveNetworkRail navigate=\{navigate\} perspective=\{perspective\} onViewInFeed=\{/)
 })

@@ -8,6 +8,7 @@ import { useState } from 'react'
 import {
   askNetwork,
   type AskNetworkResult,
+  type DemoPhysicianPerspective,
   type NetworkPhysicianAgentMatch,
 } from './api.ts'
 import { DEMO_PATIENTS } from './demoPatients.ts'
@@ -26,15 +27,19 @@ const PERSONA_BY_PHYSICIAN_ID: Record<string, string> = {
   'physician-islam': 'islam', 'physician-nakajima': 'nakajima',
 }
 
-const ASKABLE_PATIENTS = DEMO_PATIENTS.filter((patient) => patient.implemented && !patient.owner)
+/** Patient context is the viewer's own routable patients: Lucy's referral
+ * cases. A receiving specialist has none the care-routing engine can route
+ * (their patients arrived by referral), so the control is omitted for them
+ * -- a data difference, not a different card. */
+const askablePatients = (perspective: DemoPhysicianPerspective) => (perspective === 'lucy' ? DEMO_PATIENTS.filter((patient) => patient.implemented && !patient.owner) : [])
 
 /** One physician-agent match (My Agent cleanup pass, Part J/M): WHY THIS
  * MATCH as labeled, evidence-backed reasons -- never a bullet wall, never a
  * numeric value. A directly relevant post from this physician may ground
  * the result; unrelated network posts are never listed. Ask agent only
  * renders when a real Lamina agent persona exists for the physician. */
-function PhysicianAgentResultCard({ match, navigate, onAskAgent, onViewInFeed }: {
-  match: NetworkPhysicianAgentMatch; navigate: Navigate; onAskAgent: (match: NetworkPhysicianAgentMatch) => void
+function PhysicianAgentResultCard({ match, navigate, perspective, onAskAgent, onViewInFeed }: {
+  match: NetworkPhysicianAgentMatch; navigate: Navigate; perspective: DemoPhysicianPerspective; onAskAgent: (match: NetworkPhysicianAgentMatch) => void
   onViewInFeed: (postId: string) => void
 }) {
   const personaId = PERSONA_BY_PHYSICIAN_ID[match.physician_id]
@@ -63,12 +68,13 @@ function PhysicianAgentResultCard({ match, navigate, onAskAgent, onViewInFeed }:
     </p>)}
     <div className="ask-network-card-actions">
       {personaId && <button type="button" className="text-button" onClick={() => onAskAgent(match)}>Ask agent →</button>}
-      {personaId && <button type="button" className="text-button" onClick={() => navigate(networkProfilePath('lucy', personaId))}>View profile →</button>}
+      {personaId && <button type="button" className="text-button" onClick={() => navigate(networkProfilePath(perspective, personaId))}>View profile →</button>}
     </div>
   </div>
 }
 
-export function AskNetworkCard({ navigate, onViewInFeed }: { navigate: Navigate; onViewInFeed: (postId: string) => void }) {
+export function AskNetworkCard({ navigate, onViewInFeed, perspective = 'lucy' }: { navigate: Navigate; onViewInFeed: (postId: string) => void; perspective?: DemoPhysicianPerspective }) {
+  const patients = askablePatients(perspective)
   const [question, setQuestion] = useState('')
   const [patientId, setPatientId] = useState('')
   const [result, setResult] = useState<AskNetworkResult | null>(null)
@@ -81,7 +87,7 @@ export function AskNetworkCard({ navigate, onViewInFeed }: { navigate: Navigate;
     if (!trimmed || busy) return
     setBusy(true); setError('')
     try {
-      setResult(await askNetwork(trimmed, patientId || undefined))
+      setResult(await askNetwork(trimmed, patientId || undefined, perspective))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not reach the network.')
     } finally {
@@ -101,13 +107,13 @@ export function AskNetworkCard({ navigate, onViewInFeed }: { navigate: Navigate;
     <p className="muted-note">Ask physician agents in your network.</p>
     <label htmlFor="ask-network-question" className="sr-only">Ask a question</label>
     <textarea id="ask-network-question" rows={2} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a question…" />
-    <div className="ask-network-patient-context">
+    {patients.length > 0 && <div className="ask-network-patient-context">
       <span>Patient context</span>
       <select value={patientId} onChange={(event) => setPatientId(event.target.value)}>
         <option value="">None</option>
-        {ASKABLE_PATIENTS.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}
+        {patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}
       </select>
-    </div>
+    </div>}
     {patientId && <p className="ask-network-patient-note">Only information relevant to this question is used to consult physician agents.</p>}
     {error && <p className="demo-reset-error" role="alert">{error}</p>}
     <button type="button" className="button-primary" disabled={busy || !question.trim()} onClick={() => void ask()}>{busy ? 'Asking…' : 'Ask network'} <span>→</span></button>
@@ -117,7 +123,7 @@ export function AskNetworkCard({ navigate, onViewInFeed }: { navigate: Navigate;
         <h4>Physician agents</h4>
         {result.physician_agents.length === 0
           ? <p className="ask-network-empty">No confirmed physician representation matched that question yet.</p>
-          : result.physician_agents.map((match) => <PhysicianAgentResultCard key={match.physician_id} match={match} navigate={navigate} onAskAgent={setDrawerMatch} onViewInFeed={onViewInFeed} />)}
+          : result.physician_agents.map((match) => <PhysicianAgentResultCard key={match.physician_id} match={match} navigate={navigate} perspective={perspective} onAskAgent={setDrawerMatch} onViewInFeed={onViewInFeed} />)}
       </div>
     </div>}
 
@@ -133,8 +139,8 @@ export function AskNetworkCard({ navigate, onViewInFeed }: { navigate: Navigate;
   </section>
 }
 
-export function ActiveNetworkRail({ navigate, onViewInFeed }: { navigate: Navigate; onViewInFeed: (postId: string) => void }) {
+export function ActiveNetworkRail({ navigate, onViewInFeed, perspective = 'lucy' }: { navigate: Navigate; onViewInFeed: (postId: string) => void; perspective?: DemoPhysicianPerspective }) {
   return <aside className="active-network-rail">
-    <AskNetworkCard navigate={navigate} onViewInFeed={onViewInFeed} />
+    <AskNetworkCard navigate={navigate} perspective={perspective} onViewInFeed={onViewInFeed} />
   </aside>
 }

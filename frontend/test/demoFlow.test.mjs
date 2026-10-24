@@ -26,7 +26,7 @@ test('the add-colleague flow is a focused modal, not a dominant inline banner (p
   assert.match(network, /Find a physician to add to your network\./)
   assert.match(network, /Search any physician in the U\.S\. using NPPES/)
   assert.match(network, /searchProviders/, 'the NPPES search is preserved')
-  assert.match(network, /addNetworkMember\(profile\.npi\)/, 'Add colleague is preserved')
+  assert.match(network, /addNetworkMember\(profile\.npi, perspective\)/, 'Add colleague is preserved')
 })
 
 test('recommended, consulted and redirected edges are visually distinct', () => {

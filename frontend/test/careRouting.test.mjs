@@ -572,7 +572,7 @@ const physicianNetworkSource = readFileSync(new URL('../src/PhysicianNetwork.tsx
 /* --------------------------------------------------------------- Part X */
 
 test('Okafor opens the SAME PhysicianProfilePage shell as Okonkwo -- a directoryProfile branch inside the one shared component, never a separate one-off modal', () => {
-  assert.match(physicianNetworkSource, /export function PhysicianProfilePage\(\{ npi, directoryProfile, navigate \}: \{ npi\?: string; directoryProfile\?: DirectoryOnlyProfile; navigate: Navigate \}\) \{/)
+  assert.match(physicianNetworkSource, /export function PhysicianProfilePage\(\{ npi, directoryProfile, navigate, perspective = 'lucy' \}: \{ npi\?: string; directoryProfile\?: DirectoryOnlyProfile; navigate: Navigate; perspective\?: DemoPhysicianPerspective \}\) \{/)
   assert.match(physicianNetworkSource, /if \(directoryProfile\) \{/)
   assert.match(physicianNetworkSource, /Not yet on Lamina/)
   assert.match(app, /const networkDirectoryId = path\.match\(\/\^\\\/network\\\/directory\\\/\(\[\^\/\]\+\)\$\/\)\?\.\[1\]/)

@@ -187,16 +187,20 @@ test('/chen/agent reuses the exact same Overview/Train/Test tabs and shared pane
 
 /* ------------------------------------------------------------- Part J: Network */
 
-test('/chen/network has both a Colleagues (My Network) tab and a Feed tab, same structure as Lucy\'s and Iain\'s Network pages, and defaults to Colleagues', () => {
-  const fn = slice(referralSource, 'export function ChenNetworkPage', referralSource.length)
+test('/chen/network is the shared PhysicianNetworkPage (Colleagues + Feed), with no Chen-specific Network fork left', () => {
+  assert.doesNotMatch(referralSource, /function ChenNetworkPage|function ChenMyNetworkTab/)
+  const shared = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8').replaceAll(String.fromCharCode(13), '')
+  const fn = slice(shared, 'export function PhysicianNetworkPage', '/** UX polish pass, Part A/B')
   assert.match(fn, /<NetworkTabs tab=\{tab\} onSelect=\{selectTab\} \/>/)
   assert.match(fn, /const \[tab, setTab\] = useState<NetworkTab>\(tabParam === 'feed' \? 'feed' : 'my-network'\)/)
-  assert.match(fn, /tab === 'my-network'\s*\n\s*\? <ChenMyNetworkTab navigate=\{navigate\} onViewInFeed=\{viewInFeed\} \/>\s*\n\s*: <NetworkFeedTab personaId="chen" navigate=\{navigate\} focusPostId=\{focusPostId\} onFocused=\{\(\) => setFocusPostId\(null\)\} \/>/)
+  assert.match(fn, /<MyNetworkTab navigate=\{navigate\} perspective=\{perspective\} onViewInFeed=\{viewInFeed\} \/>/)
+  assert.match(fn, /<NetworkFeedTab personaId=\{perspective\} navigate=\{navigate\}/)
 })
 
-test('ChenMyNetworkTab routes to physician profiles through networkProfilePath(\'chen\', ...), never Lucy\'s or Iain\'s perspective', () => {
-  const fn = slice(referralSource, 'function ChenMyNetworkTab', 'export function ChenNetworkPage')
-  assert.match(fn, /networkProfilePath\('chen', physician\.id\)/)
+test('Colleagues routes resolve inside the viewer\'s own perspective (networkProfilePath(perspective, ...)), never Lucy\'s', () => {
+  const shared = readFileSync(new URL('../src/PhysicianNetwork.tsx', import.meta.url), 'utf8')
+  assert.match(shared, /navigate\(persona \? networkProfilePath\(perspective, persona\) : directoryProfilePath\(perspective, suggestion\.npi\)\)/)
+  assert.match(shared, /navigate\(directoryProfilePath\(perspective, member\.npi\)\)/)
 })
 
 /* ------------------------------------------------------------ Part K: identity audit */

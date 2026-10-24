@@ -10,7 +10,7 @@
    * surfaces/glyph/labels) but now carry the mineral hue, not green. --success stays
    * distinct so agent-context mineral is never confused with a real clinical outcome. */
   --copper: var(--accent); --copper-hover: var(--accent-hover);
-  --mineral: #536e7d; --mineral-deep: #344f5d; --mineral-deep-hover: #293e49; --mineral-surface: #e9eff1; --mineral-subtle: #91a9b2;
+  --mineral: #536e7d; --mineral-deep: #344f5d; --mineral-deep-hover: #293e49; --mineral-surface: #e9eff1; --mineral-subtle: #91a9b2; --change-highlight: rgba(83, 110, 125, .16);
   --sand: #ede7dc;
   --sage: var(--mineral); --sage-ink: var(--mineral); --sage-surface: var(--mineral-surface); --sage-surface-strong: #d7e1e4;
   --slate: #6b7686; --slate-surface: #eef0f3;
@@ -579,18 +579,25 @@ button.lam-row:hover { background: #fff9f1; }
 .medication-provenance { margin-left: 4px; color: var(--mineral-deep); font-family: var(--font-ui); font-size: .64rem; font-weight: 500; white-space: nowrap; }
 .medication-provenance::before { content: '· '; color: var(--text-secondary); }
 .medication-change-note { margin: 10px 0 0; color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
+/* Physician UX consistency pass, Part E: a document-highlighter wash (soft
+ * translucent background only -- no inset border) on an inline span, with
+ * a little breathing room that `box-decoration-break: clone` repeats on
+ * every wrapped line. The negative margins cancel the padding so the
+ * highlighted text never shifts against its neighbours. */
+.medication-row-text { min-width: 0; }
+.change-highlight { margin: -2px -5px; padding: 2px 5px; border-radius: 3px; background: transparent; color: inherit; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 @keyframes medication-row-wash {
-  0% { background-color: transparent; box-shadow: none; }
-  16% { background-color: var(--mineral-surface); box-shadow: 0 0 0 1px var(--mineral-subtle) inset; }
-  48% { background-color: var(--mineral-surface); box-shadow: 0 0 0 1px var(--mineral-subtle) inset; }
-  100% { background-color: transparent; box-shadow: none; }
+  0% { background-color: transparent; }
+  16% { background-color: var(--change-highlight); }
+  48% { background-color: var(--change-highlight); }
+  100% { background-color: transparent; }
 }
 @keyframes medication-provenance-fade-in {
   0% { opacity: 0; }
   16% { opacity: 1; }
   100% { opacity: 1; }
 }
-.medication-row-highlight { border-radius: 4px; animation: medication-row-wash 2500ms ease-in-out; }
+.medication-row-highlight { animation: medication-row-wash 2500ms ease-in-out; }
 .medication-provenance-enter { animation: medication-provenance-fade-in 2500ms ease-in-out; }
 @media (prefers-reduced-motion: reduce) {
   .medication-row-highlight { animation: none; }
@@ -1510,6 +1517,10 @@ button.lam-row:hover { background: #fff9f1; }
 
 .practice-chip-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .practice-chip { display: inline-block; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: 7px 14px; color: var(--clinical); font-size: .7rem; text-transform: capitalize; }
+/* NLP pass: before-referral items are already sentence-cased physician
+ * language ("Reason each diabetes medication was stopped, when known") --
+ * title-casing every word made long items hard to read. */
+.practice-workup-block .practice-chip { text-transform: none; }
 .practice-chip-group.prominent .practice-chip { border-color: rgb(184 92 50 / 28%); background: #fdf3e8; color: var(--accent-hover); font-weight: 600; }
 
 .practice-interest-group { margin-top: 4px; }
@@ -2197,13 +2208,32 @@ details.network-optional { border: 0; background: none; margin-top: 0; padding: 
 .specialty-episode-section { width: 100%; margin-top: 28px; }
 .specialty-episode-section > .section-label { margin-bottom: 8px; }
 .specialty-episode { border-top: 1px solid var(--border); padding-top: 12px; }
-.specialty-episode-summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
+/* Physician UX consistency pass, Part F: one centered flex row with a fixed
+ * minimum height -- avatar, title, status, and +/- share a single axis
+ * (line-height: 1 removes the text's extra leading that made the title sit
+ * visibly off the badge's center). */
+.specialty-episode-summary { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 4px 4px 4px 0; cursor: pointer; list-style: none; }
 .specialty-episode-summary::-webkit-details-marker { display: none; }
-.specialty-episode-title { font-size: .82rem; font-weight: 500; }
-.specialty-episode-chevron { margin-left: auto; color: var(--text-secondary); font-size: .9rem; }
-.specialty-episode-detail { margin-top: 14px; padding-left: 2px; }
+.specialty-episode-summary > * { flex: none; }
+.specialty-episode-summary .status-label { display: inline-flex; align-items: center; line-height: 1; }
+.specialty-episode-identity { display: inline-flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; }
+.specialty-episode-avatar { display: inline-grid; place-items: center; width: 30px; height: 30px; flex: none; padding: 0; font-size: .58rem; line-height: 1; }
+button.specialty-episode-avatar { cursor: pointer; }
+.specialty-episode-title { font-size: .82rem; font-weight: 500; line-height: 1.25; }
+.specialty-episode-physician { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border-strong, var(--border)); text-underline-offset: 3px; }
+.specialty-episode-physician:hover { color: var(--mineral-deep); text-decoration-color: currentColor; }
+.specialty-episode-physician:focus-visible { outline: 2px solid var(--mineral); outline-offset: 2px; border-radius: 2px; }
+.specialty-episode-chevron { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: auto; color: var(--text-secondary); font-size: .9rem; line-height: 1; }
+/* Part H: the artifact links, then a clear break before the nested Ask
+ * agent card -- which sits inset from the episode's edges as an available
+ * action within this episode, not a card jammed against another card. */
+.specialty-episode-detail { margin-top: 14px; padding: 0 0 20px 42px; }
 .specialty-episode-detail .muted-note { margin: 0 0 10px; color: var(--text-secondary); font-size: .68rem; }
 .specialty-episode-detail .referral-artifact-links { margin-top: 0; padding-top: 0; border-top: none; }
+.specialty-episode-detail .coordination-chat-card { margin-top: 24px; }
+/* NLP pass, Part N: where a proposed learning applies, and what it keeps. */
+.referral-pref-case-family { margin: 2px 0 10px; color: var(--mineral-deep); }
+.referral-pref-kept { margin: 10px 0 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: .68rem; line-height: 1.5; }
 
 /* Physician-agent-to-physician-agent coordination chat card (ongoing-
    coordination pass, Part H-T) -- a separate boxed card beneath the
@@ -2662,6 +2692,12 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .ask-network-empty { font-size: .7rem; color: var(--text-secondary); }
 .network-colleagues-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; align-items: start; }
 .network-colleagues-layout > .network-colleagues-main { min-width: 0; }
+/* Physician UX consistency pass, Part D: the breathing room below the
+ * Grow-your-network banner belongs to the whole two-column layout (main
+ * column AND the sticky Ask the Network rail), not only the main column's
+ * first section -- otherwise the rail starts flush under the banner. */
+.network-hero + .network-colleagues-layout { margin-top: 30px; }
+.network-colleagues-main > .suggested-connections:first-child { margin-top: 0; }
 @media (max-width: 960px) { .network-colleagues-layout { grid-template-columns: 1fr; } }
 
 /* Feed post one-shot focus highlight */
