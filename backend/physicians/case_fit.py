@@ -60,10 +60,22 @@ def comparable_case_patterns(
     return [pattern for pattern in patterns if pattern.features and set(pattern.features) <= signals]
 
 
+def interest_matches_case_text(interest: str, case_text: str, case_family: str) -> bool:
+    """Supporting evidence only when the case shares something specific
+    with the interest. The case family's own words ("diabetes" for a
+    type_2_diabetes case) are true of every case in that family, so on
+    their own they are not a match -- unless the interest is nothing BUT
+    the family (e.g. "Type 2 diabetes"), which then matches the family."""
+    interest_words = {word for word in interest.casefold().replace("-", " ").split() if len(word) > 3}
+    family_words = {word for word in case_family.casefold().split("_") if len(word) > 3} | {"diabetic", "cases", "patients"}
+    specific = interest_words - family_words
+    words = specific or interest_words
+    return bool(words) and any(word in case_text.casefold() for word in words)
+
+
 def _case_matches_interest(context: ClinicalRepresentation, interest: str) -> bool:
-    interest_words = {word for word in interest.casefold().split() if len(word) > 3}
-    case_text = f"{context.summary} {' '.join(context.facts)} {' '.join(context.signals)}".casefold()
-    return bool(interest_words) and any(word in case_text for word in interest_words)
+    case_text = f"{context.summary} {' '.join(context.facts)} {' '.join(context.signals)}"
+    return interest_matches_case_text(interest, case_text, context.case_family)
 
 
 def _econsult_policy_summary(short_name: str, policy: EconsultPolicy) -> str:

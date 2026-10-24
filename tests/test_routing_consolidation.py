@@ -193,7 +193,9 @@ def test_no_prior_patient_identity_or_counts_appear_in_match_explanations() -> N
 def test_case_interest_is_useful_but_not_the_only_fit_signal() -> None:
     plain = build_physician_fits(_context())
     with_interest = build_physician_fits(
-        _context(), case_interest_titles_by_physician={CHEN_ID: ["Complex type 2 diabetes"]}
+        # Teaching-intent pass: an interest must share something specific
+        # with the case (not merely its own disease name) to count.
+        _context(), case_interest_titles_by_physician={CHEN_ID: ["Progressive type 2 diabetes despite escalation"]}
     )
     chen_plain = next(fit for fit in plain if fit.physician_id == CHEN_ID)
     chen_interest = next(fit for fit in with_interest if fit.physician_id == CHEN_ID)

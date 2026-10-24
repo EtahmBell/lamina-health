@@ -2271,13 +2271,19 @@ button.specialty-episode-avatar { cursor: pointer; }
 .referral-pref-case-family { margin: 6px 0 12px; color: var(--mineral-deep); font-family: var(--font-ui); font-size: .62rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 .referral-pref-kept { margin: 12px 0 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: .68rem; line-height: 1.5; }
 .referral-pref-kept span { color: var(--clinical); font-weight: 500; }
+/* Teaching-intent pass: the effect of a case interest, and the honest
+ * "needs more detail" state for an interpretation that can't be confirmed. */
+.referral-pref-effect, .referral-pref-review-card .referral-pref-interpretation .referral-pref-group > p.referral-pref-effect { margin: 10px 0 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: .68rem; line-height: 1.5; }
+.referral-pref-needs-detail { font-family: var(--font-ui); font-size: .74rem; line-height: 1.5; color: var(--text-secondary); }
+.referral-pref-needs-detail p { margin: 0; }
+.referral-pref-needs-detail-title { margin-bottom: 4px !important; color: var(--clinical); font-size: .8rem; font-weight: 600; }
 /* Proposed-learning polish pass: inside a proposal, the guidance type reads
  * as a sentence-case label and the understood items as comfortable body
  * text -- the interpretation is the card's content, not schema output. */
 .referral-pref-review-card .referral-pref-interpretation .referral-pref-group > .section-label { margin: 0 0 6px; color: var(--clinical); font-family: var(--font-ui); font-size: .76rem; font-weight: 600; letter-spacing: normal; text-transform: none; }
 .referral-pref-review-card .referral-pref-interpretation .referral-pref-requirement-list { gap: 8px; margin-top: 0; }
 .referral-pref-review-card .referral-pref-interpretation .referral-pref-requirement-row { font-size: .8rem; line-height: 1.5; color: var(--clinical); }
-.referral-pref-review-card .referral-pref-interpretation .referral-pref-group > p:not(.section-label) { margin: 0; font-size: .8rem; line-height: 1.5; color: var(--clinical); }
+.referral-pref-review-card .referral-pref-interpretation .referral-pref-group > p:not(.section-label):not(.referral-pref-effect) { margin: 0; font-size: .8rem; line-height: 1.5; color: var(--clinical); }
 
 /* Physician-agent-to-physician-agent coordination chat card (ongoing-
    coordination pass, Part H-T) -- a separate boxed card beneath the

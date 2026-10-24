@@ -9,6 +9,7 @@ from backend.models import (
     PhysicianProfile,
 )
 from backend.physicians import similar_cases
+from backend.physicians.case_fit import interest_matches_case_text
 from backend.synthetic_data import resolve_case_rules
 
 
@@ -43,10 +44,9 @@ def evaluate_physician(
                 detail=f"Synthetic case mix includes {case.label}; overlapping signals: {', '.join(overlap)}. This is a fit signal, not a quality measure.",
             )
         )
+    case_text = f"{context.summary} {' '.join(context.facts)} {' '.join(context.signals)}"
     for interest in case_interest_titles or []:
-        interest_words = {word for word in interest.casefold().split() if len(word) > 3}
-        case_text = f"{context.summary} {' '.join(context.facts)} {' '.join(context.signals)}".casefold()
-        if interest_words and any(word in case_text for word in interest_words):
+        if interest_matches_case_text(interest, case_text, context.case_family):
             evidence.append(
                 Evidence(
                     kind=EvidenceKind.PRACTICE_SIMILARITY,

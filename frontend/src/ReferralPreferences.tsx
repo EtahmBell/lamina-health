@@ -44,14 +44,15 @@ function RequirementRow({ item, onToggleRequired, onRemove }: {
 /** NLP pass, Part N: the case family a proposal applies to, in physician
  * language -- so a proposal always says WHERE the learning applies. */
 export const CASE_FAMILY_LABELS: Record<string, string> = {
-  type_2_diabetes: 'Diabetes referrals', ckd_hypertension: 'Kidney disease and hypertension referrals',
-  iron_deficiency_anemia: 'Iron-deficiency anemia referrals', thyroid: 'Thyroid referrals',
+  type_2_diabetes: 'Diabetes', ckd_hypertension: 'Kidney disease and hypertension',
+  iron_deficiency_anemia: 'Iron-deficiency anemia', thyroid: 'Thyroid',
 }
 
 /** Nothing structured at all -- such a proposal can never be confirmed. */
 export function isEmptyInterpretation(rules: StructuredReferralPreference): boolean {
   return rules.good_fit.length === 0 && rules.required.length === 0 && rules.helpful.length === 0
     && rules.redirect.length === 0 && rules.modality === 'unspecified' && rules.modality_rules.length === 0
+    && (rules.case_interests ?? []).length === 0
 }
 
 /** Learning-history semantics pass: a case family can hold several active
@@ -61,6 +62,7 @@ export function combineConfirmed(items: StructuredReferralPreference[]): Structu
   return items.reduce((all, rules) => ({
     ...all,
     good_fit: [...all.good_fit, ...rules.good_fit], redirect: [...all.redirect, ...rules.redirect],
+    case_interests: [...(all.case_interests ?? []), ...(rules.case_interests ?? [])],
     required: [...all.required, ...rules.required], helpful: [...all.helpful, ...rules.helpful],
     modality_rules: [...all.modality_rules, ...rules.modality_rules],
     modality: rules.modality !== 'unspecified' ? rules.modality : all.modality,
@@ -77,6 +79,7 @@ export function splitAgainstConfirmed(rules: StructuredReferralPreference, confi
   const added: StructuredReferralPreference = {
     ...rules,
     good_fit: rules.good_fit.filter((item) => !confirmed.good_fit.includes(item)),
+    case_interests: (rules.case_interests ?? []).filter((item) => !(confirmed.case_interests ?? []).includes(item)),
     required: rules.required.filter((item) => !isKept(item)),
     helpful: rules.helpful.filter((item) => !isKept(item)),
     redirect: rules.redirect.filter((item) => !confirmed.redirect.includes(item)),
@@ -84,8 +87,11 @@ export function splitAgainstConfirmed(rules: StructuredReferralPreference, confi
     modality: rules.modality === confirmed.modality ? 'unspecified' : rules.modality,
   }
   const keptLabels = [
-    ...rules.required.filter(isKept), ...rules.helpful.filter(isKept),
-  ].map((item) => item.label)
+    ...[...rules.required.filter(isKept), ...rules.helpful.filter(isKept)].map((item) => item.label),
+    ...(rules.case_interests ?? []).filter((item) => (confirmed.case_interests ?? []).includes(item)),
+    ...rules.good_fit.filter((item) => confirmed.good_fit.includes(item)),
+    ...rules.redirect.filter((item) => confirmed.redirect.includes(item)),
+  ]
   // Proposed-learning polish pass: the family's other confirmed guidance,
   // which this additive learning leaves exactly as it is.
   const draftKeys = new Set([...rules.required, ...rules.helpful].map((item) => item.key))
@@ -97,7 +103,13 @@ export function splitAgainstConfirmed(rules: StructuredReferralPreference, confi
 }
 
 function ReadOnlyInterpretation({ rules }: { rules: StructuredReferralPreference }) {
+  const interests = rules.case_interests ?? []
   return <div className="referral-pref-interpretation">
+    {interests.length > 0 && <div className="referral-pref-group">
+      <p className="section-label">Case interest</p>
+      <ul className="referral-pref-requirement-list">{interests.map((item) => <li className="referral-pref-requirement-row" key={item}><span>{item}</span></li>)}</ul>
+      <p className="referral-pref-effect">Similar cases become a stronger fit for your practice. This never makes a case required or excluded.</p>
+    </div>}
     {rules.good_fit.length > 0 && <div className="referral-pref-group">
       <p className="section-label">Good fit</p>
       <ul className="referral-pref-chip-list">{rules.good_fit.map((item) => <li key={item}>{item}</li>)}</ul>
@@ -123,9 +135,10 @@ function ReadOnlyInterpretation({ rules }: { rules: StructuredReferralPreference
         <p className="section-label">Modality</p>
         <p>{MODALITY_LABELS[rules.modality]}</p>
       </div>}
-    {rules.good_fit.length === 0 && rules.required.length === 0 && rules.helpful.length === 0 && rules.redirect.length === 0
-      && rules.modality === 'unspecified' && rules.modality_rules.length === 0
-      && <p className="muted-note">Nothing could be interpreted from that description -- try adding more detail.</p>}
+    {isEmptyInterpretation(rules) && <div className="referral-pref-needs-detail">
+      <p className="referral-pref-needs-detail-title">I need a little more detail.</p>
+      <p>{rules.interpretation_note ?? 'Nothing could be interpreted from that description. Describe cases you want to see, information you want before referral, or how you want them routed.'}</p>
+    </div>}
   </div>
 }
 
@@ -147,6 +160,12 @@ function StructuredRulesEditor({ rules, onChange }: {
     helpful: rules.helpful.filter((item) => item.key !== key),
   })
   return <div className="referral-pref-editor">
+    {(rules.case_interests ?? []).length > 0 && <div className="referral-pref-group">
+      <p className="section-label">Case interest</p>
+      <ul className="referral-pref-chip-list">{(rules.case_interests ?? []).map((item) => <li key={item}>{item}
+        <button type="button" className="text-button" onClick={() => onChange({ ...rules, case_interests: (rules.case_interests ?? []).filter((x) => x !== item) })} aria-label={`Remove ${item}`}>×</button>
+      </li>)}</ul>
+    </div>}
     {rules.good_fit.length > 0 && <div className="referral-pref-group">
       <p className="section-label">Good fit</p>
       <ul className="referral-pref-chip-list">{rules.good_fit.map((item) => <li key={item}>{item}
@@ -277,7 +296,10 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
     {editing
       ? <StructuredRulesEditor rules={editedRules} onChange={setEditedRules} />
       : nothingToConfirm && keptLabels.length > 0
-        ? <p className="muted-note">This doesn’t add anything new to what your agent already knows -- try adding more detail.</p>
+        ? <div className="referral-pref-needs-detail">
+          <p className="referral-pref-needs-detail-title">Your agent already represents this guidance.</p>
+          <p>No operational change is needed.</p>
+        </div>
         : <ReadOnlyInterpretation rules={added} />}
     {!editing && keptLabels.length > 0 && !nothingToConfirm && <p className="referral-pref-kept">Already part of how your agent represents you: {keptLabels.join(' · ')}</p>}
     {!editing && existingLabels.length > 0 && !nothingToConfirm && <p className="referral-pref-kept"><span>Your existing guidance stays in place:</span> {existingLabels.join(' · ')}</p>}

@@ -38,6 +38,15 @@ _CASE_FAMILY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "thyroid": ("thyroid", "tsh", "free t4", "graves", "hypothyroid", "hyperthyroid"),
 }
 
+# The physician-readable noun for a case family, used in normalized
+# case-interest concepts ("Uncertain diabetes diagnosis").
+_CASE_FAMILY_NOUNS: dict[str, str] = {
+    "type_2_diabetes": "diabetes",
+    "ckd_hypertension": "kidney disease",
+    "iron_deficiency_anemia": "anemia",
+    "thyroid": "thyroid",
+}
+
 _REQUIREMENT_KEY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "recent_hba1c": ("a1c", "hba1c"),
     "current_medications": ("medication",),
@@ -48,14 +57,21 @@ _REQUIREMENT_KEY_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _classify_case_family(text: str) -> str:
+def detect_case_family(text: str) -> str | None:
+    """The case family a statement names, or None when it names none --
+    callers decide whether that is acceptable (teaching-intent pass, Part G:
+    case interests/fit are never filed under a guessed family)."""
     lower = text.casefold()
-    best_family, best_hits = "type_2_diabetes", 0
+    best_family, best_hits = None, 0
     for family, keywords in _CASE_FAMILY_KEYWORDS.items():
         hits = sum(1 for keyword in keywords if keyword in lower)
         if hits > best_hits:
             best_family, best_hits = family, hits
     return best_family
+
+
+def _classify_case_family(text: str) -> str:
+    return detect_case_family(text) or "type_2_diabetes"
 
 
 _FRESHNESS_PATTERN = re.compile(r"within\s+(\d+)\s+days?", re.IGNORECASE)
@@ -104,7 +120,7 @@ def _extract_list_phrases(sentence: str) -> list[str]:
 # "...available before review" / "...before referral" qualifies WHEN an item
 # is wanted; it is never itself an item.
 _BEFORE_REVIEW_CLAUSE = re.compile(
-    r"\s*,?\s*(?:(?:is|are)\s+)?(?:available\s+)?before\s+(?:review|referral|the visit)\b.*$", re.IGNORECASE
+    r"\s*,?\s*(?:(?:is|are)\s+)?(?:available\s+)?before\s+(?:i\s+can\s+)?(?:review|referral|the visit|see)\b.*$", re.IGNORECASE
 )
 _PREFERRED_BEFORE_REVIEW = re.compile(r"\bprefer\b.*\bbefore\s+(?:review|referral|the visit)\b", re.IGNORECASE)
 
@@ -279,6 +295,121 @@ def _prior_treatment_items(sentence: str, strength: str) -> list[ReferralRequire
     return items
 
 
+# ---------------------------------------------------------------------------
+# Teaching-intent pass (Part C/D/E/F/P): fit and case-interest intents. A
+# handful of generic cue patterns decide the INTENT; the content is the
+# phrase those cues govern, normalized to a small set of physician-readable
+# concepts when it expresses one ("uncertain diagnosis", "atypical
+# presentation") and otherwise kept in the physician's own words. Negation
+# is checked first, so "I'm not interested in X" never becomes interest.
+# ---------------------------------------------------------------------------
+_NEGATED_INTEREST = re.compile(
+    r"\b(?:not|never|no longer)\s+(?:particularly\s+|especially\s+|really\s+|very\s+)?(?:interested|keen)\b|"
+    r"\b(?:don't|do\s+not|doesn't|does\s+not)\s+(?:really\s+|particularly\s+)?(?:like|enjoy)\b",
+    re.IGNORECASE,
+)
+_NOT_FIT_CUES = re.compile(
+    r"\b(?:(?:isn't|aren't|is\s+not|are\s+not)\s+(?:usually\s+|generally\s+|typically\s+|really\s+)?(?:a\s+)?good[- ]fit|"
+    r"not\s+(?:a\s+)?good[- ]fit|"
+    r"(?:doesn't|don't|does\s+not|do\s+not)\s+(?:usually\s+|generally\s+|typically\s+)?need\s+to\s+(?:come\s+to|see)\s+me|"
+    r"(?:i\s+)?(?:generally\s+|usually\s+|typically\s+)?(?:don't|do\s+not)\s+(?:usually\s+|generally\s+|typically\s+)?(?:want|see|take|need\s+to\s+see)|"
+    r"better\s+(?:sent|routed|referred|handled)\s+(?:to|by|elsewhere)|"
+    r"routed\s+elsewhere|prefer\s+to\s+redirect|refer\s+elsewhere|redirect)\b",
+    re.IGNORECASE,
+)
+_INTEREST_CUES = re.compile(
+    r"\b(?:interested\s+in|(?:of\s+)?interest(?:ing)?\s+to\s+me|(?:like|love|enjoy)\s+(?:seeing|managing|taking\s+care\s+of|to\s+see|working\s+with)|"
+    r"happy\s+to\s+(?:see|take|manage)|keen\s+to\s+see)\b",
+    re.IGNORECASE,
+)
+_GOOD_FIT_CUES = re.compile(
+    r"\b(?:good[- ]fit|commonly\s+see|usually\s+see|"
+    r"(?:tend\s+to|usually|generally|typically)\s+take\s+(?:over|on)|i\s+take\s+(?:over|on))\b",
+    re.IGNORECASE,
+)
+# Wording that marks a sentence as being about INFORMATION for a referral
+# (required/helpful items) rather than which cases fit.
+_INFORMATION_CUES = re.compile(
+    r"\b(?:before\s+(?:i\s+can\s+)?(?:review|referral|the\s+visit|seeing)|included|include|attached|documented|"
+    r"(?:when|if|where)\s+(?:it'?s\s+|that(?:\s+information)?\s+is\s+|this\s+is\s+|they'?re\s+|it\s+is\s+)?(?:available|known|possible)|"
+    r"why\s+(?:they|it)\s+(?:was|were)\s+stopped)\b",
+    re.IGNORECASE,
+)
+_NEGATED_REQUIRE = re.compile(r"\b(?:don't|do\s+not|doesn't|does\s+not|no\s+longer)\s+(?:require|need)\b", re.IGNORECASE)
+
+# Concept normalization (Part F). Each concept is a template on the case
+# family's noun; distinct concepts stay distinct.
+_UNCERTAIN_DIAGNOSIS = re.compile(
+    r"\b(?:(?:diagnos[ie]s|classification)\s+(?:is\s+|are\s+|isn't\s+|is\s+not\s+)?(?:uncertain|unclear|not\s+clear|in\s+question|not\s+(?:yet\s+)?confirmed|unconfirmed)|"
+    r"(?:uncertain|unclear|unconfirmed)\s+(?:\w+\s+)?(?:diagnos[ie]s|classification)|"
+    r"(?:isn't|is\s+not|not)\s+clear\s+whether|unclear\s+whether|uncertain\s+whether|not\s+sure\s+whether)\b",
+    re.IGNORECASE,
+)
+_ATYPICAL_PRESENTATION = re.compile(
+    r"\b(?:atypical|unusual|uncommon|unclear\s+phenotype|phenotype\s+(?:doesn't|does\s+not|that\s+doesn't)\s+fit|"
+    r"(?:doesn't|does\s+not|don't|do\s+not)\s+fit\s+(?:a\s+)?(?:straightforward|typical|classic))",
+    re.IGNORECASE,
+)
+_CONTENT_PATTERNS = (
+    re.compile(r"\binterested\s+in\s+(.+)$", re.IGNORECASE),
+    re.compile(r"\b(?:like|love|enjoy)\s+(?:seeing|managing|taking\s+care\s+of|to\s+see|working\s+with)\s+(.+)$", re.IGNORECASE),
+    re.compile(r"\bhappy\s+to\s+(?:see|take|manage)\s+(.+)$", re.IGNORECASE),
+    re.compile(r"\b(?:tend\s+to|usually|generally|typically)?\s*take\s+(?:over|on)\s+(.+)$", re.IGNORECASE),
+    re.compile(r"\b(?:don't|do\s+not)\s+(?:usually\s+|generally\s+|typically\s+)?(?:want|see|take|need\s+to\s+see)\s+(.+)$", re.IGNORECASE),
+    re.compile(r"^(.+?)\s+(?:is|are|isn't|aren't|is\s+not|are\s+not)\s+(?:usually\s+|generally\s+|typically\s+|often\s+|really\s+)?(?:a\s+|not\s+(?:a\s+)?)?good[- ]fit\b", re.IGNORECASE),
+    re.compile(r"^(.+?)\s+(?:is|are)\s+(?:\w+\s+)?(?:interesting|of\s+interest)\s+to\s+me\b", re.IGNORECASE),
+    re.compile(r"^(.+?)\s+(?:usually\s+|generally\s+|typically\s+)?(?:doesn't|don't|does\s+not|do\s+not)\s+(?:usually\s+|generally\s+)?need\s+to\s+(?:come\s+to|see)\s+me\b", re.IGNORECASE),
+    re.compile(r"^(.+?)\s+(?:are|is)\s+(?:usually\s+|generally\s+)?better\s+(?:sent|routed|referred|handled)\b", re.IGNORECASE),
+)
+_LEADING_FILLER = re.compile(r"^(?:i'?m\s+|i\s+am\s+|also\s+|really\s+|particularly\s+|especially\s+|generally\s+|usually\s+|the\s+|any\s+|seeing\s+)+", re.IGNORECASE)
+_TRAILING_FILLER = re.compile(r"(?:\s*,?\s*(?:for\s+(?:me|my\s+practice)|to\s+me|in\s+my\s+practice|as\s+well|too)|\s+(?:usually|generally|typically|often|really))+\s*$", re.IGNORECASE)
+# Redirects keep their stated destination ("... back to primary care").
+_REDIRECT_CONTENT = re.compile(r"\bredirect\s+(.+?)(?:\s+(?:back\s+)?to\s+(.+))?$", re.IGNORECASE)
+_BETTER_SENT_CONTENT = re.compile(
+    r"^(.+?)\s+(?:are|is)\s+(?:usually\s+|generally\s+)?better\s+(?:sent|routed|referred|handled)\s+(?:to|by)\s+(.+)$", re.IGNORECASE
+)
+
+
+def _sentence_case(phrase: str) -> str:
+    phrase = _TRAILING_FILLER.sub("", _LEADING_FILLER.sub("", phrase.strip(" ,"))).strip(" ,")
+    return phrase[:1].upper() + phrase[1:]
+
+
+def _fit_content(sentence: str) -> str | None:
+    """The phrase a fit/interest cue governs ("diabetes cases where the
+    diagnosis is uncertain"), in the physician's own words; a redirect keeps
+    its stated destination."""
+    text = sentence.rstrip(".!? ")
+    for pattern in (_BETTER_SENT_CONTENT, _REDIRECT_CONTENT):
+        match = pattern.search(text)
+        if match and match.group(1).strip():
+            subject = _sentence_case(match.group(1))
+            return f"{subject} (better sent to {match.group(2).strip()})" if match.group(2) else subject
+    for pattern in _CONTENT_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            phrase = _TRAILING_FILLER.sub("", _LEADING_FILLER.sub("", match.group(1).strip(" ,"))).strip(" ,")
+            if phrase:
+                return phrase[:1].upper() + phrase[1:]
+    return None
+
+
+def _fit_concepts(sentence: str, case_family: str) -> list[str]:
+    """Normalized physician-readable concepts, when the sentence expresses
+    one or more; empty otherwise (the physician's own phrase is used)."""
+    noun = _CASE_FAMILY_NOUNS.get(case_family, "")
+    concepts: list[str] = []
+    if _UNCERTAIN_DIAGNOSIS.search(sentence):
+        concepts.append(f"Uncertain {noun} diagnosis".replace("  ", " "))
+    if _ATYPICAL_PRESENTATION.search(sentence):
+        concepts.append(f"Atypical {noun} presentations".replace("  ", " "))
+    return concepts
+
+
+def _family_noun(case_family: str) -> str:
+    return _CASE_FAMILY_NOUNS.get(case_family, "this condition")
+
+
 _TRAILING_AVAILABILITY_CLAUSE = re.compile(
     r"\s*,?\s*(?:if\s+possible|(?:when|if|where)\s+(?:it'?s\s+|that(?:\s+information)?\s+is\s+|this\s+is\s+|they'?re\s+|it\s+is\s+)?(?:available|known|documented))\b.*$",
     re.IGNORECASE,
@@ -303,21 +434,37 @@ def _modality_condition(sentence: str) -> str | None:
     trailing = _TRAILING_CONDITIONAL_PATTERN.match(text)
     if trailing:
         return trailing.group(2).strip().capitalize()
+    # Teaching-intent pass: "Focused medication questions can usually start
+    # as an e-consult" -- the subject IS the condition.
+    subject = _MODALITY_SUBJECT_PATTERN.match(text)
+    if subject:
+        return subject.group(1).strip().capitalize()
     return None
 
 
-def deterministic_interpret(source_text: str, case_family: str) -> StructuredReferralPreference:
+_MODALITY_SUBJECT_PATTERN = re.compile(
+    r"^(.+?)\s+(?:can|could|may|should|will)\s+(?:usually\s+|generally\s+|often\s+|typically\s+)?"
+    r"(?:start|begin|be\s+(?:handled|done|managed|answered|seen))\s+(?:as|by|via|with|in)\s+(?:an?\s+)?(?:e-?consult|in[- ]person)",
+    re.IGNORECASE,
+)
+
+
+def deterministic_interpret(source_text: str, case_family: str, family_known: bool = True) -> StructuredReferralPreference:
     """A bounded, honest keyword/phrase heuristic -- the safety-net fallback
     when a live structured model call isn't configured or fails validation
     (mirrors every other ResponsesApiClient-backed service in this codebase,
     e.g. TrainingBranchService). Never invents a rule the text doesn't
     actually contain; unmatched structure is simply left empty."""
     good_fit: list[str] = []
+    case_interests: list[str] = []
     required: list[ReferralRequirement] = []
     helpful: list[ReferralRequirement] = []
     redirect: list[str] = []
     modality_rules: list[dict[str, str]] = []
     modality = "unspecified"
+    # Teaching-intent pass, Part N: why nothing operational came out of a
+    # sentence, so the proposal can ask for the missing detail honestly.
+    notes: list[str] = []
     # Curly apostrophes ("I’d", "it’s") are ordinary physician typing --
     # every cue below is written with a straight one.
     source_text = source_text.replace("\u2019", "'").replace("\u2018", "'")
@@ -348,6 +495,57 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
         strength = _sentence_strength(sentence)
         is_helpful_sentence = strength == "helpful"
         concept_items = _prior_treatment_items(sentence, strength) if strength else None
+        about_information = bool(concept_items) or bool(_INFORMATION_CUES.search(sentence)) or bool(_HARD_REQUIREMENT_CUES.search(sentence))
+        # Teaching-intent pass, Part C/D/P: which cases fit -- checked
+        # before the information intents (so "I like seeing X cases" is an
+        # interest, not "I'd like" helpful information), unless the
+        # sentence is plainly about information for a referral.
+        if not about_information:
+            fit_intent = None
+            if _NEGATED_INTEREST.search(sentence):
+                notes.append(
+                    "This describes cases you're not interested in. Your agent won't treat that as a rule on its own -- "
+                    "if these cases are usually not a fit for your practice, say so directly."
+                )
+                continue
+            if _NOT_FIT_CUES.search(sentence):
+                fit_intent = "not_fit"
+            elif _INTEREST_CUES.search(sentence):
+                fit_intent = "interest"
+            elif _GOOD_FIT_CUES.search(sentence):
+                fit_intent = "good_fit"
+            if fit_intent is not None:
+                if not family_known:
+                    notes.append(
+                        "I'm not sure which kind of referrals this is about. Name the condition "
+                        "(for example, diabetes or thyroid) so your agent files it in the right place."
+                    )
+                    continue
+                content = _fit_concepts(sentence, case_family)
+                if not content and fit_intent == "good_fit":
+                    # Unchanged from before this pass: a good-fit statement
+                    # is kept in the physician's own words (it becomes an
+                    # "Accepts:" practice rule verbatim).
+                    content = [sentence.rstrip(".!? ")]
+                if not content:
+                    content = [phrase] if (phrase := _fit_content(sentence)) else []
+                if not content and fit_intent == "not_fit":
+                    content = [sentence.rstrip(".!? ")]
+                if not content:
+                    notes.append(
+                        f"I understand this is about {_family_noun(case_family)} cases, but I couldn't tell which cases you mean. "
+                        "Describe the kind of case in a few words."
+                    )
+                    continue
+                target = {"interest": case_interests, "good_fit": good_fit, "not_fit": redirect}[fit_intent]
+                target.extend(item for item in content if item not in target)
+                continue
+        if _NEGATED_REQUIRE.search(sentence) and not _NEGATED_REQUIREMENT.search(sentence) and strength != "helpful":
+            notes.append(
+                "This says what you don't require, so your agent won't add a requirement. "
+                "If it's still helpful when available, say so directly."
+            )
+            continue
         if concept_items:
             target = required if strength == "required" else helpful
             for item in concept_items:
@@ -372,19 +570,14 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
                             key=key, label=label, required=False, freshness_days=_freshness_days(sentence)
                         )
                     )
-        elif any(phrase in sentence_lower for phrase in ("commonly see", "usually see", "good fit", "good-fit")):
-            good_fit.append(sentence.rstrip(".!? "))
-        # Demo UX + semantic polish pass, Part 7: a bare "prefer" is NOT a
-        # redirect signal (that broke "I generally prefer an in-person
-        # evaluation" before modality sentences were excluded above, and
-        # would break it again for anyone who says "I'd prefer X" about
-        # their own practice) -- only an explicit redirect-to-another-
-        # specialty/provider phrase counts.
-        elif any(phrase in sentence_lower for phrase in (
-            "routed elsewhere", "prefer to redirect", "refer elsewhere", "redirect",
-            "do not usually see", "don't usually see",
-        )):
-            redirect.append(sentence.rstrip(".!? "))
+        else:
+            notes.append(
+                f"I understand this is about {_family_noun(case_family)}, but I'm not sure whether you're describing cases "
+                "you want to see, information you want before referral, or how you want them routed."
+                if family_known else
+                "I'm not sure what this asks your agent to do. Describe cases you want to see, information you want "
+                "before referral, or how you'd like these cases routed."
+            )
 
     econsult_conditions = [rule["condition"] for rule in modality_rules if rule["modality"] == "econsult"]
     in_person_conditions = [rule["condition"] for rule in modality_rules if rule["modality"] == "in_person"]
@@ -413,10 +606,20 @@ def deterministic_interpret(source_text: str, case_family: str) -> StructuredRef
             if sentences_mentioning_modality else None
         )
 
-    return StructuredReferralPreference(
-        good_fit=good_fit, required=required, helpful=helpful, redirect=redirect,
+    structured = StructuredReferralPreference(
+        good_fit=good_fit, case_interests=case_interests, required=required, helpful=helpful, redirect=redirect,
         modality=modality, modality_notes=modality_notes, modality_rules=modality_rules,
     )
+    # Only explain when nothing operational came out at all -- a note never
+    # accompanies (or substitutes for) a real interpretation.
+    if notes and is_empty_preference(structured):
+        structured = structured.model_copy(update={"interpretation_note": notes[0]})
+    return structured
+
+
+def is_empty_preference(structured: StructuredReferralPreference) -> bool:
+    """No operational content (an explanatory note alone is not content)."""
+    return structured.model_copy(update={"interpretation_note": None}) == StructuredReferralPreference()
 
 
 _INTERPRET_SCHEMA = {
@@ -427,6 +630,7 @@ _INTERPRET_SCHEMA = {
             "enum": ["type_2_diabetes", "ckd_hypertension", "iron_deficiency_anemia", "thyroid"],
         },
         "good_fit": {"type": "array", "items": {"type": "string"}},
+        "case_interests": {"type": "array", "items": {"type": "string"}},
         "required": {
             "type": "array",
             "items": {
@@ -456,7 +660,7 @@ _INTERPRET_SCHEMA = {
         "redirect": {"type": "array", "items": {"type": "string"}},
         "modality": {"type": "string", "enum": ["in_person", "econsult", "either", "unspecified"]},
     },
-    "required": ["case_family", "good_fit", "required", "helpful", "redirect", "modality"],
+    "required": ["case_family", "good_fit", "case_interests", "required", "helpful", "redirect", "modality"],
     "additionalProperties": False,
 }
 
@@ -494,7 +698,9 @@ class ReferralPreferenceInterpretationService:
                     prefer to receive referrals into structured rules. Only represent what
                     the physician actually said. Never invent a required item, a case-fit
                     description, a redirect, or a modality preference the text does not
-                    support. If the physician only says a workup item should be "recent",
+                    support. Cases the physician says they are interested in or like
+                    seeing are case_interests (short readable phrases), not requirements;
+                    a negated interest ("not interested in") is never a case interest. If the physician only says a workup item should be "recent",
                     leave freshness_days null -- never guess a specific number of days.""",
                     {
                         "source_text": source_text,
@@ -508,6 +714,7 @@ class ReferralPreferenceInterpretationService:
                 if self._valid(result):
                     structured = StructuredReferralPreference(
                         good_fit=result["good_fit"],
+                        case_interests=result.get("case_interests", []),
                         required=[
                             ReferralRequirement(
                                 key=item["key"], label=item["label"], required=True,
@@ -529,8 +736,13 @@ class ReferralPreferenceInterpretationService:
                 _log_validation_fallback("referral_preference_interpretation", self.client.model)
             except RuntimeError:
                 pass
-        case_family = case_family_hint or _classify_case_family(source_text)
-        return case_family, deterministic_interpret(source_text, case_family), "deterministic_fallback"
+        detected = detect_case_family(source_text)
+        case_family = case_family_hint or detected or "type_2_diabetes"
+        return (
+            case_family,
+            deterministic_interpret(source_text, case_family, family_known=bool(case_family_hint or detected)),
+            "deterministic_fallback",
+        )
 
 
 referral_preference_interpretation_service = ReferralPreferenceInterpretationService()
@@ -696,7 +908,7 @@ def effective_requirement_items(
 
 _STRUCTURED_SECTIONS = ("good_fit", "required", "helpful", "redirect")
 _ITEM_SECTIONS = ("required", "helpful")
-_TEXT_SECTIONS = ("good_fit", "redirect")
+_TEXT_SECTIONS = ("good_fit", "case_interests", "redirect")
 _MODALITY_FIELDS = ("modality", "modality_notes", "modality_rules")
 
 
@@ -738,6 +950,7 @@ def contribution_paths(structured: StructuredReferralPreference) -> set[str]:
     specialty, or disease."""
     paths = {f"item:{item.key}" for section in _ITEM_SECTIONS for item in getattr(structured, section)}
     paths |= {f"good_fit:{text}" for text in structured.good_fit}
+    paths |= {f"case_interest:{text}" for text in structured.case_interests}
     paths |= {f"redirect:{text}" for text in structured.redirect}
     if structured.modality != "unspecified" or structured.modality_rules:
         paths.add("modality")
@@ -778,6 +991,24 @@ def _compose(rows_in_order: list[dict[str, Any]]) -> StructuredReferralPreferenc
     for row in rows_in_order:
         effective = layer_preferences(effective, _structured_from_row(row))
     return effective
+
+
+def confirmed_preference_case_interests(
+    workflow_store: WorkflowStore, workspace_id: str, physician_id: str
+) -> list[str]:
+    """Case interests from the physician's active confirmed learnings
+    (every case family). They join the physician's confirmed profile case
+    interests on the SAME supporting-evidence path (physician-case fit, Ask
+    the Network) -- never a requirement, a gate, or a second matcher."""
+    families: dict[str, list[dict[str, Any]]] = {}
+    for row in workflow_store.confirmed_referral_preferences_for_physician(workspace_id, physician_id):
+        families.setdefault(row["case_family"], []).append(row)
+    interests: list[str] = []
+    for rows in families.values():
+        effective = _compose(rows)
+        if effective is not None:
+            interests.extend(item for item in effective.case_interests if item not in interests)
+    return interests
 
 
 def merge_revision(
@@ -832,6 +1063,9 @@ def _learning_lines(previous: StructuredReferralPreference | None, current: Stru
     if new_helpful:
         lines.append(f"Confirmed as helpful before review: {', '.join(new_helpful)}.")
     lines.extend(f"Confirmed a good fit: {item.rstrip('.')}." for item in current.good_fit if item not in before.good_fit)
+    new_interests = [item for item in current.case_interests if item not in before.case_interests]
+    if new_interests:
+        lines.append(f"Confirmed case interest: {', '.join(new_interests)}.")
     lines.extend(f"Confirmed generally routed elsewhere: {item.rstrip('.')}." for item in current.redirect if item not in before.redirect)
     return lines
 
@@ -1063,9 +1297,11 @@ def confirmed_referral_preference_sections(
     for row in rows:
         families.setdefault(row["case_family"], []).append(row)
     confirmed_families = set(families)
+    case_interests: list[str] = []
     for family, family_rows in families.items():
         structured = _compose(family_rows) or StructuredReferralPreference()
         good_fit.extend(structured.good_fit)
+        case_interests.extend(item for item in structured.case_interests if item not in case_interests)
         # My Agent cleanup pass: a confirmed preference that says nothing
         # about requirements (e.g. a modality-only clarification) leaves the
         # practice-footprint baseline operational -- so it must stay visible
@@ -1111,4 +1347,7 @@ def confirmed_referral_preference_sections(
         "explicit_rules": list(dict.fromkeys(explicit_rules)),
         "modality_preference": modality_label,
         "referral_preference_provenance": provenance,
+        # Teaching-intent pass: shown with the physician's other confirmed
+        # case interests (the Overview's existing Interests section).
+        "preference_case_interests": case_interests,
     }

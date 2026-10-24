@@ -30,7 +30,7 @@ from backend.engagement import (
     physician_interests,
 )
 from backend.models import PatientRecord
-from backend.referral_preferences import confirmed_referral_preference_sections
+from backend.referral_preferences import confirmed_preference_case_interests, confirmed_referral_preference_sections
 from backend.synthetic_data import ALL_PHYSICIANS
 from backend.workflow import WorkflowStore
 
@@ -98,6 +98,10 @@ def _physician_agent_candidate(
     confirmed_case_interests = [
         item["title"] for item in physician_interests(persona_id, interest_overlays)
         if item["interest_type"] == "case_interest" and item["confirmed"]
+    ]
+    confirmed_case_interests += [
+        title for title in confirmed_preference_case_interests(workflow_store, workspace_id, physician_id)
+        if title not in confirmed_case_interests
     ]
     matched_interests = [interest for interest in confirmed_case_interests if _tokens(interest) & question_tokens]
     for interest in matched_interests:

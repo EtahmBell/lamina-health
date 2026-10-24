@@ -19,6 +19,7 @@ from backend.models import (
 from backend.referral_preferences import (
     ensure_seed_preferences,
     effective_confirmed_rules,
+    is_empty_preference,
     layer_preferences,
     merge_modality_clarification,
     merge_revision,
@@ -142,7 +143,7 @@ def confirm_preference(persona_id: str, preference_id: str, workspace_id: Mutabl
     # adds nothing to the already-confirmed preference -- is never made
     # operational as a "learning".
     rules = _structured(existing)
-    if rules == StructuredReferralPreference():
+    if is_empty_preference(rules):
         raise HTTPException(status_code=409, detail="Nothing was interpreted to confirm")
     if existing["status"] == "draft" and not existing.get("supersedes_id"):
         current = effective_confirmed_rules(workflow_store, workspace_id, physician_id, existing["case_family"])

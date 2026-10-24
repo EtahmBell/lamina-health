@@ -872,6 +872,11 @@ export type ReferralRequirementItem = { key: string; label: string; required: bo
 export type ModalityRule = { modality: 'econsult' | 'in_person'; condition: string }
 export type StructuredReferralPreference = {
   good_fit: string[]; required: ReferralRequirementItem[]; helpful: ReferralRequirementItem[]
+  /** Teaching-intent pass: cases the physician is particularly interested
+   * in -- a supporting fit signal, never a requirement. */
+  case_interests?: string[]
+  /** Why nothing operational could be interpreted (never confirmable). */
+  interpretation_note?: string | null
   redirect: string[]; modality: ReferralPreferenceModality
   /** Demo coherence pass, Part J: free-text fallback only -- modality_rules
    * below is the preferred, structured source whenever it's non-empty. */

@@ -57,6 +57,11 @@ class StructuredReferralPreference(StrictModel):
     physician only said "recent" -- never an invented freshness window."""
 
     good_fit: list[str] = Field(default_factory=list)
+    # Teaching-intent pass: cases the physician is particularly interested
+    # in -- a positive, supporting fit signal (the same path confirmed
+    # profile case interests already feed), never a requirement, a gate,
+    # or an "Accepts" routing rule.
+    case_interests: list[str] = Field(default_factory=list)
     required: list[ReferralRequirement] = Field(default_factory=list)
     helpful: list[ReferralRequirement] = Field(default_factory=list)
     redirect: list[str] = Field(default_factory=list)
@@ -73,6 +78,11 @@ class StructuredReferralPreference(StrictModel):
     # representation/Ask Their Agent/Test/interpretation UI should actually
     # render once it's non-empty.
     modality_rules: list[ModalityRule] = Field(default_factory=list)
+    # Teaching-intent pass: when the interpreter could not safely tell what a
+    # statement asks the agent to do, a brief physician-facing explanation
+    # of the ambiguity. Never operational -- an interpretation with only a
+    # note cannot be confirmed.
+    interpretation_note: str | None = None
 
 
 class PhysicianReferralPreference(StrictModel):

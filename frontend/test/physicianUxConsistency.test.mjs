@@ -125,7 +125,7 @@ test('the expanded episode has clear spacing around the nested Ask agent card', 
 
 test('a proposal names its case family and separates what it adds from guidance it keeps', () => {
   const review = slice(preferences, 'export function PreferenceDraftReview', '/** Placeholder and example')
-  assert.match(preferences, /type_2_diabetes: 'Diabetes referrals'/)
+  assert.match(preferences, /type_2_diabetes: 'Diabetes'/)
   assert.match(review, /CASE_FAMILY_LABELS\[draft\.case_family\]/)
   assert.match(review, /splitAgainstConfirmed\(draft\.structured_rules, draft\.supersedes_id \? null : confirmedInFamily\)/)
   assert.match(review, /Already part of how your agent represents you:/)

@@ -7,7 +7,12 @@ from backend.engagement import PERSONA_BY_PHYSICIAN_ID, physician_interests
 from backend.fhir import MedplumError, create_clinical_data_source
 from backend.models import ConsultationEncounter, ConsultationRequest, ConsultationResult, HandoffStatus, PatientRecord
 from backend.referrals import apply_medication_changes
-from backend.referral_preferences import confirmed_case_rules_override, confirmed_modality, ensure_seed_preferences
+from backend.referral_preferences import (
+    confirmed_case_rules_override,
+    confirmed_modality,
+    confirmed_preference_case_interests,
+    ensure_seed_preferences,
+)
 from backend.synthetic_data import PATIENTS, PHYSICIANS_BY_PATIENT
 from backend.workflow import workflow_store
 
@@ -85,10 +90,16 @@ def _confirmed_case_interest_titles(workspace_id: str, physician_id: str) -> lis
     if persona_id is None:
         return []
     overlays = workflow_store.physician_interests(workspace_id, persona_id)
-    return [
+    titles = [
         item["title"]
         for item in physician_interests(persona_id, overlays)
         if item["interest_type"] == "case_interest" and item["confirmed"]
+    ]
+    # Teaching-intent pass: interests confirmed through a learning feed the
+    # same supporting-evidence path.
+    return titles + [
+        title for title in confirmed_preference_case_interests(workflow_store, workspace_id, physician_id)
+        if title not in titles
     ]
 
 

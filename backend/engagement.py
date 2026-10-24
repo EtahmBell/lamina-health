@@ -1704,7 +1704,10 @@ def project_practice_representation(
     physician's own confirmed preference becomes the canonical source
     instead of a second one existing alongside it."""
     base = base_practice_representation(persona_id)
+    preference_interests: list[str] = []
     if confirmed_referral_preference_sections:
+        confirmed_referral_preference_sections = dict(confirmed_referral_preference_sections)
+        preference_interests = confirmed_referral_preference_sections.pop("preference_case_interests", []) or []
         # My Agent cleanup pass: an empty overlay list never blanks
         # fixture-derived knowledge (e.g. a modality-only confirmation must
         # not erase the base good-fit/rule statements).
@@ -1725,9 +1728,11 @@ def project_practice_representation(
         "physician": PERSONAS[persona_id],
         "sections": {
             **base,
-            "interests": [
-                item for item in (interests or profile.get("interests", [])) if item["confirmed"]
-            ],
+            "interests": _with_preference_interests(
+                [item for item in (interests or profile.get("interests", [])) if item["confirmed"]],
+                persona_id,
+                preference_interests,
+            ),
             "interest_safety": (
                 "Interests describe cases the physician wants to see; they are not "
                 "acceptance rules, guarantees, expertise claims, or ranking signals."
@@ -1777,6 +1782,28 @@ def related_personas(perspective: str, records: list[dict], members: list[dict])
             related.update(participants)
     related.discard(perspective)
     return related
+
+
+def _with_preference_interests(interests: list[dict], persona_id: str, titles: list[str]) -> list[dict]:
+    """Teaching-intent pass: case interests confirmed through a learning
+    appear alongside profile case interests (same item shape), without
+    duplicating a title the profile already has."""
+    seen = {item["title"].casefold() for item in interests}
+    return interests + [
+        {
+            "id": f"{persona_id}-learned-case-interest-{index}",
+            "interest_type": "case_interest",
+            "title": title,
+            "detail": None,
+            "provenance": "physician_confirmed_learning",
+            "confirmed": True,
+            "shareable": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        for index, title in enumerate(titles, start=1)
+        if title.casefold() not in seen
+    ]
 
 
 def profile_update_draft(item: dict) -> dict:
