@@ -52,8 +52,17 @@ function inFixedLayer(element: HTMLElement): boolean {
  * that container lives in a fixed overlay such as a drawer, whose page
  * behind must stay still -- nudges the page just enough to show it. Never
  * scrolls to the document end. */
-export function revealElements(elements: HTMLElement[], behavior: ScrollBehavior): void {
+export function revealElements(elements: HTMLElement[], behavior: ScrollBehavior, within?: HTMLElement | null): void {
   if (elements.length === 0) return
+  if (within) {
+    // A bounded chat panel (My Agent -> Test): scroll only the transcript
+    // itself -- never the page around it.
+    const rects = elements.map((element) => element.getBoundingClientRect())
+    const box = within.getBoundingClientRect()
+    const delta = revealDelta(Math.min(...rects.map((rect) => rect.top)), Math.max(...rects.map((rect) => rect.bottom)), box.top, box.bottom)
+    if (delta) within.scrollBy({ top: delta, behavior })
+    return
+  }
   const rects = elements.map((element) => element.getBoundingClientRect())
   const top = Math.min(...rects.map((rect) => rect.top))
   const bottom = Math.max(...rects.map((rect) => rect.bottom))
@@ -87,7 +96,11 @@ const REVEAL_AFTER_COMMIT_MS = 32
  * send brings the new question + typing indicator into view; `complete()`
  * once the answer has replaced the indicator reveals the beginning of the
  * answer -- unless the physician deliberately scrolled up meanwhile. */
-export function useConversationFollow(threadRef: RefObject<HTMLElement | null>, composerRef?: RefObject<HTMLElement | null>) {
+export function useConversationFollow(
+  threadRef: RefObject<HTMLElement | null>,
+  composerRef?: RefObject<HTMLElement | null>,
+  { containWithinThread = false }: { containWithinThread?: boolean } = {},
+) {
   const state = useRef(new FollowState())
 
   useEffect(() => {
@@ -114,13 +127,14 @@ export function useConversationFollow(threadRef: RefObject<HTMLElement | null>, 
       const thread = threadRef.current
       if (!thread) return
       const targets = Array.from(thread.children).slice(-count) as HTMLElement[]
-      const composer = withComposer ? composerRef?.current : null
+      const composer = withComposer && !containWithinThread ? composerRef?.current : null
       if (composer && !scrollParentDiffers(thread, composer)) targets.push(composer)
-      revealElements(targets, scrollBehaviorFor(prefersReducedMotion()))
+      revealElements(targets, scrollBehaviorFor(prefersReducedMotion()), containWithinThread ? thread : null)
     }, REVEAL_AFTER_COMMIT_MS)
-  }, [threadRef, composerRef])
+  }, [threadRef, composerRef, containWithinThread])
 
-  const begin = useCallback(() => { if (state.current.begin()) revealLast(2, false) }, [revealLast]) // question + typing indicator
+  // The question + typing indicator (plus any context event sent with them).
+  const begin = useCallback((count = 2) => { if (state.current.begin()) revealLast(count, false) }, [revealLast])
   const complete = useCallback(() => { if (state.current.complete()) revealLast(1, true) }, [revealLast]) // the answer, its controls, the composer
   const fail = useCallback(() => state.current.fail(), [])
 

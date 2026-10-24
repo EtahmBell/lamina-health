@@ -78,6 +78,7 @@ import { cleanName, patientName } from './demoIdentity.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { AgentAvatar, agentTone, type AgentAvatarTone } from './AgentAvatar.tsx'
 import { AgentTypingIndicator, useConversationFollow, withMinimumTyping } from './agentChat.tsx'
+import { CASE_QUESTION, caseSwitchEvent, turnRequest, type CaseRef } from './testChatTurns.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 import { PreferenceDraftReview, ReferralPreferenceSection, TEACHING_PLACEHOLDER } from './ReferralPreferences.tsx'
 
@@ -2414,13 +2415,19 @@ const CHAT_STARTER_PROMPTS = [
 ]
 
 type ChatMessage = {
-  id: string; role: 'physician' | 'agent'; text: string
+  id: string; role: 'physician' | 'agent' | 'case'; text: string
+  /** The synthetic case a CASE question is about (never set on a general
+   * practice question). */
+  caseRef?: CaseRef
   response?: AgentChatResponse; feedbackState?: 'reflects' | 'not_quite'
   focusedSeed?: FocusedTrainingSeed | null
   /** Chat UX pass: an agent message awaiting its answer, rendered as the
    * typing indicator in the slot the answer will replace. `key` stays the
    * same across that replacement (the answer gets its own server `id`). */
   pending?: boolean; key?: string
+  /** Test chat polish pass: role 'case' is a "new synthetic case" context
+   * event in the transcript (with that case's facts). */
+  caseFacts?: string[]
 }
 
 /** "Not quite" in Test (routing consolidation pass, Part U): the
@@ -2456,7 +2463,15 @@ function ChatMessageBubble({ message, agentName, tone, onFeedback, onStartFocuse
   onStartFocused: (seed: FocusedTrainingSeed) => void
   busy: boolean; personaId: PhysicianIdentity
 }) {
-  if (message.role === 'physician') return <p className="chat-message physician">{message.text}</p>
+  if (message.role === 'case') return <div className="chat-case-event" role="note" aria-label={`New synthetic case: ${message.text}`}>
+    <p className="chat-case-event-divider"><span>New synthetic case</span></p>
+    <strong>{message.text}</strong>
+    <ul>{(message.caseFacts ?? []).map((fact) => <li key={fact}>{fact}</li>)}</ul>
+  </div>
+  if (message.role === 'physician') return <div className="chat-message physician">
+    <span>{message.text}</span>
+    {message.caseRef && <span className="chat-case-ref" aria-label={`About synthetic case: ${message.caseRef.title}`}>Regarding: {message.caseRef.title}</span>}
+  </div>
   if (message.pending) return <AgentTypingIndicator agentName={agentName} tone={tone} />
   const response = message.response
   return <div className="chat-message agent">
@@ -2494,8 +2509,9 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
   const [promptRotation, setPromptRotation] = useState(0)
   const tone = agentTone(personaId)
   const threadRef = useRef<HTMLDivElement>(null)
-  const composerRef = useRef<HTMLFormElement>(null)
-  const follow = useConversationFollow(threadRef, composerRef)
+  // Test chat polish pass: the transcript is a bounded panel, so following
+  // a new turn scrolls the transcript itself -- never the page.
+  const follow = useConversationFollow(threadRef, undefined, { containWithinThread: true })
   useEffect(() => { getAgentTestCases(personaId).then(setCases).catch(() => {}) }, [personaId])
   const visiblePrompts = Array.from(
     { length: Math.min(VISIBLE_STARTER_PROMPT_COUNT, CHAT_STARTER_PROMPTS.length) },
@@ -2504,22 +2520,31 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
 
   const sendStarterPrompt = (prompt: string) => {
     setPromptRotation((value) => value + 1)
-    void send(prompt, 'practice_question')
+    void send(prompt, null)
   }
 
-  const send = async (text: string, mode: 'practice_question' | 'synthetic_case', testCaseId?: string) => {
+  /** One turn. `caseContext` is set only for a CASE question -- it is
+   * stored on the turn (shown as a compact reference) and sent as the
+   * controlled test case, so the answer is grounded in that case's facts. A
+   * general practice question passes null and inherits nothing. */
+  const send = async (text: string, caseContext: AgentTestCase | null, contextEvent: ChatMessage | null = null) => {
     const trimmed = text.trim()
     if (!trimmed || busy) return
+    const request = turnRequest(trimmed, caseContext)
     setBusy(true); setError('')
     const pendingId = `pending-${crypto.randomUUID()}`
     setMessages((prev) => [...prev,
-      { id: `u-${crypto.randomUUID()}`, role: 'physician', text: trimmed },
+      ...(contextEvent ? [contextEvent] : []),
+      { id: `u-${crypto.randomUUID()}`, role: 'physician', text: trimmed, caseRef: request.caseRef },
       { id: pendingId, key: pendingId, role: 'agent', text: '', pending: true },
     ])
     setInput('')
-    follow.begin()
+    follow.begin(contextEvent ? 3 : 2)
     try {
-      const response = await withMinimumTyping(chatWithAgent(personaId, { mode, message: trimmed, controlled_test_case_id: testCaseId, origin: mode === 'synthetic_case' ? 'synthetic_demo' : 'practice' }))
+      const response = await withMinimumTyping(chatWithAgent(personaId, {
+        mode: request.mode, message: request.message, origin: request.origin,
+        ...(request.mode === 'synthetic_case' ? { controlled_test_case_id: request.controlled_test_case_id } : {}),
+      }))
       setMessages((prev) => prev.map((item) => (item.id === pendingId ? { id: response.response_id, key: pendingId, role: 'agent', text: response.answer, response } : item)))
       follow.complete()
     } catch (err) {
@@ -2529,7 +2554,15 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
     } finally { setBusy(false) }
   }
 
-  const tryCase = (testCase: AgentTestCase) => { setActiveCase(testCase); void send('How would I handle this?', 'synthetic_case', testCase.id) }
+  /** Selecting a case makes it the active case and asks about it. A case
+   * that is not already active first adds a "new synthetic case" event --
+   * the earlier conversation stays above it. */
+  const selectCase = (testCase: AgentTestCase) => {
+    if (busy) return
+    const event = caseSwitchEvent(activeCase?.id ?? null, testCase, `case-${crypto.randomUUID()}`)
+    setActiveCase(testCase)
+    void send(CASE_QUESTION, testCase, event)
+  }
 
   const feedback = async (message: ChatMessage, value: 'reflects' | 'not_quite') => {
     setMessages((prev) => prev.map((item) => (item.id === message.id ? { ...item, feedbackState: value } : item)))
@@ -2551,27 +2584,49 @@ export function ChatTab({ personaId, agentName, navigate, trainPath }: {
 
   return <div className="chat-tab-grid">
     <div className="chat-tab-main">
-      <p className="eyebrow">Test</p>
       <h2>Test how your agent currently represents you.</h2>
-      <p className="panel-intro">See how your current representation behaves on a hypothetical case. Testing never changes your agent; only a correction you confirm does.</p>
-      <p className="chat-boundary-note">Synthetic · no PHI. Use synthetic or hypothetical cases in this demo.</p>
-      {messages.length > 0 && <div className="chat-thread" role="log" aria-live="polite" ref={threadRef}>
-        {activeCase && <div className="chat-case-context"><span className="section-label">Synthetic case</span><strong>{activeCase.title}</strong><ul className="clinical-list">{activeCase.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>}
-        {messages.map((message) => <ChatMessageBubble key={message.key ?? message.id} message={message} agentName={agentName} tone={tone} onFeedback={feedback} onStartFocused={startFocused} busy={busy} personaId={personaId} />)}
-      </div>}
-      {error && <p className="demo-reset-error" role="alert">{error}</p>}
-      <div className="chat-starter-prompts">{visiblePrompts.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" disabled={busy} onClick={() => sendStarterPrompt(prompt)}>{prompt}</button>)}</div>
-      <form className="chat-composer" ref={composerRef} onSubmit={(event) => { event.preventDefault(); void send(input, 'practice_question') }}>
-        <label htmlFor="chat-input" className="sr-only">Ask your agent about your practice</label>
-        <input id="chat-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask your agent about your practice…" disabled={busy} />
-        <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
-      </form>
+      {/* Compact intro so the bounded chat panel -- composer included --
+        * fits on screen when Test opens. */}
+      <p className="panel-intro test-chat-intro">Testing never changes your agent; only a correction you confirm does. <span className="chat-boundary-note">Synthetic · no PHI.</span></p>
+      {/* Test chat polish pass: a bounded chat panel -- active-case header,
+        * a transcript that scrolls inside the panel, and the prompts +
+        * composer pinned to the panel's bottom. */}
+      <section className="test-chat-panel" aria-label="Test conversation">
+        <header className="test-chat-active-case">
+          {activeCase
+            ? <>
+              <span className="section-label">Active synthetic case</span>
+              <strong>{activeCase.title}</strong>
+              <details className="test-chat-case-details">
+                <summary>View details</summary>
+                <ul>{activeCase.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>
+              </details>
+            </>
+            : <p>No synthetic case selected. Choose one to test a case, or ask a general question about your practice.</p>}
+        </header>
+        <div className="chat-thread test-chat-history" role="log" aria-live="polite" aria-label="Conversation" ref={threadRef}>
+          {messages.map((message) => <ChatMessageBubble key={message.key ?? message.id} message={message} agentName={agentName} tone={tone} onFeedback={feedback} onStartFocused={startFocused} busy={busy} personaId={personaId} />)}
+        </div>
+        <footer className="test-chat-footer">
+          {error && <p className="demo-reset-error" role="alert">{error}</p>}
+          <div className="chat-starter-prompts">
+            {activeCase && <button type="button" className="chat-starter-prompt case-question" disabled={busy} onClick={() => void send(CASE_QUESTION, activeCase)} aria-label={`${CASE_QUESTION} About: ${activeCase.title}`}>{CASE_QUESTION}</button>}
+            {visiblePrompts.map((prompt) => <button key={prompt} type="button" className="chat-starter-prompt" disabled={busy} onClick={() => sendStarterPrompt(prompt)}>{prompt}</button>)}
+          </div>
+          <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input, null) }}>
+            <label htmlFor="chat-input" className="sr-only">Ask your agent about your practice</label>
+            <input id="chat-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask your agent about your practice…" disabled={busy} />
+            <button className="button-primary" type="submit" disabled={busy || !input.trim()}>Send</button>
+          </form>
+        </footer>
+      </section>
     </div>
     {cases.length > 0 && <aside className="chat-case-panel patient-top-card">
       <button type="button" className="chat-case-panel-toggle" aria-expanded={casesOpen} onClick={() => setCasesOpen((value) => !value)}>
         <span>Try a synthetic case</span><span aria-hidden="true">{casesOpen ? '−' : '+'}</span>
       </button>
-      {casesOpen && <div className="chat-case-panel-list">{cases.map((item) => <button key={item.id} type="button" className={`chat-case-panel-item ${activeCase?.id === item.id ? 'active' : ''}`} onClick={() => tryCase(item)}>
+      {casesOpen && <div className="chat-case-panel-list">{cases.map((item) => <button key={item.id} type="button" className={`chat-case-panel-item ${activeCase?.id === item.id ? 'active' : ''}`} aria-pressed={activeCase?.id === item.id} disabled={busy} onClick={() => selectCase(item)}>
+        {activeCase?.id === item.id && <em className="chat-case-panel-active">Active case</em>}
         <strong>{item.title}</strong><span>{item.summary}</span>
       </button>)}</div>}
     </aside>}

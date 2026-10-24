@@ -88,7 +88,7 @@ for (const [label, source, threadAttr] of [
     const fn = source()
     assert.match(fn, /const pendingId = /)
     assert.match(fn, /pending: true/)
-    assert.match(fn, /follow\.begin\(\)/)
+    assert.match(fn, /follow\.begin\((contextEvent \? 3 : 2)?\)/)
     assert.ok(fn.includes(threadAttr))
   })
 
@@ -137,5 +137,8 @@ test('a learning confirmed in Train refreshes the Overview representation too, n
 
 test('the completed answer reveal includes the composer only when it scrolls with the thread', () => {
   assert.match(agentChat, /if \(composer && !scrollParentDiffers\(thread, composer\)\) targets\.push\(composer\)/)
-  for (const fn of [chatTab(), drawer(), episodeChat()]) assert.match(fn, /useConversationFollow\(threadRef, composerRef\)/)
+  for (const fn of [drawer(), episodeChat()]) assert.match(fn, /useConversationFollow\(threadRef, composerRef\)/)
+  // Test is a bounded panel whose composer never scrolls away: it follows
+  // inside its own transcript only.
+  assert.match(chatTab(), /useConversationFollow\(threadRef, undefined, \{ containWithinThread: true \}\)/)
 })

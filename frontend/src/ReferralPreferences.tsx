@@ -69,8 +69,8 @@ export function combineConfirmed(items: StructuredReferralPreference[]): Structu
 
 /** What THIS statement adds, versus guidance it merely restates (already
  * part of the physician's confirmed representation). */
-export function splitAgainstConfirmed(rules: StructuredReferralPreference, confirmed: StructuredReferralPreference | null): { added: StructuredReferralPreference; keptLabels: string[] } {
-  if (!confirmed) return { added: rules, keptLabels: [] }
+export function splitAgainstConfirmed(rules: StructuredReferralPreference, confirmed: StructuredReferralPreference | null): { added: StructuredReferralPreference; keptLabels: string[]; existingLabels: string[] } {
+  if (!confirmed) return { added: rules, keptLabels: [], existingLabels: [] }
   const confirmedItems = new Set([...confirmed.required, ...confirmed.helpful].map((item) => `${item.key}:${item.required}`))
   const isKept = (item: ReferralRequirementItem) => confirmedItems.has(`${item.key}:${item.required}`)
   const sameRule = (rule: ModalityRule) => confirmed.modality_rules.some((other) => other.modality === rule.modality && other.condition === rule.condition)
@@ -86,7 +86,14 @@ export function splitAgainstConfirmed(rules: StructuredReferralPreference, confi
   const keptLabels = [
     ...rules.required.filter(isKept), ...rules.helpful.filter(isKept),
   ].map((item) => item.label)
-  return { added, keptLabels }
+  // Proposed-learning polish pass: the family's other confirmed guidance,
+  // which this additive learning leaves exactly as it is.
+  const draftKeys = new Set([...rules.required, ...rules.helpful].map((item) => item.key))
+  const existingLabels = [
+    ...[...confirmed.required, ...confirmed.helpful].filter((item) => !draftKeys.has(item.key)).map((item) => item.label),
+    ...(confirmed.modality_rules.length > 0 && rules.modality_rules.length === 0 ? ['Your e-consult and in-person guidance'] : []),
+  ]
+  return { added, keptLabels, existingLabels: [...new Set(existingLabels)] }
 }
 
 function ReadOnlyInterpretation({ rules }: { rules: StructuredReferralPreference }) {
@@ -217,7 +224,7 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
       items.filter((item) => item.status === 'confirmed' && item.case_family === draft.case_family && item.id !== draft.id).map((item) => item.structured_rules),
     ))).catch(() => {})
   }, [personaId, draft.id, draft.case_family, draft.supersedes_id])
-  const { added, keptLabels } = splitAgainstConfirmed(draft.structured_rules, draft.supersedes_id ? null : confirmedInFamily)
+  const { added, keptLabels, existingLabels } = splitAgainstConfirmed(draft.structured_rules, draft.supersedes_id ? null : confirmedInFamily)
   // Part N: never offer to confirm an empty learning (or one that adds
   // nothing to what is already confirmed).
   const nothingToConfirm = isEmptyInterpretation(draft.structured_rules) || (keptLabels.length > 0 && isEmptyInterpretation(added))
@@ -260,16 +267,20 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
     }
   }
 
-  return <div className="referral-pref-review-card">
+  // Proposed-learning polish pass: the status is a quiet eyebrow and the
+  // interpretation itself is the content -- case family as metadata,
+  // guidance type as a label, the understood items as the body. There is
+  // no "We interpreted this as" headline competing with what was understood.
+  return <section className="referral-pref-review-card" aria-label="Proposed learning">
     <p className={`eyebrow referral-pref-status-${draft.status}`}>{draft.status === 'draft' ? 'Proposed learning · not yet operational' : draft.status}</p>
-    <h3>We interpreted this as</h3>
-    {CASE_FAMILY_LABELS[draft.case_family] && <p className="section-label referral-pref-case-family">{CASE_FAMILY_LABELS[draft.case_family]}</p>}
+    {CASE_FAMILY_LABELS[draft.case_family] && <p className="referral-pref-case-family">{CASE_FAMILY_LABELS[draft.case_family]}</p>}
     {editing
       ? <StructuredRulesEditor rules={editedRules} onChange={setEditedRules} />
       : nothingToConfirm && keptLabels.length > 0
         ? <p className="muted-note">This doesn’t add anything new to what your agent already knows -- try adding more detail.</p>
         : <ReadOnlyInterpretation rules={added} />}
-    {!editing && keptLabels.length > 0 && !nothingToConfirm && <p className="referral-pref-kept">Already part of how your agent represents you: {keptLabels.join(', ')}.</p>}
+    {!editing && keptLabels.length > 0 && !nothingToConfirm && <p className="referral-pref-kept">Already part of how your agent represents you: {keptLabels.join(' · ')}</p>}
+    {!editing && existingLabels.length > 0 && !nothingToConfirm && <p className="referral-pref-kept"><span>Your existing guidance stays in place:</span> {existingLabels.join(' · ')}</p>}
     {error && <p className="demo-reset-error" role="alert">{error}</p>}
     <div className="referral-pref-review-actions">
       {editing
@@ -283,7 +294,7 @@ export function PreferenceDraftReview({ personaId, draft, onDraftChange, onConfi
           <button type="button" className="text-button" disabled={busy} onClick={() => void startOver()}>Start over</button>
         </>}
     </div>
-  </div>
+  </section>
 }
 
 /** Placeholder and example are deliberately separate (Part W): the

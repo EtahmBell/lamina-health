@@ -1657,6 +1657,42 @@ button.lam-row:hover { background: #fff9f1; }
 .chat-tab-grid .chat-starter-prompt:hover:not(:disabled) { border-color: var(--agent-copper); }
 .chat-tab-grid .chat-typing-dots span { background: var(--agent-copper-mid); }
 
+/* Test chat polish pass: Test is a bounded chat panel -- an active-case
+ * header, a transcript that scrolls INSIDE the panel, and suggested prompts
+ * + composer pinned to the panel's bottom -- so the page no longer grows
+ * with every turn. The height follows the viewport within a sensible
+ * range (smaller laptops keep a usable panel; tall screens cap at 720px). */
+.test-chat-panel { display: flex; flex-direction: column; height: clamp(340px, calc(100vh - 440px), 720px); margin-top: 12px; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.test-chat-intro { margin: 4px 0 0; }
+.test-chat-intro .chat-boundary-note { display: inline; margin: 0 0 0 4px; }
+.test-chat-active-case { display: flex; flex: none; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--agent-copper-surface, #fdf3e8); }
+.test-chat-active-case .section-label { margin: 0; }
+.test-chat-active-case strong { color: var(--clinical); font-family: var(--font-display); font-size: .84rem; font-weight: 500; }
+.test-chat-active-case > p { margin: 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
+.test-chat-case-details { flex-basis: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; font-size: .68rem; }
+.test-chat-case-details:not([open]) { flex-basis: auto; margin-left: auto; }
+.test-chat-case-details summary { display: inline; min-height: 0; color: var(--agent-copper-ink, var(--accent-hover)); cursor: pointer; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+.test-chat-case-details ul { margin: 6px 0 0; padding-left: 18px; color: var(--clinical); line-height: 1.6; }
+.chat-thread.test-chat-history { flex: 1 1 auto; min-height: 0; margin: 0; padding: 18px; overflow-y: auto; overscroll-behavior: contain; }
+.test-chat-footer { flex: none; padding: 12px 18px 16px; border-top: 1px solid var(--border); background: var(--surface); }
+.test-chat-footer .chat-starter-prompts { flex-wrap: nowrap; margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent); mask-image: linear-gradient(90deg, #000 92%, transparent); }
+.test-chat-footer .chat-starter-prompts::-webkit-scrollbar { display: none; }
+.test-chat-footer .chat-starter-prompt { flex: none; white-space: nowrap; }
+.chat-starter-prompt.case-question { border-color: var(--agent-copper, var(--accent)); color: var(--agent-copper-ink, var(--accent-hover)); font-weight: 500; }
+/* A case question always shows which case it is about. */
+.chat-message.physician .chat-case-ref { display: block; margin-top: 4px; color: var(--text-secondary); font-size: .66rem; }
+/* Switching cases is an explicit, compact context event in the transcript. */
+.chat-case-event { align-self: stretch; color: var(--clinical); font-size: .72rem; }
+.chat-case-event-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 6px; color: var(--text-secondary); font-size: .6rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.chat-case-event-divider::before, .chat-case-event-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.chat-case-event strong { display: block; font-family: var(--font-display); font-size: .82rem; font-weight: 500; }
+.chat-case-event ul { margin: 4px 0 0; padding-left: 18px; color: var(--text-secondary); line-height: 1.6; }
+.chat-case-panel-active { display: inline-block; margin-bottom: 4px; color: var(--agent-copper-ink, var(--accent-hover)); font-size: .6rem; font-style: normal; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.chat-case-panel-item:disabled { cursor: progress; opacity: .7; }
+@media (max-width: 960px) {
+  .test-chat-panel { height: clamp(420px, 72vh, 640px); }
+}
+
 /* Representation band: chips and rule bullets lean copper; most of the section
    stays neutral text/surfaces. */
 .agent-page .practice-chip-group.prominent .practice-chip { border-color: var(--agent-copper-soft); background: var(--agent-copper-surface); color: var(--agent-copper-ink); }
@@ -2232,8 +2268,16 @@ button.specialty-episode-avatar { cursor: pointer; }
 .specialty-episode-detail .referral-artifact-links { margin-top: 0; padding-top: 0; border-top: none; }
 .specialty-episode-detail .coordination-chat-card { margin-top: 24px; }
 /* NLP pass, Part N: where a proposed learning applies, and what it keeps. */
-.referral-pref-case-family { margin: 2px 0 10px; color: var(--mineral-deep); }
-.referral-pref-kept { margin: 10px 0 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: .68rem; line-height: 1.5; }
+.referral-pref-case-family { margin: 6px 0 12px; color: var(--mineral-deep); font-family: var(--font-ui); font-size: .62rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.referral-pref-kept { margin: 12px 0 0; color: var(--text-secondary); font-family: var(--font-ui); font-size: .68rem; line-height: 1.5; }
+.referral-pref-kept span { color: var(--clinical); font-weight: 500; }
+/* Proposed-learning polish pass: inside a proposal, the guidance type reads
+ * as a sentence-case label and the understood items as comfortable body
+ * text -- the interpretation is the card's content, not schema output. */
+.referral-pref-review-card .referral-pref-interpretation .referral-pref-group > .section-label { margin: 0 0 6px; color: var(--clinical); font-family: var(--font-ui); font-size: .76rem; font-weight: 600; letter-spacing: normal; text-transform: none; }
+.referral-pref-review-card .referral-pref-interpretation .referral-pref-requirement-list { gap: 8px; margin-top: 0; }
+.referral-pref-review-card .referral-pref-interpretation .referral-pref-requirement-row { font-size: .8rem; line-height: 1.5; color: var(--clinical); }
+.referral-pref-review-card .referral-pref-interpretation .referral-pref-group > p:not(.section-label) { margin: 0; font-size: .8rem; line-height: 1.5; color: var(--clinical); }
 
 /* Physician-agent-to-physician-agent coordination chat card (ongoing-
    coordination pass, Part H-T) -- a separate boxed card beneath the
