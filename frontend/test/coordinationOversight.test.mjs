@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { canCorrectEvent, coordinationActorLabel, groupByStage, SCOPE_LABELS } from '../src/coordinationEpisode.ts'
+import { canCorrectEvent, coordinationActorLabel, groupByStage, groupNetworkConsultation, SCOPE_LABELS } from '../src/coordinationEpisode.ts'
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8').replaceAll(String.fromCharCode(13), '')
 const referralSource = read('../src/Referral.tsx')
@@ -115,6 +115,73 @@ test('Match Details no longer repeats "Why Dr. X" but keeps the alternatives and
   // redirect) stay inspectable in the consultation record.
   assert.match(view, /<ConsultationLog messages=\{consultation\.messages\}/)
   assert.match(view, /agent\.accepts_case \? agent\.clinical_fit === 'strong' \? 'Strong fit' : 'Accepts' : 'Redirect'/)
+})
+
+/* ------------------------------------- Network consultation oversight (O-S) */
+
+const OKONKWO = 'physician-okonkwo'
+const TORRES = 'physician-torres'
+const networkItems = [
+  item({ id: 'consult-1-1', stage: 'routing', title: 'Case shared with the network', details: [{ label: 'Referral question', text: 'Treatment intensification.' }] }),
+  item({ id: 'consult-1-2', stage: 'routing', title: 'Practice fit returned', actor_physician_id: CHEN, actor_name: 'Dr. Noah Chen', content_kind: 'practice_representation' }),
+  item({ id: 'consult-1-3', stage: 'routing', title: 'Practice fit returned', actor_physician_id: OKONKWO, actor_name: 'Dr. Adaeze Okonkwo', content_kind: 'practice_representation' }),
+  item({ id: 'consult-1-4', stage: 'routing', title: 'Practice fit returned', actor_physician_id: TORRES, actor_name: 'Dr. Marcus Torres', content_kind: 'practice_representation' }),
+  item({ id: 'consult-1-priority', stage: 'routing', title: 'Priority', actor_kind: 'system', actor_physician_id: null, content_kind: 'system_fact' }),
+  item({ id: 'consult-1-route-1', stage: 'routing', title: 'Recommended route', actor_kind: 'network', actor_physician_id: null, content_kind: 'system_fact' }),
+  item({ id: 'consult-1-5', stage: 'clarification', title: 'Clarification requested', actor_physician_id: CHEN, actor_name: 'Dr. Noah Chen' }),
+  item({ id: 'consult-1-6', stage: 'clarification', title: 'Clarification resolved' }),
+]
+
+test('the Network consultation groups ONE outgoing representation, then each candidate response, then the result', () => {
+  const groups = groupNetworkConsultation(networkItems, LUCY)
+  assert.deepEqual(groups.map((group) => group.label), ['Case shared with the network', 'Candidate responses', 'Clarification', 'Routing result'])
+  const shared = groups[0].items
+  assert.equal(shared.length, 1, 'one correction target for the shared representation, not one per candidate')
+  assert.deepEqual(groups[1].items.map(({ item: entry }) => entry.actor_physician_id), [CHEN, OKONKWO, TORRES])
+  assert.deepEqual(groups.flatMap((group) => group.items.map(({ number }) => number)), ['01', '02', '03', '04', '05', '06', '07', '08'])
+})
+
+test('during the Network consultation Lucy may correct only her own agent -- never a candidate, ranking, or access entry', () => {
+  const correctable = networkItems.filter((entry) => canCorrectEvent(LUCY, entry)).map((entry) => entry.title)
+  assert.deepEqual(correctable, ['Case shared with the network', 'Clarification resolved'])
+  for (const owner of [CHEN, OKONKWO, TORRES]) {
+    const response = networkItems.find((entry) => entry.actor_physician_id === owner)
+    assert.equal(canCorrectEvent(LUCY, response), false)
+    // Ownership, not selection: a non-selected candidate owns their own response.
+    assert.equal(canCorrectEvent(owner, response), true)
+    assert.equal(canCorrectEvent(owner, networkItems[0]), false, 'nobody else edits Lucy\'s agent')
+  }
+  assert.equal(canCorrectEvent.length, 2, 'the rule takes the viewer and the entry -- no selected-physician input')
+  assert.doesNotMatch(slice(shared, 'export function canCorrectEvent', 'export type NumberedItem'), /selected|receiving|recommended/)
+})
+
+test('candidate agents are labelled by their own physician\'s name', () => {
+  assert.equal(coordinationActorLabel(networkItems[2], names), 'Dr. Adaeze Okonkwo Agent')
+  assert.equal(coordinationActorLabel(networkItems[4], names), 'Lamina')
+  assert.equal(coordinationActorLabel(networkItems[5], names), 'Lamina Network')
+})
+
+test('Consultation details offers the same Review / Correct flow on the Network consultation, before any referral', () => {
+  const view = slice(app, 'function RecommendationView', 'function PatientWorkspace')
+  const dialog = slice(view, 'aria-label="Consultation details"', '</ModalPortal>}')
+  assert.match(dialog, /\{recordId != null && <NetworkConsultationOversight recordId=\{recordId\} viewerPhysicianId=\{PCP_PHYSICIAN_ID\} viewerName=\{PCP_NAME\} \/>\}/)
+  assert.doesNotMatch(dialog, /referralStarted &&\s*<NetworkConsultationOversight|activeReferral[^\n]*NetworkConsultationOversight/, 'not gated on a referral or selection')
+  const oversight = slice(referralSource, 'export function NetworkConsultationOversight', 'function CoordinationEntry')
+  assert.match(oversight, /groupNetworkConsultation\(episode\.items, episode\.referring_physician_id\)/)
+  assert.match(oversight, /canCorrect=\{canCorrectEvent\(viewerPhysicianId, item\)\}/)
+  assert.match(oversight, /<CoordinationCorrectionDrawer\s+target=\{\{ kind: 'consultation', id: recordId \}\}/, 'the one existing correction drawer, not a second system')
+  assert.match(oversight, /<CoordinationEntry/)
+  assert.doesNotMatch(oversight, /\.evidence|\.metadata|message\.content|selectedId|receiving_physician_id/)
+  assert.equal([...referralSource.matchAll(/function CoordinationCorrectionDrawer/g)].length, 1)
+  // After a fresh consult the saved record id is picked up, so the controls are there immediately.
+  assert.match(slice(app, 'const runConsult', 'finally'), /void refreshActivity\(\)\.then\(\(found\) => \{ if \(found\?\.latest_consultation_id != null\) setRecordId\(found\.latest_consultation_id\) \}\)/)
+})
+
+test('the shared representation shows its referral question with the statement, and corrections keep the original visible', () => {
+  const entry = slice(referralSource, 'function CoordinationEntry', '/**\n * Correct your agent')
+  assert.match(entry, /<span className="coordination-original-label">Original<\/span><p>“\{item\.statement\}”<\/p>\{details\.map/)
+  assert.match(entry, /<p className="coordination-detail" key=\{detail\.label\}><b>\{detail\.label\}:<\/b> \{detail\.text\}<\/p>/)
+  assert.match(entry, /Corrected by Dr\. \{lastName\(viewerName\)\}/)
 })
 
 test('matching and coordination stay separate: no clarification or workup entries in Match Details', () => {

@@ -206,6 +206,9 @@ class AgentCorrection(StrictModel):
     referral_id: int | None = None
     source_event_sequence: int | None = None
     source_item_id: str | None = None
+    # Set when the correction was made from the Network consultation itself
+    # (before or independent of any referral).
+    consultation_record_id: int | None = None
     selected_text: str | None = None
     original_representation: str | None = None
     correction_text: str
@@ -243,6 +246,14 @@ class CoordinationFact(StrictModel):
     source: str
 
 
+class CoordinationDetail(StrictModel):
+    """One labelled part of an agent's structured representation (e.g. the
+    referral question it framed) -- corrected together with the statement."""
+
+    label: str
+    text: str
+
+
 class CoordinationItem(StrictModel):
     id: str
     stage: CoordinationStage
@@ -250,8 +261,10 @@ class CoordinationItem(StrictModel):
     actor_kind: Literal["agent", "physician", "system", "network", "scheduling_workflow"]
     # The physician whose agent produced the item (or who acted), if any.
     actor_physician_id: str | None = None
+    actor_name: str | None = None
     content_kind: CoordinationContentKind
     statement: str
+    details: list[CoordinationDetail] = Field(default_factory=list)
     patient_facts: list[CoordinationFact] = Field(default_factory=list)
     occurred_at: str | None = None
     # Whether THIS viewer may correct it -- computed by
@@ -269,6 +282,19 @@ class CoordinationEpisode(StrictModel):
     viewer_role: Literal["referring", "receiving"]
     referring_physician_id: str
     receiving_physician_id: str
+    items: list[CoordinationItem] = Field(default_factory=list)
+
+
+class NetworkConsultationEpisode(StrictModel):
+    """The Network consultation -- the referring agent's ONE outgoing case
+    representation and every candidate agent's response -- projected for one
+    viewer. Correction rights follow whose agent produced each item, never
+    which physician was eventually selected."""
+
+    consultation_record_id: int
+    patient_id: str
+    viewer_physician_id: str
+    referring_physician_id: str
     items: list[CoordinationItem] = Field(default_factory=list)
 
 

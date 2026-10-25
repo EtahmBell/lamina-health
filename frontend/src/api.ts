@@ -206,6 +206,8 @@ export type AgentCorrection = {
   id: number | null; physician_id: string; agent_id: string; patient_id: string
   referral_id: number | null; source_event_sequence: number | null
   source_item_id?: string | null; original_representation?: string | null
+  /** Set when made from the Network consultation itself. */
+  consultation_record_id?: number | null
   selected_text: string | null; correction_text: string; status: AgentCorrectionStatus
   scope?: CorrectionScope | null
   /** Set when a durable correction became a confirmed learning. */
@@ -221,8 +223,12 @@ export type CoordinationItem = {
   id: string; stage: CoordinationStage; title: string
   actor_kind: 'agent' | 'physician' | 'system' | 'network' | 'scheduling_workflow'
   actor_physician_id: string | null
+  /** Display name of a candidate physician whose agent produced the entry. */
+  actor_name?: string | null
   content_kind: CoordinationContentKind
   statement: string
+  /** Labelled parts of the same representation, corrected with it. */
+  details?: { label: string; text: string }[]
   patient_facts: { text: string; source: string }[]
   occurred_at: string | null
   /** The backend's own ownership decision for this viewer. */
@@ -234,6 +240,15 @@ export type CoordinationEpisode = {
   referral_id: number; patient_id: string; viewer_physician_id: string; viewer_role: 'referring' | 'receiving'
   referring_physician_id: string; receiving_physician_id: string; items: CoordinationItem[]
 }
+/** The Network consultation, projected for one viewer: the referring
+ * agent's one case representation and every candidate agent's response. */
+export type NetworkConsultationEpisode = {
+  consultation_record_id: number; patient_id: string; viewer_physician_id: string
+  referring_physician_id: string; items: CoordinationItem[]
+}
+/** Where a correction is made: a referral's Agent coordination, or the
+ * Network consultation (before or independent of any referral). */
+export type CoordinationTarget = { kind: 'referral' | 'consultation'; id: number }
 export type CoordinationCorrectionProposal = {
   item_id: string; original_representation: string; correction_text: string
   suggested_scope: CorrectionScope | null; episode_effect: string
@@ -827,16 +842,18 @@ export const createAgentCorrection = (
 })
 export const getCoordinationEpisode = (referralId: number, viewerPhysicianId: string) =>
   request<CoordinationEpisode>(`/api/referrals/${referralId}/coordination?viewer_physician_id=${encodeURIComponent(viewerPhysicianId)}`)
-const coordinationCorrectionPath = (referralId: number, itemId: string) =>
-  `/api/referrals/${referralId}/coordination/${encodeURIComponent(itemId)}/corrections`
+export const getNetworkConsultationEpisode = (recordId: number, viewerPhysicianId: string) =>
+  request<NetworkConsultationEpisode>(`/api/consultations/${recordId}/coordination?viewer_physician_id=${encodeURIComponent(viewerPhysicianId)}`)
+const coordinationCorrectionPath = (target: CoordinationTarget, itemId: string) =>
+  `/api/${target.kind === 'referral' ? 'referrals' : 'consultations'}/${target.id}/coordination/${encodeURIComponent(itemId)}/corrections`
 /** Never writes anything -- cancelling the proposal changes nothing. */
-export const interpretCoordinationCorrection = (referralId: number, itemId: string, physicianId: string, correctionText: string, scope?: CorrectionScope) =>
-  request<CoordinationCorrectionProposal>(`${coordinationCorrectionPath(referralId, itemId)}/interpret`, {
+export const interpretCoordinationCorrection = (target: CoordinationTarget, itemId: string, physicianId: string, correctionText: string, scope?: CorrectionScope) =>
+  request<CoordinationCorrectionProposal>(`${coordinationCorrectionPath(target, itemId)}/interpret`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ physician_id: physicianId, correction_text: correctionText, scope: scope ?? null }),
   })
-export const confirmCoordinationCorrection = (referralId: number, itemId: string, physicianId: string, correctionText: string, scope: CorrectionScope) =>
-  request<AgentCorrection>(coordinationCorrectionPath(referralId, itemId), {
+export const confirmCoordinationCorrection = (target: CoordinationTarget, itemId: string, physicianId: string, correctionText: string, scope: CorrectionScope) =>
+  request<AgentCorrection>(coordinationCorrectionPath(target, itemId), {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ physician_id: physicianId, correction_text: correctionText, scope }),
   })

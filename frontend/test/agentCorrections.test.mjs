@@ -34,7 +34,7 @@ test('the correction drawer shows the original representation, asks what to chan
   assert.match(fn, /Your agent represented this as/)
   assert.match(fn, /What would you change\?/)
   assert.match(fn, /Add context or explain how your agent should represent this in similar situations\./)
-  assert.match(fn, /await interpretCoordinationCorrection\(referralId, item\.id, viewerPhysicianId, text\.trim\(\)\)/)
+  assert.match(fn, /await interpretCoordinationCorrection\(target, item\.id, viewerPhysicianId, text\.trim\(\)\)/)
   assert.match(fn, />\{busy \? 'Interpreting…' : 'Interpret correction'\}<\/button>/)
 })
 
@@ -54,7 +54,7 @@ test('confirming requires a chosen scope; an un-inferable scope preselects nothi
   assert.match(fn, /setScope\(result\.suggested_scope\)/, 'a null suggestion leaves the choice to the physician')
   assert.match(fn, /disabled=\{busy \|\| !scope\} onClick=\{\(\) => void confirm\(\)\}/)
   assert.match(fn, /Apply this correction to/)
-  assert.match(fn, /await confirmCoordinationCorrection\(referralId, item\.id, viewerPhysicianId, proposal\.correction_text, scope\)/)
+  assert.match(fn, /await confirmCoordinationCorrection\(target, item\.id, viewerPhysicianId, proposal\.correction_text, scope\)/)
 })
 
 test('a durable scope is unavailable when nothing durable can be learned, and says why', () => {
@@ -106,6 +106,6 @@ test('coordination corrections go through interpret -> explicit confirm; the old
   assert.match(api, /export const getAgentCorrections = \(patientId: string\)/)
   assert.match(api, /Never writes anything -- cancelling the proposal changes nothing\./)
   assert.match(api, /export const interpretCoordinationCorrection = /)
-  assert.match(api, /export const confirmCoordinationCorrection = \(referralId: number, itemId: string, physicianId: string, correctionText: string, scope: CorrectionScope\)/)
+  assert.match(api, /export const confirmCoordinationCorrection = \(target: CoordinationTarget, itemId: string, physicianId: string, correctionText: string, scope: CorrectionScope\)/)
   assert.doesNotMatch(api, /applyCorrection|trainFromCorrection/i)
 })

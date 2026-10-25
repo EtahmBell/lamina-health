@@ -7,6 +7,9 @@ export const TONJIT_ID = 'patient-t2dm-003'
 export const PCP_NAME = 'Dr. Lucy Saruhashi'
 export const PCP_AGENT_NAME = "Dr. Lucy Saruhashi's Agent"
 export const PCP_AGENT_ID = 'agent-pcp-lianne-cha'
+/** Lucy's canonical physician identity for ownership checks (the backend's
+ * LUCY_AGENT_ID); PCP_AGENT_ID above is a legacy message-sender id only. */
+export const PCP_PHYSICIAN_ID = 'agent-lucy-saruhashi'
 
 /** The one controlled, workspace-isolated specialist demo persona (Pass 3A). */
 export const SPECIALIST_NAME = 'Dr. Iain Jung'

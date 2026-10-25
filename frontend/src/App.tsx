@@ -11,14 +11,14 @@ import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
 import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
-import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, TONJIT_ID, cleanName, patientName } from './demoIdentity.ts'
+import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, PCP_PHYSICIAN_ID, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, TONJIT_ID, cleanName, patientName } from './demoIdentity.ts'
 import { CHEN_PATIENT_IDS, DEMO_PATIENTS, type DemoPatientSummary, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkHighlights, NetworkPhysicianProfilePage, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, WorklistRows } from './Engagement.tsx'
 import { timeAwareGreeting } from './greeting.ts'
 import { PhysicianNetworkPage, PhysicianProfilePage, type DirectoryOnlyProfile } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
+import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, NetworkConsultationOversight, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { whyThisMatch } from './matchExplanation.ts'
 import { ModalPortal } from './ModalPortal.tsx'
@@ -1527,6 +1527,10 @@ function RecommendationView({
         <h2>How your agent handled this</h2>
         <div className="network-record">
           <p className="agent-consult-count">{consultedPhysicianCount} physician agent{consultedPhysicianCount === 1 ? '' : 's'} consulted</p>
+          {/* Network consultation oversight: Lucy reviews/corrects what HER
+           * agent represented to the network -- the same correction flow as
+           * Agent coordination, available before any physician is selected. */}
+          {recordId != null && <NetworkConsultationOversight recordId={recordId} viewerPhysicianId={PCP_PHYSICIAN_ID} viewerName={PCP_NAME} />}
           <div className="agent-handling"><div><span>Patient facts</span><ul>{consultation.patient_facts_used.map((fact) => <li key={fact}>{fact}</li>)}</ul></div>{explicitRule && <div><span>Physician rule</span><p>{explicitRule}</p></div>}<div><span>Specialist-agent responses</span><ul>{consultation.consultation.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}{routingOnlyAgents.map((agent) => <li key={agent.physician_id}><b>{cleanName(agent.physician_name)}:</b> {agent.reason}</li>)}</ul></div>{historical && <div><span>Practice footprint · fit signal, not quality</span><p>{historical}</p></div>}{operational && <div><span>Access consideration</span><p>{operational}</p></div>}</div>
           <ConsultationLog messages={consultation.messages} focusEventId={focusEventId} highlight={highlight} />
           <div className="evaluation-record-heading">Physician evaluation records</div>{consultation.consultation.map((agent) => { const rule = evidenceFor(agent, 'explicit_physician_rule'); const history = evidenceFor(agent, 'historical_practice_similarity'); return <details key={agent.physician_id} open={agent.physician_id === primary.physician_id}><summary><span className="mini-avatar">{physicianInitials(agent.physician_name)}</span><span className="agent-name"><b>{cleanName(agent.physician_name)}</b><small>{agent.specialty}</small></span><span className={`decision-badge ${agent.clinical_fit}`}>{agent.accepts_case ? agent.clinical_fit === 'strong' ? 'Strong fit' : 'Accepts' : 'Redirect'}</span><span className="chevron">⌄</span></summary><div className="structured-evidence"><p>{agent.reason}</p><div className="evidence-grid"><div><span>Decision</span><strong>{agent.accepts_case ? 'Accepts case' : 'Redirects / does not accept'}</strong></div><div><span>Availability</span><strong>{agent.availability}</strong></div><div><span>Insurance</span><strong>{insuranceLabel(agent.insurance_status)}</strong></div><div><span>Required workup</span><strong>{agent.required_workup.join(' · ')}</strong></div>{rule && <div className="wide"><span>Relevant physician rule</span><strong>{rule}</strong></div>}{history && <div className="wide"><span>Historical-practice signal</span><strong>{history}</strong></div>}</div></div></details> })}
@@ -1632,8 +1636,8 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
   const demoPatient = DEMO_PATIENTS.find((item) => item.id === patientId)
   const backPath = perspective === 'receiving' ? '/chen/patients' : '/patients'
   const refreshActivity = () => getPatientActivity()
-    .then((records) => setActivity(records.find((item) => item.patient_id === patientId) ?? null))
-    .catch(() => {})
+    .then((records) => { const found = records.find((item) => item.patient_id === patientId) ?? null; setActivity(found); return found })
+    .catch(() => null)
   useEffect(() => { setLoading(true); getPatient(patientId, perspective === 'receiving' ? CHEN_ID : undefined).then(setPatient).catch((loadError: Error) => setError(loadError.message)).finally(() => setLoading(false)) }, [patientId, perspective])
   useEffect(() => {
     if (perspective !== 'receiving') return
@@ -1757,7 +1761,9 @@ function PatientWorkspace({ patientId, navigate, perspective = 'pcp' }: { patien
       // consumed once at that next mount, reliably distinguishes "just
       // re-consulted this session" from an ordinary reload.
       setJustConsulted(true)
-      void refreshActivity()
+      // The saved record's id lets Consultation details offer correction of
+      // this consultation's own entries.
+      void refreshActivity().then((found) => { if (found?.latest_consultation_id != null) setRecordId(found.latest_consultation_id) })
     } catch (consultError) {
       setError(consultError instanceof Error ? consultError.message : 'Consultation failed')
     } finally {

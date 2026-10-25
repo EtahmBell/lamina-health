@@ -1886,6 +1886,15 @@ button.lam-row:hover { background: #fff9f1; }
 .coordination-correction-dialog { width: min(100%, 520px); }
 .coordination-correction-dialog > .section-label { display: block; margin: 14px 0 0; }
 .coordination-correction-quote { margin: 6px 0 0; border-left: 2px solid var(--border); padding-left: 10px; color: var(--text-primary); font-size: .78rem; line-height: 1.5; }
+.coordination-correction-detail { display: block; margin-top: 4px; color: var(--text-secondary); }
+.coordination-event p.coordination-detail b, .coordination-original p b { color: var(--text-primary); font-weight: 600; }
+/* Network consultation oversight: the same entries as Agent coordination,
+ * inside Consultation details. */
+.network-oversight { margin: 14px 0 20px; }
+.network-oversight > header { display: flex; justify-content: space-between; gap: 12px; padding: 12px 7px 4px; font-family: var(--font-display); font-size: .9rem; }
+.network-oversight > header small { font-family: var(--font-ui); color: var(--text-secondary); font-size: .55rem; }
+.network-oversight .coordination-stage { margin-top: 14px; }
+@media (max-width: 600px) { .network-oversight > header { flex-direction: column; gap: 4px; } }
 .coordination-correction-dialog textarea { margin-top: 6px; }
 .coordination-correction-dialog .muted-note { margin: 6px 0 0; }
 .coordination-correction-dialog .feedback-reason-actions { margin-top: 16px; }

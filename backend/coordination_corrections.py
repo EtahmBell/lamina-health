@@ -8,7 +8,7 @@ decides what else happens:
 - `episode`: an annotation on this coordination only;
 - `future`: a durable learning, through the SAME learning/versioning
   infrastructure as "Tell your agent something" -- a referral preference
-  for a receiving physician (interpreted by the existing interpreter,
+  for a specialist's practice agent (interpreted by the existing interpreter,
   layered and confirmed by the existing store), or a confirmed agent
   learning for the referring physician;
 - `both`.
@@ -19,6 +19,7 @@ write. Ownership is checked here, independently of what the UI shows.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from backend.demo_identity import LUCY_AGENT_ID
@@ -38,7 +39,7 @@ from backend.referral_preferences import (
     layer_preferences,
     referral_preference_interpretation_service,
 )
-from backend.referrals.coordination_episode import can_correct_item
+from backend.referrals.coordination_episode import can_correct_item, representation_text
 from backend.referrals.coordination_chat import represented_agent_id
 from backend.referrals.requirements import requirements_for
 from backend.representation import representation_snapshot_id
@@ -64,17 +65,43 @@ def persona_for_physician(physician_id: str) -> str | None:
     return next((key for key, persona in PERSONAS.items() if persona.get("physician_id") == physician_id), None)
 
 
-def authorize_correction(referral: Referral, item: CoordinationItem, physician_id: str) -> None:
-    if physician_id not in (referral.referring_physician_id, referral.receiving_physician_id):
-        raise CorrectionNotAllowed("Only the two physicians on this referral may correct its coordination.")
+@dataclass(frozen=True)
+class CorrectionTarget:
+    """Where a correction is made: a referral's coordination episode, or the
+    Network consultation it may have come from. `parties` are the physicians
+    who may view that record; who may CORRECT an item is decided only by
+    can_correct_item (whose agent produced it) -- never by which physician
+    was selected."""
+
+    patient_id: str
+    parties: frozenset[str]
+    referral_id: int | None = None
+    consultation_record_id: int | None = None
+
+    @classmethod
+    def for_referral(cls, referral: Referral) -> CorrectionTarget:
+        return cls(
+            patient_id=referral.patient_id,
+            parties=frozenset({referral.referring_physician_id, referral.receiving_physician_id}),
+            referral_id=referral.id,
+        )
+
+    @property
+    def source_key(self) -> str:
+        return f"referral-{self.referral_id}" if self.referral_id is not None else f"consultation-{self.consultation_record_id}"
+
+
+def authorize_correction(target: CorrectionTarget, item: CoordinationItem, physician_id: str) -> None:
+    if physician_id not in target.parties:
+        raise CorrectionNotAllowed("Only physicians who took part in this coordination may correct it.")
     if item.content_kind not in ("agent_representation", "practice_representation") or item.actor_kind != "agent":
         raise CorrectionNotAllowed("This entry is a recorded fact; it can't be corrected.")
     if not can_correct_item(physician_id, item):
         raise CorrectionNotAllowed("A physician may only correct their own agent.")
 
 
-def _future_for_receiving(
-    workflow_store: WorkflowStore, workspace_id: str, referral: Referral, physician_id: str,
+def _future_for_practice(
+    workflow_store: WorkflowStore, workspace_id: str, physician_id: str,
     persona_id: str, case_family: str, text: str,
 ) -> tuple[list[str], str | None, StructuredReferralPreference | None]:
     """(effect lines, unavailable reason, interpreted preference) -- the
@@ -121,19 +148,22 @@ def _proposal_line(line: str) -> str:
 
 
 def propose(
-    workflow_store: WorkflowStore, workspace_id: str, referral: Referral, item: CoordinationItem,
+    workflow_store: WorkflowStore, workspace_id: str, target: Referral | CorrectionTarget, item: CoordinationItem,
     physician_id: str, text: str, case_family: str, suggested_scope: str | None,
 ) -> CoordinationCorrectionProposal:
-    authorize_correction(referral, item, physician_id)
+    target = target if isinstance(target, CorrectionTarget) else CorrectionTarget.for_referral(target)
+    authorize_correction(target, item, physician_id)
     persona_id = persona_for_physician(physician_id)
     lines: list[str] = []
     reason: str | None = None
     structured: StructuredReferralPreference | None = None
     if persona_id is None:
         reason = "This physician has no agent representation to update, so the correction can only apply to this coordination."
-    elif physician_id == referral.receiving_physician_id:
-        lines, reason, structured = _future_for_receiving(
-            workflow_store, workspace_id, referral, physician_id, persona_id, case_family, text
+    elif persona_id != "lucy":
+        # A specialist's agent represents its practice: the durable form is
+        # a referral preference, whether or not this physician was selected.
+        lines, reason, structured = _future_for_practice(
+            workflow_store, workspace_id, physician_id, persona_id, case_family, text
         )
     else:
         lines = [f"Becomes confirmed guidance for how your agent represents similar cases: “{text.strip()}”"]
@@ -141,7 +171,7 @@ def propose(
         suggested_scope = "episode"
     return CoordinationCorrectionProposal(
         item_id=item.id,
-        original_representation=item.statement,
+        original_representation=representation_text(item),
         correction_text=text.strip(),
         suggested_scope=suggested_scope,
         episode_effect=EPISODE_EFFECT,
@@ -154,13 +184,14 @@ def propose(
 
 
 def confirm(
-    workflow_store: WorkflowStore, workspace_id: str, referral: Referral, item: CoordinationItem,
+    workflow_store: WorkflowStore, workspace_id: str, target: Referral | CorrectionTarget, item: CoordinationItem,
     physician_id: str, text: str, case_family: str, scope: str,
 ) -> AgentCorrection:
     """The only write. A durable scope re-derives its learning server-side
     (never trusting a client-supplied rule set) and confirms it through the
     existing store, which layers it and records supersession."""
-    proposal = propose(workflow_store, workspace_id, referral, item, physician_id, text, case_family, scope)
+    target = target if isinstance(target, CorrectionTarget) else CorrectionTarget.for_referral(target)
+    proposal = propose(workflow_store, workspace_id, target, item, physician_id, text, case_family, scope)
     learning_id: str | None = None
     version: str | None = None
     if scope in ("future", "both"):
@@ -182,7 +213,7 @@ def confirm(
         else:
             learning = workflow_store.create_proposed_learning(
                 workspace_id, persona_id, "coordination_correction",
-                f"referral-{referral.id}:{item.id}:{datetime.now(UTC).isoformat()}",
+                f"{target.source_key}:{item.id}:{datetime.now(UTC).isoformat()}",
                 proposal.correction_text,
             )
             workflow_store.update_proposed_learning(
@@ -193,10 +224,11 @@ def confirm(
     correction = AgentCorrection(
         physician_id=physician_id,
         agent_id=represented_agent_id(physician_id),
-        patient_id=referral.patient_id,
-        referral_id=referral.id,
+        patient_id=target.patient_id,
+        referral_id=target.referral_id,
+        consultation_record_id=target.consultation_record_id,
         source_item_id=item.id,
-        original_representation=item.statement,
+        original_representation=proposal.original_representation,
         correction_text=proposal.correction_text,
         scope=scope,
         status="confirmed" if learning_id else "episode_annotation",
@@ -204,4 +236,4 @@ def confirm(
         resulting_representation_version=version,
         created_at=datetime.now(UTC).isoformat(),
     )
-    return workflow_store.create_correction(workspace_id, referral.patient_id, correction)
+    return workflow_store.create_correction(workspace_id, target.patient_id, correction)

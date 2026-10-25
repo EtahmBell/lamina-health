@@ -1,6 +1,13 @@
 """Agent coordination, projected for one viewing physician (agent
 coordination oversight pass).
 
+The Network consultation itself (`project_network_consultation`) is
+projected the same way, before and independent of any referral: the
+referring agent's single case representation, every candidate agent's
+response, and the recorded routing result. One ownership rule
+(`can_correct_item`: whose agent produced the item) governs both views;
+selection never does.
+
 One referral is one coordination episode. Its structured record has two
 sources, both already persisted and both immutable here:
 
@@ -24,18 +31,21 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from backend.demo_identity import PCP_AGENT_ID
+from backend.demo_identity import LUCY_AGENT_ID, PCP_AGENT_ID
 from backend.models import (
     AgentCorrection,
     CoordinationActor,
+    CoordinationDetail,
     CoordinationEpisode,
     CoordinationEvent,
     CoordinationEventType,
     CoordinationFact,
     CoordinationItem,
+    NetworkConsultationEpisode,
     Referral,
 )
 from backend.synthetic_data import synthetic_agent_id
+from backend.synthetic_data.identities import SYNTHETIC_PHYSICIAN_NPIS
 
 CORRECTABLE_KINDS = frozenset({"agent_representation", "practice_representation"})
 STAGE_ORDER = ("routing", "clarification", "workup", "acceptance", "scheduling", "handoff")
@@ -186,40 +196,158 @@ def _join(words: list[str]) -> str:
     return words[0] if len(words) == 1 else f"{', '.join(words[:-1])}, and {words[-1]}"
 
 
-def _consultation_items(referral: Referral, record: dict[str, Any], receiving_name: str) -> list[CoordinationItem]:
+def agent_owner(agent_id: str, referring_physician_id: str = LUCY_AGENT_ID) -> str | None:
+    """The physician who owns a consultation agent -- the referring
+    physician for the (legacy-id) referring agent, otherwise the candidate
+    physician the agent represents. Ownership never depends on whether that
+    physician was selected."""
+    if agent_id == PCP_AGENT_ID:
+        return referring_physician_id
+    return _PHYSICIAN_BY_AGENT.get(agent_id)
+
+
+_PHYSICIAN_BY_AGENT = {synthetic_agent_id(physician_id): physician_id for physician_id in SYNTHETIC_PHYSICIAN_NPIS}
+
+
+def _message_items(record: dict[str, Any], referring_physician_id: str) -> list[tuple[CoordinationItem, dict[str, Any]]]:
+    """Every agent-authored consultation message, as the same structured
+    item in every view (the Network consultation and any referral that came
+    from it). The referring agent's case request is ONE item however many
+    candidate agents received it -- correcting it corrects the source."""
     result = record["result"]
-    receiving_agent = synthetic_agent_id(referral.receiving_physician_id)
-    party_agents = {PCP_AGENT_ID: referral.referring_physician_id, receiving_agent: referral.receiving_physician_id}
-    items: list[CoordinationItem] = []
+    referral_question = (result.get("care_routing") or {}).get("referral_question")
+    items: list[tuple[CoordinationItem, dict[str, Any]]] = []
     for message in result.get("messages", []):
         projection = _MESSAGE_PROJECTION.get(message["message_type"])
         sender = message["sender_agent_id"]
-        if projection is None or sender not in party_agents:
-            continue
-        # Only what passed between the two parties' agents (or what Lucy's
-        # agent shared with the network) -- never another candidate's
-        # exchange.
-        if message["recipient_agent_id"] not in (*party_agents, "network"):
+        owner = agent_owner(sender, referring_physician_id)
+        if projection is None or owner is None:
             continue
         stage, title, kind = projection
+        referring = sender == PCP_AGENT_ID
         facts = [CoordinationFact(text=fact, source=_PATIENT_RECORD_SOURCE) for fact in message.get("related_patient_facts", [])]
-        items.append(CoordinationItem(
+        details = (
+            [CoordinationDetail(label="Referral question", text=referral_question)]
+            if referring and message["message_type"] == "consult_request" and referral_question else []
+        )
+        items.append((CoordinationItem(
             id=f"consult-{record['id']}-{message['sequence']}",
             stage=stage,
             title=title,
             actor_kind="agent",
-            actor_physician_id=party_agents[sender],
+            actor_physician_id=owner,
+            actor_name=None if referring else message["sender_name"].removesuffix(" Agent"),
             content_kind=kind,
             statement=message["summary"],
+            details=details,
             # Only the referring side's representations rest on chart facts
-            # shown here; the receiving agent's responses are about its own
+            # shown here; a candidate agent's response is about its own
             # practice.
-            patient_facts=facts if sender == PCP_AGENT_ID else [],
+            patient_facts=facts if referring else [],
             occurred_at=record["completed_at"],
-        ))
-        if message["message_type"] in ("fit_response", "redirect") and sender == receiving_agent:
+        ), message))
+    return items
+
+
+def _consultation_items(referral: Referral, record: dict[str, Any], receiving_name: str) -> list[CoordinationItem]:
+    result = record["result"]
+    receiving_agent = synthetic_agent_id(referral.receiving_physician_id)
+    party_agents = {PCP_AGENT_ID, receiving_agent}
+    items: list[CoordinationItem] = []
+    for item, message in _message_items(record, referral.referring_physician_id):
+        # Only what passed between the two parties' agents (or what Lucy's
+        # agent shared with the network) -- never another candidate's
+        # exchange.
+        if message["sender_agent_id"] not in party_agents or message["recipient_agent_id"] not in (*party_agents, "network"):
+            continue
+        items.append(item)
+        if message["message_type"] in ("fit_response", "redirect") and message["sender_agent_id"] == receiving_agent:
             items.append(_routing_result_item(referral, result, record, receiving_name))
     return items
+
+
+_FIT_WORDS = {"strong": "Strong fit", "moderate": "Moderate fit", "poor": "Poor fit", "potential": "Potential fit (directory only)"}
+# Before any physician is selected there is no "receiving" side yet.
+_NETWORK_TITLES = {"Receiving response": "Response after clarification"}
+
+
+def network_consultation_items(record: dict[str, Any], referring_physician_id: str = LUCY_AGENT_ID) -> list[CoordinationItem]:
+    """The whole Network consultation, viewer-independent: the referring
+    agent's case representation (once), every candidate agent's response,
+    the clarification exchange, and the recorded routing result -- the
+    protocol priority, each evaluated route's fit/access, and the
+    recommendation. Only agent-authored items are ever correctable."""
+    result = record["result"]
+    items = [
+        item.model_copy(update={"title": _NETWORK_TITLES.get(item.title, item.title)})
+        for item, _message in _message_items(record, referring_physician_id)
+    ]
+    routing = result.get("care_routing") or {}
+    if routing.get("suggested_priority"):
+        # Protocol-grounded and clinician-confirmed, not an agent
+        # interpretation -- an authoritative input, never correctable here.
+        basis = f" {routing['priority_basis']}" if routing.get("priority_basis") else ""
+        items.append(CoordinationItem(
+            id=f"consult-{record['id']}-priority",
+            stage="routing", title="Priority", actor_kind="system", content_kind="system_fact",
+            statement=f"{routing['suggested_priority'].capitalize()}.{basis}", occurred_at=record["completed_at"],
+        ))
+    for index, route in enumerate(result.get("candidate_routes", [])):
+        modality = "e-consult" if route["modality"] == "econsult" else "in-person"
+        access = route["access"].get("econsult_response_label") if route["modality"] == "econsult" else route["access"].get("in_person_wait_label")
+        parts = [route["physician_name"].replace(" (synthetic)", ""), modality, _FIT_WORDS.get(route["fit_label"], route["fit_label"])]
+        if access:
+            parts.append(access)
+        items.append(CoordinationItem(
+            id=f"consult-{record['id']}-route-{index + 1}",
+            stage="routing", title="Recommended route" if route.get("recommended") else "Route evaluated",
+            actor_kind="network", content_kind="system_fact",
+            statement=" · ".join(parts) + ".", occurred_at=record["completed_at"],
+        ))
+    synthesis = next((message for message in result.get("messages", []) if message["message_type"] == "synthesis"), None)
+    if synthesis is not None:
+        items.append(CoordinationItem(
+            id=f"consult-{record['id']}-{synthesis['sequence']}",
+            stage="routing", title="Recommendation created", actor_kind="network", content_kind="system_fact",
+            statement=synthesis["summary"], occurred_at=record["completed_at"],
+        ))
+    return sorted(items, key=lambda item: STAGE_ORDER.index(item.stage))
+
+
+def consultation_parties(record: dict[str, Any], referring_physician_id: str = LUCY_AGENT_ID) -> set[str]:
+    """Who may view the Network consultation: the referring physician and
+    every physician whose agent took part -- selected or not."""
+    owners = {agent_owner(message["sender_agent_id"], referring_physician_id) for message in record["result"].get("messages", [])}
+    return {owner for owner in owners if owner is not None} | {referring_physician_id}
+
+
+def _with_viewer(item: CoordinationItem, viewer_physician_id: str, attached: list[AgentCorrection]) -> CoordinationItem:
+    return item.model_copy(update={"correctable": can_correct_item(viewer_physician_id, item), "corrections": attached})
+
+
+def project_network_consultation(
+    record: dict[str, Any], corrections: list[AgentCorrection], viewer_physician_id: str,
+    referring_physician_id: str = LUCY_AGENT_ID,
+) -> NetworkConsultationEpisode:
+    if viewer_physician_id not in consultation_parties(record, referring_physician_id):
+        raise PermissionError("Only the referring physician and the consulted physicians may view this consultation.")
+    own = [correction for correction in corrections if correction.physician_id == viewer_physician_id]
+    return NetworkConsultationEpisode(
+        consultation_record_id=record["id"],
+        patient_id=record["patient_id"],
+        viewer_physician_id=viewer_physician_id,
+        referring_physician_id=referring_physician_id,
+        items=[
+            _with_viewer(item, viewer_physician_id, [correction for correction in own if correction.source_item_id == item.id])
+            for item in network_consultation_items(record, referring_physician_id)
+        ],
+    )
+
+
+def representation_text(item: CoordinationItem) -> str:
+    """The full original representation as recorded on a correction --
+    the statement plus any labelled parts corrected with it."""
+    return " ".join([item.statement, *(f"{detail.label}: {detail.text}" for detail in item.details)])
 
 
 def _event_items(referral: Referral) -> list[CoordinationItem]:
@@ -273,22 +401,19 @@ def project_coordination_episode(
 ) -> CoordinationEpisode:
     if viewer_physician_id not in (referral.referring_physician_id, referral.receiving_physician_id):
         raise PermissionError("Only the two physicians on this referral may view its coordination.")
-    own = [
-        correction for correction in corrections
-        if correction.referral_id == referral.id and correction.physician_id == viewer_physician_id
-    ]
+    own = [correction for correction in corrections if correction.physician_id == viewer_physician_id]
     items = []
     for item in coordination_items(referral, consultation_record, receiving_name):
+        # Consultation items are the same entries the Network consultation
+        # shows (their ids name the consultation record), so a correction
+        # made there before the referral existed stays attached here too.
         attached = [
             correction for correction in own
-            if correction.source_item_id == item.id
+            if (correction.source_item_id == item.id and (item.id.startswith("consult-") or correction.referral_id == referral.id))
             or (correction.source_item_id is None and correction.source_event_sequence is not None
-                and item.id == f"event-{correction.source_event_sequence}")
+                and correction.referral_id == referral.id and item.id == f"event-{correction.source_event_sequence}")
         ]
-        items.append(item.model_copy(update={
-            "correctable": can_correct_item(viewer_physician_id, item),
-            "corrections": attached,
-        }))
+        items.append(_with_viewer(item, viewer_physician_id, attached))
     return CoordinationEpisode(
         referral_id=referral.id or 0,
         patient_id=referral.patient_id,
@@ -310,6 +435,7 @@ _FUTURE_CUES = re.compile(
     r"\b(?:going\s+forward|in\s+(?:the\s+)?future|from\s+now\s+on|(?:in\s+)?(?:similar|other)\s+(?:cases|patients|situations|referrals)|"
     r"cases\s+like\s+(?:this|these)|patients\s+like\s+(?:this|these)|situations\s+like\s+(?:this|these)|"
     r"(?:my\s+)?agent\s+should|should(?:n't|\s+not)?\s+(?:block|be\s+required|describe|say|represent|treat|ask|request)|"
+    r"(?:don't|do\s+not)\s+(?:describe|say|represent|call|frame)|for\s+(?:all\s+)?my\s+(?:referrals|patients|cases)|"
     r"always|never|in\s+general|generally|as\s+a\s+rule|unless)\b",
     re.IGNORECASE,
 )

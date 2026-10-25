@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, askPhysicianAgent, confirmCoordinationCorrection, createReferral, getAgentOverview, getCoordinationEpisode, getEncounter, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, interpretCoordinationCorrection, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationCorrectionProposal, type CoordinationEpisode, type CoordinationItem, type CorrectionScope, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
+import { acceptReferral, askPhysicianAgent, confirmCoordinationCorrection, createReferral, getAgentOverview, getCoordinationEpisode, getEncounter, getNetworkConsultationEpisode, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, interpretCoordinationCorrection, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationCorrectionProposal, type CoordinationEpisode, type CoordinationItem, type CoordinationTarget, type NetworkConsultationEpisode, type CorrectionScope, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME, TONJIT_ID } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkHighlights, trainingPath, TrainTab, WorklistRows, type WorklistRowData } from './Engagement.tsx'
@@ -10,7 +10,7 @@ import { LaminaMark } from './LaminaMark.tsx'
 import { physicianInitials } from './networkRoster.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 import { acceptedReferralStep, attentionOrder, CHEN_SEEDED_NEXT_STEPS, handledByAgentOrStaff, referralReviewStep, topAttention, type NextStepItem } from './specialistWorklist.ts'
-import { canCorrectEvent, coordinationActorLabel, groupByStage, SCOPE_LABELS, type PartyNames } from './coordinationEpisode.ts'
+import { canCorrectEvent, coordinationActorLabel, groupByStage, groupNetworkConsultation, SCOPE_LABELS, type PartyNames } from './coordinationEpisode.ts'
 import { derivePhases, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
@@ -655,7 +655,7 @@ export function AgentCoordinationModal({
       <p className="coordination-footer">{referral.status === 'consult_returned' ? '✓ Specialist consultation handoff received' : referral.status === 'scheduled' ? '✓ Consultation scheduled' : referral.status === 'accepted' ? `✓ Referral accepted by ${receivingPhysicianName}` : referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
     </div>
     {correcting && referral.id != null && <CoordinationCorrectionDrawer
-      referralId={referral.id}
+      target={{ kind: 'referral', id: referral.id }}
       item={correcting}
       viewerPhysicianId={viewerPhysicianId}
       onCancel={() => setCorrecting(null)}
@@ -664,19 +664,72 @@ export function AgentCoordinationModal({
   </div></ModalPortal>
 }
 
+/**
+ * Network consultation oversight: the same entries, ownership rule and
+ * correction drawer as Agent coordination, applied to the Network
+ * consultation itself -- before any physician is selected. The referring
+ * agent's case representation is ONE entry however many candidate agents
+ * received it; candidate agents' responses are read-only unless the viewer
+ * owns that agent. Correcting records an annotation (or, when chosen, a
+ * confirmed learning); recorded responses are never rewritten or re-ranked.
+ */
+export function NetworkConsultationOversight({ recordId, viewerPhysicianId, viewerName }: {
+  recordId: number; viewerPhysicianId: string; viewerName: string
+}) {
+  const [episode, setEpisode] = useState<NetworkConsultationEpisode | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const [correcting, setCorrecting] = useState<CoordinationItem | null>(null)
+  const load = () => {
+    getNetworkConsultationEpisode(recordId, viewerPhysicianId)
+      .then((value) => { setEpisode(value); setLoadError('') })
+      .catch((error) => setLoadError(error instanceof Error ? error.message : 'Could not load the consultation record.'))
+  }
+  useEffect(load, [recordId, viewerPhysicianId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const names: PartyNames = {
+    referringPhysicianId: episode?.referring_physician_id ?? '', referringName: PCP_NAME,
+    receivingPhysicianId: '', receivingName: '',
+  }
+  return <div className="network-oversight" aria-label="What each agent represented">
+    <header><strong>What each agent represented</strong><small>Correct only what your own agent said · the original stays on record</small></header>
+    {loadError && <p className="demo-reset-error" role="alert">{loadError}</p>}
+    {!episode && !loadError && <p className="muted-note">Loading consultation record…</p>}
+    {episode && groupNetworkConsultation(episode.items, episode.referring_physician_id).map((group) => <section className="coordination-stage" key={group.key} aria-label={group.label}>
+      <p className="section-label coordination-stage-label">{group.label}</p>
+      <div className="coordination-timeline">
+        {group.items.map(({ item, number }) => <CoordinationEntry
+          key={item.id} item={item} number={number}
+          actorLabel={coordinationActorLabel(item, names)}
+          side={item.actor_physician_id === episode.referring_physician_id ? 'referring' : item.actor_kind === 'agent' ? 'receiving' : 'system'}
+          viewerName={viewerName}
+          canCorrect={canCorrectEvent(viewerPhysicianId, item)}
+          onCorrect={() => setCorrecting(item)}
+        />)}
+      </div>
+    </section>)}
+    {correcting && <ModalPortal><CoordinationCorrectionDrawer
+      target={{ kind: 'consultation', id: recordId }}
+      item={correcting}
+      viewerPhysicianId={viewerPhysicianId}
+      onCancel={() => setCorrecting(null)}
+      onConfirmed={() => { setCorrecting(null); load() }}
+    /></ModalPortal>}
+  </div>
+}
+
 function CoordinationEntry({ item, number, actorLabel, side, viewerName, canCorrect, onCorrect }: {
   item: CoordinationItem; number: string; actorLabel: string; side: 'referring' | 'receiving' | 'system'
   viewerName: string; canCorrect: boolean; onCorrect: () => void
 }) {
   const corrections = item.corrections.filter((correction) => correction.scope != null)
   const feedback = item.corrections.filter((correction) => correction.scope == null)
+  const details = item.details ?? []
   return <div className={`coordination-event actor-${side}`}>
     <span className="coordination-number" aria-hidden="true">{number}</span>
     <strong className="coordination-title">{item.title}</strong>
     <span className="coordination-actor">{actorLabel}</span>
     {corrections.length > 0
-      ? <div className="coordination-original"><span className="coordination-original-label">Original</span><p>“{item.statement}”</p></div>
-      : <p>{item.statement}</p>}
+      ? <div className="coordination-original"><span className="coordination-original-label">Original</span><p>“{item.statement}”</p>{details.map((detail) => <p key={detail.label}><b>{detail.label}:</b> {detail.text}</p>)}</div>
+      : <><p>{item.statement}</p>{details.map((detail) => <p className="coordination-detail" key={detail.label}><b>{detail.label}:</b> {detail.text}</p>)}</>}
     {item.patient_facts.length > 0 && <ul className="coordination-facts" aria-label="Patient facts">
       {item.patient_facts.map((fact) => <li key={fact.text}><span>{fact.text}</span><small>{fact.source}</small></li>)}
     </ul>}
@@ -697,8 +750,8 @@ function CoordinationEntry({ item, number, actorLabel, side, viewerName, canCorr
  * correction is never silently generalized: when the scope can't be
  * inferred, nothing is preselected and the physician is asked.
  */
-function CoordinationCorrectionDrawer({ referralId, item, viewerPhysicianId, onCancel, onConfirmed }: {
-  referralId: number; item: CoordinationItem; viewerPhysicianId: string; onCancel: () => void; onConfirmed: () => void
+function CoordinationCorrectionDrawer({ target, item, viewerPhysicianId, onCancel, onConfirmed }: {
+  target: CoordinationTarget; item: CoordinationItem; viewerPhysicianId: string; onCancel: () => void; onConfirmed: () => void
 }) {
   const [text, setText] = useState('')
   const [proposal, setProposal] = useState<CoordinationCorrectionProposal | null>(null)
@@ -713,7 +766,7 @@ function CoordinationCorrectionDrawer({ referralId, item, viewerPhysicianId, onC
   const interpret = async () => {
     setBusy(true); setError('')
     try {
-      const result = await interpretCoordinationCorrection(referralId, item.id, viewerPhysicianId, text.trim())
+      const result = await interpretCoordinationCorrection(target, item.id, viewerPhysicianId, text.trim())
       setProposal(result)
       setScope(result.suggested_scope)
     } catch (interpretError) {
@@ -724,7 +777,7 @@ function CoordinationCorrectionDrawer({ referralId, item, viewerPhysicianId, onC
     if (!proposal || !scope) return
     setBusy(true); setError('')
     try {
-      await confirmCoordinationCorrection(referralId, item.id, viewerPhysicianId, proposal.correction_text, scope)
+      await confirmCoordinationCorrection(target, item.id, viewerPhysicianId, proposal.correction_text, scope)
       onConfirmed()
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : 'Could not save this correction.')
@@ -740,7 +793,7 @@ function CoordinationCorrectionDrawer({ referralId, item, viewerPhysicianId, onC
       {!proposal ? <>
         <p className="eyebrow">Correct your agent</p>
         <p className="section-label">Your agent represented this as</p>
-        <blockquote className="coordination-correction-quote">“{item.statement}”</blockquote>
+        <blockquote className="coordination-correction-quote">“{item.statement}”{(item.details ?? []).map((detail) => <span className="coordination-correction-detail" key={detail.label}><b>{detail.label}:</b> {detail.text}</span>)}</blockquote>
         <label className="section-label" htmlFor="coordination-correction-text">What would you change?</label>
         <textarea id="coordination-correction-text" className="feedback-reason-text" value={text} maxLength={1000} onChange={(event) => setText(event.target.value)} autoFocus />
         <p className="muted-note">Add context or explain how your agent should represent this in similar situations.</p>
