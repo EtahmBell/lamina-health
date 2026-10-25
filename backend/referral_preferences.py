@@ -335,6 +335,18 @@ _INFORMATION_CUES = re.compile(
     r"why\s+(?:they|it)\s+(?:was|were)\s+stopped)\b",
     re.IGNORECASE,
 )
+# "Renal function is helpful but shouldn't block review" / "X is helpful,
+# not required": the physician names wanted information and explicitly says
+# it is NOT a requirement -- helpful, never required (coordination
+# oversight pass: the typical correction of an over-strict requirement).
+_HELPFUL_NOT_BLOCKING = re.compile(
+    r"^(?:actually,?\s+|but\s+|i\s+think\s+|in\s+fact,?\s+)*(.+?)\s+(?:is|are)\s+(?:usually\s+|generally\s+|still\s+|really\s+|always\s+)?"
+    r"(?:helpful|useful|nice\s+to\s+have|good\s+to\s+have)\b[^.;]*?"
+    r"(?:(?:shouldn't|should\s+not|doesn't|does\s+not|don't|do\s+not|needn't|need\s+not)\s+(?:need\s+to\s+)?(?:block|hold\s+up|delay|gate)|"
+    r"(?:isn't|is\s+not|aren't|are\s+not|not)\s+(?:a\s+)?(?:required|requirement|blocking|necessary)|"
+    r"(?:shouldn't|should\s+not)\s+be\s+(?:required|a\s+requirement))",
+    re.IGNORECASE,
+)
 _NEGATED_REQUIRE = re.compile(r"\b(?:don't|do\s+not|doesn't|does\s+not|no\s+longer)\s+(?:require|need)\b", re.IGNORECASE)
 
 # Concept normalization (Part F). Each concept is a template on the case
@@ -488,6 +500,16 @@ def deterministic_interpret(source_text: str, case_family: str, family_known: bo
             condition = _modality_condition(sentence)
             if condition:
                 modality_rules.append({"modality": "in_person", "condition": condition})
+            continue
+        demoted = _HELPFUL_NOT_BLOCKING.search(sentence)
+        if demoted:
+            subject = re.sub(r"\band\b", ",", demoted.group(1), flags=re.IGNORECASE)
+            for phrase in (part.strip() for part in subject.split(",")):
+                if not phrase:
+                    continue
+                key, label = _requirement_key_and_label(phrase)
+                if not any(item.key == key for item in helpful):
+                    helpful.append(ReferralRequirement(key=key, label=label, required=False))
             continue
         # "I prefer X before review" names wanted information without
         # making it a hard requirement -- interpreted as helpful; the
@@ -892,15 +914,18 @@ def effective_requirement_items(
     helpful information (e.g. "I'd like the reason prior medications were
     stopped, when available") never removes the practice-footprint
     baseline: baseline required items stay required, baseline helpful
-    items stay, and the new helpful items are added."""
+    items stay, and the new helpful items are added. An item the physician
+    explicitly made helpful is no longer required."""
     if structured.required:
         return preference_requirement_items(structured)
     from backend.referrals.requirements import REFERRAL_REQUIREMENTS_BY_KEY
 
     footprint = REFERRAL_REQUIREMENTS_BY_KEY.get((physician_id, case_family), [])
     authored_keys = {item.key for item in structured.helpful}
+    # A physician who says an item is helpful has said it doesn't block
+    # review -- that demotes the baseline requirement with the same key.
     return [
-        *(item for item in footprint if item.required),
+        *(item for item in footprint if item.required and item.key not in authored_keys),
         *(item for item in footprint if not item.required and item.key not in authored_keys),
         *structured.helpful,
     ]

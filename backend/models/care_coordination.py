@@ -15,6 +15,7 @@ from pydantic import Field
 
 from .consultation import MedicationChange, StrictModel
 from .referral import Referral
+from .referral_preference import StructuredReferralPreference
 
 
 class AppointmentSlot(StrictModel):
@@ -177,17 +178,26 @@ class CoordinationChatAnswer(StrictModel):
     created_at: str
 
 
+CorrectionScope = Literal["episode", "future", "both"]
+
+
 class AgentCorrection(StrictModel):
     """A physician's explicit correction of their OWN agent's behavior
     (demo-consolidation pass, Part 23-31) -- durable, and deliberately
     separate from the immutable CoordinationEvent audit trail: the event
     stays "this is what the agent did"; this is the attached, later fact
-    "the physician says this should change." `status` stays
-    `pending_training` in this pass -- turning a correction into a
-    confirmed physician-representation update is the next pass's NLP/quick-
-    training flow, never this artifact alone (Part 30). Only the physician
-    who owns `agent_id` may create one referencing their own agent (Part 28:
-    enforced by the API layer, never by this model)."""
+    "the physician says this should change." Only the physician who owns
+    `agent_id` may create one referencing their own agent (Part 28:
+    enforced by the API layer, never by this model).
+
+    Coordination oversight pass: a correction made from Agent coordination
+    also records which structured item it annotates (`source_item_id`),
+    what the agent originally represented, and its scope. `status` is
+    `pending_training` for plain feedback (the older "Not quite" paths),
+    `episode_annotation` for a this-coordination-only correction, and
+    `confirmed` once a durable correction became a confirmed learning
+    (`resulting_learning_id`, at representation version
+    `resulting_representation_version`)."""
 
     id: int | None = None
     physician_id: str
@@ -195,9 +205,14 @@ class AgentCorrection(StrictModel):
     patient_id: str
     referral_id: int | None = None
     source_event_sequence: int | None = None
+    source_item_id: str | None = None
     selected_text: str | None = None
+    original_representation: str | None = None
     correction_text: str
-    status: Literal["pending_training"] = "pending_training"
+    scope: CorrectionScope | None = None
+    status: Literal["pending_training", "episode_annotation", "confirmed"] = "pending_training"
+    resulting_learning_id: str | None = None
+    resulting_representation_version: str | None = None
     created_at: str
 
 
@@ -207,3 +222,78 @@ class CreateAgentCorrectionRequest(StrictModel):
     source_event_sequence: int | None = None
     selected_text: str | None = None
     correction_text: str
+
+
+# ---------------------------------------------------------------------------
+# Agent coordination oversight pass: the structured coordination episode,
+# projected for ONE viewing physician. Only permitted structured outputs
+# appear here (requests, routing results, clarifications, requirements,
+# provenance, acceptance, scheduling, handoff status) -- never evidence
+# internals, prompts, model traces or free-form agent transcripts.
+# ---------------------------------------------------------------------------
+CoordinationStage = Literal["routing", "clarification", "workup", "acceptance", "scheduling", "handoff"]
+# system_fact / patient_fact are immutable records; agent_representation and
+# practice_representation are what a physician's own agent said or applied,
+# and are the only kinds its owner can correct.
+CoordinationContentKind = Literal["system_fact", "patient_fact", "agent_representation", "practice_representation"]
+
+
+class CoordinationFact(StrictModel):
+    text: str
+    source: str
+
+
+class CoordinationItem(StrictModel):
+    id: str
+    stage: CoordinationStage
+    title: str
+    actor_kind: Literal["agent", "physician", "system", "network", "scheduling_workflow"]
+    # The physician whose agent produced the item (or who acted), if any.
+    actor_physician_id: str | None = None
+    content_kind: CoordinationContentKind
+    statement: str
+    patient_facts: list[CoordinationFact] = Field(default_factory=list)
+    occurred_at: str | None = None
+    # Whether THIS viewer may correct it -- computed by
+    # backend.referrals.coordination_episode.can_correct_item, and enforced
+    # again by the correction endpoints.
+    correctable: bool = False
+    # The viewer's own corrections of this item (never another physician's).
+    corrections: list[AgentCorrection] = Field(default_factory=list)
+
+
+class CoordinationEpisode(StrictModel):
+    referral_id: int
+    patient_id: str
+    viewer_physician_id: str
+    viewer_role: Literal["referring", "receiving"]
+    referring_physician_id: str
+    receiving_physician_id: str
+    items: list[CoordinationItem] = Field(default_factory=list)
+
+
+class CoordinationCorrectionRequest(StrictModel):
+    physician_id: str
+    correction_text: str = Field(min_length=1, max_length=1000)
+    # Omitted on interpret (Lamina proposes one, or asks); required on
+    # confirm.
+    scope: CorrectionScope | None = None
+
+
+class CoordinationCorrectionProposal(StrictModel):
+    """What confirming would do -- computed, never persisted (cancelling a
+    proposal changes nothing)."""
+
+    item_id: str
+    original_representation: str
+    correction_text: str
+    # None when the scope can't be inferred confidently: the physician is
+    # asked to choose.
+    suggested_scope: CorrectionScope | None = None
+    episode_effect: str
+    # The durable change, when one is possible.
+    future_available: bool
+    future_effect: list[str] = Field(default_factory=list)
+    future_unavailable_reason: str | None = None
+    future_case_family: str | None = None
+    future_preference: StructuredReferralPreference | None = None

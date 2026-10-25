@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, askPhysicianAgent, createAgentCorrection, createReferral, getAgentOverview, getEncounter, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationEvent, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
+import { acceptReferral, askPhysicianAgent, confirmCoordinationCorrection, createReferral, getAgentOverview, getCoordinationEpisode, getEncounter, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, interpretCoordinationCorrection, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationCorrectionProposal, type CoordinationEpisode, type CoordinationItem, type CorrectionScope, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME, TONJIT_ID } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
 import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkHighlights, trainingPath, TrainTab, WorklistRows, type WorklistRowData } from './Engagement.tsx'
@@ -10,7 +10,8 @@ import { LaminaMark } from './LaminaMark.tsx'
 import { physicianInitials } from './networkRoster.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 import { acceptedReferralStep, attentionOrder, CHEN_SEEDED_NEXT_STEPS, handledByAgentOrStaff, referralReviewStep, topAttention, type NextStepItem } from './specialistWorklist.ts'
-import { derivePhases, eventActorLabel, EVENT_TYPE_TITLES, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
+import { canCorrectEvent, coordinationActorLabel, groupByStage, SCOPE_LABELS, type PartyNames } from './coordinationEpisode.ts'
+import { derivePhases, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
 export { derivePhases } from './referralPhases.ts'
 export type { DisplayPhase } from './referralPhases.ts'
@@ -507,7 +508,7 @@ export function ReferralCoordinationSurface({
             <div className="referral-artifact-links">
               <button type="button" className="text-button" onClick={openHandoff}>View handoff →</button>
               <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
-              <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>
+              <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>Agent coordination →</button>
               {scheduling?.status === 'scheduled' && <button type="button" className="text-button" onClick={() => setSchedulingDetailsOpen(true)}>View scheduling details →</button>}
             </div>
             <CoordinationChatCard
@@ -549,7 +550,7 @@ export function ReferralCoordinationSurface({
       {status === 'done' && referral && !justCompleted && <div className="referral-artifact-links">
         <p className="section-label">Referral details</p>
         <button type="button" className="text-button" onClick={() => setPacketOpen(true)}>View referral packet →</button>
-        <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination →</button>
+        <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>Agent coordination →</button>
         {scheduling?.status === 'scheduled' && <button type="button" className="text-button" onClick={() => setSchedulingDetailsOpen(true)}>View scheduling details →</button>}
       </div>}
       {/* Full-card completion takeover (Part 2-4): absolutely positioned over
@@ -582,75 +583,49 @@ export function ReferralCoordinationSurface({
 }
 
 /**
- * The detailed, scrollable audit trail behind "See agent coordination". Every
- * row is a rendering of a real backend CoordinationEvent -- structured
- * operational facts (what was checked, requested, found, attached), never
- * hidden model chain-of-thought (see Part I).
- */
-/**
- * Which physician's agent actually produced this event, if any -- mirrors
- * the backend's own `_correctable_event_owner` (Part 23-28). System events
- * (preflight_completed, referral_ready, ...) are never correctable: no
- * single physician's agent authored them.
- */
-function correctableEventOwner(referral: Referral, event: CoordinationEvent): string | null {
-  if (event.actor === 'referring_agent') return referral.referring_physician_id
-  if (event.actor === 'receiving_agent') return referral.receiving_physician_id
-  return null
-}
-
-/**
- * A quiet, physician-owned correction mechanic (demo-consolidation pass,
- * Part 23-28): a physician may correct only THEIR OWN agent's events here
- * (Lucy corrects Lucy's agent, Chen corrects Chen's agent, never cross-
- * physician -- enforced again server-side regardless). Saved as a
- * pending_training AgentCorrection, a separate attached artifact -- the
- * original CoordinationEvent audit trail is never mutated. This is
- * intentionally the simple, quiet fallback ("Correct this" per event)
- * rather than a bespoke text-selection popover; an active browser text
- * selection inside the event is still opportunistically captured as
- * `selected_text` when present.
+ * Agent coordination (agent coordination oversight pass): the ONE shared
+ * structured timeline of a referral's coordination episode, used by both
+ * physicians from every entry point (Lucy's referral card and specialty-care
+ * episode, Chen's incoming-referral review and patient detail). Grouped by
+ * stage -- routing, clarification, workup, acceptance, scheduling, handoff
+ * -- never a transcript of agent messages, never model reasoning (Part I).
+ *
+ * The episode comes from the backend already projected for this viewer: the
+ * same entries for both physicians, with correction controls only on the
+ * viewer's OWN agent's representations (canCorrectEvent; enforced again by
+ * the correction API). A correction never edits an entry: the original stays
+ * visible, and the viewer's correction is shown beneath it.
  */
 export function AgentCoordinationModal({
   referral, receivingPhysicianName, patientLabel, viewerPhysicianId, onClose,
 }: { referral: Referral; receivingPhysicianName: string; patientLabel?: string; viewerPhysicianId: string; onClose: () => void }) {
+  const [episode, setEpisode] = useState<CoordinationEpisode | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const [correcting, setCorrecting] = useState<CoordinationItem | null>(null)
+  const correctingRef = useRef(false)
+  correctingRef.current = correcting !== null
+  const load = () => {
+    if (referral.id == null) return
+    getCoordinationEpisode(referral.id, viewerPhysicianId)
+      .then((value) => { setEpisode(value); setLoadError('') })
+      .catch((error) => setLoadError(error instanceof Error ? error.message : 'Could not load agent coordination.'))
+  }
+  useEffect(load, [referral.id, viewerPhysicianId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    // Escape closes the correction drawer first, never both at once.
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !correctingRef.current) onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   const resolvedCount = referral.coordination_events.filter((event) => event.event_type === 'information_attached').length
   const needsPhysician = referral.coordination_events.some((event) => event.event_type === 'physician_action_required')
-  const referringLabel = `${PCP_NAME}'s Agent`
-
-  const [correctingSequence, setCorrectingSequence] = useState<number | null>(null)
-  const [correctionSelectedText, setCorrectionSelectedText] = useState('')
-  const [correctionText, setCorrectionText] = useState('')
-  const [savingCorrection, setSavingCorrection] = useState(false)
-  const [correctedSequences, setCorrectedSequences] = useState<Set<number>>(new Set())
-
-  const openCorrection = (sequence: number) => {
-    setCorrectionSelectedText(window.getSelection()?.toString().trim() ?? '')
-    setCorrectionText('')
-    setCorrectingSequence(sequence)
+  const names: PartyNames = {
+    referringPhysicianId: referral.referring_physician_id, referringName: PCP_NAME,
+    receivingPhysicianId: referral.receiving_physician_id, receivingName: receivingPhysicianName,
   }
-  const saveCorrection = async () => {
-    if (correctingSequence == null || !correctionText.trim()) return
-    setSavingCorrection(true)
-    try {
-      await createAgentCorrection(referral.patient_id, viewerPhysicianId, correctionText.trim(), {
-        referralId: referral.id ?? undefined,
-        sourceEventSequence: correctingSequence,
-        selectedText: correctionSelectedText || undefined,
-      })
-      setCorrectedSequences((previous) => new Set(previous).add(correctingSequence))
-      setCorrectingSequence(null)
-    } finally {
-      setSavingCorrection(false)
-    }
-  }
+  const viewerName = viewerPhysicianId === referral.referring_physician_id ? PCP_NAME : receivingPhysicianName
 
-  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+  return <ModalPortal><div className="post-flow-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !correcting) onClose() }}>
     <div className="post-flow-dialog coordination-dialog" role="dialog" aria-modal="true" aria-label="Agent coordination">
       <button className="text-button post-flow-close" onClick={onClose} aria-label="Close">×</button>
       <p className="eyebrow">Agent coordination</p>
@@ -660,37 +635,148 @@ export function AgentCoordinationModal({
         <p>{resolvedCount > 0 ? `${resolvedCount} missing requirement${resolvedCount === 1 ? '' : 's'} resolved automatically` : 'No missing requirements'}</p>
         <p>{needsPhysician ? 'Physician action required' : 'No physician action required'}</p>
       </div>
-      <div className="coordination-timeline">
-        {referral.coordination_events.map((event) => {
-          const owner = correctableEventOwner(referral, event)
-          const correctable = owner != null && owner === viewerPhysicianId
-          const corrected = correctedSequences.has(event.sequence)
-          return <div className={`coordination-event actor-${event.actor ?? 'system'}`} key={event.sequence}>
-            <span className="coordination-actor">{eventActorLabel(event, referringLabel, receivingPhysicianName)}</span>
-            <strong>{EVENT_TYPE_TITLES[event.event_type] ?? event.event_type}</strong>
-            <p>{event.summary}</p>
-            {correctable && corrected && <p className="coordination-correction-saved">✓ Saved for your agent to review. Nothing was changed automatically.</p>}
-            {correctable && !corrected && correctingSequence !== event.sequence && <button type="button" className="coordination-correct-trigger" onClick={() => openCorrection(event.sequence)}>Correct this</button>}
-            {correctingSequence === event.sequence && <div className="coordination-correction-form">
-              <p className="section-label">What should your agent have done or said instead?</p>
-              {correctionSelectedText && <p className="coordination-correction-selected">“{correctionSelectedText}”</p>}
-              <textarea
-                className="feedback-reason-text"
-                value={correctionText}
-                onChange={(textEvent) => setCorrectionText(textEvent.target.value)}
-                autoFocus
-              />
-              <div className="feedback-reason-actions">
-                <button type="button" className="text-button" onClick={() => setCorrectingSequence(null)}>Cancel</button>
-                <button type="button" className="button-secondary" disabled={savingCorrection || !correctionText.trim()} onClick={() => void saveCorrection()}>{savingCorrection ? 'Saving…' : 'Save correction'}</button>
-              </div>
-            </div>}
+      {loadError && <p className="demo-reset-error" role="alert">{loadError}</p>}
+      {!episode && !loadError && <p className="muted-note">Loading coordination…</p>}
+      {episode && <div className="coordination-stages">
+        {groupByStage(episode.items).map((group) => <section className="coordination-stage" key={group.stage} aria-label={group.label}>
+          <p className="section-label coordination-stage-label">{group.label}</p>
+          <div className="coordination-timeline">
+            {group.items.map(({ item, number }) => <CoordinationEntry
+              key={item.id} item={item} number={number}
+              actorLabel={coordinationActorLabel(item, names)}
+              side={item.actor_physician_id === referral.referring_physician_id ? 'referring' : item.actor_physician_id === referral.receiving_physician_id ? 'receiving' : 'system'}
+              viewerName={viewerName}
+              canCorrect={canCorrectEvent(viewerPhysicianId, item)}
+              onCorrect={() => setCorrecting(item)}
+            />)}
           </div>
-        })}
-      </div>
+        </section>)}
+      </div>}
       <p className="coordination-footer">{referral.status === 'consult_returned' ? '✓ Specialist consultation handoff received' : referral.status === 'scheduled' ? '✓ Consultation scheduled' : referral.status === 'accepted' ? `✓ Referral accepted by ${receivingPhysicianName}` : referral.status === 'submitted' ? '✓ Referral sent to the receiving specialist' : referral.status === 'ready_for_review' ? '✓ Referral ready for review' : 'Referral not yet ready for review'}</p>
     </div>
+    {correcting && referral.id != null && <CoordinationCorrectionDrawer
+      referralId={referral.id}
+      item={correcting}
+      viewerPhysicianId={viewerPhysicianId}
+      onCancel={() => setCorrecting(null)}
+      onConfirmed={() => { setCorrecting(null); load() }}
+    />}
   </div></ModalPortal>
+}
+
+function CoordinationEntry({ item, number, actorLabel, side, viewerName, canCorrect, onCorrect }: {
+  item: CoordinationItem; number: string; actorLabel: string; side: 'referring' | 'receiving' | 'system'
+  viewerName: string; canCorrect: boolean; onCorrect: () => void
+}) {
+  const corrections = item.corrections.filter((correction) => correction.scope != null)
+  const feedback = item.corrections.filter((correction) => correction.scope == null)
+  return <div className={`coordination-event actor-${side}`}>
+    <span className="coordination-number" aria-hidden="true">{number}</span>
+    <strong className="coordination-title">{item.title}</strong>
+    <span className="coordination-actor">{actorLabel}</span>
+    {corrections.length > 0
+      ? <div className="coordination-original"><span className="coordination-original-label">Original</span><p>“{item.statement}”</p></div>
+      : <p>{item.statement}</p>}
+    {item.patient_facts.length > 0 && <ul className="coordination-facts" aria-label="Patient facts">
+      {item.patient_facts.map((fact) => <li key={fact.text}><span>{fact.text}</span><small>{fact.source}</small></li>)}
+    </ul>}
+    {corrections.map((correction) => <div className="coordination-correction" key={correction.id ?? correction.created_at}>
+      <span className="coordination-correction-by">Corrected by Dr. {lastName(viewerName)} · {formatSubmittedAt(correction.created_at)}</span>
+      <p>“{correction.correction_text}”</p>
+      <small>{correction.scope ? SCOPE_LABELS[correction.scope] : ''}{correction.resulting_learning_id ? ' · Confirmed learning added to your agent' : ''}</small>
+    </div>)}
+    {feedback.length > 0 && <p className="coordination-correction-saved">✓ Feedback saved for your agent to review.</p>}
+    {canCorrect && <button type="button" className="coordination-correct-trigger" onClick={onCorrect}>Review / Correct →</button>}
+  </div>
+}
+
+/**
+ * Correct your agent (Part G-I): free text -> interpretation (never
+ * operational, never persisted) -> the physician picks or confirms the
+ * scope -> Confirm correction, the only write. A patient-specific
+ * correction is never silently generalized: when the scope can't be
+ * inferred, nothing is preselected and the physician is asked.
+ */
+function CoordinationCorrectionDrawer({ referralId, item, viewerPhysicianId, onCancel, onConfirmed }: {
+  referralId: number; item: CoordinationItem; viewerPhysicianId: string; onCancel: () => void; onConfirmed: () => void
+}) {
+  const [text, setText] = useState('')
+  const [proposal, setProposal] = useState<CoordinationCorrectionProposal | null>(null)
+  const [scope, setScope] = useState<CorrectionScope | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel, busy])
+  const interpret = async () => {
+    setBusy(true); setError('')
+    try {
+      const result = await interpretCoordinationCorrection(referralId, item.id, viewerPhysicianId, text.trim())
+      setProposal(result)
+      setScope(result.suggested_scope)
+    } catch (interpretError) {
+      setError(interpretError instanceof Error ? interpretError.message : 'Could not interpret this correction.')
+    } finally { setBusy(false) }
+  }
+  const confirm = async () => {
+    if (!proposal || !scope) return
+    setBusy(true); setError('')
+    try {
+      await confirmCoordinationCorrection(referralId, item.id, viewerPhysicianId, proposal.correction_text, scope)
+      onConfirmed()
+    } catch (confirmError) {
+      setError(confirmError instanceof Error ? confirmError.message : 'Could not save this correction.')
+      setBusy(false)
+    }
+  }
+  const effects = proposal && scope
+    ? [...(scope !== 'future' ? [proposal.episode_effect] : []), ...(scope !== 'episode' ? proposal.future_effect : [])]
+    : []
+  return <div className="post-flow-overlay coordination-correction-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !busy) onCancel() }}>
+    <div className="post-flow-dialog coordination-correction-dialog" role="dialog" aria-modal="true" aria-label="Correct your agent">
+      <button className="text-button post-flow-close" onClick={onCancel} aria-label="Close" disabled={busy}>×</button>
+      {!proposal ? <>
+        <p className="eyebrow">Correct your agent</p>
+        <p className="section-label">Your agent represented this as</p>
+        <blockquote className="coordination-correction-quote">“{item.statement}”</blockquote>
+        <label className="section-label" htmlFor="coordination-correction-text">What would you change?</label>
+        <textarea id="coordination-correction-text" className="feedback-reason-text" value={text} maxLength={1000} onChange={(event) => setText(event.target.value)} autoFocus />
+        <p className="muted-note">Add context or explain how your agent should represent this in similar situations.</p>
+        {error && <p className="demo-reset-error" role="alert">{error}</p>}
+        <div className="feedback-reason-actions">
+          <button type="button" className="text-button" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button type="button" className="button-primary" disabled={busy || !text.trim()} onClick={() => void interpret()}>{busy ? 'Interpreting…' : 'Interpret correction'}</button>
+        </div>
+      </> : <>
+        <p className="eyebrow">Proposed correction · Not yet operational</p>
+        <div className="coordination-proposal-group"><p className="section-label">Current representation</p><p>“{proposal.original_representation}”</p></div>
+        <div className="coordination-proposal-group"><p className="section-label">Your correction</p><p>“{proposal.correction_text}”</p></div>
+        <fieldset className="coordination-scope">
+          <legend className="section-label">Apply this correction to</legend>
+          {(['episode', 'future', 'both'] as CorrectionScope[]).map((option) => {
+            const unavailable = option !== 'episode' && !proposal.future_available
+            return <label key={option} className={`coordination-scope-option ${unavailable ? 'unavailable' : ''}`}>
+              <input type="radio" name="coordination-scope" value={option} checked={scope === option} disabled={unavailable || busy} onChange={() => setScope(option)} />
+              <span>{SCOPE_LABELS[option]}</span>
+            </label>
+          })}
+          {!proposal.future_available && proposal.future_unavailable_reason && <p className="muted-note">{proposal.future_unavailable_reason}</p>}
+        </fieldset>
+        {effects.length > 0 && <div className="coordination-proposal-group">
+          <p className="section-label">This would change</p>
+          <ul className="coordination-effects">{effects.map((line) => <li key={line}>{line}</li>)}</ul>
+        </div>}
+        {error && <p className="demo-reset-error" role="alert">{error}</p>}
+        <div className="feedback-reason-actions">
+          <button type="button" className="text-button" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button type="button" className="text-button" onClick={() => { setProposal(null); setScope(null) }} disabled={busy}>Edit</button>
+          <button type="button" className="button-primary" disabled={busy || !scope} onClick={() => void confirm()}>{busy ? 'Saving…' : 'Confirm correction'}</button>
+        </div>
+      </>}
+    </div>
+  </div>
 }
 
 /**
@@ -1140,7 +1226,7 @@ export function RequestReviewModal({
                 ? `${resolvedCount} missing requirement${resolvedCount === 1 ? '' : 's'} resolved before this reached you.`
                 : 'All required information was already included in the referral.'}</p>
               <p>No physician interruption was required.</p>
-              <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>See agent coordination <span>→</span></button>
+              <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>Agent coordination <span>→</span></button>
             </section>
 
             <button type="button" className="text-button request-review-packet-link" onClick={() => setPacketOpen(true)}>View full referral packet <span>→</span></button>
@@ -1323,7 +1409,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
   </div>
 
   const links = <div className="referral-mode-links">
-    <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>View referral history →</button>
+    <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>Agent coordination →</button>
   </div>
 
   // Symmetric cross-physician chat (Part H/S) -- available from acceptance
@@ -1346,7 +1432,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
       {handoff.sent_at && <small className="referral-submission-meta">Sent {formatSubmittedAt(handoff.sent_at)}</small>}
       <div className="referral-mode-links">
         <button type="button" className="text-button" onClick={() => setHandoffOpen(true)}>View handoff →</button>
-        <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>View referral history →</button>
+        <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>Agent coordination →</button>
       </div>
     </div>
     {chatCard}
@@ -1399,7 +1485,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
         <p>{CHEN_NAME} will respond asynchronously.</p>
         <p className="recommended-handling-line"><PriorityChip priority={referral.priority} />{capacity?.econsult_response_label && <span className="incoming-request-modality">· Expected within {capacity.econsult_response_label.replace('Approximately ', '~')}</span>}</p>
         <div className="referral-mode-links">
-          <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>View referral history →</button>
+          <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>Agent coordination →</button>
         </div>
       </div>
       {chatCard}
@@ -1415,7 +1501,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
         <p>The appointment has been confirmed.</p>
         <div className="referral-mode-links">
           <button type="button" className="text-button" onClick={() => setSchedulingDetailsOpen(true)}>View scheduling details →</button>
-          <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>View referral history →</button>
+          <button type="button" className="text-button" onClick={() => setCoordinationOpen(true)}>Agent coordination →</button>
         </div>
       </div>
       {chatCard}
@@ -1436,6 +1522,7 @@ export function ChenDownstreamCard({ referral, patientLabel }: { referral: Refer
       <p className="section-label">Referral question</p>
       <p>{referral.referral_question}</p>
       <p>Scheduling administration is in progress.</p>
+      {links}
     </div>
     {chatCard}
     {coordinationOpen && <AgentCoordinationModal referral={liveReferral} receivingPhysicianName={CHEN_NAME} patientLabel={patientLabel} viewerPhysicianId={liveReferral.receiving_physician_id} onClose={() => setCoordinationOpen(false)} />}

@@ -12,6 +12,10 @@ from backend.models import (
     ConsultationEncounter,
     CoordinationActor,
     CoordinationChatAnswer,
+    CoordinationCorrectionProposal,
+    CoordinationCorrectionRequest,
+    CoordinationEpisode,
+    CoordinationItem,
     CreateAgentCorrectionRequest,
     DraftHandoffRequest,
     EncounterIngestRequest,
@@ -46,6 +50,15 @@ from backend.referrals import (
     send_handoff,
 )
 from backend.clinical import build_patient_context
+from backend.coordination_corrections import CorrectionConflict, CorrectionNotAllowed
+from backend.coordination_corrections import confirm as confirm_coordination_correction
+from backend.coordination_corrections import propose as propose_coordination_correction
+from backend.referrals.coordination_episode import (
+    coordination_items,
+    infer_correction_scope,
+    linked_consultation,
+    project_coordination_episode,
+)
 from backend.referral_preferences import ensure_seed_preferences, requirement_override_for_referral
 from backend.synthetic_data import ALL_PHYSICIANS
 from backend.workflow import workflow_store
@@ -519,3 +532,89 @@ def create_agent_correction(
 @router.get("/patients/{patient_id}/corrections", response_model=list[AgentCorrection])
 def list_agent_corrections(patient_id: str, workspace_id: DemoWorkspace) -> list[AgentCorrection]:
     return workflow_store.list_corrections(workspace_id, patient_id)
+
+
+# --------------------------------------------------------------------------
+# Agent coordination oversight pass: the structured coordination episode for
+# one viewing physician, and corrections of that physician's OWN agent's
+# representations. The episode is the same for both physicians; only the
+# correction controls (and the viewer's own corrections) differ. Ownership
+# is enforced here, regardless of what the UI shows.
+# --------------------------------------------------------------------------
+
+
+def _consultation_record(workspace_id: str, referral: Referral) -> dict | None:
+    return linked_consultation(referral, workflow_store.history(workspace_id, limit=200))
+
+
+@router.get("/referrals/{referral_id}/coordination", response_model=CoordinationEpisode)
+def get_coordination_episode(
+    referral_id: int, viewer_physician_id: str, workspace_id: DemoWorkspace
+) -> CoordinationEpisode:
+    referral = _load_referral(workspace_id, referral_id)
+    try:
+        return project_coordination_episode(
+            referral,
+            _consultation_record(workspace_id, referral),
+            workflow_store.list_corrections(workspace_id, referral.patient_id),
+            viewer_physician_id,
+            _physician_display_name(referral.receiving_physician_id),
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+
+
+def _coordination_item(workspace_id: str, referral: Referral, item_id: str) -> CoordinationItem:
+    items = coordination_items(
+        referral, _consultation_record(workspace_id, referral), _physician_display_name(referral.receiving_physician_id)
+    )
+    item = next((candidate for candidate in items if candidate.id == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Coordination entry not found")
+    return item
+
+
+def _correction_context(workspace_id: str, referral_id: int, item_id: str) -> tuple[Referral, CoordinationItem, str, str]:
+    referral = _load_referral(workspace_id, referral_id)
+    item = _coordination_item(workspace_id, referral, item_id)
+    patient = load_patient(referral.patient_id)
+    first_name = patient.display_name.replace(" (synthetic)", "").split()[0]
+    return referral, item, build_patient_context(patient).case_family, first_name
+
+
+@router.post(
+    "/referrals/{referral_id}/coordination/{item_id}/corrections/interpret",
+    response_model=CoordinationCorrectionProposal,
+)
+def interpret_coordination_correction(
+    referral_id: int, item_id: str, request: CoordinationCorrectionRequest, workspace_id: DemoWorkspace
+) -> CoordinationCorrectionProposal:
+    """Never writes anything: cancelling a proposal leaves the episode and
+    the physician's representation exactly as they were."""
+    referral, item, case_family, first_name = _correction_context(workspace_id, referral_id, item_id)
+    scope = request.scope or infer_correction_scope(request.correction_text, first_name)
+    try:
+        return propose_coordination_correction(
+            workflow_store, workspace_id, referral, item, request.physician_id,
+            request.correction_text, case_family, scope,
+        )
+    except CorrectionNotAllowed as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+
+
+@router.post("/referrals/{referral_id}/coordination/{item_id}/corrections", response_model=AgentCorrection)
+def confirm_coordination_correction_endpoint(
+    referral_id: int, item_id: str, request: CoordinationCorrectionRequest, workspace_id: MutableDemoWorkspace
+) -> AgentCorrection:
+    if request.scope is None:
+        raise HTTPException(status_code=422, detail="Choose whether this applies to this coordination, similar cases, or both")
+    referral, item, case_family, _first_name = _correction_context(workspace_id, referral_id, item_id)
+    try:
+        return confirm_coordination_correction(
+            workflow_store, workspace_id, referral, item, request.physician_id,
+            request.correction_text, case_family, request.scope,
+        )
+    except CorrectionNotAllowed as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except CorrectionConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error

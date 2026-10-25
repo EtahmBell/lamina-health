@@ -170,9 +170,10 @@ test('an unresolved workflow renders a truthful "needs your input" state, never 
 
 /* -------------------------------------------------------------- modals (Part T) */
 
-test('See agent coordination opens the AgentCoordinationModal, built from real coordination events', () => {
-  assert.match(referralSource, /See agent coordination/)
-  assert.match(referralSource, /referral\.coordination_events\.map/)
+test('Agent coordination opens the AgentCoordinationModal, built from the referral\'s real coordination episode', () => {
+  assert.match(referralSource, />Agent coordination →</)
+  assert.match(referralSource, /getCoordinationEpisode\(referral\.id, viewerPhysicianId\)/)
+  assert.match(referralSource, /groupByStage\(episode\.items\)\.map/)
   assert.match(referralSource, /role="dialog" aria-modal="true" aria-label="Agent coordination"/)
 })
 
@@ -274,10 +275,10 @@ test('the full live referral sequence lands in a demo-acceptable ballpark -- slo
 
 /* --------------------------------------------------- polish pass: timeline dot color */
 
-test('timeline dots are colored by which agent actually acted on the event, using the existing mineral/copper palette', () => {
-  assert.match(referralSource, /className=\{`coordination-event actor-\$\{event\.actor \?\? 'system'\}`\}/)
-  assert.match(styles, /\.coordination-event\.actor-referring_agent::before \{ background: var\(--mineral-deep\); \}/)
-  assert.match(styles, /\.coordination-event\.actor-receiving_agent::before \{ background: var\(--copper\); \}/)
+test('timeline dots are colored by which side acted on the entry, using the existing mineral/copper palette', () => {
+  assert.match(referralSource, /className=\{`coordination-event actor-\$\{side\}`\}/)
+  assert.match(styles, /\.coordination-event\.actor-referring::before \{ background: var\(--mineral-deep\); \}/)
+  assert.match(styles, /\.coordination-event\.actor-receiving::before \{ background: var\(--copper\); \}/)
   assert.match(styles, /\.coordination-event\.actor-system::before \{ background: var\(--border\); \}/)
 })
 
@@ -373,7 +374,7 @@ test('the active-episode card exposes "Review handoff" as the primary action and
   assert.match(referralSource, /onClick=\{openHandoff\}>Review handoff →<\/button>/)
   assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-artifact-links">/)
   assert.match(referralSource, /onClick=\{\(\) => setPacketOpen\(true\)\}>View referral packet →<\/button>/)
-  assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination →<\/button>/)
+  assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>Agent coordination →<\/button>/)
   assert.doesNotMatch(referralSource, /function ReferralDetailsModal/, 'the modal was removed entirely -- direct links replace it')
   assert.doesNotMatch(referralSource, /Back to referral details/)
 })
@@ -456,10 +457,10 @@ test('ReferralCoordinationSurface accepts a restoredReferral prop and jumps stra
   assert.match(referralSource, /if \(restoredReferral\) return \/\/ already hydrated synchronously via initial state above/)
 })
 
-test('restoring a submitted referral still allows "See agent coordination" to open with the real restored events', () => {
+test('restoring a submitted referral still allows "Agent coordination" to open with the real restored events', () => {
   assert.match(referralSource, /useState<Referral \| null>\(restoredReferral\)/)
   assert.match(referralSource, /\{status === 'done' && referral && !justCompleted && <div className="referral-artifact-links">/)
-  assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination →<\/button>/)
+  assert.match(referralSource, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>Agent coordination →<\/button>/)
 })
 
 /* ------------------------------------------------------ patient-level referral lookup (backend) */

@@ -95,7 +95,7 @@ class PhysicianReferralPreference(StrictModel):
     # "physician_authored_nlp" is the real new product path; "migrated_fixture"
     # is only ever used once, to represent Dr. Chen's pre-existing fixture
     # rules through this same model (Part K) -- never a second hidden source.
-    source: Literal["physician_authored_nlp", "migrated_fixture"] = "physician_authored_nlp"
+    source: Literal["physician_authored_nlp", "migrated_fixture", "coordination_correction"] = "physician_authored_nlp"
     created_at: str
     updated_at: str
     confirmed_at: str | None = None

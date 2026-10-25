@@ -115,10 +115,16 @@ def reset_tonjit_demo(workspace_id: MutableDemoWorkspace) -> dict:
     preference, with modality unspecified) -- the lazy per-workspace seed
     recreates it on next read, so "teach -> confirm -> Tonjit ->
     e-consult clarification" can be rehearsed repeatedly without manual
-    database edits between runs."""
+    database edits between runs. Dr. Saruhashi's learnings confirmed from
+    a coordination correction are cleared too."""
     result = workflow_store.reset_demo_case(workspace_id, TONJIT_PATIENT_ID)
     result["removed_chen_referral_preferences"] = workflow_store.reset_physician_referral_preferences(
         workspace_id, "physician-chen"
+    )
+    # Agent coordination oversight pass: durable corrections Dr. Saruhashi
+    # confirmed from this demo's coordination are reset the same way.
+    result["removed_lucy_coordination_learnings"] = workflow_store.remove_proposed_learnings(
+        workspace_id, "lucy", "coordination_correction"
     )
     return result
 

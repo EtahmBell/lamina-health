@@ -198,11 +198,47 @@ export type CoordinationChatAnswer = {
 /** A physician's durable, explicit correction of their OWN agent's behavior
  * (demo-consolidation pass, Part 23-31) -- separate from the ephemeral chat
  * above and never mutating the immutable CoordinationEvent audit trail. */
-export type AgentCorrectionStatus = 'pending_training'
+export type AgentCorrectionStatus = 'pending_training' | 'episode_annotation' | 'confirmed'
+/** Agent coordination oversight pass: where a coordination correction
+ * applies -- this coordination only, similar cases going forward, or both. */
+export type CorrectionScope = 'episode' | 'future' | 'both'
 export type AgentCorrection = {
   id: number | null; physician_id: string; agent_id: string; patient_id: string
   referral_id: number | null; source_event_sequence: number | null
-  selected_text: string | null; correction_text: string; status: AgentCorrectionStatus; created_at: string
+  source_item_id?: string | null; original_representation?: string | null
+  selected_text: string | null; correction_text: string; status: AgentCorrectionStatus
+  scope?: CorrectionScope | null
+  /** Set when a durable correction became a confirmed learning. */
+  resulting_learning_id?: string | null; resulting_representation_version?: string | null
+  created_at: string
+}
+
+/** One structured entry of a coordination episode (agent coordination
+ * oversight pass) -- never free-form agent conversation. */
+export type CoordinationStage = 'routing' | 'clarification' | 'workup' | 'acceptance' | 'scheduling' | 'handoff'
+export type CoordinationContentKind = 'system_fact' | 'patient_fact' | 'agent_representation' | 'practice_representation'
+export type CoordinationItem = {
+  id: string; stage: CoordinationStage; title: string
+  actor_kind: 'agent' | 'physician' | 'system' | 'network' | 'scheduling_workflow'
+  actor_physician_id: string | null
+  content_kind: CoordinationContentKind
+  statement: string
+  patient_facts: { text: string; source: string }[]
+  occurred_at: string | null
+  /** The backend's own ownership decision for this viewer. */
+  correctable: boolean
+  /** The viewer's own corrections of this entry. */
+  corrections: AgentCorrection[]
+}
+export type CoordinationEpisode = {
+  referral_id: number; patient_id: string; viewer_physician_id: string; viewer_role: 'referring' | 'receiving'
+  referring_physician_id: string; receiving_physician_id: string; items: CoordinationItem[]
+}
+export type CoordinationCorrectionProposal = {
+  item_id: string; original_representation: string; correction_text: string
+  suggested_scope: CorrectionScope | null; episode_effect: string
+  future_available: boolean; future_effect: string[]; future_unavailable_reason: string | null
+  future_case_family: string | null; future_preference: StructuredReferralPreference | null
 }
 export type AgentLearning = { key: string; statement: string; provenance: string; status: 'suggested' | 'confirmed' | 'rejected'; updated_at: string | null }
 export type MyAgent = {
@@ -789,6 +825,21 @@ export const createAgentCorrection = (
     selected_text: options?.selectedText ?? null,
   }),
 })
+export const getCoordinationEpisode = (referralId: number, viewerPhysicianId: string) =>
+  request<CoordinationEpisode>(`/api/referrals/${referralId}/coordination?viewer_physician_id=${encodeURIComponent(viewerPhysicianId)}`)
+const coordinationCorrectionPath = (referralId: number, itemId: string) =>
+  `/api/referrals/${referralId}/coordination/${encodeURIComponent(itemId)}/corrections`
+/** Never writes anything -- cancelling the proposal changes nothing. */
+export const interpretCoordinationCorrection = (referralId: number, itemId: string, physicianId: string, correctionText: string, scope?: CorrectionScope) =>
+  request<CoordinationCorrectionProposal>(`${coordinationCorrectionPath(referralId, itemId)}/interpret`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ physician_id: physicianId, correction_text: correctionText, scope: scope ?? null }),
+  })
+export const confirmCoordinationCorrection = (referralId: number, itemId: string, physicianId: string, correctionText: string, scope: CorrectionScope) =>
+  request<AgentCorrection>(coordinationCorrectionPath(referralId, itemId), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ physician_id: physicianId, correction_text: correctionText, scope }),
+  })
 export const getAgentCorrections = (patientId: string) => request<AgentCorrection[]>(`/api/patients/${encodeURIComponent(patientId)}/corrections`)
 
 export const getPatientActivity = () => request<PatientActivity[]>('/api/workspace/activity')
@@ -886,7 +937,7 @@ export type StructuredReferralPreference = {
 export type PhysicianReferralPreference = {
   id: string; physician_id: string; case_family: string; source_text: string
   structured_rules: StructuredReferralPreference; status: ReferralPreferenceStatus
-  source: 'physician_authored_nlp' | 'migrated_fixture'
+  source: 'physician_authored_nlp' | 'migrated_fixture' | 'coordination_correction'
   created_at: string; updated_at: string; confirmed_at: string | null
   supersedes_id: string | null; representation_snapshot_id_at_confirmation: string | null
 }

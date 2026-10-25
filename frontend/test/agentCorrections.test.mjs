@@ -1,9 +1,10 @@
 /**
  * Physician-owned agent correction mechanic, in the Agent Coordination
- * timeline (demo-consolidation pass, Part 23-31). A quiet "Correct this"
- * per event, restricted to the viewing physician's own agent's events;
- * saved as a pending_training AgentCorrection, never mutating the original
- * immutable CoordinationEvent audit trail.
+ * timeline (demo-consolidation pass, Part 23-31; reworked by the agent
+ * coordination oversight pass). "Review / Correct →" appears only on the
+ * viewing physician's own agent's representations; a correction is
+ * interpreted, scoped and explicitly confirmed, and never mutates the
+ * original coordination entry.
  */
 
 import assert from 'node:assert/strict'
@@ -20,59 +21,61 @@ const slice = (source, from, to) => {
 }
 const modal = () => slice(referralSource, 'export function AgentCoordinationModal', '/**\n * Generic, reusable PacketItem')
 
-test('correctableEventOwner mirrors the backend ownership rule -- referring_agent events belong to the referring physician, receiving_agent events to the receiving physician, everything else (system) is never correctable', () => {
-  const fn = slice(referralSource, 'function correctableEventOwner', 'export function AgentCoordinationModal')
-  assert.match(fn, /event\.actor === 'referring_agent'\) return referral\.referring_physician_id/)
-  assert.match(fn, /event\.actor === 'receiving_agent'\) return referral\.receiving_physician_id/)
-  assert.match(fn, /return null/)
-})
-
-test('AgentCoordinationModal requires a viewerPhysicianId prop and only shows "Correct this" when the event\'s owner matches it', () => {
+test('AgentCoordinationModal requires a viewerPhysicianId and shows "Review / Correct →" only where canCorrectEvent allows it', () => {
   const fn = modal()
   assert.match(fn, /viewerPhysicianId: string/)
-  assert.match(fn, /const owner = correctableEventOwner\(referral, event\)/)
-  assert.match(fn, /const correctable = owner != null && owner === viewerPhysicianId/)
-  assert.match(fn, /\{correctable && !corrected && correctingSequence !== event\.sequence && <button type="button" className="coordination-correct-trigger" onClick=\{\(\) => openCorrection\(event\.sequence\)\}>Correct this<\/button>\}/)
+  assert.match(fn, /canCorrect=\{canCorrectEvent\(viewerPhysicianId, item\)\}/)
+  assert.match(fn, /\{canCorrect && <button type="button" className="coordination-correct-trigger" onClick=\{onCorrect\}>Review \/ Correct →<\/button>\}/)
 })
 
-test('a system event (no actor match) is never correctable, regardless of who is viewing', () => {
-  const fn = slice(referralSource, 'function correctableEventOwner', 'export function AgentCoordinationModal')
-  assert.doesNotMatch(fn, /actor === 'system'/, 'system events fall through to the final `return null` -- never special-cased into correctable')
-})
-
-test('the correction form asks "What should your agent have done or said instead?" and saves via createAgentCorrection, scoped to this referral/event', () => {
+test('the correction drawer shows the original representation, asks what to change, and only interprets (never saves) first', () => {
   const fn = modal()
-  assert.match(fn, /What should your agent have done or said instead\?/)
-  assert.match(fn, /await createAgentCorrection\(referral\.patient_id, viewerPhysicianId, correctionText\.trim\(\), \{/)
-  assert.match(fn, /referralId: referral\.id \?\? undefined,/)
-  assert.match(fn, /sourceEventSequence: correctingSequence,/)
-  assert.match(fn, /selectedText: correctionSelectedText \|\| undefined,/)
+  assert.match(fn, /<p className="eyebrow">Correct your agent<\/p>/)
+  assert.match(fn, /Your agent represented this as/)
+  assert.match(fn, /What would you change\?/)
+  assert.match(fn, /Add context or explain how your agent should represent this in similar situations\./)
+  assert.match(fn, /await interpretCoordinationCorrection\(referralId, item\.id, viewerPhysicianId, text\.trim\(\)\)/)
+  assert.match(fn, />\{busy \? 'Interpreting…' : 'Interpret correction'\}<\/button>/)
 })
 
-test('an active text selection inside the timeline is opportunistically captured as selected_text, but is optional -- Save correction only requires correction text', () => {
+test('the proposal is labelled not yet operational and offers Confirm correction / Edit / Cancel', () => {
   const fn = modal()
-  assert.match(fn, /window\.getSelection\(\)\?\.toString\(\)\.trim\(\) \?\? ''/)
-  assert.match(fn, /disabled=\{savingCorrection \|\| !correctionText\.trim\(\)\}/, 'selected text is never required to save')
+  assert.match(fn, /Proposed correction · Not yet operational/)
+  assert.match(fn, /Current representation/)
+  assert.match(fn, /Your correction/)
+  assert.match(fn, /This would change/)
+  assert.match(fn, />\{busy \? 'Saving…' : 'Confirm correction'\}<\/button>/)
+  assert.match(fn, /onClick=\{\(\) => \{ setProposal\(null\); setScope\(null\) \}\} disabled=\{busy\}>Edit<\/button>/)
+  assert.match(fn, /onClick=\{onCancel\} disabled=\{busy\}>Cancel<\/button>/)
 })
 
-test('saving a correction never mutates the original event -- it only sets local saved-state and shows a separate confirmation note beneath the event, the real event.summary/strong/p markup is untouched', () => {
+test('confirming requires a chosen scope; an un-inferable scope preselects nothing', () => {
   const fn = modal()
-  assert.doesNotMatch(fn, /event\.summary = |event\.metadata\[/, 'the CoordinationEvent object itself is never written to')
-  assert.match(fn, /setCorrectedSequences\(\(previous\) => new Set\(previous\)\.add\(correctingSequence\)\)/)
-  assert.match(fn, /✓ Saved for your agent to review\. Nothing was changed automatically\./)
+  assert.match(fn, /setScope\(result\.suggested_scope\)/, 'a null suggestion leaves the choice to the physician')
+  assert.match(fn, /disabled=\{busy \|\| !scope\} onClick=\{\(\) => void confirm\(\)\}/)
+  assert.match(fn, /Apply this correction to/)
+  assert.match(fn, /await confirmCoordinationCorrection\(referralId, item\.id, viewerPhysicianId, proposal\.correction_text, scope\)/)
 })
 
-/* (bug-fix pass, Part A) The original plain text-link read as too subtle to
- * notice/click -- now an obvious, compact copper secondary button, reusing
- * the same --agent-copper-soft/-surface/-ink training/agent-language tokens
- * used elsewhere (e.g. .practice-chip-group.prominent), never a large
- * primary CTA. */
-test('"Correct this" is an obvious, compact copper secondary button -- not a quiet text-link, and not a large primary CTA', () => {
+test('a durable scope is unavailable when nothing durable can be learned, and says why', () => {
+  const fn = modal()
+  assert.match(fn, /const unavailable = option !== 'episode' && !proposal\.future_available/)
+  assert.match(fn, /proposal\.future_unavailable_reason/)
+})
+
+test('a correction never edits the entry: the original stays visible (secondary) with the correction beneath it', () => {
+  const fn = modal()
+  assert.doesNotMatch(fn, /item\.statement = |event\.summary = /)
+  assert.match(fn, /<span className="coordination-original-label">Original<\/span><p>“\{item\.statement\}”<\/p>/)
+  assert.match(fn, /Corrected by Dr\. \{lastName\(viewerName\)\} · \{formatSubmittedAt\(correction\.created_at\)\}/)
+  assert.match(fn, /onConfirmed=\{\(\) => \{ setCorrecting\(null\); load\(\) \}\}/, 'the timeline reloads from the backend after a confirmation')
+})
+
+test('"Review / Correct" is a compact copper secondary button -- not a large primary CTA', () => {
   assert.match(styles, /\.coordination-correct-trigger \{[^}]*border: 1px solid var\(--agent-copper-soft\);[^}]*border-radius: 999px;[^}]*background: var\(--agent-copper-surface\);[^}]*color: var\(--agent-copper-ink\);/s)
-  assert.doesNotMatch(styles, /\.coordination-correct-trigger \{[^}]*border: 0;/s, 'must not keep the old borderless text-link treatment')
 })
 
-test('"Correct this" keeps a visible focus ring for keyboard users', () => {
+test('"Review / Correct" keeps a visible focus ring for keyboard users', () => {
   assert.match(styles, /\.coordination-correct-trigger:focus-visible \{ outline: 2px solid var\(--agent-copper\);/)
 })
 
@@ -82,7 +85,7 @@ test('Lucy\'s own coordination modal (inside ReferralCoordinationSurface) passes
   assert.doesNotMatch(fn, /viewerPhysicianId=\{referral\.receiving_physician_id\}/)
 })
 
-test('Chen\'s coordination modals (RequestReviewModal and every ChenDownstreamCard branch) pass her own physician id as the viewer, never Lucy\'s', () => {
+test('Chen\'s coordination modals (RequestReviewModal and every ChenDownstreamCard branch) pass his own physician id as the viewer, never Lucy\'s', () => {
   const fn = slice(referralSource, 'export function RequestReviewModal', 'export function markReferralJustAccepted')
   const occurrences = [...fn.matchAll(/viewerPhysicianId=\{(referral|liveReferral)\.receiving_physician_id\}/g)]
   assert.ok(occurrences.length >= 1, 'RequestReviewModal must pass Chen\'s own id')
@@ -90,21 +93,19 @@ test('Chen\'s coordination modals (RequestReviewModal and every ChenDownstreamCa
 
   const downstream = slice(referralSource, 'export function ChenDownstreamCard', 'const CHEN_PATIENT_STAGE_META')
   const downstreamOccurrences = [...downstream.matchAll(/viewerPhysicianId=\{liveReferral\.receiving_physician_id\}/g)]
-  assert.equal(downstreamOccurrences.length, 6, 'every AgentCoordinationModal render inside ChenDownstreamCard must pass Chen\'s own id (6, after the UX polish pass added a parallel e-consult "scheduled" branch)')
+  assert.equal(downstreamOccurrences.length, 6, 'every AgentCoordinationModal render inside ChenDownstreamCard must pass Chen\'s own id')
   assert.doesNotMatch(downstream, /viewerPhysicianId=\{liveReferral\.referring_physician_id\}/)
 })
 
-test('"Correct Chen\'s Agent" / "Correct Lucy\'s Agent" cross-physician phrasing is never exposed -- the correction affordance is always generic "Correct this", gated purely on ownership', () => {
+test('cross-physician phrasing is never exposed -- the affordance is always the generic "Review / Correct", gated purely on ownership', () => {
   assert.doesNotMatch(referralSource, /Correct (Chen|Lucy|Saruhashi)'s Agent/i)
 })
 
-test('corrections are structured for a future NLP-learning pass without exposing dead buttons now -- no "Confirm"/"Edit this preference" controls exist yet for an unbuilt interpretation pipeline', () => {
-  const fn = modal()
-  assert.doesNotMatch(fn, /Confirm preference|Edit this preference|Apply correction/i)
-})
-
-test('createAgentCorrection and getAgentCorrections are the only correction-related API helpers, and createAgentCorrection never implies immediate training', () => {
+test('coordination corrections go through interpret -> explicit confirm; the older feedback helpers are unchanged', () => {
   assert.match(api, /export const createAgentCorrection = \(/)
   assert.match(api, /export const getAgentCorrections = \(patientId: string\)/)
-  assert.doesNotMatch(api, /applyCorrection|trainFromCorrection|confirmCorrection/i)
+  assert.match(api, /Never writes anything -- cancelling the proposal changes nothing\./)
+  assert.match(api, /export const interpretCoordinationCorrection = /)
+  assert.match(api, /export const confirmCoordinationCorrection = \(referralId: number, itemId: string, physicianId: string, correctionText: string, scope: CorrectionScope\)/)
+  assert.doesNotMatch(api, /applyCorrection|trainFromCorrection/i)
 })

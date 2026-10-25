@@ -81,8 +81,9 @@ test('PriorityChip/PriorityChipRow are the ONE shared component used everywhere 
   assert.match(referralSource, /<PriorityChip priority=\{referral\.priority\} \/><span className="incoming-request-modality">/)
   // referral review modal
   assert.match(referralSource, /<PriorityChip priority=\{referral\.priority\} \/><span className="incoming-request-modality">· \{referral\.modality === 'econsult' \? 'E-consult' : 'In-person visit'\}<\/span>/)
-  // match-details "Why this care path"
-  assert.match(app, /<dt>Priority<\/dt><dd><PriorityChip priority=\{consultation\.care_routing\.suggested_priority\} \/><\/dd>/)
+  // the Recommended care path block (Match Details no longer repeats it --
+  // agent coordination oversight pass, Part U)
+  assert.match(app, /<PriorityChipRow priority=\{priority\} onChange=\{setPriority\} \/>/)
   assert.doesNotMatch(app, /<strong>\{priorityLabel\(/, 'priority must never render as plain bold text anywhere')
 })
 
@@ -110,36 +111,41 @@ test('no numeric match score is ever rendered -- no %, no X/100, no "score" anyw
 
 /* ----------------------------------------------- Part F-J: match details */
 
-test('Review match details is reduced to exactly three primary sections: Why this care path, Why Dr. Chen, Other options', () => {
+/* Agent coordination oversight pass, Part S-U: Match Details no longer
+ * repeats "Why Dr. X" -- the recommendation's Why this match is the one
+ * canonical match explanation -- nor the specialty/modality/priority the
+ * Recommended care path block already shows. */
+test('Review match details has two groups: how the care path was weighed, and the other options', () => {
   const fn = recommendationView()
-  assert.match(fn, /Why this care path/)
-  assert.match(fn, /Why \{cleanName\(recommendedRoute\.physician_name\)\}/)
-  assert.match(fn, /Other options/)
-  assert.doesNotMatch(fn, /Why this route/, 'the old "Why this route" heading was renamed to "Why this care path"')
+  const details = slice(fn, '<div className="match-details">', '</div>}\n    </section>')
+  assert.match(details, /How the care path was weighed/)
+  assert.match(details, /Other options/)
+  assert.doesNotMatch(details, /Why \{cleanName\(/, 'no second "Why Dr. X" block')
+  assert.doesNotMatch(details, /match-evidence-list|Why recommended:/)
+  assert.doesNotMatch(fn, /Why this route/)
   assert.doesNotMatch(fn, /Other routes considered/, 'merged into the one "Other options" section')
-})
-
-test('the oversized "Why this option won" section is gone -- replaced by a small supporting line, visually subordinate to the structured facts', () => {
-  const fn = recommendationView()
   assert.doesNotMatch(fn, /Why this option won/)
-  assert.match(fn, /<p className="route-why-recommended"><span className="route-why-recommended-label">Why recommended:<\/span> \{recommendedRoute\.rationale\}<\/p>/)
 })
 
-test('"Why this care path" shows specialty, modality, priority, and e-consult suitability as separate labeled values', () => {
+test('the care-path group keeps only what the Recommended care path block does not already show', () => {
   const fn = recommendationView()
-  assert.match(fn, /<dt>Specialty<\/dt><dd>\{consultation\.care_routing\.specialty\}<\/dd>/)
-  assert.match(fn, /<dt>Modality<\/dt><dd>\{consultation\.care_routing\.recommended_modality === 'in_person' \? 'In-person evaluation' : 'E-consult'\}<\/dd>/)
-  assert.match(fn, /<dt>Priority<\/dt><dd><PriorityChip priority=\{consultation\.care_routing\.suggested_priority\} \/><\/dd>/)
-  assert.match(fn, /<dt>E-consult<\/dt><dd>\{econsultSuitabilityLabel\(consultation\.care_routing\.econsult_suitability\)\}<\/dd>/)
+  const group = slice(fn, 'How the care path was weighed', '<p className="section-label">Other options</p>')
+  assert.match(group, /<dt>E-consult<\/dt><dd>\{econsultSuitabilityLabel\(consultation\.care_routing\.econsult_suitability\)\}<\/dd>/)
+  assert.match(group, /<dt>Clinically viable<\/dt>/)
+  assert.match(group, /<dt>Priority basis<\/dt>/)
+  assert.doesNotMatch(group, /<dt>Specialty<\/dt>|<dt>Modality<\/dt>|<dt>Priority<\/dt>/)
+  // ...which the Recommended care path block above still shows.
+  const careRoutingBlock = slice(fn, 'care-routing-block', '</section>}')
+  assert.match(careRoutingBlock, /\{consultation\.care_routing\.specialty\}/)
+  assert.match(careRoutingBlock, /In-person is appropriate for this presentation/)
+  assert.match(careRoutingBlock, /<PriorityChipRow priority=\{priority\} onChange=\{setPriority\} \/>/)
 })
 
-test('"Why Dr. Chen" shows practice fit, network, evidence confidence, and both access values as separate labeled facts', () => {
+test('the canonical match explanation stays on the recommendation card, once', () => {
   const fn = recommendationView()
-  assert.match(fn, /<dt>Practice fit<\/dt><dd>\{fitLabelText\(recommendedRoute\.fit_label\)\}<\/dd>/)
-  assert.match(fn, /<dt>Network<\/dt><dd>\{networkParticipationLabel\(recommendedRoute\.network_participation\)\}<\/dd>/)
-  assert.match(fn, /<dt>Evidence confidence<\/dt><dd>\{confidenceLabelText\(recommendedRoute\.evidence_confidence\)\}<\/dd>/)
-  assert.match(fn, /<dt>In-person access<\/dt><dd>\{recommendedRoute\.access\.in_person_wait_label\}<\/dd>/)
-  assert.match(fn, /<dt>E-consult response<\/dt><dd>\{recommendedRoute\.access\.econsult_response_label\}<\/dd>/)
+  assert.match(fn, /<section className="why-this-match" aria-label="Why this match">/)
+  assert.match(fn, /const whyLines = selectedFit \? whyThisMatch\(selectedFit, selectedRoute, patientFirstName\) : \[\]/)
+  assert.equal([...fn.matchAll(/className="why-this-match"/g)].length, 1)
 })
 
 test('the existing (non-routing) match-details structure is untouched for every other patient', () => {
@@ -619,7 +625,7 @@ test('no raw 1:1 agent-conversation transcript exists anywhere in the durable co
   // both render typed summaries/evidence, never message.content as a
   // quoted chat bubble.
   assert.doesNotMatch(app, /<p>\{message\.content\}<\/p>/)
-  assert.match(referralSource, /<strong>\{EVENT_TYPE_TITLES\[event\.event_type\] \?\? event\.event_type\}<\/strong>/, 'referral coordination events remain a structured, typed timeline')
+  assert.match(referralSource, /<strong className="coordination-title">\{item\.title\}<\/strong>/, 'agent coordination remains a structured, typed timeline')
 })
 
 test('the ephemeral "Ask Dr. X\'s Agent" chat remains separate and unaffected -- local-only state, no persistence/restore-on-mount, never shown to the other physician', () => {

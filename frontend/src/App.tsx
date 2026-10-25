@@ -20,7 +20,7 @@ import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, Spe
 import { TrendChart } from './TrendChart.tsx'
 import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
-import { EVIDENCE_CATEGORY_LABELS, matchEvidence, whyThisMatch } from './matchExplanation.ts'
+import { whyThisMatch } from './matchExplanation.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 
 type Navigate = (path: string) => void
@@ -1452,58 +1452,25 @@ function RecommendationView({
     {/* One open surface -- whitespace and hairline rules separate groups,
      * never a bordered/shaded box nested inside the already-boxed card. */}
     <section className="options-section"><button className="options-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Review match details <span>{detailsOpen ? '−' : '+'}</span></button>
-      {/* Routing/triage UX pass, Part F-M: reduced to THREE primary
-       * sections -- Why this care path / Why Dr. X / Other options -- never
-       * one opaque score, and never a separately-standing "Other referral
-       * options" disclosure (merged below, Part J). The oversized "Why this
-       * option won" block is gone; a small supporting line ("Why
-       * recommended: ...") replaces it, visually subordinate to the
-       * structured facts above it. Every other patient (no care_routing)
-       * keeps the pre-existing structure, unchanged. */}
+      {/* Agent coordination oversight pass, Part S-U: Match Details answers
+       * "what else happened in the matching process?" -- never a second
+       * "why this physician". The recommendation card's Why this match is
+       * the one canonical explanation of the match (clinical fit, similar-
+       * patient experience, receiving fit, route/access), so the old "Why
+       * Dr. X" group is gone from here, and the care-path group keeps only
+       * what the Recommended care path block above doesn't already show.
+       * What remains: how the route was weighed, and the other candidates /
+       * routes with why each ranked where it did. Every other patient (no
+       * care_routing) keeps the pre-existing structure, unchanged. */}
       {detailsOpen && <div className="match-details">{consultation.care_routing ? <>
         <div className="match-details-group">
-          <p className="section-label">Why this care path</p>
+          <p className="section-label">How the care path was weighed</p>
           <dl className="route-fact-list">
-            <div><dt>Specialty</dt><dd>{consultation.care_routing.specialty}</dd></div>
-            <div><dt>Modality</dt><dd>{consultation.care_routing.recommended_modality === 'in_person' ? 'In-person evaluation' : 'E-consult'}</dd></div>
-            <div><dt>Priority</dt><dd><PriorityChip priority={consultation.care_routing.suggested_priority} /></dd></div>
             <div><dt>E-consult</dt><dd>{econsultSuitabilityLabel(consultation.care_routing.econsult_suitability)}</dd></div>
             {consultation.care_routing.modality_viability && <div><dt>Clinically viable</dt><dd>Visit: {consultation.care_routing.modality_viability.visit === 'viable' ? 'yes' : 'no'} · E-consult: {consultation.care_routing.modality_viability.econsult === 'viable' ? 'yes' : consultation.care_routing.modality_viability.econsult === 'conditional' ? "only if the receiving physician's policy supports it" : 'no'}</dd></div>}
             {consultation.care_routing.priority_basis && <div><dt>Priority basis</dt><dd>{consultation.care_routing.priority_basis}</dd></div>}
           </dl>
         </div>
-        {(() => {
-          const recommendedRoute = consultation.candidate_routes.find((route) => route.recommended)
-          if (!recommendedRoute) return null
-          /** Routing consolidation pass, Part E: when structured fit
-           * evidence exists, show every reason WITH where it came from
-           * (similar-case history, confirmed preference, modality policy,
-           * access, network) -- evidence, never model scratchpad. */
-          const detailRoute = selectedRoute ?? recommendedRoute
-          const detailFit = consultation.physician_fits?.find((fit) => fit.physician_id === detailRoute.physician_id)
-          if (detailFit) {
-            return <div className="match-details-group">
-              <p className="section-label">Why {cleanName(detailRoute.physician_name)}</p>
-              <ul className="match-evidence-list">{matchEvidence(detailFit, detailRoute).map((item, index) => <li key={`${item.category}-${index}`}>
-                <span className="match-evidence-category">{EVIDENCE_CATEGORY_LABELS[item.category]}</span>
-                <span className="match-evidence-summary">{item.summary}</span>
-                <small className="match-evidence-source">Source: {item.source}</small>
-              </li>)}</ul>
-              {detailRoute.rationale && <p className="route-why-recommended"><span className="route-why-recommended-label">{detailRoute.recommended ? 'Why recommended:' : 'Route note:'}</span> {detailRoute.rationale}</p>}
-            </div>
-          }
-          return <div className="match-details-group">
-            <p className="section-label">Why {cleanName(recommendedRoute.physician_name)}</p>
-            <dl className="route-fact-list">
-              <div><dt>Practice fit</dt><dd>{fitLabelText(recommendedRoute.fit_label)}</dd></div>
-              <div><dt>Network</dt><dd>{networkParticipationLabel(recommendedRoute.network_participation)}</dd></div>
-              <div><dt>Evidence confidence</dt><dd>{confidenceLabelText(recommendedRoute.evidence_confidence)}</dd></div>
-              <div><dt>In-person access</dt><dd>{recommendedRoute.access.in_person_wait_label}</dd></div>
-              {recommendedRoute.access.econsult_response_label && <div><dt>E-consult response</dt><dd>{recommendedRoute.access.econsult_response_label}</dd></div>}
-            </dl>
-            {recommendedRoute.rationale && <p className="route-why-recommended"><span className="route-why-recommended-label">Why recommended:</span> {recommendedRoute.rationale}</p>}
-          </div>
-        })()}
         <div className="match-details-group">
           <p className="section-label">Other options</p>
           <ul className="other-options-list">{otherOptionRows.map((row) => <li key={row.key}>

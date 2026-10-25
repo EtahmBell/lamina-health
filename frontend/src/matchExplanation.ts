@@ -1,20 +1,9 @@
-/** "Why Dr. X?" (routing consolidation pass, Part D/E): turns the backend's
+/** "Why this match" (routing consolidation pass, Part D/E): turns the backend's
  * structured physician-case fit + route evidence into a few short,
  * provenance-tagged lines. Pure presentation -- no reasoning happens here,
  * no numeric value is shown, and only privacy-preserving case PATTERNS
  * (never prior patients) can appear. */
-import type { CandidateRoute, MatchEvidence, MatchEvidenceCategory, PhysicianCaseFit } from './api.ts'
-
-export const EVIDENCE_CATEGORY_LABELS: Record<MatchEvidenceCategory, string> = {
-  specialty_scope: 'Specialty / scope',
-  similar_case_experience: 'Similar-case experience',
-  case_interest: 'Confirmed case interest',
-  referral_preference: 'Receiving fit',
-  modality_policy: 'Modality',
-  access_capacity: 'Access / capacity',
-  continuity: 'Continuity',
-  network_relationship: 'Network relationship',
-}
+import type { CandidateRoute, PhysicianCaseFit } from './api.ts'
 
 export type WhyLine = { key: string; label: string; detail: string }
 
@@ -47,12 +36,4 @@ export function whyThisMatch(fit: PhysicianCaseFit, route: CandidateRoute | unde
     lines.push({ key: 'route', label: 'Route', detail: `${modality} · ${access}` })
   }
   return lines
-}
-
-/** Every reason behind a match, physician fit first, then route evidence,
- * each with its provenance -- what the detailed "Why Dr. X" surface shows. */
-export function matchEvidence(fit: PhysicianCaseFit | undefined, route: CandidateRoute | undefined): MatchEvidence[] {
-  const fitEvidence = fit?.evidence ?? []
-  const routeEvidence = (route?.route_evidence ?? []).filter((item) => !fitEvidence.some((existing) => existing.summary === item.summary))
-  return [...fitEvidence, ...routeEvidence]
 }

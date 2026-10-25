@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { EVIDENCE_CATEGORY_LABELS, matchEvidence, whyThisMatch } from '../src/matchExplanation.ts'
+import { whyThisMatch } from '../src/matchExplanation.ts'
 import {
   attentionOrder, CHEN_SEEDED_NEXT_STEPS, daysRemaining, handledByAgentOrStaff, referralReviewStep,
   acceptedReferralStep, SERVICE_TARGET_DAYS, serviceTargetDays, topAttention,
@@ -70,17 +70,14 @@ test('a physician with no similar-case history or confirmed receiving preference
   assert.doesNotMatch(JSON.stringify(lines), /\d+ (similar|comparable)/)
 })
 
-test('detailed match evidence carries provenance for every reason and labels each evidence category', () => {
-  const evidence = matchEvidence(chenFit, chenVisit)
-  assert.ok(evidence.every((item) => item.source))
-  assert.ok(evidence.some((item) => item.category === 'similar_case_experience'))
-  assert.ok(evidence.some((item) => item.category === 'access_capacity'))
-  for (const category of ['specialty_scope', 'similar_case_experience', 'case_interest', 'referral_preference', 'modality_policy', 'access_capacity', 'continuity', 'network_relationship']) {
-    assert.ok(EVIDENCE_CATEGORY_LABELS[category])
-  }
+test('the match is explained once, on the recommendation card; the evaluation evidence stays inspectable in consultation details', () => {
   const view = slice(app, 'function RecommendationView', 'function ReceivingReferralCard')
-  assert.match(view, /<small className="match-evidence-source">Source: \{item\.source\}<\/small>/)
   assert.match(view, /<p className="section-label">Why this match<\/p>/)
+  // Agent coordination oversight pass, Part S: no second, repeated "Why
+  // Dr. X" evidence list inside Review match details.
+  assert.doesNotMatch(view, /match-evidence-list|match-evidence-source/)
+  assert.match(view, /<div className="evaluation-record-heading">Physician evaluation records<\/div>/)
+  assert.match(view, /<span>Relevant physician rule<\/span>/)
   assert.doesNotMatch(readFileSync(new URL('../src/matchExplanation.ts', import.meta.url), 'utf8'), /score/i, 'no numeric physician score anywhere in the explanation')
   assert.doesNotMatch(JSON.stringify(whyThisMatch(chenFit, chenVisit, 'Tonjit')), /score|\d+\s*\/\s*100/i)
 })

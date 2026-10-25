@@ -181,11 +181,11 @@ test('a satisfied requirement shows the real packet item value and, when attache
   assert.match(fn, /packetItemProvenanceLine\(item\)/)
 })
 
-test('"Agent preflight complete" summary and "See agent coordination" reuse the same real coordination_events-derived resolved count', () => {
+test('"Agent preflight complete" summary and "Agent coordination" reuse the same real coordination_events-derived resolved count', () => {
   const fn = slice(referralSource, 'export function RequestReviewModal', 'export function ChenPatientsPage')
   assert.match(fn, /Agent preflight complete/)
   assert.match(fn, /resolvedCountFor\(referral\)/)
-  assert.match(fn, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>See agent coordination/)
+  assert.match(fn, /onClick=\{\(\) => setCoordinationOpen\(true\)\}>Agent coordination <span>→<\/span>/)
 })
 
 test('"View full referral packet" reuses the existing ReferralPacketModal -- no second receiving-side packet renderer', () => {

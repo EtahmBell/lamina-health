@@ -2077,6 +2077,16 @@ class WorkflowStore:
             ).fetchone()
         return dict(row)
 
+    def remove_proposed_learnings(self, workspace_id: str, persona_id: str, source_type: str) -> int:
+        """Removes one persona's learnings from one source (e.g. the Tonjit
+        demo reset clearing coordination-correction learnings, as it already
+        does for Dr. Chen's referral preferences). Returns rows removed."""
+        with self._connect() as db:
+            return db.execute(
+                "DELETE FROM proposed_agent_learnings WHERE workspace_id=? AND persona_id=? AND source_type=?",
+                (workspace_id, persona_id, source_type),
+            ).rowcount
+
     def update_proposed_learning(
         self,
         workspace_id: str,

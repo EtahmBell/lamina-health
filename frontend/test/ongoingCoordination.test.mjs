@@ -98,11 +98,11 @@ test('"Review handoff" remains present as the primary action once a handoff exis
 test('View referral packet / See agent coordination / Scheduling details are removed from the primary "Review handoff" action block -- they live in their own direct-links section instead, never behind a modal (demo-consolidation pass, Part 1-2)', () => {
   const linksBlock = slice(referralSource, "{status === 'done' && referral && !justCompleted && handoff && <div className=\"referral-mode-links\">", '</div>}')
   assert.doesNotMatch(linksBlock, /View referral packet/)
-  assert.doesNotMatch(linksBlock, /See agent coordination/)
+  assert.doesNotMatch(linksBlock, /Agent coordination/)
   assert.doesNotMatch(linksBlock, /View scheduling details/)
   const artifactLinks = slice(referralSource, "{status === 'done' && referral && !justCompleted && <div className=\"referral-artifact-links\">", '</div>}')
   assert.match(artifactLinks, /View referral packet/)
-  assert.match(artifactLinks, /See agent coordination/)
+  assert.match(artifactLinks, />Agent coordination →</)
   assert.match(artifactLinks, /View scheduling details/)
 })
 

@@ -1834,8 +1834,8 @@ button.lam-row:hover { background: #fff9f1; }
    (referring) agent, copper for the receiving specialist's agent, a neutral
    border tone for Lamina/system events. Subtle, matches the existing palette. */
 .coordination-event::before { content: ''; position: absolute; left: -21px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
-.coordination-event.actor-referring_agent::before { background: var(--mineral-deep); }
-.coordination-event.actor-receiving_agent::before { background: var(--copper); }
+.coordination-event.actor-referring::before { background: var(--mineral-deep); }
+.coordination-event.actor-receiving::before { background: var(--copper); }
 .coordination-event.actor-system::before { background: var(--border); }
 .coordination-event:last-child { padding-bottom: 0; }
 .coordination-actor { display: block; color: var(--text-secondary); font-size: .58rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
@@ -1861,6 +1861,45 @@ button.lam-row:hover { background: #fff9f1; }
 .coordination-correction-form { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); padding: 10px 12px; }
 .coordination-correction-selected { margin: 6px 0 0; border-left: 2px solid var(--border); padding-left: 8px; color: var(--text-secondary); font-size: .68rem; font-style: italic; }
 .consult-detail-dialog .network-record { margin-top: 10px; }
+/* Agent coordination oversight pass: the shared timeline is grouped by
+ * stage and numbered continuously; patient facts sit under the agent
+ * statement with their provenance; a physician's own correction appears
+ * beneath the original, which stays visible but visually secondary. */
+.coordination-stages { margin-top: 18px; }
+.coordination-stage + .coordination-stage { margin-top: 20px; }
+.coordination-stage-label { margin: 0; }
+.coordination-stage .coordination-timeline { margin-top: 10px; }
+.coordination-number { position: absolute; left: -46px; top: 1px; width: 20px; color: var(--text-secondary); font-size: .58rem; font-variant-numeric: tabular-nums; text-align: right; }
+.coordination-stages .coordination-timeline { margin-left: 26px; }
+.coordination-event .coordination-title { margin-top: 0; }
+.coordination-event .coordination-actor { margin-top: 2px; }
+.coordination-facts { margin: 6px 0 0; padding: 0; list-style: none; }
+.coordination-facts li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 2px 0; color: var(--text-primary); font-size: .68rem; line-height: 1.45; }
+.coordination-facts small { color: var(--text-secondary); font-size: .58rem; }
+.coordination-original { margin-top: 4px; }
+.coordination-original-label, .coordination-correction-by { display: block; color: var(--text-secondary); font-size: .58rem; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.coordination-event .coordination-original p { margin-top: 2px; color: var(--text-secondary); opacity: .8; }
+.coordination-correction { margin-top: 8px; border-left: 2px solid var(--agent-copper-soft); padding-left: 10px; }
+.coordination-event .coordination-correction p { margin-top: 2px; color: var(--text-primary); }
+.coordination-correction small { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .6rem; }
+.coordination-correction-overlay { z-index: 1001; }
+.coordination-correction-dialog { width: min(100%, 520px); }
+.coordination-correction-dialog > .section-label { display: block; margin: 14px 0 0; }
+.coordination-correction-quote { margin: 6px 0 0; border-left: 2px solid var(--border); padding-left: 10px; color: var(--text-primary); font-size: .78rem; line-height: 1.5; }
+.coordination-correction-dialog textarea { margin-top: 6px; }
+.coordination-correction-dialog .muted-note { margin: 6px 0 0; }
+.coordination-correction-dialog .feedback-reason-actions { margin-top: 16px; }
+.coordination-proposal-group { margin-top: 14px; }
+.coordination-proposal-group p:not(.section-label) { margin: 4px 0 0; color: var(--text-primary); font-size: .76rem; line-height: 1.5; }
+.coordination-scope { margin: 16px 0 0; border: 0; padding: 0; }
+.coordination-scope legend { margin-bottom: 6px; padding: 0; }
+.coordination-correction-dialog .button-primary:disabled { opacity: .45; cursor: not-allowed; }
+.coordination-scope .coordination-scope-option { display: flex; margin: 0; line-height: 1.4; }
+.coordination-scope-option { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: .74rem; cursor: pointer; }
+.coordination-scope-option input { flex: none; width: auto; height: auto; margin: 0; padding: 0; }
+.coordination-scope-option.unavailable { color: var(--text-secondary); cursor: not-allowed; }
+.coordination-effects { margin: 4px 0 0; padding-left: 18px; font-size: .72rem; line-height: 1.55; }
+
 
 /* Add-colleague modal: a search-first colleague finder, not a cramped admin table. */
 .add-colleague-dialog { width: min(100%, 680px); }
@@ -2567,10 +2606,6 @@ button.priority-chip:hover { border-color: var(--mineral); }
 .route-fact-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 18px; margin: 10px 0 0; }
 .route-fact-list dt { color: var(--text-secondary); font-size: .58rem; font-weight: 600; letter-spacing: .03em; }
 .route-fact-list dd { margin: 4px 0 0; color: var(--clinical); font-size: .78rem; font-weight: 600; }
-/* Part H: a small supporting line, never giant headline typography -- the
- * old oversized "Why this option won" section is gone. */
-.route-why-recommended { margin: 12px 0 0; color: var(--text-secondary); font-size: .7rem; line-height: 1.6; }
-.route-why-recommended-label { color: var(--clinical); font-weight: 600; }
 /* Part J/K: ONE unified "Other options" list -- merges the pre-existing
  * real alternatives with the routing model's other routes, each row
  * selectable only where the existing referral flow can safely support it
@@ -2779,12 +2814,6 @@ details.network-visual-section[open] summary { border-bottom-left-radius: 0; bor
 .why-this-match-list li { display: grid; gap: 2px; }
 .why-this-match-list strong { color: var(--clinical); font-size: .72rem; font-weight: 600; }
 .why-this-match-list span { color: var(--text-secondary); font-size: .68rem; line-height: 1.5; }
-.match-evidence-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 12px; }
-.match-evidence-list li { display: grid; gap: 2px; border-top: 1px solid rgb(222 216 206 / 60%); padding-top: 10px; }
-.match-evidence-list li:first-child { border-top: 0; padding-top: 0; }
-.match-evidence-category { color: var(--clinical); font-size: .66rem; font-weight: 600; letter-spacing: .02em; }
-.match-evidence-summary { color: var(--text-primary); font-size: .7rem; line-height: 1.5; }
-.match-evidence-source { color: var(--text-secondary); font-size: .6rem; }
 
 /* Specialist "Patients with next steps". */
 .next-step-row .lam-row-main { display: grid; gap: 3px; }
