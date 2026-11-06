@@ -28,7 +28,7 @@ import {
 } from './claimLifecycle.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { physicianDisplayName } from './networkRoster.ts'
-import { ownerHomePath } from './ownerPaths.ts'
+import { ownerHomePath, ownerOnboardingPath } from './ownerPaths.ts'
 
 type Navigate = (path: string) => void
 
@@ -72,7 +72,7 @@ function ClaimBrand() {
 
 /** A lightweight header distinct from Lucy's clinical-workspace sidebar. The
  * authenticated-account control lives only here — never inside the Lucy demo. */
-function ClaimShell({ children, navigate }: { children: React.ReactNode; navigate: Navigate }) {
+export function ClaimShell({ children, navigate }: { children: React.ReactNode; navigate: Navigate }) {
   const { configured, loading, user, signOut } = useAuth()
   const handleSignOut = async () => { await signOut(); navigate('/claim') }
   return <div className="claim-shell">
@@ -238,7 +238,15 @@ export function ProviderIdentityPage({ npi, navigate, params }: { npi: string; n
       <SessionNotice />
       {profile.claimed_by_me && profile.my_claim_id !== null && <OpenPrivateWorkspaceAction claimId={profile.my_claim_id} navigate={navigate} />}
 
-      {status === 'reserved' && profile.claimable && (
+      {status === 'reserved' && profile.claimable && !profile.synthetic && (() => {
+        /* Real NPIs are claimed only through authenticated onboarding: NPPES lookup,
+         * explicit "Is this you?" confirmation, then Lamina pilot approval. */
+        const onboarding = `${ownerOnboardingPath}?npi=${encodeURIComponent(profile.npi)}`
+        return configured
+          ? <button className="button-primary" onClick={() => navigate(user ? onboarding : signUpPath(onboarding))}>This is me — verify with my NPI <span>→</span></button>
+          : <p className="muted-note">Authentication is not configured in this environment, so identities cannot be claimed yet.</p>
+      })()}
+      {status === 'reserved' && profile.claimable && profile.synthetic && (
         user
           ? <button className="button-primary" disabled={busy} onClick={() => void claim()}>{busy ? 'Claiming…' : 'Claim this identity'} <span>→</span></button>
           : authLoading
@@ -267,7 +275,8 @@ export function ProviderIdentityPage({ npi, navigate, params }: { npi: string; n
           : <div className="production-verification">
             <strong>Verification pending</strong>
             <p>We're confirming your identity against professional provider information before your physician agent can be activated. You can return here at any time.</p>
-            <p>Real physician verification is not yet connected in this demonstration.</p>
+            <p>Lamina reviews each confirmed pilot physician before opening a private workspace. This is not medical credentialing.</p>
+            <button className="text-button" onClick={() => navigate(ownerOnboardingPath)}>View onboarding status →</button>
           </div>
       )}
       {status === 'verification_pending' && !profile.claimed_by_me && <p className="muted-note">Verification is in progress for this identity.</p>}

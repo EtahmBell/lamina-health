@@ -84,6 +84,15 @@ signing keys. Set `SUPABASE_JWT_ISSUER`, `SUPABASE_JWKS_URL`, and
 `LAMINA_DEMO_VERIFICATION_ENABLED=true` enables the explicitly synthetic-only
 verification shortcut; it never applies to an NPPES identity.
 
+Real physicians join through `/me/onboarding`: NPI lookup against NPPES (identity
+discovery), an explicit "Is this you?" confirmation (self-attestation), and manual
+Lamina pilot approval. None of these is credentialing or licensure verification.
+Approve, reject, or disable pilot physicians with
+`python -m scripts.pilot_physicians list|approve|reject|disable`, or through the
+`/api/internal/pilot-physicians` API, which exists only for the Supabase user ids
+listed in `LAMINA_PILOT_ADMIN_USER_IDS`. See
+[`docs/AUTH_IDENTITY_ARCHITECTURE.md`](docs/AUTH_IDENTITY_ARCHITECTURE.md).
+
 The Lucy clinical workspace remains available without authentication. Each browser
 receives an opaque, `HttpOnly` demo-workspace cookie; consultations, activity,
 network membership, reset, and Lucy preferences are isolated per cookie while

@@ -107,6 +107,7 @@ class ProviderClaim(StrictModel):
     verified_at: str | None = None
     updated_at: str
     verification_method: str | None = None
+    identity_confirmed_at: str | None = None
 
 
 class ProviderClaimState(StrictModel):

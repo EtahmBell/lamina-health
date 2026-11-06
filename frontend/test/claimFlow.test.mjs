@@ -32,11 +32,11 @@ test('the entry gateway offers three role cards: Physician (primary), Explore th
 test('the Physician gateway card reuses the existing sign-in/claim flow -- no invented auth system', () => {
   assert.match(portal(), /const \{ configured, loading, user \} = useAuth\(\)/)
   assert.match(portal(), /navigate\(physicianPath\)/)
-  assert.match(portal(), /signInPath\('\/claim\/my-identities'\)/)
+  assert.match(portal(), /signInPath\(ownerOnboardingPath\)/, 'the physician entry now lands in pilot onboarding')
 })
 
-test('general sign-in (not from a specific claim) defaults to My physician identities', () => {
-  assert.match(portal(), /physicianPath = physicianAuthed \? '\/claim\/my-identities' : signInPath\('\/claim\/my-identities'\)/)
+test('the physician gateway goes to onboarding; the claim shell sign-in still defaults to My physician identities', () => {
+  assert.match(portal(), /physicianPath = physicianAuthed \? ownerOnboardingPath : signInPath\(ownerOnboardingPath\)/)
   const shellSignIn = slice(claim, 'function ClaimShell', 'function LifecycleStepper')
   assert.match(shellSignIn, /navigate\(signInPath\('\/claim\/my-identities'\)\)/)
 })
@@ -147,7 +147,8 @@ test('email confirmation never implies physician verification; the two concepts 
 test('a real NPPES identity has no demo-verify, activate, or skip control at verification_pending', () => {
   const pendingBlock = identity().slice(identity().indexOf("status === 'verification_pending'"), identity().indexOf("status === 'verified'"))
   const realBranch = pendingBlock.slice(pendingBlock.indexOf(': <div className="production-verification">'))
-  assert.match(realBranch, /Real physician verification is not yet connected in this demonstration\./)
+  assert.match(realBranch, /Lamina reviews each confirmed pilot physician before opening a private workspace\. This is not medical credentialing\./)
+  assert.match(realBranch, /navigate\(ownerOnboardingPath\)/)
   assert.doesNotMatch(realBranch, /Verify demo identity|Activate agent|Skip verification|Verify now|Demo verify/i)
   assert.match(pendingBlock, /canDemoVerify\(profile\.synthetic, status\)/)
 })

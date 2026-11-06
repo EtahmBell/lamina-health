@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 from backend.config import environment
 from backend.models import (
@@ -382,6 +383,7 @@ class WorkflowStore:
             )
             self._migrate_demo_tables(db)
             self._migrate_engagement_tables(db)
+            self._migrate_pilot_onboarding(db)
             db.executescript(
                 """
                 CREATE INDEX IF NOT EXISTS consultations_workspace_id
@@ -571,6 +573,123 @@ class WorkflowStore:
         db.execute(
             "UPDATE proposed_agent_learnings SET review_action='edit' "
             "WHERE review_action IS NULL AND provenance='Physician-edited training draft'"
+        )
+
+    def _migrate_pilot_onboarding(self, db: sqlite3.Connection) -> None:
+        """Additive pilot-onboarding schema on top of claims and owner scopes.
+
+        Existing rows are never rewritten: legacy owner scopes default to
+        `pilot_access_status='pending'`, so they fail closed until approved.
+        """
+        claim_columns = self._columns(db, "provider_claims")
+        if "identity_confirmed_at" not in claim_columns:
+            db.execute("ALTER TABLE provider_claims ADD COLUMN identity_confirmed_at TEXT")
+        scope_additions = {
+            "pilot_access_status": (
+                "TEXT NOT NULL DEFAULT 'pending' CHECK(pilot_access_status IN "
+                "('pending', 'approved', 'rejected', 'disabled'))"
+            ),
+            "pilot_access_decided_at": "TEXT",
+            "pilot_access_decided_by": "TEXT",
+            "pilot_access_note": "TEXT",
+            "nppes_snapshot_json": "TEXT",
+            "nppes_fetched_at": "TEXT",
+        }
+        scope_columns = self._columns(db, "physician_owner_scopes")
+        for column, definition in scope_additions.items():
+            if column not in scope_columns:
+                db.execute(f"ALTER TABLE physician_owner_scopes ADD COLUMN {column} {definition}")
+        db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS physician_identity_selections (
+              auth_user_id TEXT PRIMARY KEY,
+              npi TEXT NOT NULL CHECK(length(npi) = 10),
+              identity_json TEXT NOT NULL,
+              fetched_at TEXT NOT NULL,
+              selected_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS physician_onboarding_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              auth_user_id TEXT NOT NULL,
+              event TEXT NOT NULL,
+              npi TEXT,
+              owner_scope_id TEXT,
+              actor TEXT NOT NULL,
+              detail_json TEXT,
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS physician_onboarding_events_user
+              ON physician_onboarding_events(auth_user_id, id);
+            CREATE INDEX IF NOT EXISTS physician_owner_scopes_pilot_status
+              ON physician_owner_scopes(pilot_access_status, updated_at);
+
+            -- One active physician claim per account (one private workspace).
+            CREATE TRIGGER IF NOT EXISTS provider_claims_one_active_per_account_insert
+            BEFORE INSERT ON provider_claims
+            WHEN NEW.status IN ('claimed', 'verification_pending', 'verified')
+              AND EXISTS (
+                SELECT 1 FROM provider_claims WHERE auth_user_id = NEW.auth_user_id
+                  AND status IN ('claimed', 'verification_pending', 'verified'))
+            BEGIN
+              SELECT RAISE(ABORT, 'account already holds an active physician claim');
+            END;
+            CREATE TRIGGER IF NOT EXISTS provider_claims_one_active_per_account_update
+            BEFORE UPDATE OF status ON provider_claims
+            WHEN NEW.status IN ('claimed', 'verification_pending', 'verified')
+              AND OLD.status NOT IN ('claimed', 'verification_pending', 'verified')
+              AND EXISTS (
+                SELECT 1 FROM provider_claims WHERE auth_user_id = NEW.auth_user_id
+                  AND id != NEW.id
+                  AND status IN ('claimed', 'verification_pending', 'verified'))
+            BEGIN
+              SELECT RAISE(ABORT, 'account already holds an active physician claim');
+            END;
+
+            -- A claim's NPI and owner can never be rewritten in place.
+            CREATE TRIGGER IF NOT EXISTS provider_claims_identity_immutable
+            BEFORE UPDATE OF npi, auth_user_id ON provider_claims
+            WHEN NEW.npi IS NOT OLD.npi OR NEW.auth_user_id IS NOT OLD.auth_user_id
+            BEGIN
+              SELECT RAISE(ABORT, 'provider claim identity is immutable');
+            END;
+
+            -- An owner scope must mirror its claim, and its keys never move.
+            CREATE TRIGGER IF NOT EXISTS physician_owner_scopes_match_claim
+            BEFORE INSERT ON physician_owner_scopes
+            WHEN NOT EXISTS (
+              SELECT 1 FROM provider_claims WHERE id = NEW.provider_claim_id
+                AND npi = NEW.npi AND auth_user_id = NEW.auth_user_id)
+            BEGIN
+              SELECT RAISE(ABORT, 'owner scope must match its provider claim');
+            END;
+            CREATE TRIGGER IF NOT EXISTS physician_owner_scopes_identity_immutable
+            BEFORE UPDATE OF npi, auth_user_id, provider_claim_id, storage_scope_id, physician_id
+              ON physician_owner_scopes
+            WHEN NEW.npi IS NOT OLD.npi OR NEW.auth_user_id IS NOT OLD.auth_user_id
+              OR NEW.provider_claim_id IS NOT OLD.provider_claim_id
+              OR NEW.storage_scope_id IS NOT OLD.storage_scope_id
+              OR NEW.physician_id IS NOT OLD.physician_id
+            BEGIN
+              SELECT RAISE(ABORT, 'owner scope identity is immutable');
+            END;
+
+            -- Pilot approval requires an active claim whose identity was confirmed.
+            CREATE TRIGGER IF NOT EXISTS physician_owner_scopes_approval_requires_confirmation
+            BEFORE UPDATE OF pilot_access_status ON physician_owner_scopes
+            WHEN NEW.pilot_access_status = 'approved' AND NOT EXISTS (
+              SELECT 1 FROM provider_claims WHERE id = NEW.provider_claim_id
+                AND identity_confirmed_at IS NOT NULL
+                AND status IN ('claimed', 'verification_pending', 'verified'))
+            BEGIN
+              SELECT RAISE(ABORT, 'pilot approval requires a confirmed active identity');
+            END;
+            CREATE TRIGGER IF NOT EXISTS physician_owner_scopes_insert_not_approved
+            BEFORE INSERT ON physician_owner_scopes
+            WHEN NEW.pilot_access_status != 'pending'
+            BEGIN
+              SELECT RAISE(ABORT, 'new owner scopes start pending pilot approval');
+            END;
+            """
         )
 
     @staticmethod
@@ -2730,9 +2849,56 @@ class WorkflowStore:
             return None
         result = dict(row)
         result["provider_identity"] = json.loads(result.pop("provider_identity_json"))
+        snapshot = result.pop("nppes_snapshot_json", None)
+        result["nppes_snapshot"] = json.loads(snapshot) if snapshot else None
         result["clinical_access"] = bool(result["clinical_access"])
         result["selected"] = bool(result["selected"])
         return result
+
+    @staticmethod
+    def _json(value: dict) -> str:
+        return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+    def _insert_owner_scope(
+        self,
+        db: sqlite3.Connection,
+        claim: dict,
+        provider_identity: dict,
+        now: str,
+        *,
+        nppes_snapshot: dict | None = None,
+        nppes_fetched_at: str | None = None,
+    ) -> str:
+        """Insert one opaque owner scope inside the caller's transaction."""
+        selected = not bool(
+            db.execute(
+                "SELECT 1 FROM physician_owner_scopes WHERE auth_user_id=? AND selected=1",
+                (claim["auth_user_id"],),
+            ).fetchone()
+        )
+        scope_id = f"pos-{secrets.token_hex(16)}"
+        db.execute(
+            """INSERT INTO physician_owner_scopes(
+                 id, provider_claim_id, auth_user_id, npi, storage_scope_id,
+                 physician_id, provider_identity_json, selected, created_at, updated_at,
+                 nppes_snapshot_json, nppes_fetched_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                scope_id,
+                claim["id"],
+                claim["auth_user_id"],
+                claim["npi"],
+                f"physician-owner-{secrets.token_hex(16)}",
+                f"claimed-physician-{secrets.token_hex(16)}",
+                self._json(provider_identity),
+                int(selected),
+                now,
+                now,
+                self._json(nppes_snapshot) if nppes_snapshot else None,
+                nppes_fetched_at,
+            ),
+        )
+        return scope_id
 
     def ensure_physician_owner_scope(self, claim: dict, provider_identity: dict) -> dict:
         """Idempotently bind an active claim to an opaque private engagement scope."""
@@ -2745,37 +2911,317 @@ class WorkflowStore:
             ).fetchone()
             if existing:
                 return self._owner_scope_dict(existing)  # type: ignore[return-value]
-            selected = not bool(
-                db.execute(
-                    "SELECT 1 FROM physician_owner_scopes WHERE auth_user_id=? AND selected=1",
-                    (claim["auth_user_id"],),
-                ).fetchone()
-            )
-            scope_id = f"pos-{secrets.token_hex(16)}"
-            storage_scope_id = f"physician-owner-{secrets.token_hex(16)}"
-            physician_id = f"claimed-physician-{secrets.token_hex(16)}"
-            db.execute(
-                """INSERT INTO physician_owner_scopes(
-                     id, provider_claim_id, auth_user_id, npi, storage_scope_id,
-                     physician_id, provider_identity_json, selected, created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    scope_id,
-                    claim["id"],
-                    claim["auth_user_id"],
-                    claim["npi"],
-                    storage_scope_id,
-                    physician_id,
-                    json.dumps(provider_identity, separators=(",", ":"), sort_keys=True),
-                    int(selected),
-                    now,
-                    now,
-                ),
-            )
+            scope_id = self._insert_owner_scope(db, claim, provider_identity, now)
             row = db.execute(
                 "SELECT * FROM physician_owner_scopes WHERE id=?", (scope_id,)
             ).fetchone()
         return self._owner_scope_dict(row)  # type: ignore[return-value]
+
+    # ------------------------------------------------------ pilot onboarding
+
+    _ACTIVE_CLAIM: ClassVar[str] = "('claimed', 'verification_pending', 'verified')"
+
+    def _record_onboarding_event(
+        self,
+        db: sqlite3.Connection,
+        auth_user_id: str,
+        event: str,
+        *,
+        actor: str,
+        npi: str | None = None,
+        owner_scope_id: str | None = None,
+        detail: dict | None = None,
+        now: str | None = None,
+    ) -> None:
+        db.execute(
+            """INSERT INTO physician_onboarding_events(
+                 auth_user_id, event, npi, owner_scope_id, actor, detail_json, created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                auth_user_id,
+                event,
+                npi,
+                owner_scope_id,
+                actor,
+                self._json(detail) if detail else None,
+                now or self._now(),
+            ),
+        )
+
+    def onboarding_events(self, auth_user_id: str) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM physician_onboarding_events WHERE auth_user_id=? ORDER BY id",
+                (auth_user_id,),
+            ).fetchall()
+        events = []
+        for row in rows:
+            item = dict(row)
+            detail = item.pop("detail_json")
+            item["detail"] = json.loads(detail) if detail else None
+            events.append(item)
+        return events
+
+    def save_identity_selection(
+        self, auth_user_id: str, npi: str, identity: dict, fetched_at: str
+    ) -> dict:
+        """Persist the server-side lookup result the user is about to confirm.
+
+        A selection is not a claim: it reserves nothing and grants nothing.
+        """
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                """INSERT INTO physician_identity_selections(
+                     auth_user_id, npi, identity_json, fetched_at, selected_at
+                   ) VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(auth_user_id) DO UPDATE SET npi=excluded.npi,
+                     identity_json=excluded.identity_json, fetched_at=excluded.fetched_at,
+                     selected_at=excluded.selected_at""",
+                (auth_user_id, npi, self._json(identity), fetched_at, now),
+            )
+            self._record_onboarding_event(
+                db, auth_user_id, "identity_selected", actor="user", npi=npi, now=now
+            )
+        return self.identity_selection(auth_user_id)  # type: ignore[return-value]
+
+    def identity_selection(self, auth_user_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM physician_identity_selections WHERE auth_user_id=?",
+                (auth_user_id,),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["identity"] = json.loads(result.pop("identity_json"))
+        return result
+
+    def clear_identity_selection(self, auth_user_id: str) -> bool:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            removed = db.execute(
+                "DELETE FROM physician_identity_selections WHERE auth_user_id=?",
+                (auth_user_id,),
+            ).rowcount
+            if removed:
+                self._record_onboarding_event(
+                    db, auth_user_id, "identity_selection_cleared", actor="user"
+                )
+        return bool(removed)
+
+    def has_rejected_claim(self, auth_user_id: str) -> bool:
+        with self._connect() as db:
+            return bool(
+                db.execute(
+                    "SELECT 1 FROM provider_claims WHERE auth_user_id=? AND status='rejected'",
+                    (auth_user_id,),
+                ).fetchone()
+            )
+
+    def confirm_physician_identity(
+        self,
+        auth_user_id: str,
+        npi: str,
+        *,
+        nppes_snapshot: dict,
+        provider_identity: dict,
+        nppes_fetched_at: str,
+        verification_method: str,
+    ) -> tuple[str, dict | None, dict | None]:
+        """Atomically turn a confirmed selection into exactly one claim + owner scope.
+
+        Returns (outcome, claim, scope). Outcomes: `confirmed`, `already_confirmed`,
+        `npi_claimed` (another account holds it), `account_bound` (this account
+        already holds a different identity), `account_rejected`.
+        """
+        now = self._now()
+        active = self._ACTIVE_CLAIM
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            own_active = db.execute(
+                f"SELECT * FROM provider_claims WHERE auth_user_id=? AND status IN {active}"
+                " ORDER BY id",
+                (auth_user_id,),
+            ).fetchall()
+            if any(row["npi"] != npi for row in own_active):
+                return "account_bound", None, None
+            if not own_active and db.execute(
+                "SELECT 1 FROM provider_claims WHERE auth_user_id=? AND status='rejected'",
+                (auth_user_id,),
+            ).fetchone():
+                return "account_rejected", None, None
+            holder = db.execute(
+                f"SELECT * FROM provider_claims WHERE npi=? AND status IN {active}",
+                (npi,),
+            ).fetchone()
+            if holder and holder["auth_user_id"] != auth_user_id:
+                return "npi_claimed", None, None
+            outcome = "confirmed"
+            if holder:
+                claim_id = holder["id"]
+                if holder["identity_confirmed_at"]:
+                    outcome = "already_confirmed"
+                else:  # Legacy unconfirmed claim on the same NPI: upgrade in place.
+                    db.execute(
+                        """UPDATE provider_claims SET identity_confirmed_at=?,
+                             status=CASE WHEN status='claimed'
+                               THEN 'verification_pending' ELSE status END,
+                             verification_submitted_at=COALESCE(verification_submitted_at, ?),
+                             verification_method=COALESCE(verification_method, ?),
+                             updated_at=? WHERE id=?""",
+                        (now, now, verification_method, now, claim_id),
+                    )
+            else:
+                claim_id = db.execute(
+                    """INSERT INTO provider_claims(
+                         auth_user_id, npi, status, claimed_at, verification_submitted_at,
+                         updated_at, verification_method, identity_confirmed_at
+                       ) VALUES (?, ?, 'verification_pending', ?, ?, ?, ?, ?)""",
+                    (auth_user_id, npi, now, now, now, verification_method, now),
+                ).lastrowid
+            claim = dict(
+                db.execute("SELECT * FROM provider_claims WHERE id=?", (claim_id,)).fetchone()
+            )
+            scope = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE provider_claim_id=?", (claim_id,)
+            ).fetchone()
+            if scope is None:
+                scope_id = self._insert_owner_scope(
+                    db,
+                    claim,
+                    provider_identity,
+                    now,
+                    nppes_snapshot=nppes_snapshot,
+                    nppes_fetched_at=nppes_fetched_at,
+                )
+            else:
+                scope_id = scope["id"]
+                if scope["nppes_snapshot_json"] is None:
+                    db.execute(
+                        """UPDATE physician_owner_scopes SET nppes_snapshot_json=?,
+                             nppes_fetched_at=?, provider_identity_json=?, updated_at=?
+                           WHERE id=?""",
+                        (
+                            self._json(nppes_snapshot),
+                            nppes_fetched_at,
+                            self._json(provider_identity),
+                            now,
+                            scope_id,
+                        ),
+                    )
+            db.execute(
+                "UPDATE physician_owner_scopes SET selected=0 WHERE auth_user_id=? AND id!=?",
+                (auth_user_id, scope_id),
+            )
+            db.execute("UPDATE physician_owner_scopes SET selected=1 WHERE id=?", (scope_id,))
+            db.execute(
+                "DELETE FROM physician_identity_selections WHERE auth_user_id=?",
+                (auth_user_id,),
+            )
+            if outcome == "confirmed":
+                self._record_onboarding_event(
+                    db,
+                    auth_user_id,
+                    "identity_confirmed",
+                    actor="user",
+                    npi=npi,
+                    owner_scope_id=scope_id,
+                    detail={"nppes_fetched_at": nppes_fetched_at, "claim_id": claim_id},
+                    now=now,
+                )
+            row = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE id=?", (scope_id,)
+            ).fetchone()
+        return outcome, claim, self._owner_scope_dict(row)
+
+    def physician_owner_scope(self, scope_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE id=?", (scope_id,)
+            ).fetchone()
+        return self._owner_scope_dict(row)
+
+    def pilot_owner_scopes(self, pilot_access_status: str | None = None) -> list[dict]:
+        """Internal review listing: owner scopes with their claim's confirmation state."""
+        query = """SELECT s.*, c.status AS claim_status,
+                          c.identity_confirmed_at AS identity_confirmed_at,
+                          c.verification_method AS verification_method
+                   FROM physician_owner_scopes s
+                   JOIN provider_claims c ON c.id = s.provider_claim_id"""
+        params: tuple = ()
+        if pilot_access_status:
+            query += " WHERE s.pilot_access_status=?"
+            params = (pilot_access_status,)
+        with self._connect() as db:
+            rows = db.execute(query + " ORDER BY s.updated_at, s.id", params).fetchall()
+        return [self._owner_scope_dict(row) for row in rows]  # type: ignore[misc]
+
+    _PILOT_TRANSITIONS: ClassVar[dict[str, tuple[set[str], str]]] = {
+        "approve": ({"pending", "disabled"}, "approved"),
+        "disable": ({"pending", "approved"}, "disabled"),
+        "reject": ({"pending", "disabled", "approved"}, "rejected"),
+    }
+
+    def decide_pilot_access(
+        self, scope_id: str, decision: str, actor: str, note: str | None = None
+    ) -> dict | None:
+        """Internal-only pilot gate transition. Rejection releases the NPI claim."""
+        allowed_from, target = self._PILOT_TRANSITIONS[decision]
+        now = self._now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            scope = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE id=?", (scope_id,)
+            ).fetchone()
+            if not scope:
+                return None
+            if scope["pilot_access_status"] != target:
+                if scope["pilot_access_status"] not in allowed_from:
+                    raise ValueError(
+                        f"Cannot {decision} a physician whose pilot access is "
+                        f"{scope['pilot_access_status']}"
+                    )
+                claim = db.execute(
+                    "SELECT * FROM provider_claims WHERE id=?", (scope["provider_claim_id"],)
+                ).fetchone()
+                if decision == "approve" and (
+                    not claim["identity_confirmed_at"]
+                    or claim["status"] not in {"claimed", "verification_pending", "verified"}
+                ):
+                    raise ValueError("Only a confirmed, active physician identity can be approved")
+                db.execute(
+                    """UPDATE physician_owner_scopes SET pilot_access_status=?,
+                         pilot_access_decided_at=?, pilot_access_decided_by=?,
+                         pilot_access_note=?, updated_at=?,
+                         selected=CASE WHEN ?='rejected' THEN 0 ELSE selected END
+                       WHERE id=?""",
+                    (target, now, actor, note, now, target, scope_id),
+                )
+                if target == "rejected" and claim["status"] in {
+                    "claimed",
+                    "verification_pending",
+                    "verified",
+                }:
+                    db.execute(
+                        "UPDATE provider_claims SET status='rejected', updated_at=? WHERE id=?",
+                        (now, claim["id"]),
+                    )
+                self._record_onboarding_event(
+                    db,
+                    scope["auth_user_id"],
+                    f"pilot_{target}",
+                    actor=actor,
+                    npi=scope["npi"],
+                    owner_scope_id=scope_id,
+                    detail={"note": note} if note else None,
+                    now=now,
+                )
+            row = db.execute(
+                "SELECT * FROM physician_owner_scopes WHERE id=?", (scope_id,)
+            ).fetchone()
+        return self._owner_scope_dict(row)
 
     def physician_owner_scopes(self, auth_user_id: str) -> list[dict]:
         with self._connect() as db:

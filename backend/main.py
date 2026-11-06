@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.consult import router as consult_router
 from backend.api.engagement import router as engagement_router
 from backend.api.eval_harness import router as eval_harness_router
+from backend.api.physician_onboarding import internal_router as pilot_admin_router
+from backend.api.physician_onboarding import router as physician_onboarding_router
 from backend.api.physician_sandbox import router as physician_sandbox_router
 from backend.api.referral_preferences import router as referral_preferences_router
 from backend.api.referrals import router as referrals_router
@@ -31,7 +33,9 @@ app.include_router(workspace_router)
 app.include_router(specialist_router)
 app.include_router(engagement_router)
 app.include_router(provider_network_router)
+app.include_router(physician_onboarding_router)
 app.include_router(physician_sandbox_router)
+app.include_router(pilot_admin_router)
 app.include_router(referrals_router)
 app.include_router(referral_preferences_router)
 app.include_router(eval_harness_router)

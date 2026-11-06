@@ -69,10 +69,12 @@ test('the demo perspective menu never references Supabase auth or identity claim
   assert.doesNotMatch(control, /useAuth|claim|Supabase/i)
 })
 
-test('PCP shell navigation and Lucy sidebar card are unchanged aside from the header control', () => {
-  assert.match(shell(), /const items = perspective === 'specialist' \? SPECIALIST_NAV_ITEMS : perspective === 'chen' \? CHEN_NAV_ITEMS : navItems/)
+test('PCP shell is its own PhysicianShell (physician-agent home pass); specialist and Chen shells keep their navigation and agent sidebar card', () => {
+  assert.match(shell(), /if \(perspective === 'pcp'\) return <PhysicianShell /)
+  assert.match(shell(), /const items = perspective === 'specialist' \? SPECIALIST_NAV_ITEMS : CHEN_NAV_ITEMS/)
   assert.match(shell(), /items\.map/)
-  assert.match(shell(), /<strong>\{PCP_AGENT_NAME\}<\/strong>/)
+  assert.match(shell(), /navItems\.map/)
+  assert.match(shell(), /<strong>\{SPECIALIST_AGENT_NAME\}<\/strong>/)
 })
 
 test('specialist shell uses the consolidated three-item navigation (post-8B): Dashboard/Patients/Network, with My Agent as the persistent sidebar object and Profile in the avatar menu', () => {

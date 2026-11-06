@@ -61,6 +61,26 @@ def _directory(path: Path) -> NppesDirectory:
     return NppesDirectory(path)
 
 
+def _claim(store: WorkflowStore, network: ProviderNetwork, user: str, npi: str) -> dict:
+    """Canonical pilot path at the store layer: confirmed identity + manual approval.
+
+    NPPES lookup/confirmation over HTTP is covered in test_pilot_onboarding.py; these
+    tests exercise the private sandbox behind an approved owner scope.
+    """
+    identity = PhysicianSandboxService._identity_payload(network._resolve(npi))
+    outcome, claim, scope = store.confirm_physician_identity(
+        user,
+        npi,
+        nppes_snapshot={"npi": npi, "display_name": identity["display_name"]},
+        provider_identity=identity,
+        nppes_fetched_at="2026-01-01T00:00:00+00:00",
+        verification_method="nppes_match_self_attested",
+    )
+    if outcome in {"confirmed", "already_confirmed"}:
+        store.decide_pilot_access(scope["id"], "approve", "test-admin")
+    return {"outcome": outcome, **(claim or {})}
+
+
 @pytest.fixture
 def sandbox_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     store = WorkflowStore(tmp_path / "workflow.sqlite")
@@ -70,7 +90,9 @@ def sandbox_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(sandbox_api, "sandbox_service", service)
     app.dependency_overrides[get_token_verifier] = lambda: FakeVerifier()
     try:
-        yield TestClient(app), store
+        client = TestClient(app)
+        client.claim = lambda user, npi: _claim(store, network, user, npi)  # type: ignore[attr-defined]
+        yield client, store
     finally:
         app.dependency_overrides.clear()
 
@@ -81,13 +103,17 @@ def test_auth_no_claim_and_claim_bootstrap_are_private_and_idempotent(sandbox_cl
     no_claim = client.get("/api/me/physician/status", headers=_headers("user-a"))
     assert no_claim.json()["has_claim"] is False
 
-    first = client.post("/api/providers/1234567890/claim", headers=_headers("user-a"))
-    repeat = client.post("/api/providers/1234567890/claim", headers=_headers("user-a"))
-    assert first.json()["id"] == repeat.json()["id"]
+    # The legacy claim shortcut no longer creates real-NPI ownership.
+    shortcut = client.post("/api/providers/1234567890/claim", headers=_headers("user-a"))
+    assert shortcut.status_code == 409
+    first = client.claim("user-a", "1234567890")
+    repeat = client.claim("user-a", "1234567890")
+    assert first["id"] == repeat["id"]
+    assert repeat["outcome"] == "already_confirmed"
     assert len(store.physician_owner_scopes("user-a")) == 1
-    conflict = client.post("/api/providers/1234567890/claim", headers=_headers("user-b"))
-    assert conflict.status_code == 409
-    assert "user-a" not in conflict.text
+    conflict = client.claim("user-b", "1234567890")
+    assert conflict["outcome"] == "npi_claimed"
+    assert store.provider_claims("user-b") == []
 
     status = client.get("/api/me/physician/status", headers=_headers("user-a")).json()
     assert status["publication_status"] == "private"
@@ -99,8 +125,8 @@ def test_auth_no_claim_and_claim_bootstrap_are_private_and_idempotent(sandbox_cl
 
 def test_owner_profile_training_chat_and_drafts_persist_and_are_isolated(sandbox_client) -> None:
     client, store = sandbox_client
-    client.post("/api/providers/1234567890/claim", headers=_headers("user-a"))
-    client.post("/api/providers/1234567891/claim", headers=_headers("user-b"))
+    client.claim("user-a", "1234567890")
+    client.claim("user-b", "1234567891")
 
     profile_item = {
         "category": "about",
@@ -215,8 +241,8 @@ def test_owner_profile_training_chat_and_drafts_persist_and_are_isolated(sandbox
 
 def test_owner_sandbox_rejects_patient_data_and_arbitrary_cross_owner_ids(sandbox_client) -> None:
     client, store = sandbox_client
-    claim_a = client.post("/api/providers/1234567890/claim", headers=_headers("user-a")).json()
-    claim_b = client.post("/api/providers/1234567891/claim", headers=_headers("user-b")).json()
+    claim_a = client.claim("user-a", "1234567890")
+    claim_b = client.claim("user-b", "1234567891")
     assert (
         client.put(
             f"/api/me/physician/selection/{claim_b['id']}", headers=_headers("user-a")
@@ -253,7 +279,7 @@ def test_verified_real_claim_remains_private_until_separate_publication(
     sandbox_client,
 ) -> None:
     client, store = sandbox_client
-    claim = client.post("/api/providers/1234567890/claim", headers=_headers("user-a")).json()
+    claim = client.claim("user-a", "1234567890")
     store.submit_provider_verification(claim["id"], "user-a")
     store.verify_provider_claim(claim["id"], "user-a", "manual_test")
     activation = client.post(
@@ -272,7 +298,7 @@ def test_real_enrichment_is_review_first_and_preserves_provenance(
     sandbox_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, _ = sandbox_client
-    client.post("/api/providers/1234567890/claim", headers=_headers("user-a"))
+    client.claim("user-a", "1234567890")
     monkeypatch.setattr(profile_enrichment_service.client, "enabled", True)
     monkeypatch.setattr(profile_enrichment_service.client, "model", "test-model")
     monkeypatch.setattr(profile_enrichment_service.client, "api_key", "test-only")

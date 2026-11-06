@@ -253,7 +253,7 @@ test('the Chen routes are registered in the SPA dispatcher, reusing ProductShell
 
 test('Chen now has a "My Agent" sidebar object, same standing as Lucy\'s and Iain\'s (closed-loop referral pass 2: full first-class workspace)', () => {
   const shell = slice(app, 'function ProductShell', 'function LandingPage')
-  assert.match(shell, /perspective === 'chen'\s*\n\s*\? <button className=\{`sidebar-clinician \$\{onAgent \? 'active' : ''\}`\}[\s\S]{0,200}CHEN_AGENT_NAME/)
+  assert.match(shell, /: <button className=\{`sidebar-clinician \$\{onAgent \? 'active' : ''\}`\} aria-current=\{onAgent \? 'page' : undefined\} onClick=\{\(\) => navigate\('\/chen\/agent'\)\}[\s\S]{0,200}CHEN_AGENT_NAME/)
 })
 
 /* ------------------------------------------------------- Patient Detail reuse */

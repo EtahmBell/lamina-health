@@ -21,6 +21,7 @@ from .service import (
     ClaimNotFoundError,
     DemoVerificationDisabledError,
     DemoVerificationForbiddenError,
+    OnboardingRequiredError,
     ProviderDirectoryUnavailableError,
     ProviderNetwork,
     ProviderNotFoundError,
@@ -43,7 +44,7 @@ def _run(action):
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (DemoVerificationForbiddenError, DemoVerificationDisabledError) as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
-    except (AgentTransitionError, ClaimConflictError) as error:
+    except (AgentTransitionError, ClaimConflictError, OnboardingRequiredError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

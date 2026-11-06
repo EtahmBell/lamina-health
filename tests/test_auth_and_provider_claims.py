@@ -28,6 +28,7 @@ from backend.workflow import WorkflowStore
 
 REAL_NPI = "1234567890"
 SYNTHETIC_NPI = SYNTHETIC_PHYSICIAN_NPIS["physician-jung"]
+SECOND_SYNTHETIC_NPI = SYNTHETIC_PHYSICIAN_NPIS["physician-patel"]
 
 
 class FakeVerifier:
@@ -93,32 +94,36 @@ def test_protected_claim_endpoint_requires_a_valid_token(claim_client) -> None:
     ).status_code == 401
 
     response = client.post(
-        f"/api/providers/{REAL_NPI}/claim", headers=_headers("user-a")
+        f"/api/providers/{SYNTHETIC_NPI}/claim", headers=_headers("user-a")
     )
     assert response.status_code == 200
     assert response.json()["status"] == "claimed"
+    # Real NPIs are no longer claimable through this shortcut: onboarding only.
+    real = client.post(f"/api/providers/{REAL_NPI}/claim", headers=_headers("user-b"))
+    assert real.status_code == 409
+    assert "onboarding" in real.json()["detail"]
 
 
 def test_claims_are_idempotent_unique_and_private(claim_client) -> None:
     client, _, _ = claim_client
     first = client.post(
-        f"/api/providers/{REAL_NPI}/claim", headers=_headers("user-a")
+        f"/api/providers/{SYNTHETIC_NPI}/claim", headers=_headers("user-a")
     )
     repeat = client.post(
-        f"/api/providers/{REAL_NPI}/claim", headers=_headers("user-a")
+        f"/api/providers/{SYNTHETIC_NPI}/claim", headers=_headers("user-a")
     )
     assert first.json()["id"] == repeat.json()["id"]
 
     conflict = client.post(
-        f"/api/providers/{REAL_NPI}/claim", headers=_headers("user-b")
+        f"/api/providers/{SYNTHETIC_NPI}/claim", headers=_headers("user-b")
     )
     assert conflict.status_code == 409
     assert "user-a" not in conflict.text
 
-    public = client.get(f"/api/providers/{REAL_NPI}/claim-state")
+    public = client.get(f"/api/providers/{SYNTHETIC_NPI}/claim-state")
     assert public.json() == {
-        "npi": REAL_NPI,
-        "synthetic": False,
+        "npi": SYNTHETIC_NPI,
+        "synthetic": True,
         "lifecycle_status": "claimed",
         "claimable": False,
         "agent_active": False,
@@ -130,7 +135,7 @@ def test_claims_are_idempotent_unique_and_private(claim_client) -> None:
     assert "verification_method" not in public.text
 
     owner = client.get(
-        f"/api/providers/{REAL_NPI}/claim-state", headers=_headers("user-a")
+        f"/api/providers/{SYNTHETIC_NPI}/claim-state", headers=_headers("user-a")
     ).json()
     assert owner["claimed_by_me"] is True
     assert owner["my_claim_id"] == first.json()["id"]
@@ -138,15 +143,26 @@ def test_claims_are_idempotent_unique_and_private(claim_client) -> None:
         "/api/me/provider-claims", headers=_headers("user-b")
     ).json() == []
     assert client.post(
-        "/api/providers/0000000000/claim", headers=_headers("user-a")
+        "/api/providers/0000000000/claim", headers=_headers("user-b")
     ).status_code == 404
+    # One active claim per account: a second identity is refused, not silently added.
+    second = client.post(
+        f"/api/providers/{SECOND_SYNTHETIC_NPI}/claim", headers=_headers("user-a")
+    )
+    assert second.status_code == 409
+    assert "user-a" not in second.text
 
 
 def test_real_nppes_claim_stops_at_verification_pending(claim_client) -> None:
-    client, network, _ = claim_client
-    claim = client.post(
-        f"/api/providers/{REAL_NPI}/claim", headers=_headers("user-a")
-    ).json()
+    client, network, store = claim_client
+    _, claim, _ = store.confirm_physician_identity(
+        "user-a",
+        REAL_NPI,
+        nppes_snapshot={"npi": REAL_NPI},
+        provider_identity={"npi": REAL_NPI, "display_name": "JANE SMITH, MD"},
+        nppes_fetched_at="2026-01-01T00:00:00+00:00",
+        verification_method="nppes_match_self_attested",
+    )
     path = f"/api/provider-claims/{claim['id']}"
 
     assert client.post(

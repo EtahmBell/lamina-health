@@ -22,6 +22,12 @@ export type DemoPatientSummary = {
    * Chen's own pre-existing synthetic patients (closed-loop referral pass 2)
    * are tagged 'chen' so they render on his Patients page, never Lucy's. */
   owner?: 'chen'
+  /** Physician-agent home pass: an honest, static reason this patient should
+   * lead the physician's attention before any network consult exists -- read
+   * only by physicianQueue.ts. `lead` completes the Dashboard briefing
+   * sentence ("The most important is <name><lead>"). Never a live clinical
+   * inference; it restates the synthetic case's own documented trajectory. */
+  attention?: { lead: string }
 }
 
 export const DEMO_PATIENTS: DemoPatientSummary[] = [
@@ -60,6 +66,7 @@ export const DEMO_PATIENTS: DemoPatientSummary[] = [
     recent: true,
     stage: 'new',
     stageNote: 'Worsening glycemic control despite medication escalation.',
+    attention: { lead: ', whose diabetes has continued to worsen and may need specialist input.' },
   },
   {
     id: 'patient-syncope-003',

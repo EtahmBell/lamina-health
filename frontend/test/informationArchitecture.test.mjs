@@ -34,12 +34,12 @@ test('the gateway is a neutral role picker, not a personalized Dr. Lucy Saruhash
 
 /* ------------------------------------------------------------------- shell */
 
-test('workspace sidebar keeps the physician landing page as a dashboard destination (post-8B: Dashboard/Patients/Network only)', () => {
+test('workspace sidebar: five physician destinations with Dashboard as the landing page (physician-agent home pass)', () => {
   const navigation = slice('const navItems', 'const SPECIALIST_NAV_ITEMS')
   assert.deepEqual(navigation.match(/title: '[^']+'/g), [
-    "title: 'Dashboard'", "title: 'Patients'", "title: 'Network'",
+    "title: 'Dashboard'", "title: 'For you'", "title: 'Patients'", "title: 'Network'", "title: 'Your Agent'",
   ])
-  assert.match(navigation, /title: 'Dashboard'.*path: '\/home'/s)
+  assert.ok(navigation.includes("title: 'Dashboard', icon: '⌂', path: '/home'"))
 })
 
 test('workspace logo returns every shell screen to the portal', () => {
@@ -52,57 +52,25 @@ test('workspace header keeps right controls without a generic page label', () =>
   assert.doesNotMatch(shell(), /section === 'home'/)
 })
 
-test('the sidebar physician-agent block is one clickable control into My Agent, persistent at the bottom of the sidebar and visually active on agent pages', () => {
-  assert.match(shell(), /className=\{`sidebar-clinician \$\{onAgent \? 'active' : ''\}`\} aria-current=\{onAgent \? 'page' : undefined\} onClick=\{\(\) => navigate\('\/agent\?tab=overview'\)\}/)
-  assert.match(shell(), /aria-label=\{`Open \$\{PCP_AGENT_NAME\} overview`\}/)
-  assert.match(styles, /\.sidebar-clinician\.active/, 'the agent object gets a visible active state, not a decorative-only look')
+test('specialist and Chen sidebars keep their agent block; Lucy reaches her agent via the Your Agent nav item and her account sits at the sidebar bottom', () => {
+  assert.ok(shell().includes("onClick={() => navigate('/specialist/agent')}"))
+  assert.ok(shell().includes("onClick={() => navigate('/chen/agent')}"))
+  assert.ok(slice('const navItems', 'const SPECIALIST_NAV_ITEMS').includes("title: 'Your Agent', icon: <AgentNavIcon />, path: '/agent?tab=overview'"))
+  assert.ok(shell().includes('<PerspectiveSwitch navigate={navigate} perspective="pcp" placement="sidebar" />'))
+  assert.ok(styles.includes('.sidebar-clinician.active'), 'the agent object gets a visible active state, not a decorative-only look')
 })
 
 /* -------------------------------------------------------------------- home */
 
-test('the Dashboard (post-8B rename of Home) greets the physician and leads with the agent banner, then the patient watchlist, then activity (Dashboard+Network polish pass: the standalone Needs You hero and the KPI row are both gone — no boxed metric-card row replaces them)', () => {
-  assert.match(home(), /<p className="eyebrow">Dashboard<\/p><h1>\{timeAwareGreeting\(greetingName\)\}<\/h1>/)
-  assert.doesNotMatch(home(), /physician workspace/i)
-  assert.doesNotMatch(home(), /Recent patients|home-patients|getPatientActivity/)
-  assert.doesNotMatch(home(), /dashboard-needs-you/, 'the large standalone Needs You section is gone from the Dashboard')
-  assert.doesNotMatch(home(), /dashboard-stats|DashboardMetricCard/, 'no KPI/stat-card row replaces Needs You either')
-  assert.match(home(), /<PatientWatchTable rows=\{watchRows\}/)
-  assert.match(home(), /Recent activity/)
-  const order = ['<HomeAgentCard', 'PatientWatchTable', 'className="home-activity"']
-  const positions = order.map((token) => home().indexOf(token))
-  assert.ok(positions.every((position) => position > 0), `missing one of ${order.join(', ')}`)
-  assert.deepEqual(positions, [...positions].sort((a, b) => a - b), 'the agent banner precedes the patient watchlist, which precedes recent activity')
-})
-
-test('the Dashboard activity header links to the agent, not to consultations', () => {
-  assert.match(home(), /onClick=\{\(\) => navigate\('\/agent\?tab=overview'\)\}>View your agent/)
-  assert.doesNotMatch(home(), /View all consultations/)
-  assert.match(home(), /'View interaction' : 'View consultation'/)
-})
-
-test('Home renders the Your Agent card from canonical AgentOverview state only', () => {
-  assert.match(home(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" records=\{records\} \/>/)
-  assert.doesNotMatch(home(), /Math\.|%|average|score|trend/i, 'no invented metrics on Home')
+test('the Dashboard is the agent-first home, rendered inside the shell with the docked agent conversation (physician-agent home pass)', () => {
+  assert.ok(home().includes('<ProductShell navigate={navigate} section="home" agentDock><AgentDashboard navigate={navigate} /></ProductShell>'))
+  assert.doesNotMatch(home(), /HomeAgentCard|PatientWatchTable|dashboard-stats|DashboardMetricCard/, 'the old banner/watchlist/KPI Dashboard is replaced, not stacked under the new one')
 })
 
 test('Patients uses canonical consultation state rather than inferring from legacy activity', () => {
   assert.match(patients(), /record\?\.has_consultation/)
   assert.match(patients(), /record\.latest_consulted_at/)
   assert.doesNotMatch(patients(), /record\?\.last_consultation/)
-})
-
-test('Dashboard activity carries timestamps and gives agent-originated events the sage "Agent" label (post-8B: clinical vs. agent events)', () => {
-  assert.match(home(), /eventTimestamp\(item\.time\)/)
-  assert.match(home(), /activityPath\(item\)/)
-  assert.match(home(), /agent-event-label">Agent</)
-  assert.match(home(), /activity-marker \$\{item\.kind\}/)
-  assert.match(home(), /agentActivity\(ordered\)\.slice\(0, 3\)/)
-})
-
-test('legacy case-raised learning records no longer drive ordinary Home current work', () => {
-  assert.doesNotMatch(home(), /agent learning\{pending\.length === 1/)
-  assert.doesNotMatch(home(), /navigate\(calibrationPath\(\)\)/)
-  assert.match(home(), /const watchRows = buildWatchRows\(latestByPatient, referralsByPatient\)/)
 })
 
 /* ---------------------------------------------------------- patient detail */
@@ -196,11 +164,12 @@ test('the targeted event keeps its normal layout with no grey evidence slab', ()
   }
 })
 
-test('agent activity reuses the one deep-link helper instead of a second implementation (post-8B: the feed moved from My Agent to the Dashboard)', () => {
-  assert.match(home(), /agentActivity\(ordered\)/)
-  assert.match(home(), /navigate\(activityPath\(item\)\)/)
-  assert.doesNotMatch(myAgent(), /agentActivity\(records\)/, 'My Agent no longer carries its own activity feed')
-  assert.doesNotMatch(source, /\?event=/, 'event URLs are built in agentActivity.ts only')
+test('agent activity reuses the one deep-link helper instead of a second implementation (physician-agent home pass: the Dashboard log reads it via physicianQueue.ts)', () => {
+  const queue = readFileSync(new URL('../src/physicianQueue.ts', import.meta.url), 'utf8')
+  assert.ok(queue.includes('agentActivity(input.records)'))
+  assert.ok(queue.includes('path: activityPath(event)'))
+  assert.ok(!myAgent().includes('agentActivity(records)'), 'My Agent no longer carries its own activity feed')
+  assert.ok(!source.includes('?event='), 'event URLs are built in agentActivity.ts only')
 })
 
 /* ------------------------------------------------------------- calibration */

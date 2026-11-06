@@ -10,6 +10,7 @@ from backend.provider_network.directory import DirectoryUnavailableError, NppesD
 from backend.provider_network.models import AgentPreferencesInput, AgentStatus
 from backend.provider_network.service import (
     DemoVerificationForbiddenError,
+    OnboardingRequiredError,
     ProviderNetwork,
 )
 from backend.synthetic_data import SYNTHETIC_PHYSICIAN_NPIS
@@ -63,11 +64,21 @@ def test_nppes_search_maps_directory_identity_and_reserved_agent(tmp_path: Path)
 def test_nppes_profile_cannot_use_demo_verification(tmp_path: Path) -> None:
     store = WorkflowStore(tmp_path / "workflow.sqlite")
     network = ProviderNetwork(build_directory(tmp_path / "providers.sqlite"), store, True)
-    claimed = network.claim("1234567890", "user-a")
-    network.submit_verification(claimed.id, "user-a")
+    # Real NPIs cannot use the legacy claim shortcut at all ...
+    with pytest.raises(OnboardingRequiredError):
+        network.claim("1234567890", "user-a")
+    # ... and a claim created through pilot onboarding still cannot be demo-verified.
+    _, claimed, _ = store.confirm_physician_identity(
+        "user-a",
+        "1234567890",
+        nppes_snapshot={"npi": "1234567890"},
+        provider_identity={"npi": "1234567890"},
+        nppes_fetched_at="2026-01-01T00:00:00+00:00",
+        verification_method="nppes_match_self_attested",
+    )
     assert network.get("1234567890").agent.status == AgentStatus.VERIFICATION_PENDING
     with pytest.raises(DemoVerificationForbiddenError):
-        network.verify_demo(claimed.id, "user-a")
+        network.verify_demo(claimed["id"], "user-a")
 
 
 def test_synthetic_profile_completes_structured_activation(tmp_path: Path) -> None:

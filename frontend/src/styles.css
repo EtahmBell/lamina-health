@@ -2933,3 +2933,148 @@ textarea.lamina-textarea, .chat-composer input { font-family: var(--font-ui); fo
 .train-history-edit { align-self: center; }
 .train-session-log { margin-top: 12px; }
 @media (max-width: 600px) { .network-activity-item { flex-direction: column; } .learned-this-week-list li { flex-direction: column; } .train-history-row { grid-template-columns: 1fr; } }
+
+/* Physician pilot onboarding (/me/onboarding) — reuses the claim-shell visual language. */
+.onboarding-panel { max-width: 620px; margin: 6vh auto 0; display: grid; gap: 16px; }
+.onboarding-panel > h1 { margin: 0; font-size: 2rem; }
+.onboarding-panel > .eyebrow { margin: 0; }
+.onboarding-panel > p { margin: 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.55; }
+.onboarding-form { max-width: 360px; }
+.onboarding-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.onboarding-confirm { display: grid; gap: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 16px; }
+.onboarding-confirm > p { margin: 0; color: var(--text-secondary); font-size: .64rem; line-height: 1.5; }
+.onboarding-identity-card { border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 15px; background: var(--surface); padding: 20px; box-shadow: var(--shadow-soft); }
+.onboarding-identity-card > header { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.onboarding-identity-card > header h2 { margin: 2px 0 0; font-size: 1.35rem; }
+.onboarding-identity-card > header p:last-child { margin: 4px 0 0; color: var(--text-secondary); font-size: .66rem; }
+.onboarding-identity-card dl { display: grid; margin: 0; }
+.onboarding-identity-card dl > div { display: grid; grid-template-columns: minmax(110px, 30%) minmax(0, 1fr); gap: 14px; padding: 9px 2px; font-size: .66rem; }
+.onboarding-identity-card dl > div + div { border-top: 1px solid rgb(222 216 206 / 60%); }
+.onboarding-identity-card dt { color: var(--text-secondary); font-weight: 600; }
+.onboarding-identity-card dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.onboarding-identity-card dd ul { margin: 0; padding-left: 16px; }
+.onboarding-npi { font-family: var(--font-ui); font-variant-numeric: tabular-nums; letter-spacing: .06em; font-weight: 700; }
+@media (max-width: 640px) {
+  .onboarding-panel { margin-top: 3vh; }
+  .onboarding-identity-card dl > div { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* ==========================================================================
+   Physician-agent home pass: Dashboard, For you, docked "Ask your agent".
+   Structure follows design_references/index_lamina_agent.html (whitespace,
+   serif briefing, border-separated rows, calm agent presence, right dock);
+   colour stays Lamina -- copper primary, warm parchment, restrained marks.
+   ========================================================================== */
+.physician-shell { --dock-width: 380px; --agent-orb: var(--agent-copper); --agent-orb-halo: #f1dfd3; --agent-orb-halo-soft: #f7ece5; }
+
+/* Sidebar: count badge on For you; account pinned bottom-left. */
+.physician-shell .nav-item { position: relative; }
+.nav-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--agent-copper-surface); color: var(--agent-copper-ink); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+.sidebar-account { border-top: 1px solid var(--border); padding-top: 16px; }
+.sidebar-account .profile-control { width: 100%; border: 0; border-radius: 8px; background: transparent; padding: 6px; gap: 10px; }
+.sidebar-account .profile-control:hover { background: #f5f1e9; }
+.sidebar-account .profile-control strong { font-size: 13px; font-weight: 500; color: var(--text-primary); text-align: left; }
+.sidebar-account .perspective-menu { top: auto; bottom: calc(100% + 8px); left: 0; right: auto; }
+
+/* Presence orb */
+.agent-orb { display: inline-block; width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--agent-orb, var(--agent-copper)); box-shadow: 0 0 0 3px var(--agent-orb-halo, #f1dfd3); animation: agent-breathe 3s ease-in-out infinite; }
+.agent-orb.still { animation: none; }
+@keyframes agent-breathe { 50% { box-shadow: 0 0 0 6px var(--agent-orb-halo-soft, #f7ece5); } }
+@media (prefers-reduced-motion: reduce) { .agent-orb { animation: none; } }
+
+/* Page */
+.agent-home { max-width: 680px; margin: 0 auto; padding: 64px 24px 112px; font-size: 14px; color: var(--text-primary); }
+.agent-home-greeting { font-family: var(--font-display); font-weight: 400; font-size: 40px; letter-spacing: -.01em; line-height: 1.15; margin: 0 0 14px; }
+.agent-status { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--agent-copper-ink); margin-bottom: 36px; }
+.agent-status.muted { color: var(--text-secondary); margin-bottom: 14px; }
+.agent-home-error { margin: -16px 0 28px; font-size: 13px; color: var(--danger); }
+.agent-brief { font-family: var(--font-display); font-size: 23px; line-height: 1.5; margin: 0 0 48px; }
+.agent-ent { background: var(--agent-copper-surface); color: var(--agent-copper-ink); padding: 0 3px; border-radius: 3px; white-space: nowrap; }
+.agent-brief-quiet { color: var(--text-secondary); }
+.agent-label { font-family: var(--font-ui); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; margin: 0 0 8px; }
+
+/* One simple list */
+.agent-list { display: flex; flex-direction: column; }
+.agent-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 16px 0; border: 0; border-top: 1px solid var(--border); background: transparent; color: inherit; font: inherit; text-align: left; }
+.agent-item:last-child { border-bottom: 1px solid var(--border); }
+.agent-item-text { flex: 1; min-width: 0; }
+.agent-item-title { font-size: 14.5px; }
+.agent-item-sub { font-size: 12.5px; color: var(--text-secondary); margin-top: 3px; line-height: 1.45; }
+.agent-item.quiet .agent-item-title { color: var(--text-secondary); }
+.agent-item.done { cursor: pointer; }
+.agent-item.done .agent-item-title::before { content: "✓  "; color: var(--success); }
+.agent-item-when { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.agent-btn { flex: none; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.agent-btn:hover { border-color: #cbc6bb; }
+.agent-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.agent-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.agent-link { border: 0; background: none; padding: 0; font-size: 13px; color: var(--accent-hover); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.agent-needs .agent-link { margin-top: 12px; }
+
+/* While you were away */
+.agent-away { margin-top: 28px; }
+.agent-away-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 0; font-size: 13px; color: var(--text-secondary); }
+.agent-log { margin-top: 12px; }
+.agent-log-row { display: flex; gap: 14px; width: 100%; padding: 8px 0; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--text-secondary); text-align: left; animation: agent-enter .4s ease-out; }
+button.agent-log-row { cursor: pointer; }
+button.agent-log-row:hover span:last-child { color: var(--text-primary); }
+.agent-log-time { width: 64px; flex: none; color: #a5a69f; }
+@keyframes agent-enter { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .agent-log-row, .agent-msg { animation: none; } }
+
+/* For you */
+.for-you-intro { margin: 0 0 40px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.for-you-section + .for-you-section { margin-top: 48px; }
+
+/* Docked conversation: always there on Dashboard/For you; collapses to a pill. */
+.agent-dock { position: fixed; top: 0; right: 0; z-index: 30; width: var(--dock-width, 380px); height: 100vh; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); font-size: 14px; }
+.physician-shell.has-agent-dock { transition: padding-right .22s ease; }
+body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock-width, 380px); }
+.agent-dock.collapsed { top: auto; bottom: 20px; right: 20px; width: auto; height: auto; border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 6px 20px rgb(41 49 46 / 10%); }
+.agent-dock.collapsed:hover { box-shadow: 0 8px 24px rgb(41 49 46 / 14%); }
+.agent-dock-rail { display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 10px 16px 10px 12px; color: var(--text-primary); font-size: 13px; font-weight: 500; cursor: pointer; }
+.agent-dock-head { display: flex; align-items: center; gap: 12px; padding: 18px; border-bottom: 1px solid var(--border); }
+.agent-dock-who { flex: 1; min-width: 0; font-weight: 500; font-size: 14px; }
+.agent-dock-who span { display: block; margin-top: 2px; font-weight: 400; font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-dock-toggle { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: #a5a69f; cursor: pointer; }
+.agent-dock-toggle:hover { background: #f5f1e9; color: var(--text-primary); }
+.agent-dock-body { flex: 1; overflow-y: auto; padding: 20px 18px; display: flex; flex-direction: column; gap: 16px; }
+.agent-msg { max-width: 88%; font-size: 14px; line-height: 1.5; animation: agent-enter .3s ease-out; }
+.agent-msg.me { align-self: flex-end; background: var(--agent-copper-surface); color: var(--text-primary); padding: 9px 13px; border-radius: 14px 14px 4px 14px; }
+.agent-msg.agent { align-self: flex-start; display: flex; gap: 10px; }
+.agent-msg.agent .agent-orb { margin-top: 7px; }
+.agent-msg-body { min-width: 0; font-family: var(--font-display); font-size: 16px; line-height: 1.5; }
+.agent-msg-body p { margin: 0 0 8px; }
+.agent-msg-body p:last-child { margin: 0; }
+.agent-msg-body ul { margin: 4px 0 0; padding-left: 18px; font-family: var(--font-ui); font-size: 13px; color: var(--text-secondary); }
+.agent-msg-body li { margin: 3px 0; }
+.agent-msg-card { margin-top: 10px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-family: var(--font-ui); font-size: 13px; }
+.agent-msg-card > div { flex: 1; min-width: 0; }
+.agent-msg-card strong { display: block; font-weight: 500; }
+.agent-msg-card span { display: block; margin-top: 2px; font-size: 11.5px; color: var(--text-secondary); }
+.agent-typing { display: flex; gap: 4px; padding: 8px 0; }
+.agent-typing i { width: 6px; height: 6px; border-radius: 50%; background: #a5a69f; animation: agent-blink 1s infinite; }
+.agent-typing i:nth-child(2) { animation-delay: .15s; } .agent-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes agent-blink { 50% { opacity: .25; } }
+.agent-dock-suggest { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 12px; }
+.agent-dock-suggest button { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; font-size: 12px; padding: 5px 10px; color: var(--text-secondary); cursor: pointer; }
+.agent-dock-suggest button:hover { color: var(--text-primary); border-color: #cbc6bb; }
+.agent-dock-input { display: flex; align-items: center; gap: 8px; margin: 0 14px 14px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 8px 8px 14px; }
+.agent-dock-input:focus-within { border-color: var(--agent-copper); }
+.agent-dock-input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 14px; color: var(--text-primary); }
+.agent-dock-send { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border: 0; border-radius: 7px; background: var(--accent); color: #fff; cursor: pointer; }
+.agent-dock-send:disabled { opacity: .45; cursor: default; }
+
+/* Narrow screens: no room for three columns -- the dock floats over the page. */
+@media (max-width: 1100px) {
+  body.agent-dock-open .physician-shell.has-agent-dock { padding-right: 0; }
+  .agent-dock:not(.collapsed) { box-shadow: -12px 0 32px rgb(41 49 46 / 8%); }
+}
+@media (max-width: 760px) {
+  .agent-dock:not(.collapsed) { width: 100%; }
+  .agent-home { padding: 40px 16px 88px; }
+  .agent-home-greeting { font-size: 32px; }
+  .agent-brief { font-size: 20px; }
+  .agent-item { flex-wrap: wrap; }
+  .agent-item-text { flex-basis: 100%; }
+}

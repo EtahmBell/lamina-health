@@ -1,4 +1,5 @@
 import { getAccessToken } from './authClient.ts'
+import { parseErrorDetail } from './apiErrors.ts'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 const workspaceBootstrapToken = Array.from(
@@ -302,6 +303,7 @@ export type PhysicianSandboxCapabilities = {
 }
 export type PhysicianSandboxStatus = {
   has_claim: boolean; claim_status: ClaimStatus | null
+  pilot_access_status: PilotAccessStatus | null
   verification_status: 'unverified' | 'verified'
   publication_status: 'private' | 'published' | 'unpublished'
   clinical_access_status: 'unavailable' | 'enabled'
@@ -699,12 +701,17 @@ export type NetworkPhysicianProfile = {
  * screens can tell 401 (sign in again) apart from 409 (conflict) apart from a
  * generic failure — without the frontend re-deriving any state the backend
  * already decided. */
+export { parseErrorDetail }
+
 export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /** Stable machine-readable reason when the backend supplies `{detail: {code, message}}`. */
+  code: string | null
+  constructor(message: string, status: number, code: string | null = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -722,8 +729,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: 'include',
   })
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { detail?: string } | null
-    throw new ApiError(body?.detail || `Request failed (${response.status})`, response.status)
+    const body = await response.json().catch(() => null) as { detail?: unknown } | null
+    const { message, code } = parseErrorDetail(body?.detail, response.status)
+    throw new ApiError(message, response.status, code)
   }
   if (workspaceScoped) workspaceProvisioned = true
   if (response.status === 204) return undefined as T
@@ -1068,6 +1076,40 @@ export const getProvider = (npi: string) => request<PhysicianNetworkProfile>(`/a
 export const getProviderClaimState = (npi: string) => request<ProviderClaimState>(`/api/providers/${encodeURIComponent(npi)}/claim-state`)
 export const getMyProviderClaims = () => request<ProviderClaim[]>('/api/me/provider-claims')
 export const getPhysicianSandboxStatus = () => request<PhysicianSandboxStatus>('/api/me/physician/status')
+
+/* ---------------------------------------------------------- pilot onboarding
+ * The request bodies carry only the NPI the physician typed or saw. Identity data,
+ * ownership, and approval state are always decided and returned by the backend. */
+export type PilotAccessStatus = 'pending' | 'approved' | 'rejected' | 'disabled'
+export type OnboardingStatusValue = 'account_created' | 'identity_selected' | 'pilot_approval_pending' | 'active' | 'rejected' | 'disabled'
+export type NppesTaxonomy = { code: string | null; description: string; primary: boolean; state: string | null }
+export type NppesPracticeLocation = { address_line: string | null; city: string | null; state: string | null; postal_code: string | null; phone: string | null }
+export type NppesIdentity = {
+  npi: string; first_name: string; middle_name: string | null; last_name: string
+  credential: string | null; display_name: string
+  taxonomies: NppesTaxonomy[]; primary_specialty: string | null
+  practice_locations: NppesPracticeLocation[]
+  enumeration_status: 'active'; enumeration_date: string | null; last_updated: string | null
+  source: 'NPPES'; fetched_at: string
+}
+/** Legacy owner scopes may only carry the flat provider_identity payload. */
+export type OnboardingIdentity = NppesIdentity | (Partial<NppesIdentity> & { npi: string; display_name: string; specialty?: string; city?: string; state?: string })
+export type OnboardingStatus = {
+  status: OnboardingStatusValue
+  selection: { identity: OnboardingIdentity; selected_at: string | null; claim_available: boolean; legacy_claim?: boolean } | null
+  confirmed_identity: { identity: OnboardingIdentity; npi: string; confirmed_at: string } | null
+  pilot_access: { status: PilotAccessStatus; decided_at: string | null } | null
+  workspace_available: boolean
+  allowed_actions: Array<'lookup_npi' | 'confirm_identity' | 'clear_selection' | 'open_workspace'>
+}
+export const getOnboardingStatus = () => request<OnboardingStatus>('/api/me/onboarding/status')
+export const lookupOnboardingNpi = (npi: string) => request<OnboardingStatus>('/api/me/onboarding/npi/lookup', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ npi }),
+})
+export const clearOnboardingSelection = () => request<OnboardingStatus>('/api/me/onboarding/selection', { method: 'DELETE' })
+export const confirmOnboardingIdentity = (npi: string) => request<OnboardingStatus>('/api/me/onboarding/identity/confirm', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ npi }),
+})
 export const selectPhysicianSandbox = (claimId: number) => request<PhysicianSandboxStatus>(`/api/me/physician/selection/${claimId}`, { method: 'PUT' })
 export const getOwnedPhysicianProfile = () => request<OwnedProfessionalProfile>('/api/me/physician/profile')
 export const updateOwnedProfileItem = (itemId: string, item: { category: ProfileCategory; title: string; detail?: string; shareable?: boolean }) => request<{ profile_item: ProfileItem }>(`/api/me/physician/profile/items/${encodeURIComponent(itemId)}`, {

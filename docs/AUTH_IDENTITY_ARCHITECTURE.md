@@ -29,8 +29,9 @@ engagement scope. It stores the claim/user/NPI relationship, a safe NPPES
 identity snapshot, independent storage and physician keys, explicit
 `publication_status`, and a separate `clinical_access` bit. The NPI is identity
 metadata, not an authorization key. A partial unique index permits one selected
-scope per account; accounts with multiple owned claims explicitly select among
-their own claim IDs.
+scope per account. Since the pilot pass a database trigger also permits only one
+active claim per account, so new accounts hold exactly one owner scope; older
+multi-claim accounts keep explicit selection among their own claim IDs.
 
 Scope creation is additive and idempotent. A claim creates one scope; a legacy
 active claim is lazily backfilled when its owner first opens the sandbox. The
@@ -79,7 +80,8 @@ Public or optionally authenticated:
 
 Authenticated owner operations:
 
-- `POST /api/providers/{npi}/claim`
+- `POST /api/providers/{npi}/claim` (controlled synthetic NPIs only; real NPIs
+  return 409 and must use physician onboarding)
 - `GET /api/me/provider-claims`
 - `POST /api/provider-claims/{claim_id}/submit-verification`
 - `POST /api/provider-claims/{claim_id}/verify-demo`
@@ -96,8 +98,13 @@ Authenticated owner operations:
 Every `/api/me/physician` route derives the account from the verified bearer
 token and then resolves an owned selected claim. It never accepts a user ID,
 NPI, anonymous workspace ID, or Lucy/Iain persona as authority. Missing auth is
-401, no active selection is a safe 409 (except the status projection), and an
-unowned selector/resource is a non-disclosing 404.
+401. Every private route resolves its scope through the single
+`require_pilot_scope` dependency (`backend/api/physician_sandbox.py`), which
+returns 403 with `{code, message}` (`physician_identity_required`,
+`pilot_approval_pending`, or `pilot_access_disabled`) unless the selected scope's
+identity was confirmed and its pilot access is `approved`. Only `/status` and
+`/selection/{claim_id}` are reachable before approval. An unowned
+selector/resource is a non-disclosing 404.
 
 ## Data boundary
 
@@ -119,12 +126,102 @@ active state. Owner-only fields are populated only when the validated token owns
 the active claim. Claimant user IDs and verification metadata are not exposed on
 public status surfaces.
 
-## UX handoff
+## Pilot physician onboarding
 
-The frontend now has reusable `authClient.ts`, `AuthProvider`, `useAuth`, and one
-bearer-aware API request layer. It intentionally has no polished sign-in,
-sign-up, claim, or onboarding pages. A later UX pass can use the provider
-profile's `claimed_by_me`, `my_claim_id`, and `my_claim_status` fields without
-changing the backend identity model.
+### Canonical relationship
+
+```
+authenticated Supabase user (verified JWT `sub`)
+  -> provider_claims         one active claim per NPI (partial unique index)
+                             one active claim per account (trigger)
+                             identity_confirmed_at = the physician's own assertion
+  -> physician_owner_scopes  opaque storage_scope_id / physician_id (never the NPI)
+                             nppes_snapshot_json = what the physician confirmed
+                             pilot_access_status = Lamina's manual pilot gate
+  -> /api/me/physician/*     private workspace, admitted by require_pilot_scope
+```
+
+No parallel account table exists. Pre-confirmation state lives in
+`physician_identity_selections` (one row per account), which reserves nothing.
+
+### Three distinct concepts
+
+| Step | Meaning | Recorded as |
+| --- | --- | --- |
+| NPPES lookup | Identity discovery: a public, active, individual (NPI-1) record exists | selection row + `nppes_snapshot_json` |
+| "Is this you?" | User assertion, not proof | `provider_claims.identity_confirmed_at`, `verification_method='nppes_match_self_attested'`, claim status `verification_pending` |
+| Pilot approval | Manual Lamina gate | `pilot_access_status/decided_at/decided_by/note` |
+
+None of these is credentialing or licensure verification. The claim stays
+`verification_pending` after approval: Lamina has not independently verified
+credentials.
+
+### Onboarding states
+
+`GET /api/me/onboarding/status` is the only projection, derived from the
+database on every call: `account_created` → `identity_selected` →
+`pilot_approval_pending` → `active`, plus `disabled` and `rejected`. A legacy
+claim that was never confirmed projects as `identity_selected` and can only be
+confirmed for the same NPI (its storage keys are preserved).
+
+### Endpoints
+
+- `GET /api/me/onboarding/status`
+- `POST /api/me/onboarding/npi/lookup` `{npi}`. Validates format, check digit,
+  and synthetic NPIs before any network call. Per-account throttle. Persists a
+  server-side selection. Creates no claim or scope.
+- `DELETE /api/me/onboarding/selection`: "Not me". Only before confirmation.
+- `POST /api/me/onboarding/identity/confirm` `{npi}`. The NPI must match the
+  server-held selection (max age `LAMINA_NPPES_SELECTION_MAX_AGE_SECONDS`).
+  Identity data comes only from that stored snapshot; NPPES is not re-queried.
+  One `BEGIN IMMEDIATE` transaction creates the claim and owner scope,
+  idempotently. A conflict returns 409 `npi_already_claimed` without claimant
+  details and never reassigns.
+- Internal: `GET /api/internal/pilot-physicians?status=pending` and
+  `POST /api/internal/pilot-physicians/{owner_scope_id}/{approve|reject|disable}`.
+  Only Supabase user IDs listed in `LAMINA_PILOT_ADMIN_USER_IDS` can reach them;
+  everyone else gets 404, and an empty list disables the API. Decisions on
+  your own account return 403. Rejection releases the NPI and blocks the account
+  from re-onboarding. Disable keeps the NPI claimed but closes the workspace.
+- CLI equivalent (no HTTP surface):
+  `python -m scripts.pilot_physicians list|approve|reject|disable`, recorded as
+  `cli:<operator>`.
+
+Every transition is appended to `physician_onboarding_events`.
+
+### Database-enforced invariants
+
+- `provider_claims_active_npi`: one active claim per NPI.
+- `provider_claims_one_active_per_account_{insert,update}`.
+- `provider_claims_identity_immutable`: a claim's NPI and owner cannot change.
+- `physician_owner_scopes_match_claim`: a scope's user and NPI must equal its
+  claim's.
+- `physician_owner_scopes_identity_immutable`: NPI, owner, claim, and opaque
+  keys cannot change.
+- `physician_owner_scopes_insert_not_approved`: scopes are born `pending`.
+- `physician_owner_scopes_approval_requires_confirmation`: `approved` requires
+  an active claim with `identity_confirmed_at`.
+
+The migration (`WorkflowStore._migrate_pilot_onboarding`) is additive and
+idempotent. Existing scopes default to `pilot_access_status='pending'`, so they
+fail closed until a physician confirms and Lamina approves.
+
+### NPPES identity resolution
+
+`backend/provider_network/identity.py` normalizes raw NPPES API records into
+`NppesIdentity` (names, credential, all taxonomies with primary first, practice
+locations excluding mailing addresses, no license numbers). It rejects
+organization and inactive records, and maps timeout, outage, malformed JSON, a
+record for the wrong NPI, an `Errors` payload, and HTTP 429 to explicit errors.
+Every failure is closed. Only successes are cached, for 10 minutes.
+
+### Frontend
+
+`/me/onboarding` (`Onboarding.tsx`) renders only the backend status.
+`OwnerShell` checks onboarding status before fetching or rendering any
+owner-scoped content and redirects non-active accounts to onboarding. The
+backend enforces the same gate independently. Real NPPES identities on
+`/claim/provider/{npi}` link into onboarding rather than the legacy claim
+call.
 
 See `PUBLIC_DEPLOYMENT_AUDIT.md` before exposing the shared Lucy demo publicly.

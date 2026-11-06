@@ -25,6 +25,22 @@ class DirectoryUnavailableError(RuntimeError):
     pass
 
 
+class DirectoryTimeoutError(DirectoryUnavailableError):
+    pass
+
+
+class DirectoryRateLimitedError(DirectoryUnavailableError):
+    pass
+
+
+class DirectoryMalformedResponseError(DirectoryUnavailableError):
+    pass
+
+
+class DirectoryQueryRejectedError(DirectoryUnavailableError):
+    """NPPES answered, but rejected the query itself (its `Errors` payload)."""
+
+
 class NppesTransport(Protocol):
     def search(
         self, query: str, specialty: str, location: str, limit: int
@@ -51,15 +67,39 @@ class LiveNppesTransport:
                 timeout=self.timeout_seconds,
                 headers={"Accept": "application/json", "User-Agent": "Lamina/0.1"},
             )
+            if response.status_code == 429:
+                raise DirectoryRateLimitedError("The live NPPES directory is rate limiting requests")
             response.raise_for_status()
             payload = response.json()
-        except (httpx.HTTPError, ValueError) as error:
+        except httpx.TimeoutException as error:
+            raise DirectoryTimeoutError("The live NPPES directory timed out") from error
+        except httpx.HTTPError as error:
             raise DirectoryUnavailableError(
                 "The live NPPES directory is temporarily unavailable"
             ) from error
+        except ValueError as error:
+            raise DirectoryMalformedResponseError(
+                "The live NPPES directory returned an invalid response"
+            ) from error
         if not isinstance(payload, dict) or not isinstance(payload.get("results", []), list):
-            raise DirectoryUnavailableError("The live NPPES directory returned an invalid response")
+            raise DirectoryMalformedResponseError(
+                "The live NPPES directory returned an invalid response"
+            )
         return payload
+
+    def fetch_record(self, npi: str) -> dict | None:
+        """Exact-NPI lookup returning the raw record, with explicit failure types.
+
+        Unlike `get`, an NPPES `Errors` payload is surfaced as a rejection rather
+        than read as "no results", so identity resolution never fails open.
+        """
+        payload = self._request({"number": npi, "limit": 2})
+        if payload.get("Errors"):
+            raise DirectoryQueryRejectedError("NPPES rejected this NPI lookup")
+        results = payload.get("results", [])
+        if len(results) > 1:
+            raise DirectoryMalformedResponseError("NPPES returned multiple records for one NPI")
+        return results[0] if results else None
 
     @staticmethod
     def _parameters(query: str, specialty: str, location: str, limit: int) -> dict:

@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
-import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getEvalCases, getEvalPhysicians, getHandoff, getMyAgent, getPatient, getPatientActivity, getNetworkFeed, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, runEvalCaseRepeated, runEvalSuite, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type CareModality, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type EvalPhysicianSummary, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkFeed, type NetworkParticipation, type Patient, type PatientActivity, type PhysicianAgentEvalCase, type PhysicianAgentEvalRun, type PhysicianAgentEvalSuiteResult, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
+import { consultNetwork, createAgentCorrection, getActiveReferral, getAgentOverview, getConsultationHistory, getConsultationRecord, getEncounter, getEvalCases, getEvalPhysicians, getHandoff, getMyAgent, getPatient, getPatientActivity, getPracticeRepresentation, getTrainingHistory, ingestConsultationEncounter, resetJordanDemo, resetTonjitDemo, runEvalCaseRepeated, runEvalSuite, updateAgentLearning, type AgentLearning, type AgentOverview, type CandidateFitLabel, type CandidateRoute, type CareModality, type Consultation, type ConsultationEncounter, type ConsultationMessage, type ConsultationRecord, type EconsultSuitability, type EvalPhysicianSummary, type Evaluation, type EvidenceConfidence, type HandoffSummary, type MyAgent, type NetworkParticipation, type Patient, type PatientActivity, type PhysicianAgentEvalCase, type PhysicianAgentEvalRun, type PhysicianAgentEvalSuiteResult, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type TrainProjection } from './api.ts'
 import { MyIdentitiesPage, PhysicianIdentitySearchPage, ProviderIdentityPage, SignInPage, signInPath, SignUpPage } from './Claim.tsx'
+import { PhysicianOnboardingPage } from './Onboarding.tsx'
 import { OwnerAgentPage, OwnerHomePage, OwnerProfilePage, OwnerTrainingPage } from './Owner.tsx'
+import { ownerOnboardingPath } from './ownerPaths.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
-import { activityPath, agentActivity, consultationPath, eventDomId } from './agentActivity.ts'
+import { consultationPath, eventDomId } from './agentActivity.ts'
 import { clinicalTrends, labDate, labFlowsheet, labUnit } from './clinicalTrends.ts'
 import { groupConsultationsByPatient } from './consultationGrouping.ts'
 import { accessSuggestions, specialtySuggestion } from './contextSuggestions.ts'
 import { groupConsultationMessages } from './consultationPresentation.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, JORDAN_ID, MARIA_ID, PCP_AGENT_ID, PCP_AGENT_NAME, PCP_NAME, PCP_PHYSICIAN_ID, SPECIALIST_AGENT_NAME, SPECIALIST_NAME, SPECIALIST_SPECIALTY, TONJIT_ID, cleanName, patientName } from './demoIdentity.ts'
 import { CHEN_PATIENT_IDS, DEMO_PATIENTS, type DemoPatientSummary, type PatientStage } from './demoPatients.ts'
-import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkHighlights, NetworkPhysicianProfilePage, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, WorklistRows } from './Engagement.tsx'
-import { timeAwareGreeting } from './greeting.ts'
+import { AgentOverviewPanel, ChatTab, NetworkPhysicianProfilePage, ProfessionalProfilePage, TrainingPage, TrainTab, networkProfilePath, networkUpdatesPath, settingsPath, trainingPath, WorklistRows } from './Engagement.tsx'
 import { PhysicianNetworkPage, PhysicianProfilePage, type DirectoryOnlyProfile } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
@@ -22,6 +23,7 @@ import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHome
 import { restorePhase } from './referralPhases.ts'
 import { whyThisMatch } from './matchExplanation.ts'
 import { ModalPortal } from './ModalPortal.tsx'
+import { AgentDashboard, AgentDock, ForYouPage, useNeedsCount } from './AgentHome.tsx'
 
 type Navigate = (path: string) => void
 
@@ -50,13 +52,26 @@ function SyntheticStatus() {
   return <div className="synthetic-status"><span />Synthetic demo · no PHI</div>
 }
 
-/** Three top-level destinations. My Agent is deliberately not here — it lives as a
- * persistent object at the bottom of the sidebar (see .sidebar-clinician below).
- * Profile/account access moved to the avatar menu in the top-right workspace bar. */
+/** Inbox glyph for "For you" -- the physician-action queue. */
+function ForYouNavIcon() {
+  return <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true"><path d="M2 10.5l2-7h10l2 7v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" /><path d="M2 10.5h4l1 2h4l1-2h4" /></svg>
+}
+
+/** Sparkle glyph for "Your Agent". */
+function AgentNavIcon() {
+  return <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M9 1.75l1.7 4.55 4.55 1.7-4.55 1.7L9 14.25l-1.7-4.55L2.75 8l4.55-1.7z" /><path d="M14.25 12.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" /></svg>
+}
+
+/** Physician-agent home pass: five top-level destinations for the referring
+ * physician. The agent is the product, so Your Agent is a first-class nav item
+ * and For you is the full queue of what the agent cannot finish alone.
+ * Profile/account access sits at the bottom-left of the sidebar. */
 const navItems = [
   { id: 'home', title: 'Dashboard', icon: '⌂', path: '/home' },
+  { id: 'for-you', title: 'For you', icon: <ForYouNavIcon />, path: '/for-you' },
   { id: 'patients', title: 'Patients', icon: '✦', path: '/patients' },
   { id: 'network', title: 'Network', icon: <NetworkNavIcon />, path: '/network' },
+  { id: 'agent', title: 'Your Agent', icon: <AgentNavIcon />, path: '/agent?tab=overview' },
 ]
 
 const SPECIALIST_NAV_ITEMS = [
@@ -98,7 +113,7 @@ const SWITCHABLE_DEMO_PERSPECTIVES = DEMO_PERSPECTIVES.filter((item) => item.id 
 
 /** The top-right avatar/account control. Combines the demo perspective switch with
  * profile and settings access, now that Profile is no longer a primary-nav item. */
-function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; perspective: 'pcp' | 'specialist' | 'chen' }) {
+function PerspectiveSwitch({ navigate, perspective, placement = 'header' }: { navigate: Navigate; perspective: 'pcp' | 'specialist' | 'chen'; placement?: 'header' | 'sidebar' }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -111,7 +126,7 @@ function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; pers
   }, [open])
   const current = DEMO_PERSPECTIVES.find((item) => item.id === perspective) ?? DEMO_PERSPECTIVES[0]
   const switchTo = (path: string) => { setOpen(false); navigate(path) }
-  return <div className="perspective-switch" ref={containerRef}>
+  return <div className={`perspective-switch ${placement === 'sidebar' ? 'sidebar-account' : ''}`} ref={containerRef}>
     <button className="profile-control avatar-control" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label="Account menu">
       <span>{current.initials}</span><strong>{current.name}</strong>
     </button>
@@ -131,9 +146,10 @@ function PerspectiveSwitch({ navigate, perspective }: { navigate: Navigate; pers
  * top-level nav item — so the agent stays visible from every workspace screen. It
  * is a real nav target (keyboard-reachable button) and picks up an active state
  * on any agent-related route. */
-function ProductShell({ children, navigate, section, perspective = 'pcp' }: { children: React.ReactNode; navigate: Navigate; section: string; perspective?: 'pcp' | 'specialist' | 'chen' }) {
-  const items = perspective === 'specialist' ? SPECIALIST_NAV_ITEMS : perspective === 'chen' ? CHEN_NAV_ITEMS : navItems
-  const onAgent = section === 'agent' || section === 'specialist-agent' || section === 'chen-agent'
+function ProductShell({ children, navigate, section, perspective = 'pcp', agentDock = false }: { children: React.ReactNode; navigate: Navigate; section: string; perspective?: 'pcp' | 'specialist' | 'chen'; agentDock?: boolean }) {
+  if (perspective === 'pcp') return <PhysicianShell navigate={navigate} section={section} agentDock={agentDock}>{children}</PhysicianShell>
+  const items = perspective === 'specialist' ? SPECIALIST_NAV_ITEMS : CHEN_NAV_ITEMS
+  const onAgent = section === 'specialist-agent' || section === 'chen-agent'
   return <div className="app-shell">
     <aside className="sidebar">
       <div><button className="brand-button" onClick={() => navigate('/')} aria-label="Return to Lamina portal"><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
@@ -143,11 +159,31 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
       </div>
       {perspective === 'specialist'
         ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><AgentAvatar tone={agentTone('iain')} /><div><strong>{SPECIALIST_AGENT_NAME}</strong></div></button>
-        : perspective === 'chen'
-          ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/chen/agent')} aria-label={`Open ${CHEN_AGENT_NAME} overview`}><AgentAvatar tone={agentTone('chen')} /><div><strong>{CHEN_AGENT_NAME}</strong></div></button>
-          : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/agent?tab=overview')} aria-label={`Open ${PCP_AGENT_NAME} overview`}><AgentAvatar /><div><strong>{PCP_AGENT_NAME}</strong></div></button>}
+        : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/chen/agent')} aria-label={`Open ${CHEN_AGENT_NAME} overview`}><AgentAvatar tone={agentTone('chen')} /><div><strong>{CHEN_AGENT_NAME}</strong></div></button>}
     </aside>
     <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><PerspectiveSwitch navigate={navigate} perspective={perspective} /></div></header>{children}</div>
+  </div>
+}
+
+/** The referring physician's (Lucy's) shell -- physician-agent home pass.
+ * Five primary destinations (Dashboard, For you, Patients, Network, Your
+ * Agent), the account/profile control pinned to the bottom-left of the
+ * sidebar, and -- on Dashboard and For you -- the persistent docked "Ask your
+ * agent" conversation. Patient detail and the referral flow keep their full
+ * width, so the existing consult/referral demo is unchanged. */
+function PhysicianShell({ children, navigate, section, agentDock }: { children: React.ReactNode; navigate: Navigate; section: string; agentDock: boolean }) {
+  const needsCount = useNeedsCount()
+  return <div className={`app-shell physician-shell ${agentDock ? 'has-agent-dock' : ''}`}>
+    <aside className="sidebar">
+      <div><button className="brand-button" onClick={() => navigate('/')} aria-label="Return to Lamina portal"><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
+        <nav aria-label="Primary navigation">
+          {navItems.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span className="nav-item-label">{item.title}</span>{item.id === 'for-you' && needsCount > 0 && <span className="nav-count" aria-label={`${needsCount} need you`}>{needsCount}</span>}</button>)}
+        </nav>
+      </div>
+      <PerspectiveSwitch navigate={navigate} perspective="pcp" placement="sidebar" />
+    </aside>
+    <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /></div></header>{children}</div>
+    {agentDock && <AgentDock navigate={navigate} />}
   </div>
 }
 
@@ -162,7 +198,7 @@ function ProductShell({ children, navigate, section, perspective = 'pcp' }: { ch
 function LandingPage({ navigate }: { navigate: Navigate }) {
   const { configured, loading, user } = useAuth()
   const physicianAuthed = configured && !loading && !!user
-  const physicianPath = physicianAuthed ? '/claim/my-identities' : signInPath('/claim/my-identities')
+  const physicianPath = physicianAuthed ? ownerOnboardingPath : signInPath(ownerOnboardingPath)
   return <main className="landing-page">
     <header className="landing-header"><Brand /><div className="landing-header-actions"><SyntheticStatus /></div></header>
     <section className="gateway-content">
@@ -202,11 +238,6 @@ function shortDate(value: string) {
 
 const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
-/** Compact activity timestamp, e.g. "Sep 25 · 10:58 PM". */
-function eventTimestamp(value: string) {
-  return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(', ', ' · ')
-}
-
 /** A `?back=` return path (e.g. a patient page linking to a physician's
  * public profile). Only same-app absolute paths are honored. */
 const safeBackPath = (params: URLSearchParams, fallback: string) => {
@@ -214,85 +245,19 @@ const safeBackPath = (params: URLSearchParams, fallback: string) => {
   return back && back.startsWith('/') && !back.startsWith('//') ? back : fallback
 }
 
-/** Dashboard-scoped patient row. Deliberately built from `records` (already fetched
- * for currentWork), never `getPatientActivity` — Home stays on canonical consultation
- * state, matching the rest of the page, and never introduces a second data source.
- * Only patients with a real, actionable next step are included here — this is a
- * focused worklist, not a miniature Patients directory (see buildWatchRows' filter). */
-type PatientWatchRow = { patient: DemoPatientSummary; status: WorklistStatus; detail: string; nextStep: string; action: string }
-
-const WORKLIST_ACTION: Record<WorklistStatus, string> = {
-  'Ready for your review': 'Review', 'Not yet consulted': 'View patient info',
-  'Awaiting specialist review': 'View patient info', 'Referral accepted': 'View patient info',
-  'Consultation scheduled': 'View patient info', 'Handoff received': 'Review handoff',
-}
-
-function buildWatchRows(records: ConsultationRecord[], referralsByPatient: Map<string, Referral | null>): PatientWatchRow[] {
-  return DEMO_PATIENTS.filter((patient) => patient.implemented && patient.owner !== 'chen').map((patient): PatientWatchRow => {
-    const record = records.find((item) => item.patient_id === patient.id)
-    const status = referralWorklistStatus(referralsByPatient.get(patient.id), Boolean(record))
-    const detail = record ? `${record.result.recommended_physician.specialty} · ${cleanName(record.result.recommended_physician.physician_name)}` : patient.reason
-    return {
-      patient, status, detail,
-      nextStep: status === 'Ready for your review' ? 'Review referral options' : WORKLIST_NEXT_STEP[status],
-      action: WORKLIST_ACTION[status],
-    }
-  }).sort((a, b) => WORKLIST_STATUS_PRIORITY[a.status] - WORKLIST_STATUS_PRIORITY[b.status])
-}
-
-function PatientWatchTable({ rows, navigate }: { rows: PatientWatchRow[]; navigate: Navigate }) {
-  return <section className="dashboard-watchlist">
-    <div className="home-section-heading"><div><h2>Patients with next steps</h2><p className="dashboard-watchlist-sub">Recent activity and the next step in their care.</p></div><button className="text-button" onClick={() => navigate('/patients')}>View all patients →</button></div>
-    <div className="lam-list patient-worklist">{rows.map(({ patient, status, detail, nextStep, action }) => <button key={patient.id} className="lam-row worklist-row" onClick={() => navigate(`/patients/${patient.id}`)}>
-      <span className="lam-row-mark patient-row-avatar">{patient.initials}</span>
-      <span className="lam-row-main"><strong>{patient.name}</strong><small>{patient.age} years · {detail}</small></span>
-      <span className={`worklist-status ${WORKLIST_STATUS_TONE[status]}`}>{status}</span>
-      <span className="worklist-next-step">{nextStep}</span>
-      <span className="lam-row-action">{action} <b>→</b></span>
-    </button>)}</div>
-  </section>
-}
-
-/* TODO (not yet designed): a lightweight "Share something your agent should
- * know" CTA -- e.g. "Share a paper" / "Share research" -- feeding agent
- * knowledge, post drafts, and profile/interests. Dashboard is the right home
- * for it (not Network): this is "tell your agent something," closer in spirit
- * to HomeAgentCard than to Network's discovery/posting surfaces. Likely a
- * quiet secondary link near HomeAgentCard, reusing PostButton's existing
- * compose -> draft-with-agent pipeline rather than a new posting path. */
+/** Physician-agent home pass: the Dashboard leads with the physician's agent --
+ * greeting, live agent status, a two-sentence briefing, the top few "Needs you"
+ * items, and "While you were away" -- with the docked "Ask your agent"
+ * conversation beside it. Everything is derived from the shared PhysicianQueue
+ * (physicianQueue.ts) over existing consultation/referral/agent state; Tonjit's
+ * Review routes to the same /patients/:id Patient Detail as before. */
 function HomePage({ navigate }: { navigate: Navigate }) {
-  const [records, setRecords] = useState<ConsultationRecord[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
-  const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [overview, setOverview] = useState<AgentOverview | null>(null)
-  const [referralsByPatient, setReferralsByPatient] = useState<Map<string, Referral | null>>(new Map())
-  useEffect(() => {
-    getConsultationHistory()
-      .then(setRecords)
-      .catch(() => setError(true)).finally(() => setLoading(false))
-    getNetworkFeed('lucy').then(setFeed).catch(() => {})
-    getAgentOverview('lucy').then(setOverview).catch(() => {})
-    fetchReferralsByPatient().then(setReferralsByPatient).catch(() => {})
-  }, [])
-  const ordered = [...records].sort((a, b) => b.completed_at.localeCompare(a.completed_at))
-  const latestByPatient = ordered.filter((record, index) => ordered.findIndex((item) => item.patient_id === record.patient_id) === index)
-  const activity = agentActivity(ordered).slice(0, 3)
-  const watchRows = buildWatchRows(latestByPatient, referralsByPatient)
-  const greetingName = `Dr. ${PCP_NAME.split(' ').at(-1)}`
-  return <ProductShell navigate={navigate} section="home"><main className="page-shell home-page dashboard-page">
-    <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1><p className="dashboard-situation">Here's what needs your attention today.</p></header>
-    {loading && <div className="home-loading"><div className="loading-line" /><p>Reviewing recent workspace activity…</p></div>}
-    {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
-    {!loading && !error && <>
-      <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('lucy')} viewAgentPath="/agent?tab=overview" records={records} />
-      <PatientWatchTable rows={watchRows} navigate={navigate} />
-      <div className="dashboard-bottom-row">
-        <section className="home-activity"><div className="home-section-heading"><div><h2>Recent activity</h2></div><button className="text-button" onClick={() => navigate('/agent?tab=overview')}>View your agent →</button></div>{activity.length ? <div className="activity-stream">{activity.map((item) => <button key={item.id} className={`activity-row ${item.kind}`} onClick={() => navigate(activityPath(item))}><span className={`activity-marker ${item.kind}`} /><span>{item.kind === 'interaction' && <em className="activity-kind agent-event-label">Agent</em>}<strong>{item.title}</strong><small>{item.detail}</small><i>{eventTimestamp(item.time)} · {item.patientLabel}</i></span><b>{item.kind === 'interaction' ? 'View interaction' : 'View consultation'} →</b></button>)}</div> : <p className="home-empty">No agent activity yet.</p>}</section>
-        <NetworkHighlights feed={feed} navigate={navigate} perspective="lucy" />
-      </div>
-    </>}
-  </main></ProductShell>
+  return <ProductShell navigate={navigate} section="home" agentDock><AgentDashboard navigate={navigate} /></ProductShell>
+}
+
+/** The full physician-action queue: Needs you, Later, Done today. */
+function ForYouRoute({ navigate }: { navigate: Navigate }) {
+  return <ProductShell navigate={navigate} section="for-you" agentDock><ForYouPage navigate={navigate} /></ProductShell>
 }
 
 /** A small controlled status vocabulary for the two patients with a wired
@@ -2003,11 +1968,13 @@ export default function App() {
   const path = current.pathname
   const params = current.searchParams
   if (path === '/') return <LandingPage navigate={navigate} />
+  if (path === ownerOnboardingPath) return <PhysicianOnboardingPage navigate={navigate} params={params} />
   if (path === '/me' || path === '/me/home') return <OwnerHomePage navigate={navigate} />
   if (path === '/me/profile') return <OwnerProfilePage navigate={navigate} params={params} />
   if (path === '/me/agent') return <OwnerAgentPage navigate={navigate} params={params} />
   if (path === '/me/agent/train') return <OwnerTrainingPage navigate={navigate} params={params} />
   if (path === '/home') return <HomePage navigate={navigate} />
+  if (path === '/for-you') return <ForYouRoute navigate={navigate} />
   if (path === '/patients') return <PatientSelector navigate={navigate} />
   if (path === '/consultations') return <ConsultationsPage navigate={navigate} />
   if (path === '/agent') return <MyAgentPage navigate={navigate} params={params} />

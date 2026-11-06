@@ -66,6 +66,14 @@ class PublicationNotEligibleError(PermissionError):
     pass
 
 
+class PilotAccessDeniedError(PermissionError):
+    """The account's physician identity is not approved for the private pilot workspace."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 @dataclass(frozen=True)
 class PhysicianOwnerScope:
     id: str
@@ -78,6 +86,12 @@ class PhysicianOwnerScope:
     claim_status: str
     publication_status: str
     clinical_access: bool
+    pilot_access_status: str = "pending"
+    identity_confirmed: bool = False
+
+    @property
+    def pilot_active(self) -> bool:
+        return self.pilot_access_status == "approved" and self.identity_confirmed
 
     @property
     def key(self) -> tuple[str, str]:
@@ -331,7 +345,37 @@ class PhysicianSandboxService:
             claim_status=claim["status"],
             publication_status=row["publication_status"],
             clinical_access=row["clinical_access"],
+            pilot_access_status=row.get("pilot_access_status") or "pending",
+            identity_confirmed=bool(claim.get("identity_confirmed_at")),
         )
+
+    def pilot_scope(self, user_id: str) -> PhysicianOwnerScope:
+        """The single pilot-access gate for every private workspace operation.
+
+        authenticated account -> selected owned claim -> owner scope -> approved.
+        Nothing in the request (ids, NPIs, cookies) participates in this decision.
+        """
+        scope = self.current(user_id, required=False)
+        if scope is None:
+            raise PilotAccessDeniedError(
+                "physician_identity_required",
+                "Confirm your physician identity to open a private workspace",
+            )
+        if not scope.identity_confirmed:
+            raise PilotAccessDeniedError(
+                "physician_identity_required",
+                "Confirm your physician identity to open a private workspace",
+            )
+        if scope.pilot_access_status == "disabled":
+            raise PilotAccessDeniedError(
+                "pilot_access_disabled", "This physician workspace is currently disabled"
+            )
+        if not scope.pilot_active:
+            raise PilotAccessDeniedError(
+                "pilot_approval_pending",
+                "Your physician identity is confirmed and awaiting Lamina pilot approval",
+            )
+        return scope
 
     def select(self, user_id: str, claim_id: int) -> dict:
         row = self.store.select_physician_owner_scope(user_id, claim_id)
@@ -341,12 +385,13 @@ class PhysicianSandboxService:
 
     def status(self, user_id: str) -> dict:
         scope = self.current(user_id, required=False)
+        active = bool(scope and scope.pilot_active)
         capabilities = {
-            "can_edit_profile": bool(scope),
-            "can_enrich_profile": bool(scope),
-            "can_train_agent": bool(scope),
-            "can_test_agent": bool(scope),
-            "can_draft_posts": bool(scope),
+            "can_edit_profile": active,
+            "can_enrich_profile": active,
+            "can_train_agent": active,
+            "can_test_agent": active,
+            "can_draft_posts": active,
             "can_publish_profile": False,
             "can_publish_posts": False,
             "can_join_network": False,
@@ -356,6 +401,7 @@ class PhysicianSandboxService:
         if not scope:
             return {
                 "has_claim": False,
+                "pilot_access_status": None,
                 "claim_status": None,
                 "verification_status": "unverified",
                 "publication_status": "private",
@@ -367,9 +413,25 @@ class PhysicianSandboxService:
                 "agent_ready": False,
                 "capabilities": capabilities,
             }
+        if not active:
+            return {
+                "has_claim": True,
+                "pilot_access_status": scope.pilot_access_status,
+                "claim_status": scope.claim_status,
+                "verification_status": "unverified",
+                "publication_status": scope.publication_status,
+                "clinical_access_status": "unavailable",
+                "provider_identity": scope.provider_identity,
+                "profile_ready": False,
+                "initialization_required": True,
+                "initialized": False,
+                "agent_ready": False,
+                "capabilities": capabilities,
+            }
         initialization = self.initialization(scope)
         return {
             "has_claim": True,
+            "pilot_access_status": scope.pilot_access_status,
             "claim_status": scope.claim_status,
             "verification_status": "verified" if scope.claim_status == "verified" else "unverified",
             "publication_status": scope.publication_status,

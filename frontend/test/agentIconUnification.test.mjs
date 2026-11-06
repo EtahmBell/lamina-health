@@ -48,9 +48,9 @@ test('Iain\'s and Chen\'s sidebar "My Agent" anchors now render the unified Agen
   assert.match(shell, /navigate\('\/chen\/agent'\)[\s\S]{0,160}<AgentAvatar tone=\{agentTone\('chen'\)\} \/>/)
 })
 
-test('Lucy\'s own sidebar "My Agent" anchor is unchanged (still the default AgentAvatar, implicitly blue)', () => {
-  const shell = slice(app, 'function ProductShell', 'function LandingPage')
-  assert.match(shell, /navigate\('\/agent\?tab=overview'\)[\s\S]{0,160}<AgentAvatar \/>/)
+test('Lucy reaches her agent through the "Your Agent" primary nav item (physician-agent home pass), and the My Agent hero keeps the default AgentAvatar, implicitly blue', () => {
+  assert.ok(app.includes("{ id: 'agent', title: 'Your Agent', icon: <AgentNavIcon />, path: '/agent?tab=overview' }"))
+  assert.match(app, /<div className="agent-hero-mark"><AgentAvatar \/><\/div>/)
 })
 
 /* ---------------------------------------------------------- My Agent hero */

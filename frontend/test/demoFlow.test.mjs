@@ -103,10 +103,12 @@ test('once a referral exists, its real persisted status always wins over the his
   assert.match(app, /return hasConsultation \? 'Ready for your review' : 'Not yet consulted'/)
 })
 
-test('both the Dashboard watchlist and the full Patients worklist fetch the patient\'s real active referral and feed it into the same status derivation, never a hardcoded per-page copy', () => {
+test('both the Dashboard queue and the full Patients worklist fetch the patient\'s real active referral, never a hardcoded per-page copy (physician-agent home pass: the Dashboard reads it through physicianQueue.ts)', () => {
   assert.match(app, /function fetchReferralsByPatient\(\): Promise<Map<string, Referral \| null>> \{/)
   assert.match(app, /fetchReferralsByPatient\(\)\.then\(setReferralsByPatient\)\.catch\(\(\) => \{\}\)/g)
-  assert.match(app, /buildWatchRows\(latestByPatient, referralsByPatient\)/)
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(home.includes('getActiveReferral(patient.id)'))
+  assert.ok(home.includes('referrals: raw.referrals'))
   assert.match(patientsList(), /referralWorklistStatus\(referralsByPatient\.get\(patient\.id\), Boolean\(record\?\.has_consultation\)\)/)
 })
 

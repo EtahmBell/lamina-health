@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lamina — Consult Network</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --surface: #ffffff;
+    --border: #e8e5df;
+    --text: #1f2a33;
+    --muted: #737a82;
+    --faint: #a0a5ab;
+    --accent: #2f4858;
+    --agent: #3d5a6c;
+    --mark: #fbeee4;
+    --mark-ink: #8a4b2a;
+    --ok: #3f7a5c;
+    --serif: "Newsreader", Georgia, serif;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  button { font: inherit; cursor: pointer; }
+
+  .app { display: grid; grid-template-columns: auto 1fr; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { position: sticky; top: 0; height: 100vh; width: 220px; border-right: 1px solid var(--border); background: var(--surface); padding: 22px 14px; display: flex; flex-direction: column; transition: width .22s ease; overflow: hidden; cursor: pointer; }
+  .sidebar a { cursor: pointer; }
+  .side-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 36px; min-height: 36px; }
+  .brand { display: flex; align-items: center; gap: 10px; padding-left: 6px; white-space: nowrap; }
+  .brand svg { flex: none; }
+  .brand-name { font-family: var(--serif); font-size: 22px; letter-spacing: .08em; line-height: 1; }
+  .toggle { width: 30px; height: 30px; border-radius: 6px; border: 0; background: none; color: var(--faint); display: grid; place-items: center; flex: none; }
+  .toggle:hover { background: #f2f4f5; color: var(--text); }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav a { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 6px; color: var(--muted); white-space: nowrap; }
+  .nav a svg { flex: none; width: 18px; height: 18px; }
+  .nav a:hover { color: var(--text); background: #f6f7f8; }
+  .nav a.active { background: #eef2f5; color: var(--text); font-weight: 500; }
+  .me { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .me .av { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 10px; flex: none; }
+  .label { transition: opacity .15s; }
+
+  /* Collapsed: icons only */
+  .app.collapsed .sidebar { width: 64px; }
+  .app.collapsed .label, .app.collapsed .brand-name { opacity: 0; pointer-events: none; }
+  .app.collapsed .side-top { flex-direction: column; gap: 14px; }
+  .app.collapsed .brand { padding-left: 0; }
+  .app.collapsed .brand-name { display: none; }
+  .app.collapsed .toggle svg { transform: rotate(180deg); }
+
+  /* Presence */
+  .orb { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--agent); box-shadow: 0 0 0 3px #e1e9ee; animation: breathe 3s ease-in-out infinite; flex: none; }
+  @keyframes breathe { 50% { box-shadow: 0 0 0 6px #edf2f5; } }
+  @media (prefers-reduced-motion: reduce) { .orb { animation: none; } }
+
+  .content { max-width: 680px; margin: 0 auto; padding: 72px 24px 96px; }
+  h1 { font-family: var(--serif); font-weight: 400; font-size: 40px; letter-spacing: -.01em; margin: 0 0 14px; }
+  .status { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--agent); margin-bottom: 36px; }
+  .status .txt { transition: opacity .3s; }
+
+  .brief { font-family: var(--serif); font-size: 23px; line-height: 1.5; margin: 0 0 48px; }
+  .brief .ent { background: var(--mark); color: var(--mark-ink); padding: 0 2px; border-radius: 3px; white-space: nowrap; }
+  .brief .quiet { color: var(--muted); }
+
+  h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 8px; }
+
+  /* One simple list */
+  .item { display: flex; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); transition: opacity .3s; }
+  .item:last-child { border-bottom: 1px solid var(--border); }
+  .item .t { flex: 1; }
+  .item .t div:first-child { font-size: 14.5px; }
+  .item .t .sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 7px 14px; border-radius: 6px; font-size: 13px; }
+  .btn:hover { border-color: #cfcbc4; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .item.done .btn { display: none; }
+  .item.done .t div:first-child { color: var(--muted); }
+  .item.done .t div:first-child::before { content: "✓  "; color: var(--ok); }
+
+  .brief b { font-weight: 500; }
+  .nav a .count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--mark); color: var(--mark-ink); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+  .nav a .count:empty { display: none; }
+  .nav a { position: relative; }
+  .app.collapsed .nav a .count { position: absolute; top: 3px; left: 24px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 9.5px; }
+  .item.muted-row .t div:first-child { color: var(--muted); }
+  .item .when { font-size: 12px; color: var(--faint); white-space: nowrap; }
+  .show-more { margin-top: 12px; border: 0; background: none; padding: 0; font-size: 13px; color: var(--accent); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ===== Conversation panel ===== */
+  /* Docked on the right, always there. Collapses to a slim rail like the left sidebar. */
+  .chat { position: fixed; top: 0; right: 0; height: 100vh; width: 380px; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; transition: width .22s ease; z-index: 20; overflow: hidden; }
+  .app { padding-right: 380px; transition: padding-right .22s ease; }
+  /* Collapsed: the column goes away and the agent waits as a small pill in the corner */
+  body.chat-collapsed .app { padding-right: 0; }
+  body.chat-collapsed .chat { top: auto; bottom: 20px; right: 20px; width: auto; height: auto; border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 6px 20px rgba(31,42,51,.10); transition: none; }
+  body.chat-collapsed .chat > :not(.rail) { display: none; }
+  .rail { display: none; }
+  body.chat-collapsed .rail { display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border: 0; background: none; color: var(--text); font-size: 13px; font-weight: 500; }
+  body.chat-collapsed .chat:hover { box-shadow: 0 8px 24px rgba(31,42,51,.14); }
+  .chat-head { display: flex; align-items: center; gap: 12px; padding: 18px 18px; border-bottom: 1px solid var(--border); }
+  .chat-head .who { flex: 1; font-weight: 500; font-size: 14px; }
+  .chat-head .who span { display: block; font-weight: 400; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .chat-body { flex: 1; overflow-y: auto; padding: 20px 18px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { max-width: 88%; font-size: 14px; line-height: 1.5; animation: enter .3s ease-out; }
+  .msg.me { align-self: flex-end; background: #eef2f5; color: var(--text); padding: 9px 13px; border-radius: 14px 14px 4px 14px; }
+  .msg.agent { align-self: flex-start; display: flex; gap: 10px; }
+  .msg.agent .orb { margin-top: 6px; animation: none; }
+  .msg.agent .body { font-family: var(--serif); font-size: 16px; line-height: 1.5; }
+  .msg.agent .body p { margin: 0 0 8px; }
+  .msg.agent .body p:last-child { margin: 0; }
+  .msg.agent ul { margin: 4px 0 0; padding-left: 18px; font-family: var(--sans); font-size: 13px; color: var(--muted); }
+  .msg.agent li { margin: 3px 0; }
+  .card { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; font-family: var(--sans); font-size: 13px; }
+  .card .t { flex: 1; }
+  .card .t span { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .card.done { color: var(--muted); }
+  .card.done .btn { display: none; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; font-family: var(--sans); font-size: 11.5px; color: var(--ok); background: #eef6f1; border-radius: 999px; padding: 4px 10px; }
+  .typing { display: flex; gap: 4px; padding: 8px 0; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); animation: blink 1s infinite; }
+  .typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .chat-suggest { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 12px; }
+  .chat-suggest button { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; font-size: 12px; padding: 5px 10px; color: var(--muted); }
+  .chat-suggest button:hover { color: var(--text); border-color: #cfcbc4; }
+  .chat-input { display: flex; align-items: center; gap: 8px; margin: 0 14px 14px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 8px 8px 14px; }
+  .chat-input:focus-within { border-color: var(--agent); }
+  .chat-input input { flex: 1; border: 0; outline: 0; font: inherit; background: transparent; color: var(--text); }
+  .chat-input .send { width: 30px; height: 30px; border-radius: 7px; border: 0; background: var(--accent); color: #fff; display: grid; place-items: center; }
+  /* Small screens: no room for three columns, so the chat floats over the page
+     and collapses to a round button in the corner. */
+  @media (max-width: 1100px) {
+    .app, body.chat-collapsed .app { padding-right: 0; }
+    .chat { box-shadow: -12px 0 32px rgba(31,42,51,.08); }
+  }
+  @media (max-width: 760px) { .chat { width: 100%; } }
+
+  /* Demo-only control for previewing different days */
+  .demo { position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px; z-index: 30; display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px dashed var(--border); border-radius: 8px; padding: 4px 6px; font-size: 11px; color: var(--faint); }
+  .demo button { border: 0; background: none; font-size: 11px; color: var(--muted); padding: 4px 8px; border-radius: 5px; }
+  .demo button.on { background: #eef2f5; color: var(--text); }
+
+  .also { margin-top: 28px; font-size: 13px; color: var(--muted); }
+  .also button { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+  .log { margin-top: 12px; display: none; }
+  .log.open { display: block; }
+  .log-row { display: flex; gap: 14px; padding: 8px 0; font-size: 13px; color: var(--muted); }
+  .log-row .time { width: 56px; flex: none; color: var(--faint); }
+  .log-row.enter { animation: enter .5s ease-out; }
+  @keyframes enter { from { opacity: 0; transform: translateY(-4px); } }
+
+  /* Tell bar */
+  .tell { margin-top: 56px; display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+  .tell:focus-within { border-color: var(--agent); }
+  .tell { transition: opacity .2s; cursor: text; }
+  body.chat-open .tell { opacity: 0; pointer-events: none; }
+  .tell .stack { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .tell .preview { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .tell .preview:empty { display: none; }
+  .tell input { flex: 1; border: 0; outline: 0; font: inherit; background: transparent; color: var(--text); }
+
+  /* Patients */
+  .patient { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-top: 1px solid var(--border); }
+  .patient:last-child { border-bottom: 1px solid var(--border); }
+  .patient .av { width: 36px; height: 36px; border-radius: 50%; background: #f1ebe3; color: #6b5f52; display: grid; place-items: center; font-family: var(--serif); font-size: 12px; flex: none; }
+  .patient .t { flex: 1; }
+  .patient .n { font-family: var(--serif); font-size: 17px; }
+  .patient .d { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  /* Agent page */
+  .mem { display: flex; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border); font-size: 14px; }
+  .mem:last-child { border-bottom: 1px solid var(--border); }
+  .mem .t { flex: 1; }
+  .mem .x { border: 0; background: none; color: var(--faint); font-size: 12px; visibility: hidden; }
+  .mem:hover .x { visibility: visible; }
+  .mem.new { animation: enter .5s ease-out; }
+  .section { margin-top: 48px; }
+
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translate(-50%, 12px); opacity: 0; background: var(--text); color: #fff; font-size: 13px; padding: 10px 16px; border-radius: 8px; transition: all .25s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { position: static; height: auto; flex-direction: row; align-items: center; padding: 12px 16px; gap: 8px; }
+    .sidebar, .app.collapsed .sidebar { width: auto; }
+    .side-top { margin: 0 8px 0 0; }
+    .toggle { display: none; }
+    .nav a .label { display: none; }
+    .nav { flex-direction: row; }
+    .me { display: none; }
+    .content { padding: 40px 16px 72px; }
+    h1 { font-size: 32px; }
+    .brief { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-top">
+      <a class="brand" href="#today" aria-label="Lamina home">
+        <svg width="28" height="28" viewBox="0 0 36 36" aria-hidden="true">
+          <line x1="18" y1="2" x2="18" y2="34" stroke="#2f4858" stroke-width="1.4"/>
+          <line x1="2" y1="18" x2="34" y2="18" stroke="#2f4858" stroke-width="1.4"/>
+          <circle cx="18" cy="18" r="2.6" fill="#d06a4a"/>
+          <circle cx="5" cy="18" r="1.8" fill="#4a8bb0"/>
+          <circle cx="31" cy="18" r="1.8" fill="#d06a4a"/>
+          <circle cx="18" cy="5" r="1.8" fill="#d9a441"/>
+        </svg>
+        <span class="brand-name">LAMINA</span>
+      </a>
+      <button class="toggle" id="toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2"/><line x1="6" y1="2.5" x2="6" y2="13.5"/><path d="M10.5 6 L8.75 8 L10.5 10"/></svg>
+      </button>
+    </div>
+    <nav class="nav">
+      <a href="#today" data-view="today" title="Today">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="9" r="3.2"/><path d="M9 1.5v1.8M9 14.7v1.8M1.5 9h1.8M14.7 9h1.8M3.7 3.7l1.3 1.3M13 13l1.3 1.3M3.7 14.3L5 13M13 5l1.3-1.3"/></svg>
+        <span class="label">Today</span>
+      </a>
+      <a href="#foryou" data-view="foryou" title="For you">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M2 10.5l2-7h10l2 7v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/><path d="M2 10.5h4l1 2h4l1-2h4"/></svg>
+        <span class="label">For you</span>
+        <span class="count" id="nav-count"></span>
+      </a>
+      <a href="#patients" data-view="patients" title="Patients">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="6.5" cy="6" r="2.6"/><path d="M1.75 15c.4-2.6 2.3-4.2 4.75-4.2s4.35 1.6 4.75 4.2"/><circle cx="12.5" cy="6.5" r="2"/><path d="M12.2 10.9c2 .1 3.6 1.5 4 3.9"/></svg>
+        <span class="label">Patients</span>
+      </a>
+      <a href="#agent" data-view="agent" title="Your agent">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M9 1.75l1.7 4.55 4.55 1.7-4.55 1.7L9 14.25l-1.7-4.55L2.75 8l4.55-1.7z"/><path d="M14.25 12.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>
+        <span class="label">Your agent</span>
+      </a>
+    </nav>
+    <div class="me" title="Dr. Lucy Saruhashi"><span class="av">LS</span><span class="label">Dr. Lucy Saruhashi</span></div>
+  </aside>
+
+  <main class="content">
+    <!-- Today -->
+    <section class="view" id="view-today">
+      <h1 id="greeting">Good afternoon, Lucy.</h1>
+      <div class="status"><span class="orb"></span><span class="txt" id="status">Reading 3 new referral letters…</span></div>
+
+      <p class="brief" id="brief"></p>
+
+      <div id="needs-wrap">
+        <h2 id="needs-title">Needs you</h2>
+        <div id="needs"></div>
+        <button class="show-more" id="show-more"></button>
+      </div>
+
+      <div class="also">
+        <span id="also-txt">While you were away I read 41 items and handled 4 on my own.</span>
+        <button id="also-btn">See what I did</button>
+      </div>
+      <div class="log" id="log"></div>
+
+    </section>
+
+    <!-- For you -->
+    <section class="view" id="view-foryou">
+      <h1>For you</h1>
+      <div class="status" style="color:var(--muted)" id="fy-status"></div>
+
+      <div id="fy-open-wrap">
+        <h2>Needs you</h2>
+        <div id="fy-open"></div>
+      </div>
+
+      <div class="section" id="fy-later-wrap">
+        <h2>Later</h2>
+        <div id="fy-later"></div>
+      </div>
+
+      <div class="section" id="fy-done-wrap">
+        <h2>Done today</h2>
+        <div id="fy-done"></div>
+      </div>
+    </section>
+
+    <!-- Patients -->
+    <section class="view" id="view-patients">
+      <h1>Patients</h1>
+      <div class="status" style="color:var(--muted)">3 patients with next steps</div>
+      <div id="patients"></div>
+    </section>
+
+    <!-- Agent -->
+    <section class="view" id="view-agent">
+      <h1>Your agent</h1>
+      <div class="status"><span class="orb"></span><span>Watching your inbox, labs, calendar and network</span></div>
+
+      <h2>What I know about you</h2>
+      <div id="memory"></div>
+
+      <div class="section">
+        <h2>What I do without asking</h2>
+        <div id="perms"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<aside class="chat" id="chat" aria-label="Conversation with your agent">
+  <button class="rail" id="chat-rail" aria-label="Open conversation" title="Talk to your agent">
+    <span class="orb"></span>
+    <span class="rail-label">Ask your agent</span>
+  </button>
+  <div class="chat-head">
+    <span class="orb"></span>
+    <div class="who">Your agent<span>Knows your patients, inbox and habits</span></div>
+    <button class="toggle" id="chat-close" aria-label="Collapse conversation" title="Collapse">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2"/><line x1="10" y1="2.5" x2="10" y2="13.5"/><path d="M5.5 6 L7.25 8 L5.5 10"/></svg>
+    </button>
+  </div>
+  <div class="chat-body" id="chat-body"></div>
+  <div class="chat-suggest" id="chat-suggest">
+    <button>What did you do overnight?</button>
+    <button>How is Jordan Lee doing?</button>
+    <button>I'm out Friday</button>
+  </div>
+  <form class="chat-input" id="chat-form">
+    <input id="chat-input" placeholder="Reply to your agent…" autocomplete="off" />
+    <button class="send" aria-label="Send">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12V2M2.5 6.5L7 2l4.5 4.5"/></svg>
+    </button>
+  </form>
+</aside>
+
+<div class="demo" id="demo">Preview:
+  <button data-day="quiet">Quiet day</button>
+  <button data-day="light" class="on">2 things</button>
+  <button data-day="busy">Busy day</button>
+</div>
+
+<script>
+  // Everything that needs the doctor, most important first. `lead` is how the briefing
+  // describes the item if it's the top one. Routine items get grouped into one row.
+  const allNeeds = [
+    { what: "Send consult question to Dr. Ramanathan", sub: "About Jordan Lee. Written in your usual format.", action: "Send",
+      lead: `<b>Jordan Lee</b>: his creatinine rose again overnight, so I drafted a question for <span class="ent">Dr. Ramanathan</span>.` },
+    { what: "Order ferritin and CRP for Maria Santos", sub: "She stopped her iron in week 6. You order these before considering IV iron.", action: "Order",
+      lead: `<b>Maria Santos</b>: she stopped her iron in week 6, so I've lined up the labs you usually order.` },
+    { what: "Review Tonjit Askarov's glucose readings", sub: "Fasting average up to 168 this week from 141.", action: "Review" },
+    { what: "Sign 2 discharge summaries", sub: "Both filed to charts, waiting on your signature.", action: "Sign" },
+    { what: "Refill lisinopril for Jordan Lee", sub: "", action: "", routine: true },
+    { what: "Refill metformin for Tonjit Askarov", sub: "", action: "", routine: true },
+    { what: "Refill atorvastatin for Maria Santos", sub: "", action: "", routine: true },
+  ];
+  const days = {
+    quiet: [],
+    light: allNeeds.slice(0, 2),
+    busy: allNeeds,
+  };
+  let needs = days.light;
+  const SHOW = 3;
+  const log = [
+    { t: "6:40am", text: "Wrote your morning briefing" },
+    { t: "5:55am", text: "Read Jordan Lee's overnight labs" },
+    { t: "11:48pm", text: "Moved Tonjit Askarov's follow-up to Thursday" },
+    { t: "10:15pm", text: "Found a pharmacy note about Maria Santos's iron" },
+    { t: "9:02pm", text: "Replied to 2 scheduling emails" },
+    { t: "8:30pm", text: "Archived 19 newsletters and FYIs" },
+    { t: "6:20pm", text: "Filed 3 discharge summaries" },
+  ];
+  const working = [
+    { now: "Reading 3 new referral letters…", done: "Read 3 referral letters" },
+    { now: "Checking the network for replies…", done: "Checked the network. No new replies yet" },
+  ];
+  const patients = [
+    { i: "JL", n: "Jordan Lee", d: "62 · Resistant hypertension with progressive renal dysfunction" },
+    { i: "MS", n: "Maria Santos", d: "54 · Persistent iron-deficiency anaemia despite oral iron" },
+    { i: "TA", n: "Tonjit Askarov", d: "52 · Worsening type 2 diabetes despite medication escalation" },
+  ];
+  let memory = [
+    "You like specialist input before changing a renal patient's medication.",
+    "You review consults after 4pm, not in the morning.",
+    "You want the short version first.",
+  ];
+  const perms = [
+    "Archive newsletters and FYIs",
+    "Reply to scheduling emails",
+    "File documents into charts",
+  ];
+
+  const $ = (id) => document.getElementById(id);
+
+  // ===== Briefing + Needs you =====
+  // The briefing is always at most two sentences: how many, then the most important one.
+  const words = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+  const countWord = (n) => words[n] || String(n);
+  const quietLine = `<span class="quiet">I'm keeping an eye on the rest.</span>`;
+
+  function renderBrief(open) {
+    const n = open.length;
+    let html;
+    if (n === 0) {
+      html = `Nothing needs you right now. <span class="quiet">I'm keeping an eye on things and will tell you if that changes.</span>`;
+    } else if (n === 1) {
+      html = `One thing needs you today. ${open[0].lead || open[0].what + "."} ${quietLine}`;
+    } else {
+      const top = open[0];
+      html = `${countWord(n)} things need you today. The most important is ${top.lead || top.what.toLowerCase() + "."} ${quietLine}`;
+    }
+    $("brief").innerHTML = html;
+  }
+
+  // Rows: real items one per row, routine items collapsed into a single row.
+  function toRows(list) {
+    const rows = list.filter(n => !n.routine).map(n => ({ ...n, items: [n] }));
+    const routine = list.filter(n => n.routine);
+    if (routine.length === 1) rows.push({ ...routine[0], sub: "Routine. Same dose as before.", action: "Approve", items: routine });
+    if (routine.length > 1) rows.push({
+      what: `${countWord(routine.length)} routine refills`,
+      sub: routine.map(r => r.what.replace("Refill ", "")).join(" · "),
+      action: "Approve all", items: routine,
+    });
+    return rows;
+  }
+
+  // One row element, used on Today and on For you
+  function openRow(r) {
+    const el = document.createElement("div");
+    el.className = "item";
+    el.innerHTML = `<div class="t"><div>${r.what}</div>${r.sub ? `<div class="sub">${r.sub}</div>` : ""}</div>
+      <button class="btn">Later</button><button class="btn primary">${r.action}</button>`;
+    el.querySelector(".primary").onclick = () => {
+      el.classList.add("done");
+      const sub = el.querySelector(".sub") || el.querySelector(".t").appendChild(Object.assign(document.createElement("div"), { className: "sub" }));
+      sub.textContent = "Done. I'll let you know when there's news.";
+      r.items.forEach(x => x.done = true);
+      setTimeout(renderNeeds, 1400);
+    };
+    el.querySelector(".btn:not(.primary)").onclick = () => {
+      r.items.forEach(x => x.later = true);
+      el.style.opacity = 0;
+      setTimeout(renderNeeds, 300);
+      toast("Moved to Later. I'll bring it back tomorrow.");
+    };
+    return el;
+  }
+  function quietRow(r, right) {
+    const el = document.createElement("div");
+    el.className = "item muted-row";
+    el.innerHTML = `<div class="t"><div>${r.what}</div>${r.sub ? `<div class="sub">${r.sub}</div>` : ""}</div>`;
+    el.appendChild(right);
+    return el;
+  }
+
+  function renderNeeds() {
+    const open = needs.filter(n => !n.done && !n.later);
+    const later = needs.filter(n => n.later && !n.done);
+    const done = needs.filter(n => n.done);
+    renderBrief(open);
+
+    // Today: top three only, the rest live in For you
+    const rows = toRows(open);
+    $("needs-wrap").style.display = rows.length ? "" : "none";
+    $("needs").innerHTML = "";
+    rows.slice(0, SHOW).forEach(r => $("needs").appendChild(openRow(r)));
+    const hidden = rows.length - SHOW;
+    $("show-more").style.display = hidden > 0 ? "" : "none";
+    $("show-more").textContent = `See ${hidden} more in For you →`;
+
+    // Sidebar count
+    $("nav-count").textContent = open.length || "";
+
+    // For you: everything
+    $("fy-status").textContent = open.length
+      ? `${countWord(open.length)} ${open.length === 1 ? "thing needs" : "things need"} you${later.length ? ` · ${later.length} for later` : ""}`
+      : "You're all caught up.";
+    $("fy-open-wrap").style.display = open.length ? "" : "none";
+    $("fy-open").innerHTML = "";
+    toRows(open).forEach(r => $("fy-open").appendChild(openRow(r)));
+
+    $("fy-later-wrap").style.display = later.length ? "" : "none";
+    $("fy-later").innerHTML = "";
+    toRows(later).forEach(r => {
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = "Bring back";
+      b.onclick = () => { r.items.forEach(x => x.later = false); renderNeeds(); toast("Back on your list."); };
+      $("fy-later").appendChild(quietRow(r, b));
+    });
+
+    $("fy-done-wrap").style.display = done.length ? "" : "none";
+    $("fy-done").innerHTML = "";
+    toRows(done).forEach(r => {
+      const s = document.createElement("span");
+      s.className = "when";
+      s.textContent = "✓ Done";
+      $("fy-done").appendChild(quietRow({ ...r, sub: "" }, s));
+    });
+  }
+  $("show-more").onclick = () => { location.hash = "#foryou"; };
+  renderNeeds();
+
+  // Demo switcher to preview different days
+  $("demo").onclick = (e) => {
+    const d = e.target.dataset.day;
+    if (!d) return;
+    allNeeds.forEach(n => { n.done = false; n.later = false; });
+    needs = days[d];
+    document.querySelectorAll("#demo button").forEach(b => b.classList.toggle("on", b === e.target));
+    renderNeeds();
+  };
+
+  // What I did
+  const logRow = (r, enter) => `<div class="log-row${enter ? " enter" : ""}"><span class="time">${r.t}</span><span>${r.text}</span></div>`;
+  $("log").innerHTML = log.map(r => logRow(r)).join("");
+  $("also-btn").onclick = () => {
+    const open = $("log").classList.toggle("open");
+    $("also-btn").textContent = open ? "Hide" : "See what I did";
+  };
+
+  // Background work that finishes while you watch
+  let read = 41;
+  function next() {
+    const job = working.shift();
+    if (!job) { $("status").textContent = "All caught up. I'll keep watching."; return; }
+    $("status").textContent = job.now;
+    setTimeout(() => {
+      $("log").insertAdjacentHTML("afterbegin", logRow({ t: "Just now", text: job.done }, true));
+      read += 3;
+      $("also-txt").textContent = `While you were away I read ${read} items and handled 4 on my own.`;
+      setTimeout(next, 1500);
+    }, 6000);
+  }
+  next();
+
+  // ===== Conversation =====
+  // Typing into the Today bar opens the conversation panel; the page stays visible beside it.
+  // The conversation is docked on the right and is the only place to type.
+  // Open/collapsed is remembered; small screens start collapsed.
+  $("chat-body").innerHTML = `<div class="msg agent"><span class="orb"></span><div class="body"><p>Hi Lucy. Ask me about a patient, or tell me something I should know.</p></div></div>`;
+  function setChat(open, focus) {
+    document.body.classList.toggle("chat-collapsed", !open);
+    try { localStorage.setItem("lamina-chat", open ? "open" : "collapsed"); } catch (e) {}
+    if (open && focus) setTimeout(() => $("chat-input").focus(), 220);
+  }
+  const openChat = () => setChat(true, true);
+  const closeChat = () => setChat(false);
+  let savedChat = null;
+  try { savedChat = localStorage.getItem("lamina-chat"); } catch (e) {}
+  setChat(savedChat ? savedChat === "open" : window.innerWidth > 1100);
+  $("chat-rail").onclick = openChat;
+  $("chat-close").onclick = closeChat;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && window.innerWidth <= 1100) closeChat(); });
+
+  function addMe(text) {
+    $("chat-body").insertAdjacentHTML("beforeend", `<div class="msg me"></div>`);
+    $("chat-body").lastElementChild.textContent = text;
+    scrollChat();
+  }
+  function addAgent(html, delay = 900) {
+    $("chat-body").insertAdjacentHTML("beforeend", `<div class="msg agent" id="typing"><span class="orb"></span><div class="typing"><i></i><i></i><i></i></div></div>`);
+    scrollChat();
+    return new Promise((res) => setTimeout(() => {
+      $("typing").remove();
+      $("chat-body").insertAdjacentHTML("beforeend", `<div class="msg agent"><span class="orb"></span><div class="body">${html}</div></div>`);
+      scrollChat();
+      res($("chat-body").lastElementChild);
+    }, delay));
+  }
+  const scrollChat = () => { $("chat-body").scrollTop = $("chat-body").scrollHeight; };
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  // Canned replies so the demo feels real. Each can carry an action card or a memory chip.
+  async function reply(text) {
+    const t = text.toLowerCase();
+    if (/overnight|did you do|while i was|away/.test(t) && !/out|off/.test(t)) {
+      await addAgent(`<p>Since you logged off at 6:12pm I read 41 items. Most needed nothing. The ones that mattered:</p>
+        <ul><li>Jordan Lee's creatinine went up again, so I drafted a consult question.</li>
+        <li>A pharmacy fax said Maria Santos stopped her iron in week 6.</li>
+        <li>I moved Tonjit Askarov's follow-up to Thursday and replied to 2 scheduling emails.</li></ul>`);
+    } else if (/jordan/.test(t)) {
+      const el = await addAgent(`<p>His creatinine is 1.9, up from 1.6 in August, and his blood pressure is still above target on three medications.</p>
+        <p>You usually want nephrology input before changing his regimen, so I drafted a question for Dr. Ramanathan.</p>
+        <div class="card"><div class="t">Consult question for Dr. Ramanathan<span>History, current regimen, one question</span></div><button class="btn primary">Send</button></div>`);
+      el.querySelector(".card .btn").onclick = (e) => {
+        const card = e.target.closest(".card");
+        card.classList.add("done");
+        card.querySelector(".t").firstChild.textContent = "✓ Sent to Dr. Ramanathan";
+        const item = allNeeds[0]; item.done = true; renderNeeds();
+      };
+    } else if (/maria/.test(t)) {
+      await addAgent(`<p>She's 12 weeks into oral iron with no ferritin response. The pharmacy says she stopped in week 6 because of stomach upset, which likely explains it.</p>
+        <p>I've lined up ferritin and CRP. It's in For you when you're ready.</p>`);
+    } else if (/^(i'm|im|i am|i prefer|i like|i don't|i dont|remember|always|never)/.test(t) || /\bout\b.*(friday|monday|tuesday|wednesday|thursday|week)/.test(t)) {
+      memory.unshift(esc(text.charAt(0).toUpperCase() + text.slice(1)));
+      renderMemory(true);
+      let extra = "";
+      if (/out|off|away|vacation/.test(t)) extra = `<p>I'll hold anything that isn't urgent until you're back, and only reach you for something like a critical lab.</p>`;
+      await addAgent(`<p>Got it.</p>${extra}<span class="chip">✓ Saved to what I know about you</span>`);
+    } else {
+      await addAgent(`<p>On it. I'll look into that and put anything that needs you in For you.</p>`, 1100);
+      $("log").insertAdjacentHTML("afterbegin", `<div class="log-row enter"><span class="time">Just now</span><span>Started looking into: ${esc(text)}</span></div>`);
+    }
+  }
+
+  async function send(text) {
+    text = text.trim();
+    if (!text) return;
+    openChat();
+    $("chat-suggest").style.display = "none";
+    addMe(text);
+    await reply(text);
+  }
+  $("chat-form").onsubmit = (e) => { e.preventDefault(); const v = $("chat-input").value; $("chat-input").value = ""; send(v); };
+  $("chat-suggest").onclick = (e) => { if (e.target.tagName === "BUTTON") send(e.target.textContent); };
+
+  // Patients
+  $("patients").innerHTML = patients.map(p => `
+    <div class="patient"><span class="av">${p.i}</span><div class="t"><div class="n">${p.n}</div><div class="d">${p.d}</div></div><button class="btn">Open</button></div>`).join("");
+
+  // Agent page
+  function renderMemory(flash) {
+    $("memory").innerHTML = memory.map((m, i) => `
+      <div class="mem${flash && i === 0 ? " new" : ""}"><span class="t">${m}</span><button class="x" data-i="${i}">Forget</button></div>`).join("");
+  }
+  $("memory").onclick = (e) => {
+    if (e.target.dataset.i === undefined) return;
+    memory.splice(+e.target.dataset.i, 1);
+    renderMemory();
+    toast("Forgotten.");
+  };
+  renderMemory();
+  $("perms").innerHTML = perms.map(p => `<div class="mem"><span class="t">${p}</span></div>`).join("") +
+    `<p style="font-size:13px;color:var(--muted);margin-top:14px">Everything else, I draft and wait for you.</p>`;
+
+  // Greeting
+  const h = new Date().getHours();
+  $("greeting").textContent = `Good ${h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"}, Lucy.`;
+
+  let tt;
+  function toast(msg) {
+    let t = document.querySelector(".toast");
+    if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(tt);
+    tt = setTimeout(() => t.classList.remove("show"), 2200);
+  }
+
+  // Sidebar collapse, remembered per browser
+  const app = document.querySelector(".app");
+  function setCollapsed(c) {
+    app.classList.toggle("collapsed", c);
+    const label = c ? "Expand sidebar" : "Collapse sidebar";
+    $("toggle").setAttribute("aria-label", label);
+    $("toggle").title = label;
+    try { localStorage.setItem("lamina-sidebar", c ? "collapsed" : "open"); } catch (e) {}
+  }
+  try { if (localStorage.getItem("lamina-sidebar") === "collapsed") setCollapsed(true); } catch (e) {}
+  // Clicking anywhere on the sidebar toggles it, except on links, which just navigate
+  document.querySelector(".sidebar").addEventListener("click", (e) => {
+    if (e.target.closest("a") && !e.target.closest("#toggle")) return;
+    setCollapsed(!app.classList.contains("collapsed"));
+  });
+
+  function route() {
+    const v = (location.hash || "#today").slice(1);
+    const target = $("view-" + v) ? v : "today";
+    document.querySelectorAll(".view").forEach(el => el.classList.toggle("active", el.id === "view-" + target));
+    document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("active", a.dataset.view === target));
+  }
+  window.addEventListener("hashchange", route);
+  route();
+</script>
+</body>
+</html>

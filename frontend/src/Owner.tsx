@@ -6,12 +6,14 @@ import { LaminaMark } from './LaminaMark.tsx'
 import {
   getAgentOverview,
   getMyProviderClaims,
+  getOnboardingStatus,
   getPhysicianSandboxStatus,
   getPracticeRepresentation,
   getProvider,
   getTrainingHistory,
   selectPhysicianSandbox,
   type AgentOverview,
+  type OnboardingStatus,
   type PhysicianNetworkProfile,
   type PhysicianSandboxStatus,
   type PracticeRepresentation,
@@ -26,6 +28,7 @@ import {
   TrainingPage,
   trainingPath,
 } from './Engagement.tsx'
+import { workspaceGateRedirect } from './onboardingState.ts'
 import { ownerAgentPath, ownerHomePath, ownerProfilePath, ownerTrainPath } from './ownerPaths.ts'
 
 type Navigate = (path: string) => void
@@ -90,12 +93,22 @@ export function OwnerShell({ children, navigate, section }: { children: React.Re
   const [statusError, setStatusError] = useState('')
   const [claims, setClaims] = useState<Array<ProviderClaim & { profile: PhysicianNetworkProfile | null }> | null>(null)
   const [switching, setSwitching] = useState(false)
+  /* Pilot gate: the backend's onboarding projection decides whether this account may see the
+   * workspace at all. Nothing owner-scoped is fetched or rendered until it says `active`;
+   * the backend independently returns 403 for every private route until then. */
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
+  const gateRedirect = onboarding ? workspaceGateRedirect(onboarding) : null
+  useEffect(() => {
+    setOnboarding(null); setStatus(null)
+    if (user) getOnboardingStatus().then(setOnboarding).catch((err) => setStatusError(err instanceof Error ? err.message : 'Could not check your physician access'))
+  }, [user])
+  useEffect(() => { if (gateRedirect) navigate(gateRedirect) }, [gateRedirect]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadStatus = () => {
     setStatusError('')
     getPhysicianSandboxStatus().then(setStatus).catch((err) => setStatusError(err instanceof Error ? err.message : 'Could not open your private workspace'))
   }
-  useEffect(() => { if (user) loadStatus() }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (user && onboarding && !gateRedirect) loadStatus() }, [user, onboarding]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadClaims = () => {
     getMyProviderClaims().then(async (list) => {
@@ -125,6 +138,8 @@ export function OwnerShell({ children, navigate, section }: { children: React.Re
     <button className="button-primary" onClick={() => navigate(signInPath(ownerHomePath))}>Sign in <span>→</span></button>
   </main>
   if (statusError) return <main className="page-shell owner-gate"><div className="error-banner" role="alert">{statusError}</div></main>
+  if (!onboarding) return <main className="page-shell owner-gate"><p className="muted-note">Checking your physician access…</p></main>
+  if (gateRedirect) return <main className="page-shell owner-gate"><p className="muted-note">Opening physician onboarding…</p></main>
   if (!status) return <main className="page-shell owner-gate"><p className="muted-note">Opening your private workspace…</p></main>
 
   if (!status.has_claim) return <main className="page-shell owner-gate">

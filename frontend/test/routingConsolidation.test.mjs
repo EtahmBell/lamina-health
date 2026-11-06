@@ -169,8 +169,10 @@ test('Chen Dashboard has exactly one "Patients with next steps" worklist and no 
   assert.match(home, /\{agentHandledCount\} administrative step/)
 })
 
-test('Lucy\'s Dashboard keeps the same "Patients with next steps" concept', () => {
-  assert.match(app, /<h2>Patients with next steps<\/h2>/)
+test('Lucy\'s Dashboard replaces "Patients with next steps" with the agent\'s "Needs you" list (physician-agent home pass); the full patient list stays on Patients', () => {
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.match(home, /<h2 className="agent-label">Needs you<\/h2>/)
+  assert.match(app, /<h1>Patients<\/h1>/)
 })
 
 /* ------------------------------------------------------------- Learning */

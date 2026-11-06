@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from backend.config import environment
 from backend.synthetic_data import ALL_PHYSICIANS, SYNTHETIC_PHYSICIAN_NPIS
 from backend.workflow import WorkflowStore, workflow_store
@@ -37,6 +39,10 @@ class ClaimNotFoundError(LookupError):
 
 
 class ClaimConflictError(ValueError):
+    pass
+
+
+class OnboardingRequiredError(ValueError):
     pass
 
 
@@ -176,7 +182,18 @@ class ProviderNetwork:
 
     def claim(self, npi: str, auth_user_id: str) -> ProviderClaim:
         profile = self._resolve(npi)
-        claim, conflict = self.store.claim_provider(auth_user_id, npi)
+        if profile.source != ProviderSource.SYNTHETIC:
+            # Real NPIs are claimed only through authenticated physician onboarding
+            # (lookup -> explicit confirmation -> pilot approval), never this shortcut.
+            raise OnboardingRequiredError(
+                "Real physician identities are claimed through physician onboarding"
+            )
+        try:
+            claim, conflict = self.store.claim_provider(auth_user_id, npi)
+        except sqlite3.IntegrityError as error:
+            raise ClaimConflictError(
+                "This account already holds a physician identity claim"
+            ) from error
         if conflict:
             raise ClaimConflictError("Provider identity already has an active claim")
         self.store.ensure_physician_owner_scope(

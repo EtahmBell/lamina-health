@@ -159,17 +159,18 @@ test('the Dashboard agent CTA never launches the legacy question sequence -- a r
   assert.match(card, /navigate\(viewAgentPath\)\}>View My Agent/)
 })
 
-test('Home (both personas) renders the Your Agent card from AgentOverview', () => {
-  assert.match(homePageFn(), /getAgentOverview\('lucy'\)\.then\(setOverview\)/)
-  assert.match(homePageFn(), /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('lucy'\)\} viewAgentPath="\/agent\?tab=overview" records=\{records\} \/>/)
+test('Home (both personas) reads AgentOverview; Lucy\'s agent-first Dashboard reads it through the shared workspace snapshot, the specialist keeps the Your Agent card', () => {
+  assert.match(homePageFn(), /<AgentDashboard navigate=\{navigate\} \/>/)
+  const agentHome = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(agentHome.includes("getAgentOverview('lucy')"))
+  assert.ok(agentHome.includes('clarifications: raw.overview?.learning_opportunities ?? []'))
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.match(specialistHome, /getAgentOverview\('iain'\)\.then\(setOverview\)/)
   assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" \/>/)
 })
 
-test('the full Network Pulse feed section is gone from Home; only the compact 2-item highlight preview remains', () => {
-  assert.doesNotMatch(homePageFn(), /NetworkFeedSection/)
-  assert.match(homePageFn(), /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="lucy" \/>/)
+test('the full Network Pulse feed section is gone from Home; Lucy\'s agent-first Dashboard carries no network feed at all, the specialist keeps the compact 2-item highlight preview', () => {
+  assert.doesNotMatch(homePageFn(), /NetworkFeedSection|NetworkHighlights/)
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.doesNotMatch(specialistHome, /NetworkFeedSection/)
   assert.match(specialistHome, /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="iain" \/>/)

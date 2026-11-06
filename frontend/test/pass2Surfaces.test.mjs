@@ -76,9 +76,12 @@ test('My Agent uses the consolidated post-8B tab set (Overview/Train/Test), with
   assert.doesNotMatch(app, /function ConsultationFootprint/, 'the specialties-consulted chart was removed as part of the My Agent simplification')
 })
 
-test('case-raised preferences still confirm/edit/reject without a separate Calibration tab; activity now links via the one deep-link helper on the Dashboard', () => {
+test('case-raised preferences still confirm/edit/reject without a separate Calibration tab; Dashboard activity links via the one deep-link helper', () => {
   assert.match(app, /Proposed · needs confirmation/)
-  assert.match(app, /navigate\(activityPath\(item\)\)/)
+  const queue = readFileSync(new URL('../src/physicianQueue.ts', import.meta.url), 'utf8')
+  assert.ok(queue.includes('path: activityPath(event)'))
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(home.includes('navigate(entry.path!)'))
 })
 
 test('specialty counts come from the recommended specialty of each record', () => {

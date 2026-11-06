@@ -41,8 +41,10 @@ test('all five Chen workspace routes are registered: Dashboard, Patients, Patien
   assert.match(dispatch, /path === '\/chen\/profile'/)
 })
 
-test('Lucy\'s own workspace navigation and Dashboard route are unchanged by this pass', () => {
-  assert.match(app, /const navItems = \[\s*\n\s*\{ id: 'home', title: 'Dashboard', icon: '⌂', path: '\/home' \},\s*\n\s*\{ id: 'patients', title: 'Patients', icon: '✦', path: '\/patients' \},\s*\n\s*\{ id: 'network', title: 'Network', icon: <NetworkNavIcon \/>, path: '\/network' \},\s*\n\]/)
+test('Lucy\'s workspace keeps its Dashboard, Patients and Network routes (physician-agent home pass adds For you and Your Agent around them)', () => {
+  for (const item of ["{ id: 'home', title: 'Dashboard', icon: '⌂', path: '/home' }", "{ id: 'patients', title: 'Patients', icon: '✦', path: '/patients' }", "{ id: 'network', title: 'Network', icon: <NetworkNavIcon />, path: '/network' }"]) {
+    assert.ok(app.includes(item), item)
+  }
   assert.match(routing(), /path === '\/home'\) return <HomePage/)
 })
 
