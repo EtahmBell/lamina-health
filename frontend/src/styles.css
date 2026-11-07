@@ -3078,3 +3078,12 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
   .agent-item { flex-wrap: wrap; }
   .agent-item-text { flex-basis: 100%; }
 }
+
+/* Visual polish pass: the agent-first shell's selected nav item returns to
+ * Lamina's blue-grey (mineral) identity -- existing tokens only. Copper stays
+ * on actions, agent presence and highlights. Icons sit in one fixed 20px box
+ * so the SVG icons and the remaining text glyph align identically. */
+.physician-shell .nav-icon { display: grid; place-items: center; width: 24px; height: 20px; flex: none; }
+.physician-shell .nav-icon svg { display: block; }
+.physician-shell .nav-item.active { border-color: rgb(83 110 125 / 22%); background: var(--sage-surface-strong); color: var(--mineral-deep); }
+.physician-shell .nav-item.active .nav-icon { color: var(--mineral-deep); }

@@ -284,7 +284,7 @@ export function AgentDashboard({ navigate, persona = 'lucy' }: { navigate: Navig
   const [logOpen, setLogOpen] = useState(false)
   const log = [...status.justNow, ...queue.log]
   const handled = queue.log.length
-  return <main className="agent-home" aria-label="Dashboard">
+  return <main className="agent-home" aria-label="Home">
     <h1 className="agent-home-greeting">{timeAwareGreeting(config.firstName)}</h1>
     <div className="agent-status" role="status"><AgentOrb /><span>{loading ? config.firstJob.now : status.text}</span></div>
     {error && <p className="agent-home-error" role="alert">Some recent workspace activity is temporarily unavailable. Patient records remain accessible.</p>}

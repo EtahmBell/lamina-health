@@ -41,7 +41,7 @@ test('replacing Iain in the switcher does not touch his own routes, data, or the
 
 test('switching to Chen lands on his real Dashboard, and Profile is reached the same way Lucy\'s and Iain\'s are (via profilePath, not a new nav system)', () => {
   assert.match(app, /id: 'chen' as const, name: CHEN_NAME, role: 'Receiving specialist', initials: 'NC', path: '\/chen\/home', profilePath: '\/chen\/profile'/)
-  assert.match(app, /const CHEN_NAV_ITEMS = \[\s*\n\s*\{ id: 'chen-home', title: 'Dashboard'/)
+  assert.match(app, /const CHEN_NAV_ITEMS = \[\s*\n\s*\{ id: 'chen-home', title: 'Home'/)
 })
 
 test('Chen Profile, Agent, and Network routes are registered in the SPA dispatcher, reusing the shared shells', () => {

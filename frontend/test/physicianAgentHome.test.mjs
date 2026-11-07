@@ -82,7 +82,7 @@ const buildChen = ({ incoming = [], accepted = [], careState = new Map(), referr
 /* ================================================================ shell */
 
 test('Lucy and Chen each get exactly the same five primary destinations, in order', () => {
-  const five = ["title: 'Dashboard'", "title: 'For you'", "title: 'Patients'", "title: 'Network'", "title: 'Your Agent'"]
+  const five = ["title: 'Home'", "title: 'For you'", "title: 'Patients'", "title: 'Network'", "title: 'Your Agent'"]
   const lucy = slice(app, 'const navItems', 'const SPECIALIST_NAV_ITEMS')
   const chen = slice(app, 'const CHEN_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
   assert.deepEqual(titles(lucy), five)
@@ -372,4 +372,15 @@ test('the sidebar count stays in step while the physician works inside Patient D
   assert.ok(counter.includes("if (document.visibilityState === 'visible') void loadSnapshot(persona)"))
   assert.ok(home.includes(`const possessive = lead.rest.startsWith("'s") ? "'s" : ''`))
   assert.ok(home.includes('<span className="agent-ent">{lead.name}{possessive}</span>'))
+})
+
+test('visual polish: Home uses an SVG icon on the same grid, size and stroke as For you / Your Agent, and the selected nav item is Lamina blue-grey from existing tokens', () => {
+  const icon = slice(app, 'function HomeNavIcon', '/** Inbox glyph')
+  assert.ok(icon.includes('viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5"'))
+  assert.ok(slice(app, 'function ForYouNavIcon', '/** Sparkle glyph').includes('viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5"'))
+  assert.ok(!slice(app, 'const navItems', 'const SPECIALIST_NAV_ITEMS').includes("'⌂'"))
+  assert.ok(!slice(app, 'const CHEN_NAV_ITEMS', 'const DEMO_PERSPECTIVES').includes("'⌂'"))
+  assert.ok(styles.includes('.physician-shell .nav-icon { display: grid; place-items: center; width: 24px; height: 20px; flex: none; }'))
+  assert.ok(styles.includes('.physician-shell .nav-item.active { border-color: rgb(83 110 125 / 22%); background: var(--sage-surface-strong); color: var(--mineral-deep); }'))
+  assert.ok(home.includes('<main className="agent-home" aria-label="Home">'))
 })

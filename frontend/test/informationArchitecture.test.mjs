@@ -37,9 +37,9 @@ test('the gateway is a neutral role picker, not a personalized Dr. Lucy Saruhash
 test('workspace sidebar: five physician destinations with Dashboard as the landing page (physician-agent home pass)', () => {
   const navigation = slice('const navItems', 'const SPECIALIST_NAV_ITEMS')
   assert.deepEqual(navigation.match(/title: '[^']+'/g), [
-    "title: 'Dashboard'", "title: 'For you'", "title: 'Patients'", "title: 'Network'", "title: 'Your Agent'",
+    "title: 'Home'", "title: 'For you'", "title: 'Patients'", "title: 'Network'", "title: 'Your Agent'",
   ])
-  assert.ok(navigation.includes("title: 'Dashboard', icon: '⌂', path: '/home'"))
+  assert.ok(navigation.includes("title: 'Home', icon: <HomeNavIcon />, path: '/home'"))
 })
 
 test('workspace logo returns every shell screen to the portal', () => {

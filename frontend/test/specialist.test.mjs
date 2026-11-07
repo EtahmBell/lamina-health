@@ -83,7 +83,7 @@ test('specialist shell uses the consolidated three-item navigation (post-8B): Da
 
 test('Chen shell uses the same five agent-first destinations as Lucy (specialist agent-first pass)', () => {
   const navBlock = slice(app, 'const CHEN_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'For you'", "title: 'Patients'", "title: 'Network'", "title: 'Your Agent'"])
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Home'", "title: 'For you'", "title: 'Patients'", "title: 'Network'", "title: 'Your Agent'"])
 })
 
 test('the specialist sidebar card never claims Active status for a reserved provider (Dashboard+Network polish pass: the bottom-left object was simplified to a name only — "Active"/"Synthetic demo profile" status lines are gone for both personas, so there is nothing left to misclaim)', () => {

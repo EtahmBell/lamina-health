@@ -52,6 +52,13 @@ function SyntheticStatus() {
   return <div className="synthetic-status"><span />Synthetic demo · no PHI</div>
 }
 
+/** House glyph for "Home" -- drawn on the same 18-unit grid, 17px size and
+ * 1.5 stroke as the For you / Your Agent icons, replacing the old "⌂" text
+ * character, which rendered smaller than the SVG icons beside it. */
+function HomeNavIcon() {
+  return <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true"><path d="M2.5 8.25 9 2.75l6.5 5.5" /><path d="M4.25 7v7.25a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V7" /><path d="M7.25 15.25v-4.5h3.5v4.5" /></svg>
+}
+
 /** Inbox glyph for "For you" -- the physician-action queue. */
 function ForYouNavIcon() {
   return <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true"><path d="M2 10.5l2-7h10l2 7v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" /><path d="M2 10.5h4l1 2h4l1-2h4" /></svg>
@@ -67,7 +74,7 @@ function AgentNavIcon() {
  * and For you is the full queue of what the agent cannot finish alone.
  * Profile/account access sits at the bottom-left of the sidebar. */
 const navItems = [
-  { id: 'home', title: 'Dashboard', icon: '⌂', path: '/home' },
+  { id: 'home', title: 'Home', icon: <HomeNavIcon />, path: '/home' },
   { id: 'for-you', title: 'For you', icon: <ForYouNavIcon />, path: '/for-you' },
   { id: 'patients', title: 'Patients', icon: '✦', path: '/patients' },
   { id: 'network', title: 'Network', icon: <NetworkNavIcon />, path: '/network' },
@@ -84,7 +91,7 @@ const SPECIALIST_NAV_ITEMS = [
  * agent home pass, specialist side) -- the same five destinations, routed
  * under /chen, with his account at the sidebar bottom. */
 const CHEN_NAV_ITEMS = [
-  { id: 'chen-home', title: 'Dashboard', icon: '⌂', path: '/chen/home' },
+  { id: 'chen-home', title: 'Home', icon: <HomeNavIcon />, path: '/chen/home' },
   { id: 'chen-for-you', title: 'For you', icon: <ForYouNavIcon />, path: '/chen/for-you' },
   { id: 'chen-patients', title: 'Patients', icon: '✦', path: '/chen/patients' },
   { id: 'chen-network', title: 'Network', icon: <NetworkNavIcon />, path: '/chen/network' },

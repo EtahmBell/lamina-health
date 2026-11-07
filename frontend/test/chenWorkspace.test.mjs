@@ -13,9 +13,9 @@ const routing = () => slice(app, 'export default function App', app.length)
 
 /* ----------------------------------------------------- Part A/O: navigation */
 
-test('Chen sidebar shows Dashboard, Patients, and Network -- the same standard three-item navigation Lucy has', () => {
+test('Chen sidebar shows Home, Patients, and Network alongside For you and Your Agent -- the same navigation Lucy has', () => {
   const navBlock = slice(app, 'const CHEN_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
-  assert.match(navBlock, /\{ id: 'chen-home', title: 'Dashboard', icon: '⌂', path: '\/chen\/home' \}/)
+  assert.ok(navBlock.includes("{ id: 'chen-home', title: 'Home', icon: <HomeNavIcon />, path: '/chen/home' }"))
   assert.match(navBlock, /\{ id: 'chen-patients', title: 'Patients', icon: '✦', path: '\/chen\/patients' \}/)
   assert.match(navBlock, /\{ id: 'chen-network', title: 'Network', icon: <NetworkNavIcon \/>, path: '\/chen\/network' \}/)
 })
@@ -41,7 +41,7 @@ test('all five Chen workspace routes are registered: Dashboard, Patients, Patien
 })
 
 test('Lucy\'s workspace keeps its Dashboard, Patients and Network routes (physician-agent home pass adds For you and Your Agent around them)', () => {
-  for (const item of ["{ id: 'home', title: 'Dashboard', icon: '⌂', path: '/home' }", "{ id: 'patients', title: 'Patients', icon: '✦', path: '/patients' }", "{ id: 'network', title: 'Network', icon: <NetworkNavIcon />, path: '/network' }"]) {
+  for (const item of ["{ id: 'home', title: 'Home', icon: <HomeNavIcon />, path: '/home' }", "{ id: 'patients', title: 'Patients', icon: '✦', path: '/patients' }", "{ id: 'network', title: 'Network', icon: <NetworkNavIcon />, path: '/network' }"]) {
     assert.ok(app.includes(item), item)
   }
   assert.match(routing(), /path === '\/home'\) return <HomePage/)
