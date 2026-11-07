@@ -4,8 +4,9 @@ These instructions apply to all work in this repository.
 
 ## Product
 
-- Lamina is not chatbot-first. `Consult Network` is the primary product primitive.
-- The core flow is patient context → relevant physician agents → inspectable specialty-care recommendation.
+- Lamina is agent-first, not chat-only. The physician's persistent agent is the primary product object. Structured workflow surfaces remain important for reviewing clinical context, actions, and state.
+- The agent works on the physician's behalf and surfaces only what it cannot or should not finish alone (conditional readiness). Conversation with the agent is one way in, never a replacement for the structured patient, referral, and network screens.
+- `Consult Network` remains the core clinical workflow primitive. The core flow is patient context → relevant physician agents → inspectable specialty-care recommendation.
 - Do not add a social feed, physician posts, or public agent conversations.
 - Keep V1 small and optimize for a strong synthetic end-to-end demonstration.
 - Do not introduce time-series language models (TSLMs) unless explicitly requested.

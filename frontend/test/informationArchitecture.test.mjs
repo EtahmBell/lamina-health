@@ -52,11 +52,10 @@ test('workspace header keeps right controls without a generic page label', () =>
   assert.doesNotMatch(shell(), /section === 'home'/)
 })
 
-test('specialist and Chen sidebars keep their agent block; Lucy reaches her agent via the Your Agent nav item and her account sits at the sidebar bottom', () => {
+test('the specialist sidebar keeps its agent block; Lucy and Chen reach their agent via the Your Agent nav item and their account sits at the sidebar bottom', () => {
   assert.ok(shell().includes("onClick={() => navigate('/specialist/agent')}"))
-  assert.ok(shell().includes("onClick={() => navigate('/chen/agent')}"))
   assert.ok(slice('const navItems', 'const SPECIALIST_NAV_ITEMS').includes("title: 'Your Agent', icon: <AgentNavIcon />, path: '/agent?tab=overview'"))
-  assert.ok(shell().includes('<PerspectiveSwitch navigate={navigate} perspective="pcp" placement="sidebar" />'))
+  assert.ok(shell().includes('<PerspectiveSwitch navigate={navigate} perspective={perspective} placement="sidebar" />'))
   assert.ok(styles.includes('.sidebar-clinician.active'), 'the agent object gets a visible active state, not a decorative-only look')
 })
 

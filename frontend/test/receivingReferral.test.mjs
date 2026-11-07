@@ -117,16 +117,13 @@ test('the separate incoming-requests control is gone -- a referral to review is 
   assert.doesNotMatch(referralSource, /function IncomingRequestsControl|<IncomingRequestsControl/)
 })
 
-test('a referral next step shows patient name, the real referring physician (Lucy), specialty, priority, modality, and a real resolved-count detail', () => {
-  const rows = slice(referralSource, 'function NextStepRows', 'function chenNextSteps')
-  assert.match(rows, /patientName\(item\.patientId\)/)
-  assert.match(rows, /<PriorityChip priority=\{item\.priority\} \/>/)
-  assert.doesNotMatch(rows, /Ready for review/)
-  assert.match(rows, /onClick=\{\(\) => onOpen\(item\)\}/)
-  const builder = slice(referralSource, 'function chenNextSteps', 'export function RequestReviewModal')
-  assert.match(builder, /referralReviewStep\(referral, now, PCP_NAME\)/)
-  assert.match(worklist, /detail: `\$\{referral\.specialty\} referral from \$\{referringName\}/)
-  assert.match(worklist, /event\.event_type === 'information_attached'/)
+test('a referral next step carries the real referring physician (Lucy), specialty, priority, modality, and a real resolved-count detail', () => {
+  const worklistSource = readFileSync(new URL('../src/specialistWorklist.ts', import.meta.url), 'utf8')
+  assert.match(worklistSource, /referralReviewStep\(referral, now, referringName\)/)
+  assert.match(worklistSource, /detail: `\$\{referral\.specialty\} referral from \$\{referringName\}/)
+  assert.match(worklistSource, /event\.event_type === 'information_attached'/)
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(home.includes('specialistNextSteps(data.incoming, accepted, data.careState, now, PCP_NAME)'))
 })
 
 test('resolvedCountFor derives the resolved-item count from real information_attached events, never a hardcoded "1"', () => {
@@ -251,9 +248,10 @@ test('the Chen routes are registered in the SPA dispatcher, reusing ProductShell
   assert.match(dispatch, /chenPatientId === TONJIT_ID \|\| \(chenPatientId && CHEN_PATIENT_IDS\.includes\(chenPatientId\)\)\) return <PatientWorkspace patientId=\{chenPatientId\} navigate=\{navigate\} perspective="receiving" \/>/)
 })
 
-test('Chen now has a "My Agent" sidebar object, same standing as Lucy\'s and Iain\'s (closed-loop referral pass 2: full first-class workspace)', () => {
+test('Chen now shares Lucy\'s agent-first shell: Your Agent in the nav, account at the sidebar bottom (specialist agent-first pass)', () => {
   const shell = slice(app, 'function ProductShell', 'function LandingPage')
-  assert.match(shell, /: <button className=\{`sidebar-clinician \$\{onAgent \? 'active' : ''\}`\} aria-current=\{onAgent \? 'page' : undefined\} onClick=\{\(\) => navigate\('\/chen\/agent'\)\}[\s\S]{0,200}CHEN_AGENT_NAME/)
+  assert.match(shell, /if \(perspective === 'pcp' \|\| perspective === 'chen'\) return <PhysicianShell /)
+  assert.match(shell, /const items = perspective === 'chen' \? CHEN_NAV_ITEMS : navItems/)
 })
 
 /* ------------------------------------------------------- Patient Detail reuse */

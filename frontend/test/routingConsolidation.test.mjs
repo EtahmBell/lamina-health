@@ -157,16 +157,13 @@ test('e-consult and visit work keep separate, modality-specific service targets'
   const econsult = CHEN_SEEDED_NEXT_STEPS.find((item) => item.kind === 'respond_econsult')
   assert.equal(serviceTargetDays(econsult), SERVICE_TARGET_DAYS.econsult_response.routine)
   assert.notEqual(SERVICE_TARGET_DAYS.econsult_response.routine, SERVICE_TARGET_DAYS.referral_review.routine)
-  const capacity = slice(referralSource, 'function ChenCapacityCards', 'export const CHEN_AUTO_ROUTED_PATIENT_IDS')
-  assert.match(capacity, />Visits</)
-  assert.match(capacity, />E-consults</)
 })
 
-test('Chen Dashboard has exactly one "Patients with next steps" worklist and no separate "Needs your review" section', () => {
-  const home = slice(referralSource, 'export function ChenHomePage', '/* ===================================================================== Part B/D')
-  assert.equal((home.match(/<h2>Patients with next steps<\/h2>/g) ?? []).length, 1)
-  assert.doesNotMatch(home, /Needs your review|dashboard-needs-you/)
-  assert.match(home, /\{agentHandledCount\} administrative step/)
+test('Chen\'s Dashboard has one "Needs you" list over the shared queue -- agent/staff work stays off it (specialist agent-first pass)', () => {
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.equal((home.match(/<h2 className="agent-label">Needs you<\/h2>/g) ?? []).length, 2, 'one on the Dashboard, one on For you')
+  const queue = readFileSync(new URL('../src/physicianQueue.ts', import.meta.url), 'utf8')
+  assert.ok(queue.includes('if (!step.physicianJudgment) {'), 'agent/staff steps go to waiting, never Needs you')
 })
 
 test('Lucy\'s Dashboard replaces "Patients with next steps" with the agent\'s "Needs you" list (physician-agent home pass); the full patient list stays on Patients', () => {

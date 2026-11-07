@@ -163,7 +163,7 @@ test('Home (both personas) reads AgentOverview; Lucy\'s agent-first Dashboard re
   assert.match(homePageFn(), /<AgentDashboard navigate=\{navigate\} \/>/)
   const agentHome = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
   assert.ok(agentHome.includes("getAgentOverview('lucy')"))
-  assert.ok(agentHome.includes('clarifications: raw.overview?.learning_opportunities ?? []'))
+  assert.ok(agentHome.includes('clarifications: snapshots.lucy.overview?.learning_opportunities ?? []'))
   const specialistHome = slice(specialist, 'export function SpecialistHomePage', '/* --------------------------------------------------------------- Cases */')
   assert.match(specialistHome, /getAgentOverview\('iain'\)\.then\(setOverview\)/)
   assert.match(specialistHome, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('iain'\)\} viewAgentPath="\/specialist\/agent\?tab=overview" \/>/)

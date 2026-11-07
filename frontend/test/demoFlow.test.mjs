@@ -108,7 +108,7 @@ test('both the Dashboard queue and the full Patients worklist fetch the patient\
   assert.match(app, /fetchReferralsByPatient\(\)\.then\(setReferralsByPatient\)\.catch\(\(\) => \{\}\)/g)
   const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
   assert.ok(home.includes('getActiveReferral(patient.id)'))
-  assert.ok(home.includes('referrals: raw.referrals'))
+  assert.ok(home.includes('referrals: data.referrals'))
   assert.match(patientsList(), /referralWorklistStatus\(referralsByPatient\.get\(patient\.id\), Boolean\(record\?\.has_consultation\)\)/)
 })
 

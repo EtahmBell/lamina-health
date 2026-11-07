@@ -30,6 +30,9 @@ export type WorkspaceSnapshot = {
   queue: PhysicianQueue
   overview: AgentOverview | null
   patients: DemoPatientSummary[]
+  /** Where this physician opens a patient and their own agent. */
+  patientPath: (id: string) => string
+  agentPath: string
 }
 
 const firstName = (name: string) => name.split(' ')[0]
@@ -51,7 +54,7 @@ export function answerWorkspaceQuestion(question: string, snapshot: WorkspaceSna
     const paragraphs = [`${patient.name}, ${patient.age}. ${patient.reason}.`, status]
     if (need && !need.deferred && queue.needs.includes(need)) paragraphs.push(`This one needs you. I've kept the case context ready on ${firstName(patient.name)}'s page.`)
     else if (wait) paragraphs.push("I'm handling this and will tell you when it moves.")
-    return { paragraphs, link: { label: patient.name, detail: patient.reason, path: need?.path ?? wait?.path ?? `/patients/${patient.id}`, action: 'Open' } }
+    return { paragraphs, link: { label: patient.name, detail: patient.reason, path: need?.path ?? wait?.path ?? snapshot.patientPath(patient.id), action: 'Open' } }
   }
 
   if (/while i was away|did you (do|handle)|handled|overnight/.test(text)) {
@@ -81,11 +84,11 @@ export function answerWorkspaceQuestion(question: string, snapshot: WorkspaceSna
     const facts = overview?.portrait_confirmed_facts ?? []
     const recent = (overview?.recent_learnings ?? []).map((item) => item.summary)
     const open = overview?.learning_opportunities.length ?? 0
-    if (!overview || (!facts.length && !recent.length)) return { paragraphs: ["I haven't confirmed anything about your practice yet. Answering a few questions in Your Agent is the fastest way to teach me."], link: { label: 'Your Agent', detail: 'How I represent your practice', path: '/agent?tab=overview', action: 'Open' } }
+    if (!overview || (!facts.length && !recent.length)) return { paragraphs: ["I haven't confirmed anything about your practice yet. Answering a few questions in Your Agent is the fastest way to teach me."], link: { label: 'Your Agent', detail: 'How I represent your practice', path: snapshot.agentPath, action: 'Open' } }
     return {
       paragraphs: ['This is what you have confirmed with me so far:'],
       bullets: [...recent, ...facts].slice(0, 5),
-      link: { label: 'Your Agent', detail: open ? `${countWord(open)} open question${open === 1 ? '' : 's'} where I need your input` : 'How I represent your practice', path: '/agent?tab=overview', action: 'Open' },
+      link: { label: 'Your Agent', detail: open ? `${countWord(open)} open question${open === 1 ? '' : 's'} where I need your input` : 'How I represent your practice', path: snapshot.agentPath, action: 'Open' },
     }
   }
 

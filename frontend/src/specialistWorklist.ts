@@ -18,7 +18,7 @@
  * Service targets are modality-specific (an e-consult response is not a
  * visit-referral review) and are demo-safe configuration, not clinical
  * SLAs. */
-import type { CareModality, Referral, ReferralPriority } from './api.ts'
+import type { CareModality, ConsultationEncounter, HandoffSummary, Referral, ReferralPriority } from './api.ts'
 
 export type NextStepKind =
   | 'review_referral' | 'respond_econsult' | 'review_results' | 'review_handoff'
@@ -156,3 +156,25 @@ export const CHEN_SEEDED_NEXT_STEPS: NextStepItem[] = [
   { id: 'followup-daniel', patientId: 'patient-chen-daniel-002', kind: 'follow_up_booked', priority: 'routine', modality: 'in_person', action: 'Follow-up visit booked', detail: 'No action needed before the visit', physicianJudgment: false, ready: true, ageDays: 3, existingPatient: true },
   { id: 'followup-peter', patientId: 'patient-chen-peter-006', kind: 'follow_up_booked', priority: 'routine', modality: 'in_person', action: 'Follow-up DEXA booked', detail: 'No action needed before the scan', physicianJudgment: false, ready: true, ageDays: 5, existingPatient: true },
 ]
+
+export type SpecialistCareState = Map<number, { encounter: ConsultationEncounter | null; handoff: HandoffSummary | null }>
+
+/** Every next step for a specialist's patients, from real referral state plus
+ * his established synthetic panel -- the single source both his Dashboard /
+ * For you queue (physicianQueue.ts) and any other worklist read. Moved here
+ * from Referral.tsx (physician-agent home pass, specialist side) so it stays
+ * pure and testable. */
+export function specialistNextSteps(
+  incoming: Referral[] | null, accepted: Referral[] | null, careState: SpecialistCareState,
+  now: Date, referringName: string, seeded: NextStepItem[] = CHEN_SEEDED_NEXT_STEPS,
+): NextStepItem[] {
+  const referralSteps = (accepted ?? []).map((referral) => {
+    const state = (referral.id != null && careState.get(referral.id)) || { encounter: null, handoff: null }
+    return acceptedReferralStep(referral, {
+      encounterDocumented: Boolean(state.encounter),
+      handoffStatus: state.handoff?.status ?? null,
+      handoffDraftedAt: state.handoff?.drafted_at ?? null,
+    }, now)
+  }).filter((item): item is NextStepItem => item !== null)
+  return [...(incoming ?? []).map((referral) => referralReviewStep(referral, now, referringName)), ...referralSteps, ...seeded]
+}

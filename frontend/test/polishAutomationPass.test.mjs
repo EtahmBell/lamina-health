@@ -181,9 +181,11 @@ test('the live post-acceptance intro sequence (accepted -> checking -> routing -
   assert.match(fn, /if \(!justAccepted \|\| scheduling === undefined \|\| prefersReducedMotion\(\)\) return/)
 })
 
-test('markReferralJustAccepted is called right before navigating away from a just-accepted referral, in both places acceptance can happen', () => {
+test('markReferralJustAccepted is called right before navigating away from a just-accepted referral, in both places acceptance can happen (Chen Patients, and the agent-first Dashboard / For you)', () => {
   const occurrences = [...referralSource.matchAll(/markReferralJustAccepted\(updated\.patient_id\)\s*\n\s*navigate\(`\/chen\/patients\/\$\{updated\.patient_id\}`\)/g)]
-  assert.equal(occurrences.length, 2, 'expected both ChenPatientsPage and ChenHomePage handleAccepted to set the flag before navigating')
+  assert.equal(occurrences.length, 1, 'ChenPatientsPage sets the flag before navigating')
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.match(home, /markReferralJustAccepted\(updated\.patient_id\)\s*\n\s*void loadSnapshot\(persona\)\s*\n\s*navigate\(`\/chen\/patients\/\$\{updated\.patient_id\}`\)/)
 })
 
 test('the intro sequence never runs under reduced motion or on a restored/hydrated view -- it falls straight through to the real durable state', () => {

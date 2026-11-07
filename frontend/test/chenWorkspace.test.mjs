@@ -20,10 +20,9 @@ test('Chen sidebar shows Dashboard, Patients, and Network -- the same standard t
   assert.match(navBlock, /\{ id: 'chen-network', title: 'Network', icon: <NetworkNavIcon \/>, path: '\/chen\/network' \}/)
 })
 
-test('Chen has a real "My Agent" persistent sidebar object pointing at /chen/agent, same standing as Lucy\'s and Iain\'s', () => {
-  const shell = slice(app, 'function ProductShell', 'function LandingPage')
-  assert.match(shell, /navigate\('\/chen\/agent'\)/)
-  assert.match(shell, /CHEN_AGENT_NAME/)
+test('Chen reaches his agent through the "Your Agent" primary nav item, same as Lucy (specialist agent-first pass)', () => {
+  const nav = slice(app, 'const CHEN_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
+  assert.ok(nav.includes("{ id: 'chen-agent', title: 'Your Agent', icon: <AgentNavIcon />, path: '/chen/agent?tab=overview' }"))
 })
 
 test('Chen Profile is reached via the avatar menu\'s profilePath, the same convention as Lucy\'s and Iain\'s -- not a sidebar nav item', () => {
@@ -56,24 +55,18 @@ test('Iain\'s specialist routes/nav remain valid and untouched (he is simply no 
 
 /* ------------------------------------------------------------- Part B: Dashboard */
 
-test('ChenHomePage mirrors Lucy\'s HomePage architecture: greeting, agent banner, one "Patients with next steps" worklist, recent activity, recent network', () => {
-  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /<HomeAgentCard overview=\{overview\} navigate=\{navigate\} trainPath=\{trainingPath\('chen'\)\} viewAgentPath="\/chen\/agent\?tab=overview" \/>/)
-  assert.match(fn, /<h2>Patients with next steps<\/h2>/)
-  assert.doesNotMatch(fn, /<h2>Needs your review<\/h2>/)
-  assert.doesNotMatch(fn, /<h2>Patients<\/h2>/)
-  assert.match(fn, /<h2>Recent activity<\/h2>/)
-  assert.match(fn, /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="chen" \/>/)
+test('Chen\'s Dashboard is the same agent-first Dashboard as Lucy\'s -- greeting, agent status, briefing, Needs you, While you were away -- populated with his own data (specialist agent-first pass)', () => {
+  assert.ok(app.includes('<ProductShell navigate={navigate} section="chen-home" perspective="chen" agentDock><AgentDashboard navigate={navigate} persona="chen" /></ProductShell>'))
+  assert.doesNotMatch(referralSource, /export function ChenHomePage/, 'the old Chen-only Dashboard is retired, not stacked under the new one')
 })
 
-test('a new referral on ChenHomePage is that patient\'s next step, built from the real submitted-referral data and opening the same RequestReviewModal -- never a duplicate fixture', () => {
-  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /getPhysicianReferrals\(CHEN_ID, 'submitted'\)/)
-  assert.match(fn, /setIncoming\(submitted\)/)
-  assert.match(fn, /chenNextSteps\(incoming, accepted, careState, new Date\(\)\)/)
-  assert.match(fn, /item\.kind === 'review_referral' \? incoming\?\.find/)
-  assert.match(fn, /<RequestReviewModal referral=\{reviewing\} receivingPhysicianName=\{CHEN_NAME\} onAccepted=\{handleAccepted\} onClose=\{\(\) => setReviewing\(null\)\} \/>/)
-  assert.doesNotMatch(fn, /submitted-fixture|fakeReferral|mockReferral/i)
+test('a new referral on Chen\'s Dashboard is that patient\'s Needs-you item, built from the real submitted-referral data and opening the same RequestReviewModal -- never a duplicate fixture (specialist agent-first pass)', () => {
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(home.includes("getPhysicianReferrals(CHEN_ID, 'submitted')"))
+  assert.ok(home.includes('specialistNextSteps(data.incoming, accepted, data.careState, now, PCP_NAME)'))
+  assert.ok(home.includes("item.kind === 'incoming_referral' ? incoming.find((candidate) => candidate.id === item.referralId)"))
+  assert.ok(home.includes('<RequestReviewModal referral={reviewing} receivingPhysicianName={CHEN_NAME} onAccepted={handleAccepted} onClose={() => setReviewing(null)} />'))
+  assert.doesNotMatch(home, /submitted-fixture|fakeReferral|mockReferral/i)
 })
 
 /* ============================================================= Tonjit demo-
@@ -83,32 +76,34 @@ test('a new referral on ChenHomePage is that patient\'s next step, built from th
  * ordinary priority once sent -- never a permanent-residency guarantee.
  * =========================================================================== */
 
-test('ChenHomePage merges accepted-or-later referrals into the same worklist from their real encounter/handoff state -- not a separate, divergent implementation', () => {
-  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /getPhysicianReferrals\(CHEN_ID\)/)
-  assert.match(fn, /ACCEPTED_OR_LATER_STATUSES\.includes\(referral\.status\)/)
-  assert.match(fn, /getEncounter\(referral\.id\), getHandoff\(referral\.id, CHEN_ID\)/)
-  const builder = slice(referralSource, 'function chenNextSteps', 'export function RequestReviewModal')
+test('Chen\'s queue merges accepted-or-later referrals from their real encounter/handoff state -- the same step builder, now pure in specialistWorklist.ts', () => {
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(home.includes('getPhysicianReferrals(CHEN_ID)'))
+  assert.ok(home.includes("['accepted', 'scheduled', 'consult_returned'].includes(referral.status)"))
+  assert.ok(home.includes('getEncounter(referral.id).catch(() => null), getHandoff(referral.id, CHEN_ID).catch(() => null)'))
+  const worklistSource = readFileSync(new URL('../src/specialistWorklist.ts', import.meta.url), 'utf8')
+  const builder = worklistSource.slice(worklistSource.indexOf('export function specialistNextSteps'))
   assert.match(builder, /acceptedReferralStep\(referral, \{/)
-  assert.match(builder, /referralReviewStep\(referral, now, PCP_NAME\)/)
-  assert.match(builder, /\.\.\.CHEN_SEEDED_NEXT_STEPS/)
+  assert.match(builder, /referralReviewStep\(referral, now, referringName\)/)
+  assert.match(builder, /\.\.\.seeded/)
 })
 
-test('a pending "Review handoff" is a physician-judgment next step with its own service target, so it competes for attention by time remaining -- never a hard-coded rank', () => {
-  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.doesNotMatch(fn, /priority: nextStep === 'Review handoff' \? -2 : -1/)
-  assert.match(fn, /const topSteps = topAttention\(steps\)/)
+test('a pending "Review handoff" is a physician-judgment Needs-you item for Chen -- from real handoff state, never a hard-coded rank or patient id', () => {
+  const queue = readFileSync(new URL('../src/physicianQueue.ts', import.meta.url), 'utf8')
+  assert.ok(queue.includes("if (step.kind === 'review_handoff') {"))
+  assert.doesNotMatch(queue, /TONJIT_ID|patient-t2dm-003/)
 })
 
-test('once a handoff is sent the referral leaves the worklist, and no patient is ever pinned to the Dashboard by id', () => {
-  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.doesNotMatch(fn, /patient\.id === TONJIT_ID|patient_id === TONJIT_ID|patientId === TONJIT_ID/, 'no patient-id special-casing keeps a referral pinned to the Dashboard')
-  assert.match(fn, /<NextStepRows items=\{topSteps\} onOpen=\{openStep\} \/>/)
+test('once a handoff is sent the referral leaves Chen\'s queue, and no patient is ever pinned to the Dashboard by id', () => {
+  const worklist = readFileSync(new URL('../src/specialistWorklist.ts', import.meta.url), 'utf8')
+  assert.match(worklist, /if \(state\.handoffStatus === 'sent'\) return null/)
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(home, /patient\.id === TONJIT_ID|patient_id === TONJIT_ID|patientId === TONJIT_ID/)
 })
 
-test('ChenHomePage never shows fake next steps when there are none', () => {
-  const fn = slice(referralSource, 'export function ChenHomePage', referralSource.length)
-  assert.match(fn, /\{topSteps\.length > 0 && <section className="patient-worklist-section">/)
+test('Chen\'s Dashboard never shows fake Needs-you rows when there are none', () => {
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(home.includes('{top.length > 0 && <section className="agent-needs" aria-label="Needs you">'))
 })
 
 /* ---------------------------------------------------- Part C/D/E: seeded patients */

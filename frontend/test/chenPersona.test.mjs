@@ -54,7 +54,8 @@ test('Chen Profile, Agent, and Network routes are registered in the SPA dispatch
 
 test('Chen Patients and Incoming Requests routes still work (now alongside a real Dashboard route)', () => {
   const dispatch = routing()
-  assert.match(dispatch, /path === '\/chen' \|\| path === '\/chen\/home'\)[\s\S]{0,160}ChenHomePage/)
+  assert.match(dispatch, /path === '\/chen' \|\| path === '\/chen\/home'\)[\s\S]{0,160}<AgentDashboard navigate=\{navigate\} persona="chen" \/>/)
+  assert.match(dispatch, /path === '\/chen\/for-you'\)[\s\S]{0,160}<ForYouPage navigate=\{navigate\} persona="chen" \/>/)
   assert.match(dispatch, /path === '\/chen\/patients'\)[\s\S]{0,160}ChenPatientsPage/)
   assert.match(dispatch, /chenPatientId === TONJIT_ID \|\| \(chenPatientId && CHEN_PATIENT_IDS\.includes\(chenPatientId\)\)\) return <PatientWorkspace patientId=\{chenPatientId\} navigate=\{navigate\} perspective="receiving"/)
 })

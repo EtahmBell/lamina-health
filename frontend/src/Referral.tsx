@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { acceptReferral, askPhysicianAgent, confirmCoordinationCorrection, createReferral, getAgentOverview, getCoordinationEpisode, getEncounter, getNetworkConsultationEpisode, getHandoff, getNetworkFeed, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, interpretCoordinationCorrection, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationCorrectionProposal, type CoordinationEpisode, type CoordinationItem, type CoordinationTarget, type NetworkConsultationEpisode, type CorrectionScope, type HandoffSummary, type NetworkFeed, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
+import { acceptReferral, askPhysicianAgent, confirmCoordinationCorrection, createReferral, getAgentOverview, getCoordinationEpisode, getEncounter, getNetworkConsultationEpisode, getHandoff, getPhysicianCapacity, getPhysicianReferrals, getPracticeRepresentation, getScheduling, getTrainingHistory, interpretCoordinationCorrection, markHandoffViewed, runReferralPreflight, sendHandoff, type AccessProfile, type AgentOverview, type AppointmentSlot, type CareModality, type ConsultationEncounter, type CoordinationCorrectionProposal, type CoordinationEpisode, type CoordinationItem, type CoordinationTarget, type NetworkConsultationEpisode, type CorrectionScope, type HandoffSummary, type PacketItem, type PracticeRepresentation, type Referral, type ReferralPriority, type ReferralStatus, type SchedulingCoordination, type TrainProjection } from './api.ts'
 import { CHEN_AGENT_NAME, CHEN_ID, CHEN_NAME, CHEN_SPECIALTY, patientAgeLocation, patientInitials, patientName, PCP_NAME, TONJIT_ID } from './demoIdentity.ts'
 import { DEMO_PATIENTS, type PatientStage } from './demoPatients.ts'
-import { AgentOverviewPanel, ChatTab, HomeAgentCard, NetworkHighlights, trainingPath, TrainTab, WorklistRows, type WorklistRowData } from './Engagement.tsx'
-import { timeAwareGreeting } from './greeting.ts'
+import { AgentOverviewPanel, ChatTab, trainingPath, TrainTab, WorklistRows, type WorklistRowData } from './Engagement.tsx'
 import { AgentAvatar, agentTone } from './AgentAvatar.tsx'
 import { AgentTypingIndicator, useConversationFollow, withMinimumTyping } from './agentChat.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { physicianInitials } from './networkRoster.ts'
 import { ModalPortal } from './ModalPortal.tsx'
-import { acceptedReferralStep, attentionOrder, CHEN_SEEDED_NEXT_STEPS, handledByAgentOrStaff, referralReviewStep, topAttention, type NextStepItem } from './specialistWorklist.ts'
 import { canCorrectEvent, coordinationActorLabel, groupByStage, groupNetworkConsultation, SCOPE_LABELS, type PartyNames } from './coordinationEpisode.ts'
 import { derivePhases, formatSubmittedAt, lastName, PHASE_FADE_MS, PHASE_HOLD_MS, resolvedSummary, restorePhase, SUCCESS_WASH_HOLD_MS, type DisplayPhase } from './referralPhases.ts'
 
@@ -1121,41 +1119,6 @@ export function CoordinationChatCard({
 const resolvedCountFor = (referral: Referral) =>
   referral.coordination_events.filter((event) => event.event_type === 'information_attached').length
 
-/** Routing consolidation pass, Part I: one row in a specialist's
- * "Patients with next steps" -- a new referral to review is just that
- * patient's current next step, shown with its clinician-defined priority
- * and modality, never in a separate "Needs your review" section. */
-function NextStepRows({ items, onOpen }: { items: NextStepItem[]; onOpen: (item: NextStepItem) => void }) {
-  return <div className="lam-list patient-worklist next-step-worklist">{items.map((item) => <button key={item.id} className="lam-row next-step-row" onClick={() => onOpen(item)}>
-    <span className="lam-row-mark patient-row-avatar">{patientInitials(item.patientId)}</span>
-    <span className="lam-row-main">
-      <strong>{patientName(item.patientId)}</strong>
-      <small className="next-step-meta"><PriorityChip priority={item.priority} /><span className="incoming-request-modality">· {item.modality === 'econsult' ? 'E-consult' : 'Visit'}</span></small>
-      <span className="next-step-detail">{item.detail}</span>
-    </span>
-    <span className="lam-row-action">{item.action} <b>→</b></span>
-  </button>)}</div>
-}
-
-/** Every next step for Dr. Chen's patients, from real referral state plus
- * his established synthetic panel -- the single source his Dashboard
- * worklist reads. */
-function chenNextSteps(
-  incoming: Referral[] | null, accepted: Referral[] | null,
-  careState: Map<number, { encounter: ConsultationEncounter | null; handoff: HandoffSummary | null }>,
-  now: Date,
-): NextStepItem[] {
-  const referralSteps = (accepted ?? []).map((referral) => {
-    const state = (referral.id != null && careState.get(referral.id)) || { encounter: null, handoff: null }
-    return acceptedReferralStep(referral, {
-      encounterDocumented: Boolean(state.encounter),
-      handoffStatus: state.handoff?.status ?? null,
-      handoffDraftedAt: state.handoff?.drafted_at ?? null,
-    }, now)
-  }).filter((item): item is NextStepItem => item !== null)
-  return [...(incoming ?? []).map((referral) => referralReviewStep(referral, now, PCP_NAME)), ...referralSteps, ...CHEN_SEEDED_NEXT_STEPS]
-}
-
 /**
  * The focused clinical handoff surface (Part G-N): who, from whom, why, what
  * was sent, whether it satisfies Dr. Chen's own referral requirements, and
@@ -1724,193 +1687,11 @@ export function ChenPatientsPage({ navigate, params }: { navigate: Navigate; par
   </main>
 }
 
-/**
- * Dr. Chen's Dashboard (Part B): the same general Dashboard architecture as
- * Lucy's own HomePage -- greeting, agent banner, patients-with-next-steps,
- * incoming-request awareness, recent activity, recent network -- populated
- * with his own real data, never a special "endocrinologist dashboard."
- * Incoming requests reuse the exact same submitted-referral data (and the
- * same RequestReviewModal) as Patients -> Incoming requests, never a
- * duplicate referral fixture (Part B1).
- *
- * Bug-fix pass (demo-story pass, Part A/B/C): the Dashboard's "Patients"
- * worklist used to be built ONLY from the static seeded roster
- * (CHEN_SEEDED_PATIENTS) -- it had no idea an accepted referral existed at
- * all, so a patient with a documented consultation and a draft handoff
- * still awaiting review (one of the most important outstanding actions in
- * the whole demo) never appeared here, even though the full Patients page
- * already modeled this correctly via chenPatientRowStatus/careState. This
- * now merges in every accepted-or-later referral the exact same way
- * ChenPatientsPage does, and ranks a pending "Review handoff" above
- * everything else -- but once it's sent, that referral-derived row returns
- * to ordinary priority and can fall off the top-3 Dashboard slice just like
- * any other patient (Part C: Dashboard presence is driven by outstanding
- * action/relevance, never a permanent-residency guarantee).
- */
-/**
- * Routing/triage UX pass, Part X/Y (polish pass, Part 5D): two restrained,
- * read-only capacity cards -- the two real capacity LANES, visits and
- * e-consults. Urgent review was removed as a third card (polish pass, Part
- * 5D) -- it read as an equal-weight third queue rather than the exceptional
- * physician-review escalation path it actually is; that distinction now
- * lives only in copy elsewhere (Needs your review), not as its own capacity
- * tile. Reuses the exact same structured AccessProfile the routing/match-
- * details UI already reads (Part B/K) -- no second, independently-
- * maintained source. Currently only meaningful for Chen; renders nothing if
- * no capacity profile exists. No shadows, no KPI/metric-dashboard styling.
- */
-function ChenCapacityCards() {
-  const [capacity, setCapacity] = useState<AccessProfile | null>(null)
-  useEffect(() => { getPhysicianCapacity(CHEN_ID).then(setCapacity).catch(() => {}) }, [])
-  if (!capacity) return null
-  return <section className="care-capacity-cards">
-    <p className="section-label">Care capacity</p>
-    <div className="care-capacity-grid">
-      <div className="care-capacity-card">
-        <p className="care-capacity-card-label">Visits</p>
-        <p className="care-capacity-card-value">Next appropriate opening</p>
-        <p className="care-capacity-card-detail">{capacity.in_person_wait_label.replace('Approximately ', '~')}</p>
-      </div>
-      <div className="care-capacity-card">
-        <p className="care-capacity-card-label">E-consults</p>
-        <p className="care-capacity-card-value">Typical response</p>
-        <p className="care-capacity-card-detail">{capacity.econsult_available ? (capacity.econsult_response_label ?? 'Available').replace('Approximately ', '~') : 'Not enabled'}</p>
-      </div>
-    </div>
-  </section>
-}
-
-/** Routing/triage UX pass, Part Z (polish pass, Part 5A/B): the three
- * synthetic auto-routed requests that used to be their own standalone
- * "Recent routing activity" block are now a single item inside the
- * Dashboard's ordinary Recent activity feed instead -- a dedicated
- * dashboard-middle surface overstated how much was happening; folding it
- * into Recent activity says the same thing ("routine demand moves in the
- * background without Chen's manual sorting") at the right visual weight.
- * Because cross-agent coordination detail is never exposed to the other
- * physician (the Witness-style boundary this demo already keeps for agent
- * chat), clicking through does something useful but partial: it opens
- * Patients and briefly highlights the affected patients, rather than
- * opening a detail view of the coordination itself. Deliberately
- * static/synthetic (no backing workflow for these three requests is
- * needed, Part Z). */
+/** The three synthetic requests Dr. Chen's agent routed automatically before
+ * this demo session (static demo context, no backing workflow). Shown as one
+ * standing entry in his Dashboard's "While you were away" log; opening it
+ * highlights these patients on his Patients page. */
 export const CHEN_AUTO_ROUTED_PATIENT_IDS = ['patient-chen-robert-004', 'patient-chen-aisha-005', 'patient-chen-maya-003']
-
-export function ChenHomePage({ navigate }: { navigate: Navigate }) {
-  const [incoming, setIncoming] = useState<Referral[] | null>(null)
-  const [accepted, setAccepted] = useState<Referral[] | null>(null)
-  const [careState, setCareState] = useState<Map<number, { encounter: ConsultationEncounter | null; handoff: HandoffSummary | null }>>(new Map())
-  const [overview, setOverview] = useState<AgentOverview | null>(null)
-  const [feed, setFeed] = useState<NetworkFeed | null>(null)
-  const [reviewing, setReviewing] = useState<Referral | null>(null)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    Promise.all([
-      getPhysicianReferrals(CHEN_ID, 'submitted'),
-      getPhysicianReferrals(CHEN_ID),
-    ]).then(async ([submitted, all]) => {
-      setIncoming(submitted)
-      const activeReferrals = all.filter((referral) => ACCEPTED_OR_LATER_STATUSES.includes(referral.status))
-      setAccepted(activeReferrals)
-      const entries = await Promise.all(activeReferrals.map(async (referral) => {
-        if (!referral.id) return null
-        const [encounter, handoff] = await Promise.all([getEncounter(referral.id), getHandoff(referral.id, CHEN_ID)])
-        return [referral.id, { encounter, handoff }] as const
-      }))
-      setCareState(new Map(entries.filter((entry): entry is readonly [number, { encounter: ConsultationEncounter | null; handoff: HandoffSummary | null }] => entry !== null)))
-    }).catch((err: Error) => setError(err.message))
-    getAgentOverview('chen').then(setOverview).catch(() => {})
-    getNetworkFeed('chen').then(setFeed).catch(() => {})
-  }, [])
-
-  const handleAccepted = (updated: Referral) => {
-    setReviewing(null)
-    setIncoming((current) => current?.filter((item) => item.id !== updated.id) ?? current)
-    markReferralJustAccepted(updated.patient_id)
-    navigate(`/chen/patients/${updated.patient_id}`)
-  }
-
-  const greetingName = `Dr. ${CHEN_NAME.split(' ').at(-1)}`
-  /** Routing consolidation pass, Part I-M: ONE "Patients with next steps"
-   * worklist. The top three are the next steps most deserving Dr. Chen's
-   * attention now (specialistWorklist.ts: physician judgment required,
-   * readiness, time remaining to a modality-specific service target, then
-   * clinician-defined priority) -- not newest-first, not static priority
-   * alone. Agent/staff-resolvable steps never take a top slot. */
-  const steps = incoming === null ? [] : chenNextSteps(incoming, accepted, careState, new Date())
-  const topSteps = topAttention(steps)
-  const physicianSteps = attentionOrder(steps)
-  const agentHandledCount = handledByAgentOrStaff(steps).length
-  const situationSummary = physicianSteps.length > 0
-    ? `${physicianSteps.length} patient${physicianSteps.length === 1 ? ' has a next step' : 's have next steps'} that need${physicianSteps.length === 1 ? 's' : ''} you.`
-    : null
-  const openStep = (item: NextStepItem) => {
-    const referral = item.kind === 'review_referral' ? incoming?.find((candidate) => candidate.id === item.referralId) : undefined
-    if (referral) setReviewing(referral)
-    else navigate(`/chen/patients/${item.patientId}`)
-  }
-
-  return <main className="page-shell home-page dashboard-page">
-    <header className="dashboard-greeting"><p className="eyebrow">Dashboard</p><h1>{timeAwareGreeting(greetingName)}</h1>{situationSummary && <p className="dashboard-situation">{situationSummary}</p>}</header>
-    {error && <div className="error-banner" role="alert">Recent workspace activity is temporarily unavailable. Patient records remain accessible.</div>}
-    <HomeAgentCard overview={overview} navigate={navigate} trainPath={trainingPath('chen')} viewAgentPath="/chen/agent?tab=overview" />
-    {topSteps.length > 0 && <section className="patient-worklist-section">
-      <div className="home-section-heading"><div><h2>Patients with next steps</h2><p className="dashboard-watchlist-sub">Ordered by clinical timing and service targets.</p></div><button className="text-button" onClick={() => navigate('/chen/patients')}>View all patients →</button></div>
-      <NextStepRows items={topSteps} onOpen={openStep} />
-      {agentHandledCount > 0 && <p className="next-step-agent-note">{agentHandledCount} administrative step{agentHandledCount === 1 ? ' is' : 's are'} being handled by your agent and staff.</p>}
-    </section>}
-    <ChenCapacityCards />
-    <div className="dashboard-bottom-row">
-      {/* Follow-up pass, Part L-Q: TWO separate activity entries, never
-       * conflated -- Lucy/Chen agent coordination around Tonjit's referral
-       * is its own real event; the synthetic auto-routed-demand summary is
-       * a different, unrelated kind of event (Part 5B/C from the prior
-       * pass: one entry among Chen's real agent activity, at ordinary
-       * weight, not its own standalone dashboard-middle block). Order is
-       * the Tonjit coordination first (most recent for this demo), then
-       * the auto-routing summary (Part O). */}
-      <section className="home-activity">
-        <div className="home-section-heading"><div><h2>Recent activity</h2></div></div>
-        <div className="activity-stream">
-          {/* Witness-architecture boundary (Part M/Q): this must never open
-           * the ephemeral cross-agent chat/task transcript -- it may only
-           * navigate to an already-authorized, real destination (Tonjit's
-           * own patient record, which Chen is independently allowed to
-           * open), never reveal the private coordination context itself. */}
-          <button
-            key="saruhashi-coordination"
-            className="activity-row interaction"
-            onClick={() => navigate(`/chen/patients/${TONJIT_ID}`)}
-          >
-            <span className="activity-marker interaction" />
-            <span>
-              <em className="activity-kind agent-event-label">Agent</em>
-              <strong>Your agent coordinated with Dr. Saruhashi's agent</strong>
-              <small>{patientName(TONJIT_ID)} · Endocrinology referral</small>
-            </span>
-            <b>View patient →</b>
-          </button>
-          <button
-            key="auto-routing"
-            className="activity-row interaction"
-            onClick={() => navigate(`/chen/patients?highlight=${CHEN_AUTO_ROUTED_PATIENT_IDS.join(',')}`)}
-          >
-            <span className="activity-marker interaction" />
-            <span>
-              <em className="activity-kind agent-event-label">Agent</em>
-              <strong>3 requests routed automatically</strong>
-              <small>2 visits · 1 e-consult</small>
-            </span>
-            <b>View patients →</b>
-          </button>
-        </div>
-      </section>
-      <NetworkHighlights feed={feed} navigate={navigate} perspective="chen" />
-    </div>
-    {reviewing && <RequestReviewModal referral={reviewing} receivingPhysicianName={CHEN_NAME} onAccepted={handleAccepted} onClose={() => setReviewing(null)} />}
-  </main>
-}
 
 /* ===================================================================== Part B/D
  * Dr. Chen's Profile reuses ProfessionalProfilePage directly (wired up at the

@@ -19,7 +19,7 @@ import { AgentOverviewPanel, ChatTab, NetworkPhysicianProfilePage, ProfessionalP
 import { PhysicianNetworkPage, PhysicianProfilePage, type DirectoryOnlyProfile } from './PhysicianNetwork.tsx'
 import { SpecialistAgentPage, SpecialistCaseDetailPage, SpecialistCasesPage, SpecialistHomePage, SpecialistPatientsPage } from './Specialist.tsx'
 import { TrendChart } from './TrendChart.tsx'
-import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenHomePage, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, NetworkConsultationOversight, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
+import { ACCEPTED_OR_LATER_STATUSES, ChenAgentPage, ChenDownstreamCard, ChenPatientsPage, consumeMedicationHighlightFlag, CoordinationChatCard, lucySuggestedPrompts, NetworkConsultationOversight, PriorityChip, PriorityChipRow, priorityLabel, ReferralCoordinationSurface } from './Referral.tsx'
 import { restorePhase } from './referralPhases.ts'
 import { whyThisMatch } from './matchExplanation.ts'
 import { ModalPortal } from './ModalPortal.tsx'
@@ -80,17 +80,15 @@ const SPECIALIST_NAV_ITEMS = [
   { id: 'specialist-network', title: 'Network', icon: <NetworkNavIcon />, path: '/specialist/network' },
 ]
 
-/** Chen now gets the full standard physician workspace navigation (Part A,
- * closed-loop referral pass 2) -- same three top-level destinations as
- * Lucy's own navItems, same shape, just routed under /chen. My Agent remains
- * the persistent sidebar object (not a navItems entry) and Profile remains
- * reached via the avatar menu's profilePath, exactly like Lucy's and Iain's
- * own workspace -- "using the existing product navigation convention," not a
- * new navigation system. */
+/** Chen gets the same agent-first physician navigation as Lucy (physician-
+ * agent home pass, specialist side) -- the same five destinations, routed
+ * under /chen, with his account at the sidebar bottom. */
 const CHEN_NAV_ITEMS = [
   { id: 'chen-home', title: 'Dashboard', icon: '⌂', path: '/chen/home' },
+  { id: 'chen-for-you', title: 'For you', icon: <ForYouNavIcon />, path: '/chen/for-you' },
   { id: 'chen-patients', title: 'Patients', icon: '✦', path: '/chen/patients' },
   { id: 'chen-network', title: 'Network', icon: <NetworkNavIcon />, path: '/chen/network' },
+  { id: 'chen-agent', title: 'Your Agent', icon: <AgentNavIcon />, path: '/chen/agent?tab=overview' },
 ]
 
 /** Every demo perspective that actually exists as a real page, used to
@@ -147,9 +145,9 @@ function PerspectiveSwitch({ navigate, perspective, placement = 'header' }: { na
  * is a real nav target (keyboard-reachable button) and picks up an active state
  * on any agent-related route. */
 function ProductShell({ children, navigate, section, perspective = 'pcp', agentDock = false }: { children: React.ReactNode; navigate: Navigate; section: string; perspective?: 'pcp' | 'specialist' | 'chen'; agentDock?: boolean }) {
-  if (perspective === 'pcp') return <PhysicianShell navigate={navigate} section={section} agentDock={agentDock}>{children}</PhysicianShell>
-  const items = perspective === 'specialist' ? SPECIALIST_NAV_ITEMS : CHEN_NAV_ITEMS
-  const onAgent = section === 'specialist-agent' || section === 'chen-agent'
+  if (perspective === 'pcp' || perspective === 'chen') return <PhysicianShell navigate={navigate} section={section} agentDock={agentDock} perspective={perspective}>{children}</PhysicianShell>
+  const items = SPECIALIST_NAV_ITEMS
+  const onAgent = section === 'specialist-agent'
   return <div className="app-shell">
     <aside className="sidebar">
       <div><button className="brand-button" onClick={() => navigate('/')} aria-label="Return to Lamina portal"><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
@@ -157,33 +155,33 @@ function ProductShell({ children, navigate, section, perspective = 'pcp', agentD
           {items.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span className="nav-item-label">{item.title}</span></button>)}
         </nav>
       </div>
-      {perspective === 'specialist'
-        ? <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><AgentAvatar tone={agentTone('iain')} /><div><strong>{SPECIALIST_AGENT_NAME}</strong></div></button>
-        : <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/chen/agent')} aria-label={`Open ${CHEN_AGENT_NAME} overview`}><AgentAvatar tone={agentTone('chen')} /><div><strong>{CHEN_AGENT_NAME}</strong></div></button>}
+      <button className={`sidebar-clinician ${onAgent ? 'active' : ''}`} aria-current={onAgent ? 'page' : undefined} onClick={() => navigate('/specialist/agent')} aria-label={`Open ${SPECIALIST_AGENT_NAME} overview`}><AgentAvatar tone={agentTone('iain')} /><div><strong>{SPECIALIST_AGENT_NAME}</strong></div></button>
     </aside>
     <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /><PerspectiveSwitch navigate={navigate} perspective={perspective} /></div></header>{children}</div>
   </div>
 }
 
-/** The referring physician's (Lucy's) shell -- physician-agent home pass.
+/** The agent-first physician shell (Lucy, and Chen on the specialist side) -- physician-agent home pass.
  * Five primary destinations (Dashboard, For you, Patients, Network, Your
  * Agent), the account/profile control pinned to the bottom-left of the
  * sidebar, and -- on Dashboard and For you -- the persistent docked "Ask your
  * agent" conversation. Patient detail and the referral flow keep their full
  * width, so the existing consult/referral demo is unchanged. */
-function PhysicianShell({ children, navigate, section, agentDock }: { children: React.ReactNode; navigate: Navigate; section: string; agentDock: boolean }) {
-  const needsCount = useNeedsCount()
+function PhysicianShell({ children, navigate, section, agentDock, perspective }: { children: React.ReactNode; navigate: Navigate; section: string; agentDock: boolean; perspective: 'pcp' | 'chen' }) {
+  const persona = perspective === 'chen' ? 'chen' : 'lucy'
+  const items = perspective === 'chen' ? CHEN_NAV_ITEMS : navItems
+  const needsCount = useNeedsCount(persona)
   return <div className={`app-shell physician-shell ${agentDock ? 'has-agent-dock' : ''}`}>
     <aside className="sidebar">
       <div><button className="brand-button" onClick={() => navigate('/')} aria-label="Return to Lamina portal"><Brand /></button><p className="brand-subtitle">Specialty Care Network</p>
         <nav aria-label="Primary navigation">
-          {navItems.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span className="nav-item-label">{item.title}</span>{item.id === 'for-you' && needsCount > 0 && <span className="nav-count" aria-label={`${needsCount} need you`}>{needsCount}</span>}</button>)}
+          {items.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span className="nav-item-label">{item.title}</span>{item.id.endsWith('for-you') && needsCount > 0 && <span className="nav-count" aria-label={`${needsCount} need you`}>{needsCount}</span>}</button>)}
         </nav>
       </div>
-      <PerspectiveSwitch navigate={navigate} perspective="pcp" placement="sidebar" />
+      <PerspectiveSwitch navigate={navigate} perspective={perspective} placement="sidebar" />
     </aside>
     <div className="workspace"><header className="workspace-bar"><div className="workspace-bar-actions"><SyntheticStatus /></div></header>{children}</div>
-    {agentDock && <AgentDock navigate={navigate} />}
+    {agentDock && <AgentDock navigate={navigate} persona={persona} />}
   </div>
 }
 
@@ -2009,7 +2007,8 @@ export default function App() {
   if (specialistNetworkNpi) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><PhysicianProfilePage npi={specialistNetworkNpi} navigate={navigate} perspective="iain" /></ProductShell>
   const specialistNetworkProfileId = path.match(/^\/specialist\/network\/profile\/([^/]+)$/)?.[1]
   if (specialistNetworkProfileId) return <ProductShell navigate={navigate} section="specialist-network" perspective="specialist"><NetworkPhysicianProfilePage controlledId={specialistNetworkProfileId} navigate={navigate} backPath="/specialist/home" perspective="iain" params={params} /></ProductShell>
-  if (path === '/chen' || path === '/chen/home') return <ProductShell navigate={navigate} section="chen-home" perspective="chen"><ChenHomePage navigate={navigate} /></ProductShell>
+  if (path === '/chen' || path === '/chen/home') return <ProductShell navigate={navigate} section="chen-home" perspective="chen" agentDock><AgentDashboard navigate={navigate} persona="chen" /></ProductShell>
+  if (path === '/chen/for-you') return <ProductShell navigate={navigate} section="chen-for-you" perspective="chen" agentDock><ForYouPage navigate={navigate} persona="chen" /></ProductShell>
   if (path === '/chen/patients') return <ProductShell navigate={navigate} section="chen-patients" perspective="chen"><ChenPatientsPage navigate={navigate} params={params} /></ProductShell>
   const chenPatientId = path.match(/^\/chen\/patients\/([^/]+)$/)?.[1]
   if (chenPatientId === TONJIT_ID || (chenPatientId && CHEN_PATIENT_IDS.includes(chenPatientId))) return <PatientWorkspace patientId={chenPatientId} navigate={navigate} perspective="receiving" />

@@ -271,18 +271,20 @@ test('routing consolidation pass, Part I: a referral to review is a row in Chen\
   assert.doesNotMatch(referralSource, /Incoming requests <span>/)
 })
 
-test('Chen\'s Needs your review shows the shared priority chip per row, reading the referring physician\'s own selection -- never a numeric acuity score, never something this view changes', () => {
-  const fn = slice(referralSource, 'function NextStepRows', 'function chenNextSteps')
-  assert.match(fn, /<PriorityChip priority=\{item\.priority\} \/>/)
+test('Chen\'s Dashboard queue keeps the referring physician\'s own priority on the step and never re-scores it -- the review modal still shows the shared priority chip (specialist agent-first pass)', () => {
+  const worklist = readFileSync(new URL('../src/specialistWorklist.ts', import.meta.url), 'utf8')
+  assert.match(worklist, /priority: referral\.priority,/)
+  const fn = slice(referralSource, 'export function RequestReviewModal', 'export function markReferralJustAccepted')
+  assert.match(fn, /<PriorityChip priority=\{referral\.priority\} \/>/)
 })
 
 /* --------------------------------------------------------------- Part S */
 
-test('the Tonjit next-step row shows exactly ONE status chip (priority), a quiet modality label, and the resolved-item detail -- never a redundant "Ready for review" badge', () => {
-  const fn = slice(referralSource, 'function NextStepRows', 'function chenNextSteps')
-  assert.doesNotMatch(fn, /Ready for review/)
-  assert.match(fn, /<span className="incoming-request-modality">· \{item\.modality === 'econsult' \? 'E-consult' : 'Visit'\}<\/span>/)
-  assert.match(fn, /\{item\.detail\}/)
+test('the Tonjit row on Chen\'s Dashboard is one quiet line -- specialty referral and readiness -- with no extra status badges (specialist agent-first pass)', () => {
+  const queue = readFileSync(new URL('../src/physicianQueue.ts', import.meta.url), 'utf8')
+  assert.ok(queue.includes("detail: `${specialty} referral · ${step.ready ? 'Ready for review' : 'Waiting on missing information'}`"))
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(home, /PriorityChip|worklist-status/)
 })
 
 /* --------------------------------------------------------- Part 6 (polish) */
@@ -316,13 +318,11 @@ test('the Routing summary\'s facts align cleanly -- the label/value flex row nev
 
 /* --------------------------------------------------------------- Part R/T/X/Y (polish, 5D) */
 
-test('Chen exposes two small read-only capacity cards -- Visits and E-consults -- Urgent review was removed as a third card (it read as a third equal queue, not an escalation path), never a KPI-dashboard strip, never fake buttons', () => {
-  const fn = slice(referralSource, 'function ChenCapacityCards', 'export const CHEN_AUTO_ROUTED_PATIENT_IDS')
-  assert.match(fn, /getPhysicianCapacity\(CHEN_ID\)/)
-  assert.match(fn, /<p className="care-capacity-card-label">Visits<\/p>/)
-  assert.match(fn, /<p className="care-capacity-card-label">E-consults<\/p>/)
-  assert.doesNotMatch(fn, /Urgent review/, 'Urgent review is no longer a third capacity card')
-  assert.doesNotMatch(fn, /<button|onClick/, 'the capacity cards must be read-only -- no fake e-consult request affordance (Part S)')
+test('Chen\'s access capacity (visits and e-consults) is shown where he decides on a referral -- the review modal\'s Routing summary -- not as Dashboard cards (specialist agent-first pass)', () => {
+  assert.doesNotMatch(referralSource, /function ChenCapacityCards/, 'the Dashboard capacity cards were retired with the old Chen Dashboard')
+  const fn = slice(referralSource, 'export function RequestReviewModal', 'export function markReferralJustAccepted')
+  assert.match(fn, /getPhysicianCapacity/)
+  assert.match(fn, /<span className="section-label">Expected access<\/span>/)
 })
 
 test('capacity cards use no box-shadow -- calm, restrained, not KPI/metric-SaaS styling', () => {
@@ -336,41 +336,30 @@ test('the capacity cards reuse the SAME structured access endpoint the routing U
 
 /* --------------------------------------------------------------- Part P */
 
-test('the capacity cards never assume unknown e-consult availability is "enabled"', () => {
-  const fn = slice(referralSource, 'function ChenCapacityCards', 'export const CHEN_AUTO_ROUTED_PATIENT_IDS')
-  assert.match(fn, /\{capacity\.econsult_available \? \(capacity\.econsult_response_label \?\? 'Available'\)/)
-  assert.match(fn, /: 'Not enabled'/)
-})
 
 /* ------------------------------------------------- Part Z (polish, 5A-C) */
 
-test('UX polish pass, Part 5A/B: the synthetic auto-routed demand no longer has its own standalone "Recent routing activity" block in the dashboard middle -- it is folded into the ordinary Recent activity feed instead, at ordinary visual weight', () => {
+test('UX polish pass, Part 5A/B: the synthetic auto-routed demand is one ordinary entry in Chen\'s "While you were away" log, not a standalone dashboard block (specialist agent-first pass)', () => {
   assert.doesNotMatch(referralSource, /function ChenRoutingActivity/, 'the old standalone component is gone entirely')
-  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
-  assert.doesNotMatch(home, /<ChenRoutingActivity/)
-  assert.match(home, /Your agent coordinated with Dr\. Saruhashi's agent/)
-  assert.match(home, /3 requests routed automatically/)
-  assert.match(home, /2 visits · 1 e-consult/)
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(home.includes("text: 'Routed 3 routine requests automatically: 2 visits, 1 e-consult'"))
+  assert.ok(home.includes('standingLog: CHEN_STANDING_LOG'))
 })
 
-test('UX polish pass, Part 5C: clicking the auto-routing activity item navigates to Patients and briefly highlights the affected patients -- the Witness-style cross-agent boundary means it cannot open a detail view of the coordination itself', () => {
-  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
-  assert.match(home, /onClick=\{\(\) => navigate\(`\/chen\/patients\?highlight=\$\{CHEN_AUTO_ROUTED_PATIENT_IDS\.join\(','\)\}`\)\}/)
-  const patientsPage = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
+test('UX polish pass, Part 5C: opening the auto-routing log entry navigates to Patients and briefly highlights the affected patients -- the Witness-style cross-agent boundary means it cannot open a detail view of the coordination itself', () => {
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.ok(home.includes("path: `/chen/patients?highlight=${CHEN_AUTO_ROUTED_PATIENT_IDS.join(',')}`"))
+  const patientsPage = slice(referralSource, 'export function ChenPatientsPage', 'export const CHEN_AUTO_ROUTED_PATIENT_IDS')
   assert.match(patientsPage, /const ids = \(params\?\.get\('highlight'\) \?\? ''\)\.split\(','\)\.filter\(Boolean\)/)
   assert.match(patientsPage, /highlightIds=\{highlighted\}/)
 })
 
 test('the highlight is purely presentational and briefly-applied -- never changes which patients are shown or how long the highlight persists beyond a short demo-friendly window', () => {
-  const patientsPage = slice(referralSource, 'export function ChenPatientsPage', 'export function ChenHomePage')
+  const patientsPage = slice(referralSource, 'export function ChenPatientsPage', 'export const CHEN_AUTO_ROUTED_PATIENT_IDS')
   assert.match(patientsPage, /window\.setTimeout\(\(\) => setHighlighted\(new Set\(\)\), 2600\)/)
   assert.match(styles, /\.worklist-row-highlight \{ animation: medication-row-wash 2600ms ease-in-out; \}/)
 })
 
-test('ChenHomePage renders the two capacity cards near Needs your review', () => {
-  const fn = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
-  assert.match(fn, /<ChenCapacityCards \/>/)
-})
 
 /* --------------------------------------------------------------- Part U/V */
 
@@ -547,23 +536,22 @@ test('the consultation-details trigger is an aligned flex row with the caret in 
 
 /* ------------------------------------------------- Part U: Recent activity */
 
-test('Saruhashi coordination and automatic routing are two separate activity rows -- the old conflated single-row copy is gone', () => {
-  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
-  assert.doesNotMatch(home, /Endocrinology referral routed automatically/, 'the old combined single-row phrasing is gone -- these are two separate facts now')
-  const matches = [...home.matchAll(/key="(saruhashi-coordination|auto-routing)"/g)]
-  assert.equal(matches.length, 2, 'exactly two distinct activity rows exist')
+test('Saruhashi coordination and automatic routing stay two separate facts in Chen\'s log -- real referral coordination events, then the standing auto-routing entry (specialist agent-first pass)', () => {
+  const queue = readFileSync(new URL('../src/physicianQueue.ts', import.meta.url), 'utf8')
+  assert.ok(queue.includes('return [...entries, ...(input.standingLog ?? [])]'))
+  assert.doesNotMatch(queue, /Endocrinology referral routed automatically/)
 })
 
-test('the Saruhashi coordination activity never exposes the private cross-agent transcript -- it only navigates to Tonjit\'s own already-authorized patient record, never a chat/coordination modal', () => {
-  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
-  const saruhashiRow = home.slice(home.indexOf('key="saruhashi-coordination"'), home.indexOf('key="auto-routing"'))
-  assert.match(saruhashiRow, /onClick=\{\(\) => navigate\(`\/chen\/patients\/\$\{TONJIT_ID\}`\)\}/)
-  assert.doesNotMatch(saruhashiRow, /View agent conversation|AgentCoordinationModal|coordinationOpen/i, 'never opens the raw cross-agent conversation')
+test('Chen\'s coordination log entries never expose the private cross-agent transcript -- they only open Tonjit\'s own already-authorized patient record', () => {
+  const queue = readFileSync(new URL('../src/physicianQueue.ts', import.meta.url), 'utf8')
+  const log = slice(queue, 'export function buildSpecialistLog', '/* ---------------------------------------------------------------- briefing */')
+  assert.match(log, /path: input\.patientPath\(referral\.patient_id\)/)
+  assert.doesNotMatch(log, /coordination-chat|AgentCoordinationModal|coordinationOpen/i)
 })
 
-test('Recent network (NetworkHighlights) is unchanged by this pass', () => {
-  const home = slice(referralSource, 'export function ChenHomePage', 'export function ChenAgentPage')
-  assert.match(home, /<NetworkHighlights feed=\{feed\} navigate=\{navigate\} perspective="chen" \/>/)
+test('Chen\'s network updates stay on Network; the agent-first Dashboard carries no feed (specialist agent-first pass)', () => {
+  const home = readFileSync(new URL('../src/AgentHome.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(home, /NetworkHighlights|NetworkFeedSection/)
 })
 
 /* =====================================================================

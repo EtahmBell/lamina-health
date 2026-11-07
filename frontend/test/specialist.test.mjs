@@ -69,11 +69,10 @@ test('the demo perspective menu never references Supabase auth or identity claim
   assert.doesNotMatch(control, /useAuth|claim|Supabase/i)
 })
 
-test('PCP shell is its own PhysicianShell (physician-agent home pass); specialist and Chen shells keep their navigation and agent sidebar card', () => {
-  assert.match(shell(), /if \(perspective === 'pcp'\) return <PhysicianShell /)
-  assert.match(shell(), /const items = perspective === 'specialist' \? SPECIALIST_NAV_ITEMS : CHEN_NAV_ITEMS/)
+test('Lucy and Chen share PhysicianShell; the specialist (Iain) shell keeps its navigation and agent sidebar card', () => {
+  assert.match(shell(), /if \(perspective === 'pcp' \|\| perspective === 'chen'\) return <PhysicianShell /)
+  assert.match(shell(), /const items = SPECIALIST_NAV_ITEMS/)
   assert.match(shell(), /items\.map/)
-  assert.match(shell(), /navItems\.map/)
   assert.match(shell(), /<strong>\{SPECIALIST_AGENT_NAME\}<\/strong>/)
 })
 
@@ -82,9 +81,9 @@ test('specialist shell uses the consolidated three-item navigation (post-8B): Da
   assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
 })
 
-test('Chen shell now uses the full standard Dashboard/Patients/Network navigation, same shape as Lucy\'s own (closed-loop referral pass 2: full first-class workspace)', () => {
+test('Chen shell uses the same five agent-first destinations as Lucy (specialist agent-first pass)', () => {
   const navBlock = slice(app, 'const CHEN_NAV_ITEMS', 'const DEMO_PERSPECTIVES')
-  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'Patients'", "title: 'Network'"])
+  assert.deepEqual(navBlock.match(/title: '[^']+'/g), ["title: 'Dashboard'", "title: 'For you'", "title: 'Patients'", "title: 'Network'", "title: 'Your Agent'"])
 })
 
 test('the specialist sidebar card never claims Active status for a reserved provider (Dashboard+Network polish pass: the bottom-left object was simplified to a name only — "Active"/"Synthetic demo profile" status lines are gone for both personas, so there is nothing left to misclaim)', () => {

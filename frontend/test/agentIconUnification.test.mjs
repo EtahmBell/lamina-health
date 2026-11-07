@@ -42,10 +42,10 @@ test('the blue and copper CSS tones were already Lamina-palette (mineral / agent
 
 /* ------------------------------------------------------------ sidebar anchors */
 
-test('Iain\'s and Chen\'s sidebar "My Agent" anchors now render the unified AgentAvatar with copper tone, not the old YouAvatar mark', () => {
+test('Iain\'s sidebar "My Agent" anchor renders the unified copper AgentAvatar; Chen reaches his agent via the Your Agent nav item', () => {
   const shell = slice(app, 'function ProductShell', 'function LandingPage')
   assert.match(shell, /navigate\('\/specialist\/agent'\)[\s\S]{0,160}<AgentAvatar tone=\{agentTone\('iain'\)\} \/>/)
-  assert.match(shell, /navigate\('\/chen\/agent'\)[\s\S]{0,160}<AgentAvatar tone=\{agentTone\('chen'\)\} \/>/)
+  assert.ok(app.includes("{ id: 'chen-agent', title: 'Your Agent', icon: <AgentNavIcon />, path: '/chen/agent?tab=overview' }"))
 })
 
 test('Lucy reaches her agent through the "Your Agent" primary nav item (physician-agent home pass), and the My Agent hero keeps the default AgentAvatar, implicitly blue', () => {
