@@ -384,3 +384,17 @@ test('visual polish: Home uses an SVG icon on the same grid, size and stroke as 
   assert.ok(styles.includes('.physician-shell .nav-item.active { border-color: rgb(83 110 125 / 22%); background: var(--sage-surface-strong); color: var(--mineral-deep); }'))
   assert.ok(home.includes('<main className="agent-home" aria-label="Home">'))
 })
+
+test('visual polish: Home / For you / agent panel accents use Lamina\'s mineral blue-grey tokens -- the same as .button-primary / .text-button -- never copper', () => {
+  const block = styles.slice(styles.indexOf('Physician-agent home pass: Dashboard, For you'))
+  assert.doesNotMatch(block, /agent-copper|var\(--accent|#f1dfd3|#f7ece5/, 'no copper left in the Home/agent styles')
+  for (const rule of [
+    '--agent-orb: var(--mineral); --agent-orb-halo: var(--sage-surface-strong); --agent-orb-halo-soft: var(--mineral-surface);',
+    '.agent-btn.primary { background: var(--mineral-deep); border-color: var(--mineral-deep); color: #fffaf4; }',
+    '.agent-btn.primary:hover { background: var(--mineral-deep-hover); border-color: var(--mineral-deep-hover); }',
+    'font-size: 13px; color: var(--mineral-deep); font-weight: 500; text-decoration: underline;',
+    'border: 0; border-radius: 7px; background: var(--mineral-deep); color: #fffaf4; cursor: pointer; }',
+    '.agent-ent { background: var(--mineral-surface); color: var(--mineral-deep);',
+  ]) assert.ok(block.includes(rule), rule)
+  assert.match(styles, /\.consult-button, \.button-primary \{[^}]*background: var\(--mineral-deep\)/, 'matches the existing Lamina primary button')
+})
