@@ -384,6 +384,7 @@ class WorkflowStore:
             self._migrate_demo_tables(db)
             self._migrate_engagement_tables(db)
             self._migrate_pilot_onboarding(db)
+            self._migrate_operational_rules(db)
             db.executescript(
                 """
                 CREATE INDEX IF NOT EXISTS consultations_workspace_id
@@ -688,6 +689,76 @@ class WorkflowStore:
             WHEN NEW.pilot_access_status != 'pending'
             BEGIN
               SELECT RAISE(ABORT, 'new owner scopes start pending pilot approval');
+            END;
+            """
+        )
+
+    def _migrate_operational_rules(self, db: sqlite3.Connection) -> None:
+        """Make physician_referral_preferences the canonical operational rule store.
+
+        Additive only. Legacy (demo) rows keep their existing `status` semantics and
+        callers; the new columns are backfilled from it, and triggers keep them in
+        sync for every non-practice row so demo code never has to know about them.
+        Pilot practice rules (`scope='practice'`) set these columns explicitly.
+        """
+        columns = self._columns(db, "physician_referral_preferences")
+        additions = {
+            "referral_type": "TEXT",
+            "scope": "TEXT NOT NULL DEFAULT 'physician'",
+            "practice_id": "TEXT",
+            "confidence": "REAL",
+            "operational_status": (
+                "TEXT CHECK(operational_status IS NULL OR operational_status IN "
+                "('inferred', 'inferred_active', 'confirmed', 'superseded', 'rejected'))"
+            ),
+            "physician_confirmed": "INTEGER NOT NULL DEFAULT 0",
+            "provenance_json": "TEXT",
+            "publishable": "INTEGER NOT NULL DEFAULT 0",
+            "version": "INTEGER NOT NULL DEFAULT 1",
+        }
+        for column, definition in additions.items():
+            if column not in columns:
+                db.execute(
+                    f"ALTER TABLE physician_referral_preferences ADD COLUMN {column} {definition}"
+                )
+        db.executescript(
+            """
+            UPDATE physician_referral_preferences
+               SET referral_type = COALESCE(referral_type, case_family),
+                   operational_status = CASE status WHEN 'draft' THEN 'inferred' ELSE status END,
+                   physician_confirmed = CASE WHEN confirmed_at IS NOT NULL THEN 1 ELSE 0 END
+             WHERE operational_status IS NULL AND scope != 'practice';
+            CREATE INDEX IF NOT EXISTS referral_preferences_practice
+              ON physician_referral_preferences(practice_id, referral_type, operational_status);
+            CREATE TRIGGER IF NOT EXISTS referral_preferences_legacy_sync_insert
+            AFTER INSERT ON physician_referral_preferences
+            WHEN NEW.scope != 'practice'
+            BEGIN
+              UPDATE physician_referral_preferences
+                 SET referral_type = COALESCE(NEW.referral_type, NEW.case_family),
+                     operational_status = CASE NEW.status WHEN 'draft' THEN 'inferred'
+                                          ELSE NEW.status END,
+                     physician_confirmed = CASE WHEN NEW.confirmed_at IS NOT NULL THEN 1 ELSE 0 END
+               WHERE id = NEW.id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS referral_preferences_legacy_sync_update
+            AFTER UPDATE OF status, confirmed_at ON physician_referral_preferences
+            WHEN NEW.scope != 'practice'
+            BEGIN
+              UPDATE physician_referral_preferences
+                 SET operational_status = CASE NEW.status WHEN 'draft' THEN 'inferred'
+                                          ELSE NEW.status END,
+                     physician_confirmed = CASE WHEN NEW.confirmed_at IS NOT NULL THEN 1 ELSE 0 END
+               WHERE id = NEW.id;
+            END;
+            -- A practice rule's content is immutable once written: edits create a new
+            -- version, so any recommendation's cited rule version stays recoverable.
+            CREATE TRIGGER IF NOT EXISTS referral_preferences_practice_content_immutable
+            BEFORE UPDATE OF structured_rules_json, source_text, referral_type, version, practice_id
+              ON physician_referral_preferences
+            WHEN OLD.scope = 'practice'
+            BEGIN
+              SELECT RAISE(ABORT, 'practice rule content is immutable; create a new version');
             END;
             """
         )

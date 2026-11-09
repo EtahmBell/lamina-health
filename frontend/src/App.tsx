@@ -24,6 +24,8 @@ import { restorePhase } from './referralPhases.ts'
 import { whyThisMatch } from './matchExplanation.ts'
 import { ModalPortal } from './ModalPortal.tsx'
 import { AgentDashboard, AgentDock, ForYouPage, useNeedsCount } from './AgentHome.tsx'
+import { PilotApp } from './Pilot.tsx'
+import { productMode } from './productMode.ts'
 
 type Navigate = (path: string) => void
 
@@ -1972,6 +1974,8 @@ export default function App() {
   const current = new URL(location, window.location.origin)
   const path = current.pathname
   const params = current.searchParams
+  // Pilot mode: only the real authenticated practice pilot resolves; demo routes never render.
+  if (productMode === 'pilot') return <PilotApp path={path} params={params} navigate={navigate} />
   if (path === '/') return <LandingPage navigate={navigate} />
   if (path === ownerOnboardingPath) return <PhysicianOnboardingPage navigate={navigate} params={params} />
   if (path === '/me' || path === '/me/home') return <OwnerHomePage navigate={navigate} />

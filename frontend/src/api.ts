@@ -715,6 +715,12 @@ export class ApiError extends Error {
   }
 }
 
+/** The configured backend origin, shared with the pilot client for raw uploads/downloads. */
+export const apiBaseUrl = API_BASE_URL
+
+/** Exported for the pilot client (pilotApi.ts): same auth header, error shape, and CORS mode. */
+export const apiRequest = <T,>(path: string, init?: RequestInit) => request<T>(path, init)
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const accessToken = await getAccessToken()

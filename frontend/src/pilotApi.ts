@@ -1,0 +1,183 @@
+import { ApiError, apiBaseUrl, apiRequest, parseErrorDetail, type NppesIdentity, type OnboardingStatus } from './api.ts'
+import { getAccessToken } from './authClient.ts'
+
+/** Client for the real, authenticated practice pilot (`/api/me/practice/*`).
+ * The client never sends a user id, practice id, owner scope, or role: the backend
+ * derives all of them from the verified Supabase token. */
+
+const json = (body: unknown): RequestInit => ({
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+})
+
+/* --------------------------------------------------------------- onboarding */
+
+export type NameSearchResult = { identity: NppesIdentity; claim_available: boolean }
+export const searchPhysicianByName = (name: string, location = '') =>
+  apiRequest<{ results: NameSearchResult[]; result_count: number; truncated: boolean }>(
+    '/api/me/onboarding/npi/search', json({ name, location }),
+  )
+
+/* ----------------------------------------------------------------- practice */
+
+export type PracticeRole = 'physician' | 'staff'
+export type PilotNextStep = 'physician_onboarding' | 'practice_setup' | 'pilot_pending' | 'practice_pending' | 'workspace' | 'unavailable'
+export type Practice = {
+  id: string; name: string; specialty: string | null; website: string | null; address: string | null
+  phone: string | null; contact_email: string | null; status: 'active' | 'archived'; created_at: string
+}
+export type PracticeFields = Pick<Practice, 'name' | 'specialty' | 'website' | 'address' | 'phone' | 'contact_email'>
+export type PilotStatus = {
+  next_step: PilotNextStep
+  role: PracticeRole | null
+  practice: Practice | null
+  physician_onboarding: OnboardingStatus
+  practice_defaults: (Partial<PracticeFields> & { source: string }) | null
+}
+export type PracticeMember = { id: string; role: PracticeRole; label: string | null; is_you: boolean; joined_at: string }
+export type PracticeInvitation = { id: string; role: 'staff'; label: string | null; state: 'pending' | 'accepted' | 'revoked' | 'expired'; created_at: string; expires_at: string }
+
+export const getPilotStatus = () => apiRequest<PilotStatus>('/api/me/practice/status')
+export const createPractice = (fields: PracticeFields) => apiRequest<Practice>('/api/me/practice', json(fields))
+export const updatePractice = (fields: PracticeFields) => apiRequest<Practice>('/api/me/practice', { ...json(fields), method: 'PUT' })
+export const getPracticeMembers = () => apiRequest<{ members: PracticeMember[]; invitations: PracticeInvitation[] }>('/api/me/practice/members')
+export const inviteStaff = (label: string) => apiRequest<{ id: string; token: string; expires_at: string; label: string | null }>('/api/me/practice/invitations', json({ role: 'staff', label: label || null }))
+export const revokeInvitation = (id: string) => apiRequest<void>(`/api/me/practice/invitations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const removeStaffMember = (id: string) => apiRequest<void>(`/api/me/practice/members/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const previewInvitation = (token: string) => apiRequest<{ practice_name: string | null; practice_specialty: string | null; role: string; expires_at: string }>('/api/me/practice/invitations/preview', json({ token }))
+export const acceptInvitation = (token: string) => apiRequest<PilotStatus>('/api/me/practice/invitations/accept', json({ token }))
+
+/* -------------------------------------------------------------------- rules */
+
+export type RuleRequirement = { key: string; label: string; required: boolean; freshness_days: number | null }
+export type Modality = 'in_person' | 'econsult' | 'either' | 'unspecified'
+export type PracticeRuleInput = {
+  referral_type: string; good_fit: string[]; outside_scope: string[]
+  required: RuleRequirement[]; helpful: RuleRequirement[]; urgent_signals: string[]
+  modality: Modality; note: string | null; publishable: boolean
+}
+export type PracticeRule = {
+  id: string; referral_type: string; version: number; supersedes_id: string | null
+  operational_status: 'inferred' | 'inferred_active' | 'confirmed' | 'superseded' | 'rejected'
+  physician_confirmed: boolean; confidence: number | null; source: string; publishable: boolean
+  created_at: string; confirmed_at: string | null
+  content: {
+    good_fit: string[]; redirect: string[]; required: RuleRequirement[]; helpful: RuleRequirement[]
+    urgent_signals: string[]; modality: Modality; modality_notes: string | null
+  }
+}
+export const getPracticeRules = (includeHistory = false) => apiRequest<PracticeRule[]>(`/api/me/practice/rules${includeHistory ? '?include_history=true' : ''}`)
+export const createPracticeRule = (rule: PracticeRuleInput) => apiRequest<PracticeRule>('/api/me/practice/rules', json(rule))
+export const revisePracticeRule = (id: string, rule: PracticeRuleInput) => apiRequest<PracticeRule>(`/api/me/practice/rules/${encodeURIComponent(id)}`, { ...json(rule), method: 'PUT' })
+export const retirePracticeRule = (id: string) => apiRequest<PracticeRule>(`/api/me/practice/rules/${encodeURIComponent(id)}/retire`, { method: 'POST' })
+
+/* ---------------------------------------------------------------- referrals */
+
+export type IntakeStatus = 'received' | 'triaged' | 'needs_information' | 'ready_for_review' | 'accepted' | 'redirected' | 'declined'
+export type Fit = 'strong' | 'possible' | 'outside_scope' | 'unknown'
+export type Priority = 'routine' | 'soon' | 'urgent'
+export type NextStep = 'request_information' | 'confirm_document_evidence' | 'physician_review' | 'consider_redirect'
+export type RequirementState = 'satisfied' | 'proposed_from_document' | 'missing' | 'optional_missing'
+export type RationaleSource = {
+  kind: 'practice_rule' | 'document' | 'submitted_item' | 'requirement_logic' | 'no_rule'
+  rule_id: string | null; rule_version: number | null; document_id: string | null
+  page: number | null; quote: string | null; item_key: string | null
+}
+export type RequirementAssessment = {
+  key: string; label: string; required: boolean; freshness_days: number | null; state: RequirementState
+  rule_id: string; rule_version: number; evidence: RationaleSource | null; detail: string
+}
+export type TriageRecommendation = {
+  id: string; fit: Fit; readiness: 'ready' | 'missing_information' | 'unknown'
+  requirements: RequirementAssessment[]; missing_items: string[]
+  suggested_priority: Priority; suggested_modality: Modality; requires_physician: boolean
+  next_step: NextStep; rationale: Array<{ statement: string; source: RationaleSource }>
+  generator: 'deterministic' | 'deterministic+llm_extraction'; model_id: string | null
+  rules_snapshot_id: string; created_at: string
+}
+export type EffectiveTriage = Pick<TriageRecommendation, 'fit' | 'suggested_priority' | 'suggested_modality' | 'requires_physician' | 'next_step'>
+export type SubmittedItem = { key: string; label?: string | null; value: string; observed_date?: string | null; source?: string; document_id?: string | null; page?: number | null }
+export type ReferralDocument = { id: string; filename: string; content_type: string; size_bytes: number; uploaded_at: string; extraction_status: 'extracted' | 'unsupported' | 'failed' | 'empty'; page_count: number | null }
+export type IntakeReferral = {
+  id: string; status: IntakeStatus; source: 'manual' | 'upload' | 'public_form'
+  sender: { name: string; practice: string | null; contact: string | null; npi: string | null }
+  patient: { name: string; date_of_birth: string | null; sex: string | null; phone: string | null; insurance: string | null; external_id: string | null }
+  referral_type: string; reason: string; clinical_context: string | null; sender_priority: Priority | null
+  submitted_items: SubmittedItem[]; received_at: string; entered_at: string
+  escalated_at: string | null; escalation_note: string | null
+  information_request: { items: string[]; draft_message: string; sent: boolean; prepared_at: string } | null
+  disposition: { decision: 'accept' | 'redirect' | 'decline'; reason: string | null; redirect_to: string | null; at: string } | null
+  documents: ReferralDocument[]
+}
+export type ReferralAction = 'upload_document' | 'record_item' | 'retriage' | 'approve' | 'edit' | 'reject' | 'request_information' | 'escalate' | 'accept' | 'redirect' | 'decline'
+export type ReferralDetail = {
+  referral: IntakeReferral
+  recommendation: TriageRecommendation | null
+  rules_snapshot: { rules: Array<{ rule_id: string; version: number; referral_type: string }> } | null
+  decision: { id: string; decision: 'accepted' | 'edited' | 'rejected'; changed_fields: Record<string, { from: unknown; to: unknown }>; reason: string | null; actor_role: PracticeRole; created_at: string } | null
+  effective_triage: EffectiveTriage | null
+  history: Array<{ event_type: string; actor: string; autonomy: 'automatic' | 'human'; metadata: Record<string, unknown>; created_at: string }>
+  allowed_actions: ReferralAction[]
+}
+export type ReferralSummary = {
+  id: string; status: IntakeStatus; patient_name: string; referral_type: string
+  sender_name: string; sender_practice: string | null; received_at: string
+  fit: Fit | null; priority: Priority | null; next_step: NextStep | null; requires_physician: boolean | null
+  missing_items: string[]; escalated: boolean; decided: boolean
+}
+export type NewReferral = {
+  source: 'manual' | 'upload'
+  sender: { name: string; practice?: string | null; contact?: string | null; npi?: string | null }
+  patient: { name: string; date_of_birth?: string | null; phone?: string | null; insurance?: string | null; external_id?: string | null }
+  referral_type: string; reason: string; clinical_context?: string | null
+  sender_priority?: Priority | null; received_at?: string | null; submitted_items: SubmittedItem[]
+}
+
+const referralPath = (id: string, action = '') => `/api/me/practice/referrals/${encodeURIComponent(id)}${action ? `/${action}` : ''}`
+export const listReferrals = () => apiRequest<ReferralSummary[]>('/api/me/practice/referrals')
+export const getReferral = (id: string) => apiRequest<ReferralDetail>(referralPath(id))
+export const createReferral = (referral: NewReferral) => apiRequest<ReferralDetail>('/api/me/practice/referrals', json(referral))
+export const retriageReferral = (id: string) => apiRequest<ReferralDetail>(referralPath(id, 'triage'), { method: 'POST' })
+export const approveTriage = (id: string) => apiRequest<ReferralDetail>(referralPath(id, 'approve'), { method: 'POST' })
+export const editTriage = (id: string, changes: Partial<EffectiveTriage> & { reason?: string | null }) => apiRequest<ReferralDetail>(referralPath(id, 'edit'), json(changes))
+export const rejectTriage = (id: string, reason: string) => apiRequest<ReferralDetail>(referralPath(id, 'reject'), json({ reason }))
+export const requestInformation = (id: string, items: string[], note: string) => apiRequest<ReferralDetail>(referralPath(id, 'request-information'), json({ items, note: note || null }))
+export const escalateReferral = (id: string, note: string) => apiRequest<ReferralDetail>(referralPath(id, 'escalate'), json({ note: note || null }))
+export const recordReferralItem = (id: string, item: { key: string; value: string; observed_date?: string | null; document_id?: string | null; page?: number | null }) => apiRequest<ReferralDetail>(referralPath(id, 'items'), json(item))
+export const decideReferral = (id: string, decision: 'accept' | 'redirect' | 'decline', reason: string, redirectTo: string) =>
+  apiRequest<ReferralDetail>(referralPath(id, 'disposition'), json({ decision, reason: reason || null, redirect_to: redirectTo || null }))
+
+async function authHeaders(extra: Record<string, string> = {}): Promise<Headers> {
+  const headers = new Headers(extra)
+  const token = await getAccessToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  return headers
+}
+
+async function raise(response: Response): Promise<never> {
+  const body = await response.json().catch(() => null) as { detail?: unknown } | null
+  const { message, code } = parseErrorDetail(body?.detail, response.status)
+  throw new ApiError(message, response.status, code)
+}
+
+/** Raw-body upload: the file never passes through a public URL or browser storage. */
+export async function uploadReferralDocument(id: string, file: File): Promise<ReferralDetail> {
+  const response = await fetch(`${apiBaseUrl}${referralPath(id, 'documents')}`, {
+    method: 'POST',
+    headers: await authHeaders({ 'Content-Type': file.type || 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) }),
+    body: file,
+    credentials: 'include',
+  })
+  if (!response.ok) return raise(response)
+  return response.json() as Promise<ReferralDetail>
+}
+
+/** Authenticated download into a short-lived object URL (no bearer token in a link). */
+export async function openReferralDocument(documentId: string): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/me/practice/documents/${encodeURIComponent(documentId)}`, {
+    headers: await authHeaders(), credentials: 'include',
+  })
+  if (!response.ok) return raise(response)
+  const url = URL.createObjectURL(await response.blob())
+  window.open(url, '_blank', 'noopener')
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}

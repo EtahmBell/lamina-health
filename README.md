@@ -4,6 +4,16 @@ Lamina is a physician-agent network for specialty care. Each physician's configu
 
 This rebuild is intentionally different from the YC × Medplum hackathon prototype in `../lamina-og/`: there is no social feed, public agent conversation, or chatbot-first workflow. V1 is a small, deterministic demonstration using synthetic patients and physicians only—no PHI.
 
+## Product modes
+
+Lamina runs as either the synthetic **demo** (default, described below) or the real
+authenticated specialist-practice **pilot** (`LAMINA_PRODUCT_MODE=pilot` and
+`VITE_LAMINA_PRODUCT_MODE=pilot`). Pilot mode serves only physician sign-in, professional-profile
+confirmation, practice setup and staff membership, and the referral intake/triage workspace under
+`/me/*`; no demo route resolves. See [docs/PILOT_FOUNDATION.md](docs/PILOT_FOUNDATION.md) for the
+architecture and local launch steps, and [docs/PILOT_PHI_READINESS.md](docs/PILOT_PHI_READINESS.md)
+before using any real patient data — the current deployment is not approved for PHI.
+
 ## Clinical demos
 
 Lamina includes two deliberately different synthetic consultation patterns:

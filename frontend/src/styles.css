@@ -3088,3 +3088,77 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .physician-shell .nav-icon svg { display: block; }
 .physician-shell .nav-item.active { border-color: rgb(83 110 125 / 22%); background: var(--sage-surface-strong); color: var(--mineral-deep); }
 .physician-shell .nav-item.active .nav-icon { color: var(--mineral-deep); }
+
+/* ------------------------------------------------------------------ Pilot (real practice) */
+.pilot-page h1 { margin: 0 0 6px; font-family: var(--font-display); font-size: 2rem; font-weight: 500; }
+.pilot-narrow { max-width: 920px; }
+.pilot-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 26px 0 12px; }
+.pilot-section-head h2 { margin: 0; font-size: 1.05rem; }
+.pilot-card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 20px 22px; margin-bottom: 16px; }
+.pilot-card h2 { margin: 0 0 12px; font-size: 1.05rem; }
+.pilot-card h3 { margin: 18px 0 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+.pilot-form fieldset { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 16px; margin: 0; display: grid; gap: 12px; }
+.pilot-form legend { padding: 0 6px; font-size: .7rem; font-weight: 600; color: var(--clinical); }
+.pilot-form textarea, .pilot-form select, .pilot-panel textarea, .pilot-panel select, .pilot-panel input, .pilot-inline-form input { width: 100%; border: 1px solid var(--border); border-radius: 9px; background: #fffdf9; padding: 10px 12px; color: var(--text-primary); font: inherit; font-size: .76rem; }
+.pilot-form select { height: 44px; }
+.pilot-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pilot-briefing { display: flex; gap: 18px; align-items: flex-start; border: 1px solid var(--border); border-radius: 16px; background: var(--mineral-surface); padding: 22px 24px; }
+.pilot-briefing h1 { margin: 2px 0 6px; font-family: var(--font-display); font-size: 1.7rem; font-weight: 500; }
+.pilot-briefing p { margin: 4px 0; }
+.pilot-briefing-mark { flex: 0 0 auto; }
+.pilot-callout { margin-top: 16px; border: 1px dashed var(--mineral-subtle); border-radius: 14px; padding: 18px 20px; background: var(--surface); }
+.pilot-callout h2 { margin: 0 0 6px; font-size: 1rem; }
+.pilot-referral-row .lam-row-main { display: grid; gap: 3px; }
+.pilot-type { margin-left: 8px; color: var(--text-secondary); font-weight: 500; font-size: .66rem; }
+.pilot-row-meta { color: var(--text-secondary); font-size: .64rem; }
+.pilot-status-pill { flex: 0 0 auto; border-radius: 999px; padding: 4px 10px; font-size: .62rem; font-weight: 600; background: var(--slate-surface); color: var(--slate); white-space: nowrap; }
+.pilot-status-pill.status-triaged, .pilot-status-pill.status-received { background: var(--mineral-surface); color: var(--mineral-deep); }
+.pilot-status-pill.status-needs_information { background: #f6ecdf; color: var(--warning); }
+.pilot-status-pill.status-ready_for_review { background: #e6efe9; color: var(--success); }
+.pilot-status-pill.status-declined, .pilot-status-pill.status-redirected { background: #f4e7e5; color: var(--danger); }
+.pilot-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+.pilot-detail-head p { margin: 2px 0; color: var(--text-secondary); font-size: .74rem; }
+.pilot-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 16px; align-items: start; }
+.pilot-facts { display: grid; gap: 10px; margin: 0; }
+.pilot-facts div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; }
+.pilot-facts dt { color: var(--text-secondary); font-size: .66rem; font-weight: 600; }
+.pilot-facts dd { margin: 0; font-size: .76rem; line-height: 1.45; overflow-wrap: anywhere; }
+.pilot-pre { white-space: pre-wrap; }
+.pilot-triage-head { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+.pilot-triage-head h2 { margin: 0; }
+.pilot-requirements, .pilot-documents, .pilot-members { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pilot-requirement { display: flex; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; flex-wrap: wrap; }
+.pilot-requirement.state-missing { border-left: 3px solid var(--warning); }
+.pilot-requirement.state-proposed_from_document { border-left: 3px solid var(--mineral); }
+.pilot-requirement.state-satisfied { border-left: 3px solid var(--success); }
+.pilot-requirement-main { display: grid; gap: 2px; min-width: 0; }
+.pilot-requirement-state { font-size: .66rem; font-weight: 600; color: var(--clinical); }
+.pilot-requirement blockquote { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid var(--border); color: var(--text-secondary); font-size: .68rem; }
+.pilot-inline-form { width: 100%; display: grid; gap: 8px; }
+.pilot-inline-form label > span, .pilot-panel label > span { display: block; margin-bottom: 4px; color: var(--text-secondary); font-size: .6rem; font-weight: 600; }
+.pilot-why { margin-top: 16px; }
+.pilot-why summary { cursor: pointer; font-weight: 600; font-size: .76rem; }
+.pilot-why ul { margin: 8px 0; padding-left: 18px; display: grid; gap: 6px; font-size: .74rem; }
+.pilot-why small { color: var(--text-secondary); margin-left: 4px; }
+.pilot-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+.pilot-panel { margin-top: 14px; border: 1px solid var(--border); border-radius: 12px; background: #fbfaf6; padding: 14px 16px; display: grid; gap: 10px; }
+.pilot-panel h3 { margin: 0; }
+.pilot-check { display: flex; gap: 8px; align-items: center; font-size: .74rem; }
+.pilot-check input { width: auto; }
+.pilot-decision { margin: 10px 0 0; font-size: .7rem; color: var(--mineral-deep); }
+.pilot-disposition { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 4px; }
+.pilot-draft p { margin: 0; font-size: .74rem; }
+.pilot-upload { display: grid; gap: 4px; margin-top: 12px; font-size: .66rem; color: var(--text-secondary); }
+.pilot-documents li, .pilot-members li { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.pilot-link { display: block; overflow-wrap: anywhere; font-size: .66rem; background: var(--slate-surface); border-radius: 8px; padding: 8px 10px; }
+.pilot-history summary { cursor: pointer; font-weight: 600; font-size: .76rem; }
+.pilot-history ul { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: .7rem; }
+.pilot-history span { color: var(--text-secondary); margin-right: 6px; }
+.pilot-history small { color: var(--text-secondary); }
+.pilot-user { color: var(--text-secondary); font-size: .66rem; }
+.pilot-search-results .lam-row { min-height: 70px; }
+@media (max-width: 900px) {
+  .pilot-detail-grid, .pilot-form-row { grid-template-columns: 1fr; }
+  .pilot-facts div { grid-template-columns: 1fr; gap: 2px; }
+  .pilot-section-head, .pilot-detail-head { flex-direction: column; }
+}

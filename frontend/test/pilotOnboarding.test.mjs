@@ -100,7 +100,9 @@ test('identity facts put the NPI, specialty, and practice context in front of th
 test('onboarding explains the NPI without implying endorsement or credentialing', () => {
   assert.match(onboarding, /This does not replace medical credentialing or licensure verification\./)
   assert.doesNotMatch(onboarding, /government[- ]verified|CMS[- ]endorsed|credentialed by|license verified|fully verified/i)
-  assert.match(onboarding, /Verify your physician identity/)
+  // Pilot-foundation copy: NPPES lookup is profile confirmation, not identity proofing.
+  assert.match(onboarding, /Confirm your professional profile/)
+  assert.doesNotMatch(onboarding, /Verify your physician identity/)
 })
 
 test('the confirmation screen shows the NPI and offers "Is this you?" with a Not me path', () => {

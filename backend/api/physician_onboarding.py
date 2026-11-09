@@ -69,6 +69,36 @@ def lookup_npi(update: NpiInput, user: RequiredUser) -> dict:
     return _run(lambda: onboarding_service.lookup(user.id, update.npi))
 
 
+class NameSearchInput(_Strict):
+    name: str = Field(min_length=1, max_length=120)
+    location: str = Field(default="", max_length=120)
+    specialty: str = Field(default="", max_length=120)
+
+
+@router.post("/npi/search")
+def search_by_name(update: NameSearchInput, user: RequiredUser) -> dict:
+    return _run(
+        lambda: onboarding_service.search(user.id, update.name, update.location, update.specialty)
+    )
+
+
+def _record_profile_claim(user_id: str, before: str, after: dict) -> None:
+    """Pilot analytics: one `physician_claimed_profile` event per real confirmation."""
+    if before == after.get("status") or after.get("status") not in {
+        "pilot_approval_pending", "active",
+    }:
+        return
+    from backend.pilot.store import pilot_store_for
+
+    scope = onboarding_service.store.selected_physician_owner_scope(user_id)
+    pilot_store_for(onboarding_service.store).append_event(
+        "physician_claimed_profile",
+        actor=f"user:{user_id}",
+        owner_scope_id=scope["id"] if scope else None,
+        metadata={"verification_method": "nppes_match_self_attested"},
+    )
+
+
 @router.delete("/selection")
 def clear_selection(user: RequiredUser) -> dict:
     return _run(lambda: onboarding_service.clear_selection(user.id))
@@ -76,7 +106,10 @@ def clear_selection(user: RequiredUser) -> dict:
 
 @router.post("/identity/confirm")
 def confirm_identity(update: NpiInput, user: RequiredUser) -> dict:
-    return _run(lambda: onboarding_service.confirm(user.id, update.npi))
+    before = _run(lambda: onboarding_service.status(user.id))["status"]
+    result = _run(lambda: onboarding_service.confirm(user.id, update.npi))
+    _record_profile_claim(user.id, before, result)
+    return result
 
 
 # ------------------------------------------------------------------ internal

@@ -20,9 +20,10 @@ import {
   onboardingScreen,
 } from './onboardingState.ts'
 import { ownerOnboardingPath } from './ownerPaths.ts'
+import { searchPhysicianByName, type NameSearchResult } from './pilotApi.ts'
 
 type Navigate = (path: string) => void
-type Busy = null | 'lookup' | 'confirm' | 'clear'
+type Busy = null | 'lookup' | 'confirm' | 'clear' | 'search'
 
 /** Shown wherever Lamina asks for an NPI. Deliberately no endorsement or credentialing claim. */
 export const NPI_PURPOSE_COPY = 'Lamina uses your NPI to find your public NPPES physician record and connect your account to the correct physician profile. This does not replace medical credentialing or licensure verification.'
@@ -48,7 +49,7 @@ function IdentityCard({ identity, eyebrow }: { identity: OnboardingIdentity; eye
 /** The authenticated physician onboarding flow: NPI lookup → "Is this you?" → pilot approval.
  * Every screen is a projection of the backend's `/api/me/onboarding/status`. The client
  * never stores or asserts confirmation/approval state of its own. */
-export function PhysicianOnboardingPage({ navigate, params }: { navigate: Navigate; params: URLSearchParams }) {
+export function PhysicianOnboardingPage({ navigate, params, onConfirmed }: { navigate: Navigate; params: URLSearchParams; onConfirmed?: () => void }) {
   const { configured, loading: authLoading, user } = useAuth()
   const [status, setStatus] = useState<OnboardingStatus | null>(null)
   const [loadError, setLoadError] = useState('')
@@ -56,6 +57,9 @@ export function PhysicianOnboardingPage({ navigate, params }: { navigate: Naviga
   const [busy, setBusy] = useState<Busy>(null)
   const [error, setError] = useState('')
   const [sessionExpired, setSessionExpired] = useState(false)
+  const [searchName, setSearchName] = useState('')
+  const [searchLocation, setSearchLocation] = useState('')
+  const [searchResults, setSearchResults] = useState<NameSearchResult[] | null>(null)
   const returnHere = npi ? `${ownerOnboardingPath}?npi=${encodeURIComponent(npi)}` : ownerOnboardingPath
 
   const load = () => getOnboardingStatus()
@@ -66,6 +70,8 @@ export function PhysicianOnboardingPage({ navigate, params }: { navigate: Naviga
     })
   useEffect(() => { setStatus(null); if (user) void load() }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (status && onboardingScreen(status) === 'active') navigate(onboardingCompletePath) }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
+  /* Pilot mode: once the profile is confirmed, practice setup continues while approval is pending. */
+  useEffect(() => { if (onConfirmed && status && onboardingScreen(status) === 'pending') onConfirmed() }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async (kind: Exclude<Busy, null>, action: () => Promise<OnboardingStatus>, fallback: string) => {
     setBusy(kind); setError('')
@@ -88,11 +94,23 @@ export function PhysicianOnboardingPage({ navigate, params }: { navigate: Naviga
     void run('lookup', () => lookupOnboardingNpi(npi), 'Could not look up this NPI.')
   }
 
+  const submitSearch = async (event: FormEvent) => {
+    event.preventDefault()
+    if (searchName.trim().length < 2) { setError('Enter at least two letters of your name.'); return }
+    setBusy('search'); setError(''); setSearchResults(null)
+    try { setSearchResults((await searchPhysicianByName(searchName.trim(), searchLocation.trim())).results) }
+    catch (err) {
+      if (err instanceof ApiError && err.status === 401) setSessionExpired(true)
+      else setError(onboardingErrorCopy(err instanceof ApiError ? err.code : null, err instanceof Error ? err.message : 'Could not search NPPES.'))
+    }
+    finally { setBusy(null) }
+  }
+
   if (!configured) return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Authentication is not configured in this environment.</p></div></ClaimShell>
   if (authLoading) return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Checking your session…</p></div></ClaimShell>
   if (!user || sessionExpired) return <ClaimShell navigate={navigate}><div className="onboarding-panel">
     <p className="eyebrow">Physician pilot</p><h1>{sessionExpired ? 'Sign in again to continue' : 'Create your Lamina physician account'}</h1>
-    <p>Create an account or sign in, then verify your physician identity with your NPI.</p>
+    <p>Create an account or sign in, then confirm your professional profile from the public NPI registry.</p>
     <div className="onboarding-actions">
       <button className="button-primary" onClick={() => navigate(signUpPath(returnHere))}>Create account <span>→</span></button>
       <button className="text-button" onClick={() => navigate(signInPath(returnHere))}>I already have an account</button>
@@ -107,22 +125,40 @@ export function PhysicianOnboardingPage({ navigate, params }: { navigate: Naviga
   if (screen === 'active') return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Opening your private workspace…</p></div></ClaimShell>
 
   if (screen === 'lookup') return <ClaimShell navigate={navigate}><div className="onboarding-panel">
-    <p className="eyebrow">Step 1 of 3 · Physician identity</p>
-    <h1>Verify your physician identity</h1>
+    <p className="eyebrow">Step 1 · Professional profile</p>
+    <h1>Confirm your professional profile</h1>
     <p>{NPI_PURPOSE_COPY}</p>
     <form className="auth-form onboarding-form" onSubmit={submitLookup} aria-busy={busy === 'lookup'}>
       <label><span>Your individual NPI</span><input inputMode="numeric" autoComplete="off" maxLength={14} placeholder="10-digit NPI" value={npi} onChange={(event) => { setNpi(normalizeNpiInput(event.target.value)); setError('') }} disabled={busy !== null} /></label>
       {errorBanner}
       <button className="button-primary" type="submit" disabled={busy !== null}>{busy === 'lookup' ? 'Looking up NPPES…' : 'Find my record'} <span>→</span></button>
     </form>
-    <p className="muted-note">Lookup does not link your account to anyone. Nothing is linked until you confirm the record is you.</p>
+    <form className="auth-form onboarding-form" onSubmit={(event) => void submitSearch(event)} aria-busy={busy === 'search'}>
+      <p className="eyebrow">Don’t have your NPI handy? Search by name</p>
+      <label><span>Your name</span><input autoComplete="name" placeholder="First and last name" value={searchName} onChange={(event) => { setSearchName(event.target.value); setError('') }} disabled={busy !== null} /></label>
+      <label><span>City, state (optional)</span><input placeholder="e.g. Palo Alto, CA" value={searchLocation} onChange={(event) => setSearchLocation(event.target.value)} disabled={busy !== null} /></label>
+      <button className="button-secondary" type="submit" disabled={busy !== null}>{busy === 'search' ? 'Searching NPPES…' : 'Search by name'}</button>
+    </form>
+    {searchResults && (searchResults.length === 0
+      ? <p className="muted-note">No individual physician records matched. Check the spelling, add a city and state, or use your NPI.</p>
+      : <div className="lam-list pilot-search-results" aria-label="NPPES search results">{searchResults.map((result) => {
+        const facts = identityFacts(result.identity)
+        return <div key={facts.npi} className="lam-row">
+          <span className="lam-row-mark directory-avatar">{initials(facts.name)}</span>
+          <span className="lam-row-main"><strong>{facts.name}</strong><span>{facts.specialty} · NPI {facts.npi}{facts.locations[0] ? ` · ${facts.locations[0]}` : ''}</span></span>
+          {result.claim_available
+            ? <button className="button-primary" disabled={busy !== null} onClick={() => void run('lookup', () => lookupOnboardingNpi(facts.npi), 'Could not open this record.')}>This is me <span>→</span></button>
+            : <span className="muted-note">Already linked to an account</span>}
+        </div>
+      })}</div>)}
+    <p className="muted-note">Searching or selecting does not link your account to anyone. Nothing is linked until you confirm the record is you on the next screen.</p>
   </div></ClaimShell>
 
   if (screen === 'confirm' && status.selection) {
     const selection = status.selection
     const canClear = status.allowed_actions.includes('clear_selection')
     return <ClaimShell navigate={navigate}><div className="onboarding-panel">
-      <p className="eyebrow">Step 2 of 3 · Confirm</p>
+      <p className="eyebrow">Step 2 · Confirm</p>
       <h1>Is this you?</h1>
       <p>Check the name, NPI, specialty, and practice location carefully. If any of it is wrong, choose “Not me”.</p>
       <IdentityCard identity={selection.identity} eyebrow="NPPES public record" />
@@ -142,7 +178,7 @@ export function PhysicianOnboardingPage({ navigate, params }: { navigate: Naviga
   }
 
   if (screen === 'pending') return <ClaimShell navigate={navigate}><div className="onboarding-panel">
-    <p className="eyebrow">Step 3 of 3 · Pilot approval</p>
+    <p className="eyebrow">Pilot approval</p>
     <h1>Awaiting pilot approval</h1>
     <p>{PILOT_PENDING_COPY}</p>
     {status.confirmed_identity && <IdentityCard identity={status.confirmed_identity.identity} eyebrow="Confirmed physician identity" />}

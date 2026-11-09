@@ -23,16 +23,31 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from threading import Lock
 from time import monotonic
-from typing import Any
+from typing import Any, Protocol
 
 from backend.config import environment
+from backend.provider_network.directory import (
+    DirectoryRateLimitedError,
+    DirectoryUnavailableError,
+    LiveNppesTransport,
+)
 from backend.provider_network.identity import (
     IdentityLookupError,
+    IdentityLookupRateLimitedError,
+    IdentityLookupUnavailableError,
     NppesIdentity,
     NppesIdentityResolver,
+    _live_lookup_enabled,
     normalize_npi,
+    normalize_nppes_record,
 )
 from backend.workflow import WorkflowStore, workflow_store
+
+
+class NppesSearchTransport(Protocol):
+    def search(
+        self, query: str, specialty: str, location: str, limit: int
+    ) -> tuple[list[dict], int]: ...
 
 VERIFICATION_METHOD = "nppes_match_self_attested"
 _ACTIVE_CLAIM_STATUSES = {"claimed", "verification_pending", "verified"}
@@ -120,11 +135,13 @@ class PhysicianOnboardingService:
         resolver: NppesIdentityResolver | None = None,
         throttle: LookupThrottle | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        search_transport: NppesSearchTransport | None = None,
     ) -> None:
         self.store = store or workflow_store
         self.resolver = resolver or NppesIdentityResolver()
         self.throttle = throttle or LookupThrottle()
         self._now = now
+        self._search_transport = search_transport
 
     # ----------------------------------------------------------- projection
 
@@ -254,6 +271,51 @@ class PhysicianOnboardingService:
             user_id, identity.npi, identity.model_dump(mode="json"), identity.fetched_at
         )
         return self.status(user_id)
+
+    def _search(self) -> NppesSearchTransport:
+        if self._search_transport is None:
+            if not _live_lookup_enabled():
+                raise IdentityLookupUnavailableError("NPPES search is not available right now")
+            self._search_transport = LiveNppesTransport()
+        return self._search_transport
+
+    def search(
+        self, user_id: str, name: str, location: str = "", specialty: str = ""
+    ) -> dict[str, Any]:
+        """Identity discovery by name. Returns candidates only: no selection, no claim.
+
+        Picking a candidate goes through `lookup` (exact NPI) and then the explicit
+        confirmation step, exactly like typing the NPI.
+        """
+        self._require(user_id, "lookup_npi")
+        terms = " ".join(name.split())
+        if len(terms.replace(" ", "")) < 2:
+            raise OnboardingConflictError("search_too_short", "Enter at least two letters of your name")
+        if terms.isdigit():
+            raise OnboardingConflictError("search_use_npi", "Use the NPI field to search by number")
+        self.throttle.check(user_id)
+        try:
+            raw_results, total = self._search().search(terms, specialty, location, 20)
+        except DirectoryRateLimitedError as error:
+            raise IdentityLookupRateLimitedError("NPPES is busy right now. Try again in a minute") from error
+        except DirectoryUnavailableError as error:
+            raise IdentityLookupUnavailableError(
+                "NPPES search is not available right now. Try again shortly"
+            ) from error
+        fetched_at = self._now().isoformat(timespec="seconds")
+        candidates = []
+        for raw in raw_results:
+            number = str((raw or {}).get("number", ""))
+            try:
+                identity = normalize_nppes_record(raw, normalize_npi(number), fetched_at)
+            except IdentityLookupError:
+                continue  # Organizations, inactive, synthetic, or malformed rows are skipped.
+            holder = self.store.active_provider_claim(identity.npi)
+            candidates.append({
+                "identity": identity.model_dump(mode="json"),
+                "claim_available": holder is None or holder["auth_user_id"] == user_id,
+            })
+        return {"results": candidates, "result_count": total, "truncated": total > len(candidates)}
 
     def clear_selection(self, user_id: str) -> dict[str, Any]:
         """"Not me": discard the pending selection. Never touches confirmed claims."""

@@ -12,35 +12,63 @@ from backend.api.referrals import router as referrals_router
 from backend.api.specialist import router as specialist_router
 from backend.api.workspace import router as workspace_router
 from backend.demo_workspace import configured_cors_origins
+from backend.pilot.api import router as pilot_practice_router
+from backend.pilot.mode import ProductMode, product_mode
 from backend.provider_network import router as provider_network_router
 
-app = FastAPI(title="Lamina Consult Network", version="0.1.0")
-origins = configured_cors_origins()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "Accept",
-        "Authorization",
-        "Content-Type",
-        "X-Lamina-Workspace-Bootstrap",
-    ],
+# Synthetic demo surface: anonymous Lucy/Chen/Iain workspaces, fixture patients,
+# Consult Network, the controlled synthetic roster, and the demo eval harness.
+DEMO_ROUTERS = (
+    consult_router,
+    workspace_router,
+    specialist_router,
+    engagement_router,
+    provider_network_router,
+    physician_onboarding_router,
+    physician_sandbox_router,
+    pilot_admin_router,
+    referrals_router,
+    referral_preferences_router,
+    eval_harness_router,
 )
-app.include_router(consult_router)
-app.include_router(workspace_router)
-app.include_router(specialist_router)
-app.include_router(engagement_router)
-app.include_router(provider_network_router)
-app.include_router(physician_onboarding_router)
-app.include_router(physician_sandbox_router)
-app.include_router(pilot_admin_router)
-app.include_router(referrals_router)
-app.include_router(referral_preferences_router)
-app.include_router(eval_harness_router)
+# Real pilot surface: authenticated onboarding, the internal approval gate, and
+# practice-scoped pilot routes. Nothing here can resolve a demo persona or patient.
+PILOT_ROUTERS = (
+    physician_onboarding_router,
+    pilot_admin_router,
+    pilot_practice_router,
+)
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "data_mode": "synthetic"}
+def create_app(mode: str | None = None) -> FastAPI:
+    resolved: ProductMode = product_mode(mode)
+    application = FastAPI(
+        title="Lamina Consult Network" if resolved == "demo" else "Lamina Pilot", version="0.1.0"
+    )
+    application.state.product_mode = resolved
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=configured_cors_origins(),
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=[
+            "Accept",
+            "Authorization",
+            "Content-Type",
+            "X-Filename",
+            "X-Lamina-Workspace-Bootstrap",
+        ],
+    )
+    for router in PILOT_ROUTERS if resolved == "pilot" else DEMO_ROUTERS:
+        application.include_router(router)
+
+    @application.get("/health")
+    def health() -> dict[str, str]:
+        if resolved == "demo":
+            return {"status": "ok", "data_mode": "synthetic"}  # Unchanged demo contract.
+        return {"status": "ok", "data_mode": "pilot", "product_mode": "pilot"}
+
+    return application
+
+
+app = create_app()
