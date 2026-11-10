@@ -1,7 +1,7 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim()
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
+const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL?.trim()
+const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY?.trim()
 
 export const authConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 
@@ -17,8 +17,17 @@ function getClient(): SupabaseClient {
   return client
 }
 
+/** Where the email-confirmation link should land: this same origin, at the page's own
+ * `?return=` path (e.g. a staff invitation), never an external URL. Supabase honours it
+ * only if it is in the project's Redirect URLs allow-list; otherwise it uses the Site URL. */
+export function confirmationRedirectUrl(location: Pick<Location, 'origin' | 'search'> = window.location): string {
+  const requested = new URLSearchParams(location.search).get('return') ?? ''
+  const path = requested.startsWith('/') && !requested.startsWith('//') && !requested.includes('\\') ? requested : '/me'
+  return `${location.origin}${path}`
+}
+
 export async function signUp(email: string, password: string) {
-  const { data, error } = await getClient().auth.signUp({ email, password })
+  const { data, error } = await getClient().auth.signUp({ email, password, options: { emailRedirectTo: confirmationRedirectUrl() } })
   if (error) throw error
   return data
 }

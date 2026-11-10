@@ -90,7 +90,7 @@ test('home buckets put each referral in exactly one place and the briefing count
 })
 
 test('triage headline is concrete and quiet for closed referrals', () => {
-  assert.equal(triageHeadline(item('a', 'triaged', { missing_items: ['Renal function'], priority: 'urgent' })), 'Strong practice fit · missing renal function · urgent priority')
+  assert.equal(triageHeadline(item('a', 'triaged', { missing_items: ['Renal function'], priority: 'urgent' })), 'Strong practice fit · missing Renal function · urgent priority')
   assert.equal(triageHeadline(item('a', 'declined')), 'Declined')
 })
 

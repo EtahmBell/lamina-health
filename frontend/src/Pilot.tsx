@@ -20,7 +20,7 @@ import {
   type HomeItem, type HomeProjection, type InformationRequest, type LearningQuestion,
 } from './pilotApi.ts'
 import {
-  briefingLines, canUse, emptyReferralForm, emptyRuleForm, FIT_LABELS, homeBuckets, isClosed, MODALITY_LABELS,
+  briefingLines, canUse, emptyReferralForm, itemLabel, emptyRuleForm, FIT_LABELS, homeBuckets, isClosed, MODALITY_LABELS,
   NEXT_STEP_LABELS, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, REQUIREMENT_STATE_LABELS, referralFormErrors,
   referralPayload, resolvePilotRoute, ruleFormFrom, ruleInput, STATUS_LABELS, triageHeadline,
   type ReferralForm, type RuleForm,
@@ -618,7 +618,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
         </div>}
 
         {(detail.information_requests ?? []).filter((request) => request.status !== 'cancelled').map((request) => <InformationRequestPanel key={request.id} request={request} senderName={referral.sender.name} onChanged={() => void load()} />)}
-        {(detail.sender_responses ?? []).length > 0 && <div className="pilot-panel"><h3>Replies from the referring office</h3><ul className="pilot-documents">{(detail.sender_responses ?? []).map((response) => <li key={response.id}><span>{response.message ?? 'Provided requested values'}</span><span className="muted-note">{response.items.map((item) => item.key.replace(/_/g, ' ')).join(', ')} · {formatDateTime(response.created_at)}</span></li>)}</ul></div>}
+        {(detail.sender_responses ?? []).length > 0 && <div className="pilot-panel"><h3>Replies from the referring office</h3><ul className="pilot-documents">{(detail.sender_responses ?? []).map((response) => <li key={response.id}><span>{response.message ?? 'Provided requested values'}</span><span className="muted-note">{response.items.map((item) => `${itemLabel(item.key, detail, item.label)}: ${item.value}${item.observed_date ? ` (${item.observed_date})` : ''}`).join('; ')} · {formatDateTime(response.created_at)}</span></li>)}</ul></div>}
 
         {referral.disposition && <div className="pilot-panel"><h3>Decision</h3><p>{referral.disposition.decision === 'accept' ? 'Accepted' : referral.disposition.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : 'Declined'} · {formatDateTime(referral.disposition.at)}{referral.disposition.reason ? ` — “${referral.disposition.reason}”` : ''}</p></div>}
 

@@ -128,18 +128,24 @@ def weekly_summary(store: PilotStore, practice_id: str, now: datetime | None = N
     since = (current - timedelta(days=7)).isoformat(timespec="seconds")
     metrics = practice_metrics(store, practice_id, since=since)
     usage, quality, trust, public = metrics["usage"], metrics["referral_quality"], metrics["agent_trust"], metrics["public"]
-    lines = [f"This week Lamina processed {usage['referrals_received']} referral{'s' if usage['referrals_received'] != 1 else ''}."]
+    def n(count: int, one: str, many: str) -> str:
+        return f"{count} {one if count == 1 else many}"
+
+    lines = [f"This week Lamina processed {n(usage['referrals_received'], 'referral', 'referrals')}."]
     if quality["missing_information_detected"]:
         lines.append(f"{quality['missing_information_detected']} arrived incomplete.")
     if quality["made_ready_after_missing_info_request"]:
-        lines.append(f"{quality['made_ready_after_missing_info_request']} were made ready after requesting missing information.")
+        made_ready = quality["made_ready_after_missing_info_request"]
+        lines.append(f"{made_ready} {'was' if made_ready == 1 else 'were'} made ready after requesting missing information.")
     if trust["accepted"] or trust["edited"] or trust["rejected"]:
-        lines.append(f"{trust['accepted']} triage recommendation{'s were' if trust['accepted'] != 1 else ' was'} accepted without changes"
+        lines.append(f"{n(trust['accepted'], 'triage recommendation was', 'triage recommendations were')} accepted without changes"
                      f", {trust['edited']} edited, {trust['rejected']} rejected.")
     if metrics["learning"]["confirmed"] or metrics["learning"]["edited"]:
-        lines.append(f"You confirmed {metrics['learning']['confirmed'] + metrics['learning']['edited']} new preference(s).")
+        confirmed = metrics["learning"]["confirmed"] + metrics["learning"]["edited"]
+        lines.append(f"You confirmed {n(confirmed, 'new preference', 'new preferences')}.")
     if public["unique_public_referring_clinicians"]:
-        lines.append(f"{public['unique_public_referring_clinicians']} referring clinician(s) used your public page.")
+        clinicians = public["unique_public_referring_clinicians"]
+        lines.append(f"{n(clinicians, 'referring clinician', 'referring clinicians')} used your public page.")
     elif public["profile_views"]:
-        lines.append(f"Your public page was viewed {public['profile_views']} time(s).")
+        lines.append(f"Your public page was viewed {n(public['profile_views'], 'time', 'times')}.")
     return {"since": since, "text": " ".join(lines), "metrics": metrics}

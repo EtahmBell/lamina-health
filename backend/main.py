@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -46,8 +48,18 @@ PILOT_ROUTERS = (
 
 def create_app(mode: str | None = None) -> FastAPI:
     resolved: ProductMode = product_mode(mode)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if resolved == "pilot":
+            # Apply every additive pilot migration at startup (fail loudly), not on first use.
+            from backend.pilot.api import get_pilot_services
+
+            get_pilot_services()
+        yield
+
     application = FastAPI(
-        title="Lamina Consult Network" if resolved == "demo" else "Lamina Pilot", version="0.1.0"
+        title="Lamina Consult Network" if resolved == "demo" else "Lamina Pilot", version="0.1.0",
+        lifespan=lifespan,
     )
     application.state.product_mode = resolved
     application.add_middleware(

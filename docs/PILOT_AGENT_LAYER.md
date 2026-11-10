@@ -82,3 +82,18 @@ a 7-day summary sentence. No "time saved" metric.
 LAMINA_DEV_FAKE_NPPES=true LAMINA_PRODUCT_MODE=pilot LAMINA_WORKFLOW_DATABASE=data/pilot-dev.sqlite \
   python -m scripts.dev_pilot_server        # NPIs 1234567893 (Avery Testwell), 1234567802
 ```
+
+## Step 13 — Browser hardening (verification record)
+
+Fixes: pilot migrations run at app startup; `set_publishable` refuses another practice's rule;
+teaching splits "X and Y" into separate requirements; sender replies show practice labels, not keys;
+publishing saves on-screen edits first; Supabase sign-up confirmation returns to the same origin
+(`confirmationRedirectUrl`); grammatical weekly summary.
+
+Verified (local, synthetic/test data only): physician browser flow end to end; staff authorization
+API matrix (58/58 checks); cross-practice isolation; secure document upload.
+
+Not verified in a browser: the remaining manual staff UI checks (that staff never *see* physician-only
+controls on every screen, the staff invitation sign-up → email confirmation → `/me/join` redirect
+round trip, and staff document upload through the UI). These are covered at the API layer only.
+Email-confirmation redirects also depend on the Supabase project's Redirect URLs allow-list.

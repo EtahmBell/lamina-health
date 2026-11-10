@@ -272,6 +272,8 @@ class PracticeRules:
 
     def set_publishable(self, practice_id: str, rule_id: str, publishable: bool, *, actor: str) -> PracticeRule:
         with self._connect() as db:
+            if not self._row(db, practice_id, rule_id):
+                raise RuleNotFoundError(rule_id)  # another practice's rule is indistinguishable from none
             changed = db.execute(
                 "UPDATE physician_referral_preferences SET publishable = ?, updated_at = ? WHERE id = ? "
                 "AND practice_id = ? AND scope = 'practice' AND operational_status IN ('confirmed', 'inferred_active')",

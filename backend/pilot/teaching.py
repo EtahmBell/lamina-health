@@ -95,13 +95,16 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
             continue
         required = re.search(r"\b(?:want|need|require|requires|must have|expect|ask for|always get)\b\s+(?:to see\s+|to have\s+)?(.+?)(?:\s+\b(?:before|prior to|with|for|on)\b.*)?$", sentence, re.IGNORECASE)
         if required:
-            phrase = _clean_phrase(re.sub(r"\bwithin\b.*$", "", required.group(1), flags=re.IGNORECASE))
-            if phrase and len(phrase) <= 80:
-                helpful = bool(re.search(r"\b(nice to have|helpful|if available|ideally)\b", lowered))
-                key = "_".join(sorted(_tokens(phrase))) or "item"
-                item = {"key": key[:80], "label": phrase[:1].upper() + phrase[1:], "required": not helpful,
-                        "freshness_days": _freshness(sentence)}
-                content["helpful" if helpful else "required"].append(item)
+            listed = _clean_phrase(re.sub(r"\bwithin\b.*$", "", required.group(1), flags=re.IGNORECASE))
+            helpful = bool(re.search(r"\b(nice to have|helpful|if available|ideally)\b", lowered))
+            # "a thyroid ultrasound and a recent TSH" is two requirements, not one.
+            for part in re.split(r"\s*,\s*(?:and\s+|plus\s+)?|\s+(?:and|plus)\s+", listed, flags=re.IGNORECASE):
+                phrase = _clean_phrase(part)
+                if phrase and len(phrase) <= 80:
+                    key = "_".join(sorted(_tokens(phrase))) or "item"
+                    item = {"key": key[:80], "label": phrase[:1].upper() + phrase[1:], "required": not helpful,
+                            "freshness_days": _freshness(sentence)}
+                    content["helpful" if helpful else "required"].append(item)
             continue
         good = re.search(r"\b(?:i (?:do |also )?see|we see|happy to see|interested in|good fit(?: for)?|i (?:like|love) to see|i take)\b\s+(.+)$", sentence, re.IGNORECASE)
         if good:

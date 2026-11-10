@@ -73,3 +73,39 @@ test('metrics never claim time saved', () => {
   assert.match(agent, /doesn’t estimate “time saved”/)
   assert.doesNotMatch(agent, /time_saved/)
 })
+
+test('email confirmation returns to this origin and keeps only a safe relative return path', async () => {
+  const { confirmationRedirectUrl } = await import('../src/authClient.ts').catch(() => ({}))
+  assert.equal(typeof confirmationRedirectUrl, 'function')
+  const at = (search) => confirmationRedirectUrl({ origin: 'http://127.0.0.1:5173', search })
+  assert.equal(at('?return=%2Fme%2Fjoin%3Finvite%3Dabc'), 'http://127.0.0.1:5173/me/join?invite=abc')
+  assert.equal(at('?return=https%3A%2F%2Fevil.example'), 'http://127.0.0.1:5173/me')
+  assert.equal(at('?return=%2F%2Fevil.example'), 'http://127.0.0.1:5173/me')
+  assert.equal(at(''), 'http://127.0.0.1:5173/me')
+})
+
+test('signup passes the confirmation redirect to Supabase', () => {
+  const auth = source('authClient.ts')
+  assert.match(auth, /auth\.signUp\(\{ email, password, options: \{ emailRedirectTo: confirmationRedirectUrl\(\) \} \}\)/)
+})
+
+test('publishing includes on-screen public-page edits and rule toggles keep them', () => {
+  const settings = slice(agent, 'export function PublicSettingsPage', '/* ----------------------------------------------------------------- metrics')
+  assert.match(settings, /const saveThenPublish = async \(\) => \{ if \(unsaved\) await saveSettings\(\); return publishPublicProfile\(\) \}/)
+  assert.match(settings, /onClick=\{\(\) => void run\(saveThenPublish\)\}/)
+  assert.match(settings, /setRulePublishable\(rule\.id, event\.target\.checked\), true\)/)
+  assert.match(settings, /Unsaved changes/)
+})
+
+test('sender replies show the practice label, never the internal item key', async () => {
+  const { itemLabel } = await import('../src/pilotState.ts')
+  const detail = {
+    recommendation: { requirements: [{ key: 'recent_tsh', label: 'Recent TSH' }] },
+    information_requests: [{ items: [{ key: 'thyroid_ultrasound', label: 'Thyroid ultrasound' }] }],
+  }
+  assert.equal(itemLabel('recent_tsh', detail), 'Recent TSH')
+  assert.equal(itemLabel('thyroid_ultrasound', detail), 'Thyroid ultrasound')
+  assert.equal(itemLabel('free_t4', { recommendation: null }), 'Free t4')
+  assert.equal(itemLabel('tsh', detail, 'Recent TSH'), 'Recent TSH')
+  assert.doesNotMatch(pilot, /item\.key\.replace\(\/_\/g, ' '\)/)
+})

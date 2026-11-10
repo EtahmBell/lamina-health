@@ -1,4 +1,4 @@
-import type { Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, Priority, PracticeRuleInput, ReferralAction, ReferralSummary, RequirementState, RuleRequirement } from './pilotApi.ts'
+import type { Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement } from './pilotApi.ts'
 
 /** Pure presentation + routing helpers for the real practice pilot. Everything here is
  * a projection of backend state; nothing is persisted client-side. */
@@ -97,7 +97,7 @@ export function triageHeadline(item: Pick<ReferralSummary, 'status' | 'fit' | 'm
   if (isClosed(item.status)) return STATUS_LABELS[item.status]
   const parts: string[] = []
   if (item.fit) parts.push(FIT_LABELS[item.fit])
-  if (item.missing_items.length) parts.push(`missing ${item.missing_items.join(', ').toLowerCase()}`)
+  if (item.missing_items.length) parts.push(`missing ${item.missing_items.join(', ')}`)
   if (item.priority && item.priority !== 'routine') parts.push(`${PRIORITY_LABELS[item.priority].toLowerCase()} priority`)
   return parts.join(' · ') || STATUS_LABELS[item.status]
 }
@@ -228,3 +228,14 @@ export const PILOT_ERROR_COPY: Record<string, string> = {
   document_too_large: 'Files must be 15 MB or smaller.',
 }
 export const pilotErrorCopy = (code: string | null | undefined, fallback: string) => (code && PILOT_ERROR_COPY[code]) || fallback
+
+/** Human label for a submitted item key: the requirement / request label the practice used,
+ * never the internal key ("recent_tsh" → "Recent TSH"). Falls back to a readable key. */
+export function itemLabel(key: string, detail: Pick<ReferralDetail, 'recommendation' | 'information_requests'>, fallback?: string | null): string {
+  const fromRequests = (detail.information_requests ?? []).flatMap((request) => request.items).find((item) => item.key === key)?.label
+  const fromTriage = detail.recommendation?.requirements.find((item) => item.key === key)?.label
+  const label = fallback || fromRequests || fromTriage
+  if (label) return label
+  const words = key.replace(/_/g, ' ').trim()
+  return words ? words[0].toUpperCase() + words.slice(1) : key
+}

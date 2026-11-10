@@ -196,6 +196,11 @@ def test_deterministic_interpreter_never_invents_structure() -> None:
     assert window["content"]["required"][0]["freshness_days"] == 90
     chatter = deterministic_interpret("Thanks, that was helpful today.", known)
     assert chatter["structured"] is False and chatter["confidence"] == 0.0
+    listed = deterministic_interpret(
+        "For thyroid nodule referrals I need a thyroid ultrasound and a recent TSH before review.", known)
+    assert [item["label"] for item in listed["content"]["required"]] == ["Thyroid ultrasound", "Recent TSH"]
+    three = deterministic_interpret("For thyroid referrals I need a TSH, free T4, and an ultrasound.", known)
+    assert [item["label"] for item in three["content"]["required"]] == ["TSH", "Free T4", "Ultrasound"]
 
 
 def test_teaching_flow_proposes_then_confirms_a_new_rule_version_used_by_triage(pilot: Pilot) -> None:
@@ -464,3 +469,16 @@ def test_new_surfaces_are_practice_isolated(pilot: Pilot) -> None:
     assert pilot.post(f"/api/me/practice/teach/{proposal['id']}/confirm", "user-b", {}).status_code == 404
     assert pilot.get("/api/me/practice/teach", "user-b").json()["proposals"] == []
     assert pilot.get("/api/me/practice/home", "user-b").json()["needs_you"] == []
+
+
+def test_publishable_toggle_on_another_practices_rule_is_not_found(pilot: Pilot) -> None:
+    pilot.ready_physician()
+    rule = pilot.add_rule()
+    pilot.ready_physician("user-b", NPI_B)
+    response = pilot.client.put(f"/api/me/practice/rules/{rule['id']}/publishable",
+                                headers=_h("user-b"), json={"publishable": True})
+    assert response.status_code == 404  # indistinguishable from a rule that does not exist
+    assert pilot.client.get("/api/me/practice/rules", headers=_h("user-a")).json()[0]["publishable"] is False
+    own_practice = pilot.client.put(f"/api/me/practice/rules/{rule['id']}/publishable",
+                                     headers=_h("user-a"), json={"publishable": True})
+    assert own_practice.status_code == 200

@@ -131,24 +131,31 @@ export function PublicSettingsPage({ status }: { status: PilotStatus }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const physician = status.role === 'physician'
-  const apply = (next: PublicProfilePreview) => {
+  const draftFrom = (next: PublicProfilePreview) => ({ slug: next.slug, intro: next.settings.intro, insurance: next.settings.insurance, how_to_refer: next.settings.how_to_refer, hours: next.settings.hours, locations: next.settings.locations.join('\n') })
+  // keepDraft: refresh the preview without discarding fields the physician is still editing.
+  const apply = (next: PublicProfilePreview, keepDraft = false) => {
     setPreview(next)
-    setDraft({ slug: next.slug, intro: next.settings.intro, insurance: next.settings.insurance, how_to_refer: next.settings.how_to_refer, hours: next.settings.hours, locations: next.settings.locations.join('\n') })
+    if (!keepDraft) setDraft(draftFrom(next))
   }
-  useEffect(() => { getPublicProfilePreview().then(apply).catch((err) => setError(errorText(err, 'Could not load the public profile'))) }, [])
-  const run = async (action: () => Promise<PublicProfilePreview | unknown>) => {
+  useEffect(() => { getPublicProfilePreview().then((next) => apply(next)).catch((err) => setError(errorText(err, 'Could not load the public profile'))) }, [])
+  const run = async (action: () => Promise<PublicProfilePreview | unknown>, keepDraft = false) => {
     setBusy(true); setError('')
-    try { const result = await action(); apply(result && typeof result === 'object' && 'slug' in result ? result as PublicProfilePreview : await getPublicProfilePreview()) }
+    try { const result = await action(); apply(result && typeof result === 'object' && 'slug' in result ? result as PublicProfilePreview : await getPublicProfilePreview(), keepDraft) }
     catch (err) { setError(errorText(err, 'That didn’t work.')) } finally { setBusy(false) }
   }
   if (!preview || !draft) return <main className="page-shell pilot-page"><p className="muted-note">{error || 'Loading…'}</p></main>
   const publicUrl = `${window.location.origin}${pilotPaths.publicPage(preview.slug)}`
   const set = (key: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft({ ...draft, [key]: event.target.value })
+  const saved = draftFrom(preview)
+  const unsaved = (Object.keys(saved) as (keyof typeof saved)[]).some((key) => saved[key] !== draft[key])
+  const saveSettings = () => savePublicProfileSettings({ slug: draft.slug, intro: draft.intro, insurance: draft.insurance, how_to_refer: draft.how_to_refer, hours: draft.hours, locations: draft.locations.split('\n').map((line) => line.trim()).filter(Boolean) })
+  // Publishing always includes the edits on screen: save them first, then publish.
+  const saveThenPublish = async () => { if (unsaved) await saveSettings(); return publishPublicProfile() }
   return <main className="page-shell pilot-page">
     <div className="pilot-section-head"><div><h1>Public referral page</h1>
       <p className="muted-note">{preview.status === 'published' ? <>Live at <a href={pilotPaths.publicPage(preview.slug)} target="_blank" rel="noreferrer">{publicUrl}</a> · version {preview.published_version?.version}</> : preview.status === 'unpublished' ? 'Unpublished — the page is offline.' : 'Not published yet.'}{preview.unpublished_changes && preview.status === 'published' ? ' · You have changes that aren’t live yet.' : ''}</p></div>
       {physician && <div className="onboarding-actions">
-        <button className="button-primary" disabled={busy} onClick={() => void run(publishPublicProfile)}>{preview.status === 'published' ? 'Publish update' : 'Publish'}</button>
+        <button className="button-primary" disabled={busy} onClick={() => void run(saveThenPublish)}>{preview.status === 'published' ? 'Publish update' : 'Publish'}</button>
         {preview.status === 'published' && <button className="text-button" disabled={busy} onClick={() => void run(unpublishPublicProfile)}>Unpublish</button>}
       </div>}
     </div>
@@ -159,15 +166,16 @@ export function PublicSettingsPage({ status }: { status: PilotStatus }) {
         <h2>What to publish</h2>
         <h3>Referral rules</h3>
         {preview.rules.length === 0 && <p className="muted-note">Add referral rules first.</p>}
-        {preview.rules.map((rule) => <label key={rule.id} className="pilot-check"><input type="checkbox" checked={rule.publishable} disabled={!physician || busy} onChange={(event) => void run(() => setRulePublishable(rule.id, event.target.checked))} /> {rule.referral_type} <small className="muted-note">v{rule.version}</small></label>)}
-        <form className="auth-form pilot-form" onSubmit={(event) => { event.preventDefault(); void run(() => savePublicProfileSettings({ slug: draft.slug, intro: draft.intro, insurance: draft.insurance, how_to_refer: draft.how_to_refer, hours: draft.hours, locations: draft.locations.split('\n').map((line) => line.trim()).filter(Boolean) })) }}>
+        {preview.rules.map((rule) => <label key={rule.id} className="pilot-check"><input type="checkbox" checked={rule.publishable} disabled={!physician || busy} onChange={(event) => void run(() => setRulePublishable(rule.id, event.target.checked), true)} /> {rule.referral_type} <small className="muted-note">v{rule.version}</small></label>)}
+        <form className="auth-form pilot-form" onSubmit={(event) => { event.preventDefault(); void run(saveSettings) }}>
           <label><span>Page address</span><input value={draft.slug} onChange={set('slug')} disabled={!physician} /></label>
           <label><span>Short introduction</span><textarea rows={2} value={draft.intro} onChange={set('intro')} disabled={!physician} /></label>
           <label><span>Locations — one per line</span><textarea rows={2} value={draft.locations} onChange={set('locations')} disabled={!physician} /></label>
           <label><span>Hours</span><input value={draft.hours} onChange={set('hours')} disabled={!physician} /></label>
           <label><span>Insurance information</span><textarea rows={2} value={draft.insurance} onChange={set('insurance')} disabled={!physician} /></label>
           <label><span>How to refer</span><textarea rows={2} value={draft.how_to_refer} onChange={set('how_to_refer')} disabled={!physician} /></label>
-          {physician && <button className="button-secondary" type="submit" disabled={busy}>Save draft</button>}
+          {physician && unsaved && <p className="muted-note" role="status">Unsaved changes — the preview updates when you save. Publish saves them too.</p>}
+          {physician && <button className="button-secondary" type="submit" disabled={busy || !unsaved}>Save draft</button>}
         </form>
       </section>
       <section className="pilot-card pilot-public-preview"><p className="eyebrow">Preview — exactly what will be public</p><PublicProfileView profile={preview.draft_snapshot} slug={preview.slug} preview /></section>

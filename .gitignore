@@ -13,3 +13,4 @@ dist/
 .DS_Store
 # Pilot referral documents may contain PHI: never commit them.
 data/pilot_documents/
+data/*.log
