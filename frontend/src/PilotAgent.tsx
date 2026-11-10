@@ -119,9 +119,9 @@ export function AgentPage({ status, navigate, tab }: { status: PilotStatus; navi
   const practice = status.practice
   return <main className="page-shell agent-page pilot-agent-page">
     <section className="agent-hero"><div className="agent-hero-mark"><AgentAvatar tone="copper" /></div><div>
-      <p className="eyebrow">Your practice agent</p>
+      <p className="eyebrow">Your physician agent</p>
       <h1>{practice?.name ?? 'Your practice'}</h1>
-      <p>{practice?.specialty ? `${practice.specialty} · ` : ''}Shadow mode — your agent recommends; your team decides.</p>
+      <p>{practice?.specialty ? `${practice.specialty} · ` : ''}Represents how you and your practice work. Shadow mode — your agent recommends; your team decides.</p>
     </div></section>
     <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => navigate(pilotPaths.agentTab(item))}>{TAB_LABELS[item]}{item === 'teach' && (teaching?.proposals.length ?? 0) > 0 ? ` · ${teaching?.proposals.length}` : ''}</button>)}</nav>
     {error && <div className="error-banner" role="alert">{error}</div>}
@@ -165,7 +165,7 @@ function AgentOverview({ status, navigate, rules, teaching, referrals, weekly }:
             <span className="network-activity-detail">Fit, readiness, priority, and modality checked; missing information flagged</span>
             {open.length > 0 && <span className="network-activity-outcome">✓ {plural(open.length, 'referral', 'referrals')} open now</span>}
             {open.filter((item) => item.status === 'needs_information').length > 0 && <span className="network-activity-outcome">✓ {plural(open.filter((item) => item.status === 'needs_information').length, 'referral', 'referrals')} waiting on the referring office</span>}
-          </div><button type="button" className="text-button" onClick={() => navigate(pilotPaths.referrals)}>View referrals →</button></li>}
+          </div><button type="button" className="text-button" onClick={() => navigate(pilotPaths.patients)}>View patients →</button></li>}
         </ul>}
     </section>
     <hr className="agent-overview-divider" />
@@ -347,7 +347,7 @@ export function PublicSettingsPage({ status, navigate }: { status: PilotStatus; 
   return <main className="page-shell selector-page pilot-public-settings">
     {back}
     <header className="selector-header">
-      <div><p className="eyebrow">Public referral page</p><h1>How referring offices see you</h1>
+      <div><p className="eyebrow">Public physician profile</p><h1>How colleagues and referring offices see you</h1>
         <p>{preview.status === 'published' ? <>Live at <a href={pilotPaths.publicPage(preview.slug)} target="_blank" rel="noreferrer">{publicUrl}</a> · version {preview.published_version?.version}</> : preview.status === 'unpublished' ? 'Unpublished — the page is offline.' : 'Not published yet.'}{preview.unpublished_changes && preview.status === 'published' ? ' · You have changes that aren’t live yet.' : ''}</p></div>
       {physician && <div className="onboarding-actions">
         <button className="button-primary" disabled={busy} onClick={() => void run(saveThenPublish)}>{preview.status === 'published' ? 'Publish update' : 'Publish'}</button>

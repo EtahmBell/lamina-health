@@ -18,7 +18,7 @@ const errorMessage = (err: unknown, fallback: string) =>
 
 function PublicShell({ children }: { children: ReactNode }) {
   return <div className="public-shell">
-    <header className="public-header"><span className="brand"><span className="brand-symbol" aria-hidden="true"><img src={laminaLogo} alt="" /></span><span className="wordmark">LAMINA</span></span><span className="muted-note">Referral front door</span></header>
+    <header className="public-header"><span className="brand"><span className="brand-symbol" aria-hidden="true"><img src={laminaLogo} alt="" /></span><span className="wordmark">LAMINA</span></span><span className="muted-note">Lamina for physicians</span></header>
     <main className="public-main">{children}</main>
     <footer className="public-footer">Information on this page is published by the practice. It is not medical advice. In an emergency, call 911.</footer>
   </div>
@@ -29,7 +29,7 @@ export function PublicProfileView({ profile, slug, navigate, preview = false }: 
   return <article className="public-profile">
     <header className="public-hero">
       <div>
-        <p className="eyebrow">{profile.practice.specialty ?? 'Specialty practice'}</p>
+        <p className="eyebrow">{profile.practice.specialty ?? 'Physician practice'}</p>
         <h1>{profile.practice.name}</h1>
         {profile.physicians.length > 0 && <p>{profile.physicians.map((physician) => physician.name).join(' · ')}</p>}
         {profile.intro && <p className="public-intro">{profile.intro}</p>}
@@ -84,7 +84,7 @@ function PublicAsk({ slug, onStart, canRefer }: { slug: string; onStart: () => v
     } catch (err) { setError(errorMessage(err, 'Could not get an answer right now.')) } finally { setBusy(false) }
   }
   return <section className="pilot-card public-ask">
-    <div className="pilot-triage-head public-agent-head"><AgentAvatar tone="copper" /><div><p className="eyebrow">Ask about this practice</p><h2>Referral questions, answered from what the practice published</h2></div></div>
+    <div className="pilot-triage-head public-agent-head"><AgentAvatar tone="copper" /><div><p className="eyebrow">Ask about this practice</p><h2>Questions about this practice, answered from what it published</h2></div></div>
     <ul className="public-answers">{answers.map((item, index) => <li key={index}>
       <p className="public-q">{item.question}</p><p className="public-a">{item.answer.answer}</p>
       {item.answer.suggest_referral && canRefer && <button className="text-button" onClick={onStart}>Start a referral →</button>}

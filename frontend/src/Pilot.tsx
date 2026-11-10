@@ -6,7 +6,8 @@ import { greetingPrefix, timeAwareGreeting } from './greeting.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { PhysicianOnboardingPage } from './Onboarding.tsx'
 import { AgentPage, MetricsPage, PublicSettingsPage } from './PilotAgent.tsx'
-import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavIcon, LaminaShell, type DockReply, type NavEntry } from './pilotUi.tsx'
+import { NetworkPage } from './PilotNetwork.tsx'
+import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavIcon, LaminaShell, NetworkNavIcon, type DockReply, type NavEntry } from './pilotUi.tsx'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
   acceptInvitation, approveTriage, createPractice, createReferral, decideReferral,
@@ -20,11 +21,11 @@ import {
   type HomeItem, type HomeProjection, type InformationRequest,
 } from './pilotApi.ts'
 import {
-  accountIdentity, canUse, countWord, emptyReferralForm, itemLabel, FIT_LABELS, historyLabel, isClosed, matchesReferral,
-  MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
-  REQUIREMENT_STATE_LABELS, referralFormErrors, referralGroups, referralNextStep, referralPayload, resolveAgentTab,
-  resolvePilotRoute, STATUS_LABELS, statusTone, triageHeadline,
-  type ReferralForm,
+  accountIdentity, canUse, countWord, emptyReferralForm, itemLabel, FIT_LABELS, historyLabel, isClosed,
+  MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
+  receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
+  resolvePilotRoute, STATUS_LABELS,
+  type PatientWorkItem, type ReferralForm,
 } from './pilotState.ts'
 
 type Navigate = (path: string) => void
@@ -55,9 +56,10 @@ export function PilotApp({ path, params, navigate }: { path: string; params: URL
     case 'onboarding':
     case 'home': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="home" agentDock={status.role === 'physician'}><PilotHomePage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'for_you': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="for-you" agentDock={status.role === 'physician'}><ForYouPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
-    case 'referrals': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="referrals"><ReferralsPage navigate={navigate} /></PilotShell>}</PilotGate>
-    case 'new_referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="referrals"><NewReferralPage navigate={navigate} /></PilotShell>}</PilotGate>
-    case 'referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="referrals"><ReferralDetailPage id={route.id} status={status} navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'patients': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><PatientsPage navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'network': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="network"><NetworkPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'new_referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><NewReferralPage navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><ReferralDetailPage id={route.id} status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'practice': return <PilotGate navigate={navigate} params={params}>{(status, reload) => <PilotShell status={status} navigate={navigate} section="profile"><ProfilePage status={status} reload={reload} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'agent': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="agent"><AgentPage status={status} navigate={navigate} tab={resolveAgentTab(params.get('tab'))} /></PilotShell>}</PilotGate>
     case 'rules': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="agent"><AgentPage status={status} navigate={navigate} tab="rules" /></PilotShell>}</PilotGate>
@@ -84,9 +86,9 @@ function PilotGate({ navigate, params, children }: { navigate: Navigate; params:
   if (!configured) return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Authentication is not configured in this environment.</p></div></ClaimShell>
   if (loading) return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Checking your session…</p></div></ClaimShell>
   if (!user) return <ClaimShell navigate={navigate}><div className="onboarding-panel">
-    <p className="eyebrow">Lamina for specialty practices</p>
-    <h1>Your practice’s referral agent</h1>
-    <p>Lamina reviews incoming referrals against how your practice works, prepares what it can, and surfaces only the decisions that need you.</p>
+    <p className="eyebrow">Lamina pilot</p>
+    <h1>Your physician agent</h1>
+    <p>Lamina works alongside you and your practice. It learns how you work, prepares what it can (today, starting with incoming referrals), and brings you only the decisions that need you.</p>
     <div className="onboarding-actions">
       <button className="button-primary" onClick={() => navigate(signUpPath(pilotPaths.home))}>Create account <span>→</span></button>
       <button className="text-button" onClick={() => navigate(signInPath(pilotPaths.home))}>Sign in</button>
@@ -196,12 +198,14 @@ function JoinPracticePage({ navigate, params }: { navigate: Navigate; params: UR
 
 /* ----------------------------------------------------------------- shell */
 
-/** Referrals takes the demo's "Patients" place and glyph: in the pilot the referral is
- * the patient-facing work object. There is no pilot network, so no Network item. */
+/** The demo's five general physician destinations, in the demo's order. Patients is the
+ * clinical workspace (today: received referrals as patient work items); Network is the
+ * pilot's own page and shows only real relationships — never the demo roster. */
 const NAV: NavEntry[] = [
   { id: 'home', title: 'Home', icon: <HomeNavIcon />, path: pilotPaths.home },
   { id: 'for-you', title: 'For you', icon: <ForYouNavIcon />, path: pilotPaths.forYou },
-  { id: 'referrals', title: 'Referrals', icon: '✦', path: pilotPaths.referrals },
+  { id: 'patients', title: 'Patients', icon: '✦', path: pilotPaths.patients },
+  { id: 'network', title: 'Network', icon: <NetworkNavIcon />, path: pilotPaths.network },
   { id: 'agent', title: 'Your Agent', icon: <AgentNavIcon />, path: pilotPaths.agent },
 ]
 
@@ -213,7 +217,7 @@ function PilotShell({ status, navigate, section, agentDock = false, children }: 
   const physician = status.role === 'physician'
   const account = <AccountMenu initials={me.initials} name={me.name} items={[
     { label: 'Profile & practice', onSelect: () => navigate(pilotPaths.practice) },
-    ...(physician ? [{ label: 'Public referral page', onSelect: () => navigate(pilotPaths.publicProfile) }, { label: 'Pilot metrics', onSelect: () => navigate(pilotPaths.metrics) }] : []),
+    ...(physician ? [{ label: 'Public physician profile', onSelect: () => navigate(pilotPaths.publicProfile) }, { label: 'Pilot metrics', onSelect: () => navigate(pilotPaths.metrics) }] : []),
     'divider',
     { note: `${status.practice?.name ?? 'Your practice'} · ${me.role}` },
     ...(user?.email ? [{ note: user.email }] : []),
@@ -235,7 +239,7 @@ function PilotHomePage({ status, navigate }: { status: PilotStatus; navigate: Na
   const waiting = home?.waiting ?? []
   return <main className="agent-home" aria-label="Home">
     <h1 className="agent-home-greeting">{me.firstName ? timeAwareGreeting(me.firstName) : `${greetingPrefix(new Date().getHours())}.`}</h1>
-    <div className="agent-status" role="status"><AgentOrb /><span>{loading ? 'Reviewing your practice’s referrals…' : needs.length ? 'I’ve prepared what I can. The rest needs you.' : 'All caught up. I’ll keep watching.'}</span></div>
+    <div className="agent-status" role="status"><AgentOrb /><span>{loading ? 'Reviewing what’s come in for your practice…' : needs.length ? 'I’ve prepared what I can. The rest needs you.' : 'All caught up. I’ll keep watching.'}</span></div>
     {error && <p className="agent-home-error" role="alert">{error}</p>}
     {home && <>
       <p className="agent-brief">{home.briefing.lead}{home.briefing.detail && <> {home.briefing.detail}</>}{home.briefing.tail && <>{' '}<span className="agent-brief-quiet">{home.briefing.tail}</span></>}</p>
@@ -363,49 +367,55 @@ function TeachDock({ status, navigate }: { status: PilotStatus; navigate: Naviga
   }
   return <AgentDock
     title="Teach your agent" subtitle={`${status.practice?.name ?? 'Your practice'} · drafts rules you confirm`}
-    greeting={`Hi${me.firstName ? ` ${me.firstName}` : ''}. Tell me how your practice handles a kind of referral — what fits, what’s out of scope, what you need before review. I’ll draft a rule for you to confirm.`}
-    suggestions={['I need a recent TSH before thyroid nodule referrals.', 'Insulin pump management is outside my scope.', 'I prefer eConsult for stable medication questions.']}
+    greeting={`Hi${me.firstName ? ` ${me.firstName}` : ''}. Tell me how you like to work — what fits your practice, what’s outside your scope, what you need before you review. I’ll draft a rule for you to confirm.`}
+    suggestions={['I need recent labs and a current medication list before I review a referral.', 'Pediatric patients are outside my scope.', 'I prefer eConsult for stable medication questions.']}
     placeholder="Teach your agent…" onSend={onSend} navigate={navigate} />
 }
 
 /* ------------------------------------------------------------- referrals */
+/* Patients: the general clinical workspace. Rows are patient work items (today only
+ * received referrals); the row component knows nothing referral-specific. */
 
-/** One referral row in the demo Patients worklist treatment. */
-function ReferralRows({ items, navigate }: { items: ReferralSummary[]; navigate: Navigate }) {
-  return <div className="lam-list patient-worklist">{items.map((item) => <button key={item.id} className="lam-row worklist-row pilot-referral-row" onClick={() => navigate(pilotPaths.referral(item.id))}>
-    <span className="lam-row-mark patient-row-avatar">{patientInitials(item.patient_name)}</span>
-    <span className="lam-row-main"><strong>{item.patient_name}</strong><small>{item.referral_type} · {triageHeadline(item)}</small><small>From {item.sender_name}{item.sender_practice ? `, ${item.sender_practice}` : ''} · received {formatDate(item.received_at)}</small></span>
-    <span className={`worklist-status ${statusTone(item.status)}`}>{STATUS_LABELS[item.status]}</span>
-    <span className="worklist-next-step">{referralNextStep(item)}</span>
-    <span className="worklist-updated">{item.escalated ? 'Flagged for physician' : item.priority === 'urgent' ? 'Urgent' : ''}</span>
+/** Patient work items in the demo Patients worklist treatment. */
+function PatientWorkRows({ items, navigate }: { items: PatientWorkItem[]; navigate: Navigate }) {
+  return <div className="lam-list patient-worklist">{items.map((item) => <button key={item.key} className="lam-row worklist-row pilot-patient-row" onClick={() => navigate(item.path)}>
+    <span className="lam-row-mark patient-row-avatar">{item.patient.initials}</span>
+    <span className="lam-row-main"><strong>{item.patient.name}</strong><small>{item.episode.title} · {item.episode.summary}</small><small>{item.episode.source} · {formatDate(item.episode.at)}</small></span>
+    <span className={`worklist-status ${item.status.tone}`}>{item.status.label}</span>
+    <span className="worklist-next-step">{item.nextStep}</span>
+    <span className="worklist-updated">{item.flag}</span>
   </button>)}</div>
 }
 
-function ReferralsPage({ navigate }: { navigate: Navigate }) {
-  const [items, setItems] = useState<ReferralSummary[] | null>(null)
+function PatientsPage({ navigate }: { navigate: Navigate }) {
+  const [items, setItems] = useState<PatientWorkItem[] | null>(null)
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
-  useEffect(() => { listReferrals().then(setItems).catch((err) => setError(errorText(err, 'Could not load referrals'))) }, [])
-  const groups = referralGroups((items ?? []).filter((item) => matchesReferral(item, query)))
-  const sections: Array<[string, ReferralSummary[]]> = [['Needs review', groups.review], ['Waiting on information', groups.waiting], ['Closed', groups.closed]]
+  useEffect(() => { listReferrals().then((rows) => setItems(rows.map(receivedReferralWorkItem))).catch((err) => setError(errorText(err, 'Could not load patients'))) }, [])
+  const { active, previous } = patientWorkSections(items ?? [], query)
   return <main className="page-shell selector-page">
     <header className="selector-header">
-      <div><p className="eyebrow">Referral intake</p><h1>Referrals</h1><p>Every referral your practice has received in Lamina, triaged against your rules.</p></div>
+      <div><p className="eyebrow">Your patients</p><h1>Patients</h1><p>Patients with active work in your practice, including new referrals awaiting review.</p></div>
       <button className="button-primary" onClick={() => navigate(pilotPaths.newReferral)}>New referral <span>+</span></button>
     </header>
-    <label className="patient-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients, referral types, or referring clinicians…" aria-label="Search referrals" /></label>
+    <label className="patient-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients, clinical problem, or referring clinician…" aria-label="Search patients" /></label>
     {error && <div className="error-banner" role="alert">{error}</div>}
-    {!items && !error && <div className="page-state embedded"><div className="loading-line" /><p>Opening referrals…</p></div>}
-    {sections.map(([title, rows]) => rows.length > 0 && <section key={title} className="patient-worklist-section">
-      <div className="home-section-heading"><h2>{title}</h2><span>{rows.length}</span></div>
-      <ReferralRows items={rows} navigate={navigate} />
-    </section>)}
-    {items && groups.review.length + groups.waiting.length + groups.closed.length === 0 && <div className="empty-state specialist-empty">
+    {!items && !error && <div className="page-state embedded"><div className="loading-line" /><p>Opening patients…</p></div>}
+    {active.length > 0 && <section className="patient-worklist-section">
+      <div className="home-section-heading"><h2>Active patients</h2><span>{active.length}</span></div>
+      <PatientWorkRows items={active} navigate={navigate} />
+    </section>}
+    {previous.length > 0 && <section className="patient-worklist-section">
+      <div className="home-section-heading"><h2>Previous care</h2><span>{previous.length}</span></div>
+      <PatientWorkRows items={previous} navigate={navigate} />
+    </section>}
+    {items && active.length + previous.length === 0 && <div className="empty-state specialist-empty">
       <LaminaMark />
-      <h2>{items.length ? 'No referrals found' : 'No referrals yet'}</h2>
-      <p>{items.length ? 'Try a different name, referral type, or clinician.' : 'Enter the first referral your practice receives and Lamina will triage it against your rules.'}</p>
+      <h2>{items.length ? 'No patients found' : 'No patients yet'}</h2>
+      <p>{items.length ? 'Try a different name, clinical problem, or clinician.' : 'Patients appear here as work arrives. Enter the first referral your practice receives and Lamina will triage it against your rules.'}</p>
       {!items.length && <button className="button-primary" onClick={() => navigate(pilotPaths.newReferral)}>New referral <span>+</span></button>}
     </div>}
+    {items && items.length > 0 && <p className="network-roster-note">Each row is one piece of patient work, such as a received referral. In the pilot, Lamina doesn’t combine rows into a single patient record.</p>}
   </main>
 }
 
@@ -435,7 +445,7 @@ function NewReferralPage({ navigate }: { navigate: Navigate }) {
     } catch (err) { setErrors([errorText(err, 'Could not save the referral.')]) } finally { setBusy(false) }
   }
   return <main className="page-shell selector-page pilot-form-page">
-    <button className="text-button back-link" onClick={() => navigate(pilotPaths.referrals)}>← All referrals</button>
+    <button className="text-button back-link" onClick={() => navigate(pilotPaths.patients)}>← All patients</button>
     <header className="selector-header"><div><p className="eyebrow">Referral intake</p><h1>New referral</h1><p>Enter what the referring office sent. Lamina never looks the patient up elsewhere — it works only from what you enter and attach.</p></div></header>
     <form className="auth-form pilot-form" onSubmit={(event) => void submit(event)} aria-busy={busy}>
       <fieldset><legend>Referring clinician</legend>
@@ -592,7 +602,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
       if (err instanceof ApiError && (err.code === 'stale_referral' || err.code === 'already_decided')) void load()
     } finally { setBusy(false) }
   }
-  const back = <button className="text-button back-link" onClick={() => navigate(pilotPaths.referrals)}>← All referrals</button>
+  const back = <button className="text-button back-link" onClick={() => navigate(pilotPaths.patients)}>← All patients</button>
   if (error && !detail) return <main className="page-shell patient-page">{back}<div className="error-banner" role="alert">{error}</div></main>
   if (!detail) return <main className="page-shell patient-page">{back}<div className="page-state embedded"><div className="loading-line" /><p>Opening referral…</p></div></main>
 
@@ -617,7 +627,9 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   return <main className="page-shell patient-page pilot-referral-page">
     {back}
     <header className="patient-identity"><span className="patient-row-avatar large">{patientInitials(referral.patient.name)}</span><div><h1>{referral.patient.name}</h1>
-      <p>{[referral.referral_type, referral.patient.date_of_birth && `DOB ${referral.patient.date_of_birth}`, `received ${formatDate(referral.received_at)}`].filter(Boolean).join(' · ')}</p></div></header>
+      <p>{[referral.referral_type, referral.patient.date_of_birth && `DOB ${referral.patient.date_of_birth}`, `received ${formatDate(referral.received_at)}`].filter(Boolean).join(' · ')}</p>
+      {/* Honest scope: the pilot stores patient details per referral, not a chart. */}
+      <p className="pilot-episode-note">Received referral · patient details as recorded on this referral, not a full patient record</p></div></header>
     <p className="patient-current-issue"><span className="section-label">Reason for referral</span>{referral.reason}</p>
     <hr className="patient-header-divider" />
     {error && <div className="error-banner" role="alert">{error}</div>}
@@ -660,7 +672,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           </div>}
           {panel === 'reject' && <div className="pilot-panel">
             <h3>What’s wrong with this triage?</h3>
-            <textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. This is a thyroid question, not diabetes" />
+            <textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. This belongs with a different service" />
             <div className="onboarding-actions"><button className="button-primary" disabled={busy || !note.trim()} onClick={() => void act(() => rejectTriage(referral.id, note))}>Reject and send to physician</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
           </div>}
           {panel === 'request' && <div className="pilot-panel">
@@ -800,7 +812,7 @@ function ProfilePage({ status, reload, navigate }: { status: PilotStatus; reload
     </header>
     <div className="profile-header-actions">
       {physician && !editing && <button className="button-primary" onClick={() => setEditing(true)}>Edit practice</button>}
-      {physician && <button className="text-button" onClick={() => navigate(pilotPaths.publicProfile)}>View as referring offices see it →</button>}
+      {physician && <button className="text-button" onClick={() => navigate(pilotPaths.publicProfile)}>View your public physician profile →</button>}
       <button className="text-button" onClick={() => navigate(pilotPaths.agent)}>View how my agent represents the practice →</button>
     </div>
     {error && <div className="error-banner" role="alert">{error}</div>}

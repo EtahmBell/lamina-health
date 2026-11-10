@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
-  accountIdentity, countWord, historyLabel, matchesReferral, patientInitials, pilotPaths, practicePortrait, proposalLines,
-  referralGroups, referralNextStep, resolveAgentTab, resolvePilotRoute, statusTone,
+  accountIdentity, countWord, historyLabel, matchesReferral, patientInitials, patientWorkSections, pilotPaths, practicePortrait, proposalLines,
+  receivedReferralWorkItem, referralGroups, referralNextStep, referringClinicians, resolveAgentTab, resolvePilotRoute, statusTone,
 } from '../src/pilotState.ts'
 
 /* Step 14: the authenticated pilot renders the polished demo's design system and page
@@ -13,6 +13,7 @@ const source = (name) => readFileSync(new URL(`../src/${name}`, import.meta.url)
 const pilot = source('Pilot.tsx')
 const agent = source('PilotAgent.tsx')
 const ui = source('pilotUi.tsx')
+const network = source('PilotNetwork.tsx')
 const app = source('App.tsx')
 const slice = (text, from, to) => text.slice(text.indexOf(from), to ? text.indexOf(to, text.indexOf(from)) : undefined)
 
@@ -28,15 +29,31 @@ test('pilot shell is the demo physician shell: same classes, nav glyphs, account
   }
 })
 
-test('pilot nav mirrors the demo order and never shows a fictional network', () => {
+test('pilot nav is the demo general physician nav: Home, For you, Patients, Network, Your Agent', () => {
   const nav = slice(pilot, 'const NAV: NavEntry[]', ']\n')
-  assert.deepEqual([...nav.matchAll(/title: '([^']+)'/g)].map((match) => match[1]), ['Home', 'For you', 'Referrals', 'Your Agent'])
-  assert.doesNotMatch(nav, /Network/)
+  assert.deepEqual([...nav.matchAll(/title: '([^']+)'/g)].map((match) => match[1]), ['Home', 'For you', 'Patients', 'Network', 'Your Agent'])
+  assert.doesNotMatch(nav, /'Referrals'/)
+  // The Network glyph is the demo's exact people mark.
+  for (const path of ['M2 19c0-3.3 2.7-6 6-6s6 2.7 6 6', 'M14.3 13.1c.7-.26 1.5-.4 2.2-.4 2.8 0 5 2.1 5 5.3']) {
+    assert.ok(ui.includes(path), path)
+    assert.ok(app.includes(path), `demo still defines ${path}`)
+  }
+})
+
+test('Network uses the demo page structure and shows no fictional colleagues or connections', () => {
+  for (const cls of ['physician-directory-page', 'directory-hero', 'network-hero', 'network-colleagues-layout', 'network-section-title', 'lam-row connection-row', 'active-network-rail']) assert.ok(network.includes(cls), cls)
+  // Only real pilot data: the practice's own referrals. No demo roster, suggestions, or network API.
+  for (const forbidden of ['getAgentNetwork', 'addNetworkMember', 'searchProviders', 'CURATED_SUGGESTIONS', 'Add a colleague', 'Ask their agent', '/api/workspace', 'demoIdentity', 'PhysicianNetwork', 'Engagement', 'localStorage']) {
+    assert.ok(!network.includes(forbidden), `Network references ${forbidden}`)
+  }
+  assert.match(network, /listReferrals\(\)/)
+  assert.match(network, /not Lamina network connections/)
+  assert.match(network, /\{physician && <button className="button-primary" onClick=\{\(\) => navigate\(pilotPaths\.publicProfile\)\}/, 'public-profile action is physician-only')
 })
 
 test('physician-only destinations and controls are hidden for staff, never shown disabled', () => {
   const shell = slice(pilot, 'function PilotShell', '/* ------------------------------------------------------------------ home')
-  assert.match(shell, /\.\.\.\(physician \? \[\{ label: 'Public referral page'/)
+  assert.match(shell, /\.\.\.\(physician \? \[\{ label: 'Public physician profile'/)
   assert.match(pilot, /agentDock=\{status\.role === 'physician'\}/, 'teaching dock is physician-only')
   assert.match(pilot, /\{physician && <TeachDock/)
   assert.match(pilot, /physician && canUse\(actions, 'accept'\)/)
@@ -62,10 +79,12 @@ test('Home and For you use the demo dashboard structure and read only the server
   assert.doesNotMatch(agent, /getHome/)
 })
 
-test('referral list and detail reuse the demo Patients worklist and Patient Detail structure', () => {
-  const list = slice(pilot, 'function ReferralsPage', 'function NewReferralPage')
-  for (const cls of ['selector-page', 'selector-header', 'patient-search', 'home-section-heading', 'empty-state specialist-empty']) assert.ok(list.includes(cls), cls)
-  assert.match(slice(pilot, 'function ReferralRows', 'function ReferralsPage'), /lam-list patient-worklist/)
+test('Patients and referral detail reuse the demo Patients worklist and Patient Detail structure', () => {
+  const list = slice(pilot, 'function PatientsPage', 'function NewReferralPage')
+  for (const cls of ['selector-page', 'selector-header', 'patient-search', 'home-section-heading', 'empty-state specialist-empty', 'Active patients', 'Previous care']) assert.ok(list.includes(cls), cls)
+  const rows = slice(pilot, 'function PatientWorkRows', 'function PatientsPage')
+  assert.match(rows, /lam-list patient-worklist/)
+  assert.doesNotMatch(rows, /referral|Referral/, 'the reusable row knows nothing referral-specific')
   const detail = slice(pilot, 'function ReferralDetailPage', '/* -------------------------------------------------------------- profile')
   for (const cls of ['patient-identity', 'patient-current-issue', 'patient-detail-grid', 'patient-next-step patient-top-card', 'next-step-card', 'patient-history-section', 'clinical-timeline', 'clinical-overview', 'care-context', 'source-record']) assert.ok(detail.includes(cls), cls)
 })
@@ -141,4 +160,52 @@ test('portrait, labels, and proposal lines describe only confirmed facts', () =>
   assert.equal(countWord(42), '42')
   assert.deepEqual(proposalLines({ required: [{ key: 'tsh', label: 'Recent TSH', required: true, freshness_days: 90 }], helpful: [], good_fit: [], redirect: ['Pump management'], urgent_signals: [], modality: 'econsult', modality_notes: null }),
     ['Require before review: Recent TSH (within 90 days)', 'Outside your scope: Pump management', 'Default modality: eConsult'])
+})
+
+const summaryOf = (id, status, extra = {}) => ({ id, status, patient_name: 'Sam Rivera', referral_type: 'Diabetes management', sender_name: 'Dr. Ref', sender_practice: 'Clinic', received_at: `2026-11-0${id}T00:00:00Z`, fit: 'possible', priority: 'routine', next_step: 'physician_review', requires_physician: false, missing_items: [], escalated: false, decided: false, ...extra })
+
+test('patient work items keep each referral episode distinct and carry its real state', () => {
+  const items = [summaryOf('1', 'triaged'), summaryOf('2', 'needs_information'), summaryOf('3', 'accepted'), summaryOf('4', 'triaged', { priority: 'urgent' })].map(receivedReferralWorkItem)
+  // Same patient name on four referrals: four episodes, never merged into one identity.
+  assert.equal(new Set(items.map((item) => item.key)).size, 4)
+  assert.equal(items[0].kind, 'received_referral')
+  assert.equal(items[0].path, '/me/referrals/1', 'episode keeps its referral URL')
+  assert.equal(items[1].nextStep, 'Waiting on the referring office')
+  assert.equal(items[1].status.tone, 'slate')
+  assert.equal(items[3].flag, 'Urgent')
+  const { active, previous } = patientWorkSections(items)
+  assert.deepEqual(active.map((item) => item.key), ['received_referral:4', 'received_referral:1', 'received_referral:2'], 'needs-review (urgent first) before waiting')
+  assert.deepEqual(previous.map((item) => item.key), ['received_referral:3'])
+  assert.equal(patientWorkSections(items, 'nephrology').active.length, 0)
+  assert.equal(patientWorkSections(items, 'clinic').active.length, 3)
+})
+
+test('routes: Patients and Network resolve; /me/referrals stays a working alias', () => {
+  assert.deepEqual(resolvePilotRoute('/me/patients'), { kind: 'patients' })
+  assert.deepEqual(resolvePilotRoute('/me/referrals'), { kind: 'patients' })
+  assert.deepEqual(resolvePilotRoute('/me/network'), { kind: 'network' })
+  assert.deepEqual(resolvePilotRoute('/network'), { kind: 'redirect', to: pilotPaths.home }, 'demo network paths still redirect')
+  assert.equal(pilotPaths.referral('abc'), '/me/referrals/abc')
+})
+
+test('referring clinicians come only from received referrals, exact-name grouped', () => {
+  const rows = referringClinicians([
+    { sender_name: 'Dr. Ref', sender_practice: 'Clinic', received_at: '2026-11-01T00:00:00Z' },
+    { sender_name: 'dr. ref', sender_practice: 'clinic ', received_at: '2026-11-05T00:00:00Z' },
+    { sender_name: 'Dr. Ref', sender_practice: 'Other Clinic', received_at: '2026-11-03T00:00:00Z' },
+    { sender_name: '  ', sender_practice: null, received_at: '2026-11-03T00:00:00Z' },
+  ])
+  assert.equal(rows.length, 2, 'same name at a different practice stays separate; blank senders are skipped')
+  assert.equal(rows[0].count, 2)
+  assert.equal(rows[0].lastAt, '2026-11-05T00:00:00Z')
+  assert.equal(rows[0].initials, 'R')
+  assert.deepEqual(referringClinicians([]), [])
+})
+
+test('general physician wording: no endocrine-only prompts or specialist-only fallbacks', () => {
+  for (const [name, text] of [['Pilot.tsx', pilot], ['PilotAgent.tsx', agent], ['PilotNetwork.tsx', network], ['PublicPages.tsx', source('PublicPages.tsx')]]) {
+    assert.doesNotMatch(text, /[Tt]hyroid|\bTSH\b|[Ii]nsulin pump|'Specialty practice'|specialty practices/, name)
+  }
+  assert.match(agent, /<p className="eyebrow">Your physician agent<\/p>/)
+  assert.match(practicePortrait({ name: 'P', specialty: null }, []), /^Your practice\./)
 })

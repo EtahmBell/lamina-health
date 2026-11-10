@@ -3244,7 +3244,13 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 /* Pilot next-step labels are longer than the demo's; on phones let them span the row
  * instead of widening the avatar column. */
 @media (max-width: 760px) {
-  .pilot-referral-row { grid-template-areas: "avatar main" "status status" "step step" "updated updated"; }
-  .pilot-referral-row .worklist-next-step { white-space: normal; }
-  .pilot-referral-row .worklist-updated { justify-self: start; }
+  .pilot-patient-row { grid-template-areas: "avatar main" "status status" "step step" "updated updated"; }
+  .pilot-patient-row .worklist-next-step { white-space: normal; }
+  .pilot-patient-row .worklist-updated { justify-self: start; }
 }
+
+/* General physician workspace (Step 14 refinement): pilot-only adaptations. */
+.pilot-referral-page .patient-identity .pilot-episode-note { margin: 6px 0 0; color: var(--text-secondary); font-size: var(--type-meta); }
+.pilot-network-page .pilot-network-empty { margin-top: 0; }
+.pilot-network-page .pilot-referrer-row .connection-row-main { cursor: default; }
+.pilot-network-page .network-primary-section + .network-primary-section { margin-top: 8px; }

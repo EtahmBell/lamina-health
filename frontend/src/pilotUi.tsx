@@ -31,6 +31,41 @@ export function AgentNavIcon() {
   return <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M9 1.75l1.7 4.55 4.55 1.7-4.55 1.7L9 14.25l-1.7-4.55L2.75 8l4.55-1.7z" /><path d="M14.25 12.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" /></svg>
 }
 
+/** The demo's Network people glyph (two heads + shoulders), same strokes as the demo. */
+export function NetworkNavIcon() {
+  return <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="8" cy="7.5" r="3" />
+    <path d="M2 19c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+    <circle cx="16.5" cy="9" r="2.3" />
+    <path d="M14.3 13.1c.7-.26 1.5-.4 2.2-.4 2.8 0 5 2.1 5 5.3" />
+  </svg>
+}
+
+/** The demo Network hero's wireframe globe (decorative; same geometry as the demo). */
+export function NetworkGlobeArt() {
+  return <svg className="network-hero-globe-art" viewBox="0 0 240 240" fill="none" aria-hidden="true">
+    <g className="globe-tilt">
+      <circle className="globe-sphere" cx="120" cy="120" r="84" />
+      <ellipse className="globe-ring" cx="120" cy="120" rx="84" ry="19" />
+      <ellipse className="globe-ring" cx="120" cy="86" rx="67" ry="11" />
+      <ellipse className="globe-ring" cx="120" cy="154" rx="67" ry="11" />
+      <ellipse className="globe-ring" cx="120" cy="120" rx="34" ry="84" />
+      <ellipse className="globe-ring" cx="120" cy="120" rx="62" ry="84" />
+      <path className="globe-arc" d="M176,66 Q199,92 198,120" />
+      <path className="globe-arc" d="M198,120 Q196,150 172,172" />
+      <path className="globe-arc" d="M130,118 Q156,88 176,66" />
+      <path className="globe-arc" d="M130,122 Q127,160 120,184" />
+      <path className="globe-arc dashed" d="M128,119 Q96,132 70,150" />
+      <circle className="globe-node" cx="176" cy="66" r="3" />
+      <circle className="globe-node" cx="198" cy="120" r="2.6" />
+      <circle className="globe-node" cx="172" cy="172" r="3" />
+      <circle className="globe-node" cx="120" cy="184" r="2.6" />
+      <circle className="globe-node" cx="70" cy="150" r="2.4" />
+      <circle className="globe-node hub" cx="130" cy="119" r="4.5" />
+    </g>
+  </svg>
+}
+
 /** The agent presence orb (breathes unless `still` or reduced motion). */
 export function AgentOrb({ still = false }: { still?: boolean }) {
   return <span className={`agent-orb ${still ? 'still' : ''}`} aria-hidden="true" />

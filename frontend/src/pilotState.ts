@@ -8,7 +8,11 @@ export const pilotPaths = {
   forYou: '/me/for-you',
   onboarding: '/me/onboarding',
   join: '/me/join',
-  referrals: '/me/referrals',
+  /** Patients is the general clinical workspace (demo parity). `/me/referrals` stays a
+   * working alias, and a received referral keeps its own episode URL below. */
+  patients: '/me/patients',
+  referrals: '/me/patients',
+  network: '/me/network',
   newReferral: '/me/referrals/new',
   referral: (id: string) => `/me/referrals/${encodeURIComponent(id)}`,
   practice: '/me/practice',
@@ -24,21 +28,23 @@ export const pilotPaths = {
 
 export type PilotRoute =
   | { kind: 'home' } | { kind: 'for_you' } | { kind: 'onboarding' } | { kind: 'join' }
-  | { kind: 'referrals' } | { kind: 'new_referral' } | { kind: 'referral'; id: string }
+  | { kind: 'patients' } | { kind: 'network' } | { kind: 'new_referral' } | { kind: 'referral'; id: string }
   | { kind: 'practice' } | { kind: 'rules' } | { kind: 'agent' } | { kind: 'public_settings' } | { kind: 'metrics' }
   | { kind: 'public_profile'; slug: string } | { kind: 'public_refer'; slug: string } | { kind: 'sender'; token: string }
   | { kind: 'auth'; page: 'sign-in' | 'sign-up' }
   | { kind: 'redirect'; to: string }
 
 /** The ONLY routes that resolve in pilot mode. Every demo path (Lucy, Chen, Iain,
- * synthetic patients, consultations, network, claim directory) redirects home. */
+ * synthetic patients, consultations, demo network, claim directory) redirects home.
+ * `/me/network` is the pilot's own Network page, which reads no demo roster. */
 export function resolvePilotRoute(path: string): PilotRoute {
   const clean = path.replace(/\/+$/, '') || '/'
   if (clean === '/me' || clean === '/me/home') return { kind: 'home' }
   if (clean === '/me/for-you') return { kind: 'for_you' }
   if (clean === '/me/onboarding') return { kind: 'onboarding' }
   if (clean === '/me/join') return { kind: 'join' }
-  if (clean === '/me/referrals') return { kind: 'referrals' }
+  if (clean === '/me/patients' || clean === '/me/referrals') return { kind: 'patients' }
+  if (clean === '/me/network') return { kind: 'network' }
   if (clean === '/me/referrals/new') return { kind: 'new_referral' }
   const referral = clean.match(/^\/me\/referrals\/([A-Za-z0-9_-]+)$/)?.[1]
   if (referral) return { kind: 'referral', id: referral }
@@ -309,7 +315,7 @@ export const matchesReferral = (item: ReferralSummary, query: string) =>
 /** "Your agent currently represents your practice as …" — built only from the practice
  * record and its confirmed rules. Never invents a preference the physician didn't confirm. */
 export function practicePortrait(practice: { name: string; specialty: string | null } | null, rules: Pick<PracticeRule, 'referral_type'>[]): string {
-  const who = practice?.specialty ? `${practice.specialty} practice` : 'Specialty practice'
+  const who = practice?.specialty ? `${practice.specialty} practice` : 'Your practice'
   if (!rules.length) return `${who}. No referral rules are confirmed yet, so your agent can record referrals but can’t judge fit or completeness.`
   const types = [...new Set(rules.map((rule) => rule.referral_type))]
   const list = types.length <= 3 ? types.join(', ') : `${types.slice(0, 3).join(', ')} and ${types.length - 3} more`
@@ -364,3 +370,84 @@ export function proposalLines(content: Pick<PracticeRule['content'], 'required' 
 
 const NUMBER_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten']
 export const countWord = (count: number) => NUMBER_WORDS[count] ?? String(count)
+
+/* ------------------------------------------------------- patients workspace */
+
+/** What a Patients row is about. Lamina is a general physician-agent product: today the
+ * pilot only has received referrals, but the same workspace is meant to carry sent
+ * referrals, follow-up responsibilities, and longitudinal patients once those exist.
+ * Only kinds the backend actually produces are listed — nothing here is invented. */
+export type PatientWorkKind = 'received_referral'
+
+/** One patient-related work item. It is an EPISODE of work (e.g. one referral), never a
+ * patient identity: the pilot backend stores patient details per referral and has no
+ * patient record to link episodes to, so rows are never merged by name (two different
+ * people can share one) and never presented as a longitudinal chart. */
+export type PatientWorkItem = {
+  key: string; kind: PatientWorkKind; path: string
+  /** As recorded on this episode only. */
+  patient: { name: string; initials: string }
+  episode: { title: string; summary: string; source: string; at: string }
+  status: { label: string; tone: 'copper' | 'slate' | 'quiet' | 'success' }
+  nextStep: string; flag: string
+  /** Active work vs. previous care (the demo Patients page's two sections). */
+  active: boolean; urgency: number; searchText: string
+}
+
+export const PATIENT_WORK_KIND_LABELS: Record<PatientWorkKind, string> = { received_referral: 'Received referral' }
+
+/** A received referral as a Patients work item. Status, fit, readiness, missing
+ * information, and the next action all come straight from the referral summary. */
+export function receivedReferralWorkItem(item: ReferralSummary): PatientWorkItem {
+  const closed = isClosed(item.status)
+  return {
+    key: `received_referral:${item.id}`, kind: 'received_referral', path: pilotPaths.referral(item.id),
+    patient: { name: item.patient_name, initials: patientInitials(item.patient_name) },
+    episode: {
+      title: item.referral_type,
+      summary: triageHeadline(item),
+      source: `From ${item.sender_name}${item.sender_practice ? `, ${item.sender_practice}` : ''}`,
+      at: item.received_at,
+    },
+    status: { label: STATUS_LABELS[item.status], tone: statusTone(item.status) },
+    nextStep: referralNextStep(item),
+    flag: item.escalated ? 'Flagged for physician' : item.priority === 'urgent' ? 'Urgent' : '',
+    active: !closed,
+    // Needs-review work before waiting-on-others; urgent first within each.
+    urgency: (item.status === 'needs_information' ? 3 : 0) + (item.priority === 'urgent' ? 0 : item.priority === 'soon' ? 1 : 2),
+    searchText: `${item.patient_name} ${item.referral_type} ${item.sender_name} ${item.sender_practice ?? ''}`.toLowerCase(),
+  }
+}
+
+/** Splits work items into the demo's "Active patients" / "Previous care" sections. */
+export function patientWorkSections(items: PatientWorkItem[], query = ''): { active: PatientWorkItem[]; previous: PatientWorkItem[] } {
+  const q = query.trim().toLowerCase()
+  const visible = q ? items.filter((item) => item.searchText.includes(q)) : items
+  const newestFirst = (a: PatientWorkItem, b: PatientWorkItem) => b.episode.at.localeCompare(a.episode.at)
+  return {
+    active: visible.filter((item) => item.active).sort((a, b) => a.urgency - b.urgency || newestFirst(a, b)),
+    previous: visible.filter((item) => !item.active).sort(newestFirst),
+  }
+}
+
+/** Network: the clinicians who have actually referred to this practice, derived only
+ * from received referrals. These are real referral relationships — NOT Lamina network
+ * connections, and nothing here claims the clinician is on Lamina. Grouped by the
+ * sender name + practice exactly as entered (no fuzzy merging). */
+export type ReferringClinician = { key: string; name: string; practice: string | null; initials: string; count: number; lastAt: string }
+export function referringClinicians(items: Pick<ReferralSummary, 'sender_name' | 'sender_practice' | 'received_at'>[]): ReferringClinician[] {
+  const byKey = new Map<string, ReferringClinician>()
+  for (const item of items) {
+    const name = item.sender_name.trim()
+    if (!name) continue
+    const key = `${name.toLowerCase()}|${(item.sender_practice ?? '').trim().toLowerCase()}`
+    const existing = byKey.get(key)
+    if (existing) {
+      existing.count += 1
+      if (item.received_at > existing.lastAt) existing.lastAt = item.received_at
+    } else {
+      byKey.set(key, { key, name, practice: item.sender_practice?.trim() || null, initials: patientInitials(name.replace(/^dr\.?\s+/i, '')), count: 1, lastAt: item.received_at })
+    }
+  }
+  return [...byKey.values()].sort((a, b) => b.count - a.count || b.lastAt.localeCompare(a.lastAt))
+}
