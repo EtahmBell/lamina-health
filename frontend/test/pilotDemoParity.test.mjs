@@ -54,8 +54,10 @@ test('Network uses the demo page structure and shows no fictional colleagues or 
 test('physician-only destinations and controls are hidden for staff, never shown disabled', () => {
   const shell = slice(pilot, 'function PilotShell', '/* ------------------------------------------------------------------ home')
   assert.match(shell, /\.\.\.\(physician \? \[\{ label: 'Public physician profile'/)
-  assert.match(pilot, /agentDock=\{status\.role === 'physician'\}/, 'teaching dock is physician-only')
-  assert.match(pilot, /\{physician && <TeachDock/)
+  // Step 15: the conversational agent is for every member; teaching stays physician-only
+  // server-side, and the dock only offers the teaching prompt to physicians.
+  assert.match(pilot, /section="home" agentDock>/)
+  assert.match(pilot, /suggestions=\{physician\s*\? \[[^\]]*eConsult/)
   assert.match(pilot, /physician && canUse\(actions, 'accept'\)/)
   const profile = slice(pilot, 'function ProfilePage')
   assert.match(profile, /\{physician && !editing && <button className="button-primary" onClick=\{\(\) => setEditing\(true\)\}>Edit practice/)

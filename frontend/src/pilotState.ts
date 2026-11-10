@@ -451,3 +451,31 @@ export function referringClinicians(items: Pick<ReferralSummary, 'sender_name' |
   }
   return [...byKey.values()].sort((a, b) => b.count - a.count || b.lastAt.localeCompare(a.lastAt))
 }
+
+/* ------------------------------------------------------------ agent handoffs */
+
+/** A referral intake the agent prefilled, handed to the New referral form. Held in
+ * module memory for one navigation only (never browser storage); the form takes it once. */
+let referralPrefill: Partial<ReferralForm> | null = null
+export function setReferralPrefill(draft: Partial<Record<'patient_name' | 'patient_dob' | 'referral_type' | 'reason' | 'sender_name' | 'sender_practice', string>>): void {
+  referralPrefill = {
+    ...(draft.patient_name ? { patientName: draft.patient_name } : {}),
+    ...(draft.patient_dob && /^\d{4}-\d{2}-\d{2}$/.test(draft.patient_dob) ? { patientDob: draft.patient_dob } : {}),
+    ...(draft.referral_type ? { referralType: draft.referral_type } : {}),
+    ...(draft.reason ? { reason: draft.reason } : {}),
+    ...(draft.sender_name ? { senderName: draft.sender_name } : {}),
+    ...(draft.sender_practice ? { senderPractice: draft.sender_practice } : {}),
+  }
+}
+export function takeReferralPrefill(): Partial<ReferralForm> | null {
+  const value = referralPrefill
+  referralPrefill = null
+  return value
+}
+
+/** Stored conversation messages → the dock's message shape (no client-side reinterpretation). */
+export function dockMessagesFrom(messages: Array<{ id: string; role: 'user' | 'agent'; text: string; reply: { paragraphs: string[]; bullets?: string[]; cards?: Array<{ label: string; detail: string; action: string; path?: string | null; execute?: unknown }> } | null }>) {
+  return messages.map((message) => message.role === 'user'
+    ? { id: message.id, role: 'physician' as const, text: message.text }
+    : { id: message.id, role: 'agent' as const, reply: message.reply ?? { paragraphs: [message.text] } })
+}

@@ -48,7 +48,8 @@ test('Home shows the four agent-first sections from the server projection only',
   const home = slice(pilot, 'function PilotHomePage', '/* ------------------------------------------------------------- referrals')
   for (const title of ['Needs you', 'Prepared for you', 'Waiting on others', 'While you were away']) assert.ok(home.includes(title), title)
   assert.match(home, /getHome\(\)/)
-  assert.match(home, /Teach your agent/)
+  assert.match(home, /<PracticeAgentDock status=\{status\} navigate=\{navigate\} \/>/)
+  assert.match(home, /teach me how you like to work/)
 })
 
 test('teaching shows the interpretation and offers confirm, edit, reject, and clarification', () => {

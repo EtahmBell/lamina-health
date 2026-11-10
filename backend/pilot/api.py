@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.auth import AuthenticatedUser, require_authenticated_user
 
+from .assistant import AssistantService, history_days
 from .documents import MAX_DOCUMENT_BYTES
 from .home import HomeService
 from .intake import IntakeService
@@ -57,11 +58,12 @@ class PilotServices:
     learning: LearningService
     publication: PublicationService
     home: HomeService
+    assistant: AssistantService
 
     @classmethod
     def build(
         cls, store: PilotStore, intake: IntakeService | None = None, mailer: MailSender | None = None,
-        teaching_client: object | None = None,
+        teaching_client: object | None = None, assistant_client: object | None = None,
     ) -> PilotServices:
         intake = intake or IntakeService(store)
         rules = PracticeRules(store)
@@ -71,6 +73,7 @@ class PilotServices:
         learning = LearningService(store, rules, teaching)
         publication = PublicationService(store, rules)
         home = HomeService(store, intake, missing, rules, learning)
+        assistant = AssistantService(store, intake, missing, rules, teaching, home, assistant_client)
         # Wire the workflow: drafts go through the persistent request entity; every
         # re-triage reconciles open requests; human corrections feed pattern detection.
         intake.request_projection = missing
@@ -82,7 +85,7 @@ class PilotServices:
             "sender_responses": sender.responses(context.practice_id, referral_id),
         })
         return cls(store, PracticeService(store), rules, intake, missing, sender, teaching, learning,
-                   publication, home)
+                   publication, home, assistant)
 
 
 _default: dict[str, PilotServices] = {}
@@ -410,6 +413,34 @@ def resolve_information_request(request_id: str, context: Practice, services: Se
 @router.get("/home")
 def home(context: Practice, services: Services) -> dict:
     return services.home.projection(context)
+
+
+# --------------------------------------------------------------- assistant
+
+
+class AssistantInput(_Strict):
+    text: str = Field(min_length=1, max_length=2000)
+    # Optional page context ("this patient"). Resolved only against the caller's own
+    # practice; an id from another practice is simply ignored.
+    referral_id: str | None = Field(default=None, max_length=80)
+
+
+@router.get("/assistant")
+def assistant_history(context: Practice, services: Services) -> dict:
+    """The signed-in user's own conversation in this practice (never another member's)."""
+    return {"messages": services.assistant.history(context), "retention_days": history_days(),
+            "model_available": services.assistant.model() is not None}
+
+
+@router.post("/assistant/messages", status_code=201)
+def assistant_message(update: AssistantInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.assistant.respond(context, update.text, update.referral_id))
+
+
+@router.delete("/assistant/history", status_code=204)
+def clear_assistant_history(context: Practice, services: Services) -> Response:
+    services.assistant.clear(context)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------- teaching

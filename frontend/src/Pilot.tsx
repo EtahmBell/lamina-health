@@ -7,7 +7,7 @@ import { LaminaMark } from './LaminaMark.tsx'
 import { PhysicianOnboardingPage } from './Onboarding.tsx'
 import { AgentPage, MetricsPage, PublicSettingsPage } from './PilotAgent.tsx'
 import { NetworkPage } from './PilotNetwork.tsx'
-import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavIcon, LaminaShell, NetworkNavIcon, type DockReply, type NavEntry } from './pilotUi.tsx'
+import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavIcon, LaminaShell, NetworkNavIcon, type DockCard, type DockReply, type NavEntry } from './pilotUi.tsx'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
   acceptInvitation, approveTriage, createPractice, createReferral, decideReferral,
@@ -19,12 +19,14 @@ import {
   type ReferralSummary, type RequirementAssessment, getHome, teachAgent, editInformationRequest,
   sendInformationRequest, cancelInformationRequest, resolveInformationRequest,
   type HomeItem, type HomeProjection, type InformationRequest,
+  getAssistant, sendAssistantMessage, type AgentCardExecute, type AgentReplyBody,
 } from './pilotApi.ts'
 import {
   accountIdentity, canUse, countWord, emptyReferralForm, itemLabel, FIT_LABELS, historyLabel, isClosed,
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
   resolvePilotRoute, STATUS_LABELS,
+  dockMessagesFrom, setReferralPrefill, takeReferralPrefill,
   type PatientWorkItem, type ReferralForm,
 } from './pilotState.ts'
 
@@ -54,8 +56,8 @@ export function PilotApp({ path, params, navigate }: { path: string; params: URL
     case 'auth': return route.page === 'sign-in' ? <SignInPage navigate={navigate} params={params} /> : <SignUpPage navigate={navigate} params={params} />
     case 'join': return <JoinPracticePage navigate={navigate} params={params} />
     case 'onboarding':
-    case 'home': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="home" agentDock={status.role === 'physician'}><PilotHomePage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
-    case 'for_you': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="for-you" agentDock={status.role === 'physician'}><ForYouPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'home': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="home" agentDock><PilotHomePage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'for_you': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="for-you" agentDock><ForYouPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'patients': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><PatientsPage navigate={navigate} /></PilotShell>}</PilotGate>
     case 'network': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="network"><NetworkPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'new_referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><NewReferralPage navigate={navigate} /></PilotShell>}</PilotGate>
@@ -259,8 +261,8 @@ function PilotHomePage({ status, navigate }: { status: PilotStatus; navigate: Na
       </section>}
       <AwayLog done={home.done} navigate={navigate} />
     </>}
-    {/* The docked conversation, physician-only (staff can't teach). */}
-    {physician && <TeachDock status={status} navigate={navigate} />}
+    {/* The docked conversation: the practice agent for everyone; teaching stays physician-only server-side. */}
+    <PracticeAgentDock status={status} navigate={navigate} />
   </main>
 }
 
@@ -295,7 +297,7 @@ function ForYouPage({ status, navigate }: { status: PilotStatus; navigate: Navig
         </button>)}</div>
       </section>}
     </>}
-    {status.role === 'physician' && <TeachDock status={status} navigate={navigate} />}
+    <PracticeAgentDock status={status} navigate={navigate} />
   </main>
 }
 
@@ -349,27 +351,39 @@ function AwayLog({ done, navigate }: { done: HomeItem[]; navigate: Navigate }) {
   </section>
 }
 
-/** The physician teaches the agent in the demo's docked conversation. Every message
- * becomes a proposed rule the physician confirms on Your Agent → Teach. */
-function TeachDock({ status, navigate }: { status: PilotStatus; navigate: Navigate }) {
+/** The practice's conversational agent in the demo's docked conversation, for every
+ * member of the practice. It answers, explains, and PREPARES; the backend decides what
+ * each role may do (staff can't teach), and any card that changes state runs an
+ * existing endpoint only when the person clicks it. */
+function PracticeAgentDock({ status, navigate }: { status: PilotStatus; navigate: Navigate }) {
   const { user } = useAuth()
   const me = accountIdentity(status, user?.email)
-  const review = pilotPaths.agentTab('teach')
+  const physician = status.role === 'physician'
+  const toReply = (body: AgentReplyBody | null, text: string): DockReply => body ?? { paragraphs: [text] }
   const onSend = async (text: string): Promise<DockReply> => {
     try {
-      const proposal = await teachAgent(text)
-      const type = proposal.referral_type === 'Unassigned' ? 'this' : proposal.referral_type
-      const link = { label: `${proposal.referral_type === 'Unassigned' ? 'New' : proposal.referral_type} — draft rule`, detail: 'Not active until you confirm', action: 'Review', path: review }
-      if (!proposal.structured) return { paragraphs: ['I couldn’t turn that into a structured rule, so I kept it as a note. You can edit it into a rule.'], link }
-      if (proposal.clarification) return { paragraphs: [`I drafted that, but need one detail first: ${proposal.clarification.question}`], link }
-      return { paragraphs: [`Got it. Here’s what I drafted for ${type} referrals:`], bullets: proposalLines(proposal.content), link }
-    } catch (err) { throw new Error(errorText(err, 'I couldn’t interpret that.')) }
+      const { reply } = await sendAssistantMessage(text)
+      return toReply(reply.reply, reply.text)
+    } catch (err) { throw new Error(errorText(err, 'I couldn’t take that in just now. Try again in a moment.')) }
+  }
+  // Only ever runs on a human click on a card; each branch is an existing endpoint.
+  const onCard = async (card: DockCard) => {
+    const action = card.execute as AgentCardExecute | undefined
+    if (!action) return
+    try {
+      if (action.type === 'create_information_request') { await requestInformation(action.referral_id, action.items, ''); navigate(pilotPaths.referral(action.referral_id)) }
+      else if (action.type === 'escalate') { await escalateReferral(action.referral_id, ''); navigate(pilotPaths.referral(action.referral_id)) }
+      else if (action.type === 'open_referral_draft') { setReferralPrefill(action.draft); navigate(pilotPaths.newReferral) }
+    } catch (err) { throw new Error(errorText(err, 'That didn’t work. Open the referral to try again.')) }
   }
   return <AgentDock
-    title="Teach your agent" subtitle={`${status.practice?.name ?? 'Your practice'} · drafts rules you confirm`}
-    greeting={`Hi${me.firstName ? ` ${me.firstName}` : ''}. Tell me how you like to work — what fits your practice, what’s outside your scope, what you need before you review. I’ll draft a rule for you to confirm.`}
-    suggestions={['I need recent labs and a current medication list before I review a referral.', 'Pediatric patients are outside my scope.', 'I prefer eConsult for stable medication questions.']}
-    placeholder="Teach your agent…" onSend={onSend} navigate={navigate} />
+    title="Your agent" subtitle={`${status.practice?.name ?? 'Your practice'} · prepares, you decide`}
+    greeting={`Hi${me.firstName ? ` ${me.firstName}` : ''}. Ask me what needs attention, why I recommended something, or to prepare a request or referral draft.${physician ? ' You can also teach me how you like to work; I’ll draft it for you to confirm.' : ''}`}
+    suggestions={physician
+      ? ['What needs my attention today?', 'Which referrals are waiting on information?', 'I prefer eConsult for stable medication questions.']
+      : ['What needs attention today?', 'Which referrals are waiting on information?', 'What can you help with?']}
+    placeholder="Ask or teach your agent…" onSend={onSend} navigate={navigate} onCard={onCard}
+    loadHistory={() => getAssistant().then((data) => dockMessagesFrom(data.messages))} />
 }
 
 /* ------------------------------------------------------------- referrals */
@@ -420,7 +434,8 @@ function PatientsPage({ navigate }: { navigate: Navigate }) {
 }
 
 function NewReferralPage({ navigate }: { navigate: Navigate }) {
-  const [form, setForm] = useState<ReferralForm>(emptyReferralForm)
+  // An agent-prepared draft (if any) prefills the form once; nothing is saved until submit.
+  const [form, setForm] = useState<ReferralForm>(() => ({ ...emptyReferralForm(), ...(takeReferralPrefill() ?? {}) }))
   const [file, setFile] = useState<File | null>(null)
   const [rules, setRules] = useState<PracticeRule[]>([])
   const [errors, setErrors] = useState<string[]>([])

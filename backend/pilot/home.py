@@ -45,19 +45,21 @@ class HomeService:
                  rules: PracticeRules, learning: LearningService) -> None:
         self.store, self.intake, self.missing, self.rules, self.learning = store, intake, missing, rules, learning
 
-    def _since(self, context: PracticeContext) -> str:
+    def _since(self, context: PracticeContext, record_view: bool = True) -> str:
         views = [e for e in self.store.events(practice_id=context.practice_id, event_type="home_viewed", actor=context.actor)]
         now = datetime.now(UTC)
         last = datetime.fromisoformat(views[-1]["created_at"]) if views else now - AWAY_DEFAULT
-        if not views or now - last >= HOME_VIEW_DEDUPE:
+        if record_view and (not views or now - last >= HOME_VIEW_DEDUPE):
             self.store.append_event("home_viewed", actor=context.actor, practice_id=context.practice_id)
         since = max(last, now - AWAY_MAX) if views else now - AWAY_DEFAULT
         # A just-refreshed page still shows the last day's activity.
         return min(since, now - timedelta(hours=1)).isoformat(timespec="seconds")
 
-    def projection(self, context: PracticeContext) -> dict:
+    def projection(self, context: PracticeContext, record_view: bool = True) -> dict:
+        """record_view=False is the read-only variant (the agent's pending-work tool): it
+        neither records a home view nor marks today's learning question as shown."""
         physician = context.role == "physician"
-        since = self._since(context)
+        since = self._since(context, record_view)
         needs, waiting, prepared, done = [], [], [], []
         summaries = {item["id"]: item for item in self.intake.list(context)}
         names = {rid: item["patient_name"] for rid, item in summaries.items()}
@@ -100,7 +102,7 @@ class HomeService:
                                           + (" · partial response received" if request["status"] == "partially_resolved" else "")})
         needs.extend(self._document_confirmations(context, summaries))
         if physician:
-            question = self.learning.question_for_today(context.practice_id, mark_shown=True, actor="agent:learning")
+            question = self.learning.question_for_today(context.practice_id, mark_shown=record_view, actor="agent:learning")
             if question:
                 needs.append({"kind": "learning_question", "rank": 4, "question_id": question["id"],
                               "proposal_id": question["proposal_id"], "title": question["question"],

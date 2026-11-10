@@ -125,22 +125,30 @@ export function AccountMenu({ initials, name, items }: { initials: string; name:
 
 /* ----------------------------------------------------------- docked agent */
 
-export type DockReply = { paragraphs: string[]; bullets?: string[]; link?: { label: string; detail: string; action: string; path: string } }
+/** A structured card under an agent reply (the demo's agent-msg-card). `execute` is an
+ * opaque instruction the page's own handler carries out when the HUMAN clicks; the dock
+ * itself never acts on it. */
+export type DockCard = { label: string; detail: string; action: string; path?: string | null; execute?: unknown }
+export type DockReply = { paragraphs: string[]; bullets?: string[]; link?: { label: string; detail: string; action: string; path: string }; cards?: DockCard[] }
 export type DockMessage = { id: string; role: 'physician' | 'agent'; text?: string; reply?: DockReply; pending?: boolean }
+type CardState = 'busy' | 'done' | { error: string }
 
 const DOCK_WIDE_QUERY = '(min-width: 1101px)'
 
 /** The demo's docked agent conversation (Home / For you), wired to a real handler.
- * Open by default on wide screens, a floating pill otherwise; state lives in memory only. */
-export function AgentDock({ title, subtitle, greeting, suggestions, placeholder, onSend, navigate }: {
+ * Open by default on wide screens, a floating pill otherwise. The conversation itself is
+ * persisted server-side (loadHistory); nothing is kept in browser storage. */
+export function AgentDock({ title, subtitle, greeting, suggestions, placeholder, onSend, navigate, loadHistory, onCard }: {
   title: string; subtitle: string; greeting: string; suggestions: string[]; placeholder: string
   onSend: (text: string) => Promise<DockReply>; navigate: Navigate
+  loadHistory?: () => Promise<DockMessage[]>; onCard?: (card: DockCard) => Promise<void>
 }) {
   const [open, setOpenState] = useState(() => window.matchMedia?.(DOCK_WIDE_QUERY).matches ?? true)
   const [messages, setMessages] = useState<DockMessage[]>([{ id: 'hello', role: 'agent', reply: { paragraphs: [greeting] } }])
   const [sent, setSent] = useState(false)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  const [cards, setCards] = useState<Record<string, CardState>>({})
   const bodyRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const setOpen = (next: boolean, focus = false) => {
@@ -151,6 +159,16 @@ export function AgentDock({ title, subtitle, greeting, suggestions, placeholder,
     document.body.classList.toggle('agent-dock-open', open)
     return () => document.body.classList.remove('agent-dock-open')
   }, [open])
+  useEffect(() => {
+    if (!loadHistory) return
+    let live = true
+    loadHistory().then((history) => {
+      if (!live || !history.length) return
+      setMessages((prev) => [prev[0], ...history, ...prev.slice(1)])
+      setSent(true)
+    }).catch(() => undefined)
+    return () => { live = false }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const body = bodyRef.current; if (body) body.scrollTop = body.scrollHeight }, [messages, open])
 
   const send = async (text: string) => {
@@ -165,6 +183,12 @@ export function AgentDock({ title, subtitle, greeting, suggestions, placeholder,
     setBusy(false)
   }
   const submit = (event: FormEvent) => { event.preventDefault(); void send(input) }
+  const runCard = async (key: string, card: DockCard) => {
+    if (!card.execute || !onCard) { if (card.path) navigate(card.path); return }
+    setCards((prev) => ({ ...prev, [key]: 'busy' }))
+    try { await onCard(card); setCards((prev) => ({ ...prev, [key]: 'done' })) }
+    catch (err) { setCards((prev) => ({ ...prev, [key]: { error: err instanceof Error && err.message ? err.message : 'That didn’t work. Try from the referral.' } })) }
+  }
 
   if (!open) return <aside className="agent-dock collapsed" aria-label={title}>
     <button className="agent-dock-rail" onClick={() => setOpen(true, true)} aria-label={`Open ${title.toLowerCase()}`} aria-expanded={false}><AgentOrb /><span>{title}</span></button>
@@ -185,8 +209,18 @@ export function AgentDock({ title, subtitle, greeting, suggestions, placeholder,
           ? <div className="agent-typing" role="status" aria-label="Your agent is responding"><i /><i /><i /></div>
           : <div className="agent-msg-body">
             {message.reply?.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
-            {message.reply?.bullets && <ul>{message.reply.bullets.map((bullet, index) => <li key={index}>{bullet}</li>)}</ul>}
+            {message.reply?.bullets && message.reply.bullets.length > 0 && <ul>{message.reply.bullets.map((bullet, index) => <li key={index}>{bullet}</li>)}</ul>}
             {message.reply?.link && <div className="agent-msg-card"><div><strong>{message.reply.link.label}</strong><span>{message.reply.link.detail}</span></div><button className="agent-btn primary" onClick={() => navigate(message.reply!.link!.path)}>{message.reply.link.action}</button></div>}
+            {message.reply?.cards?.map((card, index) => {
+              const key = `${message.id}:${index}`
+              const state = cards[key]
+              return <div key={key} className="agent-msg-card">
+                <div><strong>{card.label}</strong><span>{typeof state === 'object' ? state.error : state === 'done' ? 'Done' : card.detail}</span></div>
+                {state === 'done'
+                  ? (card.path ? <button className="agent-btn" onClick={() => navigate(card.path!)}>Open</button> : null)
+                  : <button className={`agent-btn ${card.execute ? 'primary' : ''}`} disabled={state === 'busy'} onClick={() => void runCard(key, card)}>{state === 'busy' ? 'Working…' : card.action}</button>}
+              </div>
+            })}
           </div>}
       </div>)}</div>
     {!sent && suggestions.length > 0 && <div className="agent-dock-suggest">{suggestions.map((prompt) => <button key={prompt} onClick={() => void send(prompt)}>{prompt}</button>)}</div>}

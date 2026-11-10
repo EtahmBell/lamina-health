@@ -267,6 +267,29 @@ export type MetricSection = 'usage' | 'referral_quality' | 'agent_trust' | 'lear
 export type PilotMetrics = Record<MetricSection, Record<string, unknown>> & { window_start: string | null }
 export const getPilotMetrics = () => apiRequest<{ all_time: PilotMetrics; weekly: { since: string; text: string; metrics: PilotMetrics } }>('/api/me/practice/metrics')
 
+/* ---------------------------------------------------------------- assistant */
+/* The practice's conversational agent. It reads and prepares; any card that changes
+ * state names an existing endpoint the human triggers by clicking. */
+
+export type AgentReferralDraft = Partial<Record<'patient_name' | 'patient_dob' | 'referral_type' | 'reason' | 'sender_name' | 'sender_practice', string>>
+export type AgentCardExecute =
+  | { type: 'create_information_request'; referral_id: string; items: string[] }
+  | { type: 'escalate'; referral_id: string }
+  | { type: 'open_referral_draft'; draft: AgentReferralDraft }
+export type AgentCard = {
+  kind: 'link' | 'proposal' | 'information_request' | 'physician_review' | 'referral_draft'
+  label: string; detail: string; action: string; path?: string | null; proposal_id?: string; execute?: AgentCardExecute
+}
+export type AgentReplyBody = { paragraphs: string[]; bullets?: string[]; cards?: AgentCard[] }
+export type AgentMessage = {
+  id: string; role: 'user' | 'agent'; text: string; intent: string | null; reply: AgentReplyBody | null
+  interpreter: string | null; focus_referral_id: string | null; created_at: string
+}
+export const getAssistant = () => apiRequest<{ messages: AgentMessage[]; retention_days: number; model_available: boolean }>('/api/me/practice/assistant')
+export const sendAssistantMessage = (text: string, referralId?: string | null) =>
+  apiRequest<{ user_message: AgentMessage; reply: AgentMessage }>('/api/me/practice/assistant/messages', json({ text, referral_id: referralId ?? null }))
+export const clearAssistantHistory = () => apiRequest<void>('/api/me/practice/assistant/history', { method: 'DELETE' })
+
 /* ------------------------------------------------- public (no account needed) */
 
 export type PublicAnswer = { answer: string; category: string; in_scope: boolean; suggest_referral: boolean; fit: string | null; disclaimer: string }
