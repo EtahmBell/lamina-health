@@ -3102,22 +3102,11 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .pilot-form textarea, .pilot-form select, .pilot-panel textarea, .pilot-panel select, .pilot-panel input, .pilot-inline-form input { width: 100%; border: 1px solid var(--border); border-radius: 9px; background: #fffdf9; padding: 10px 12px; color: var(--text-primary); font: inherit; font-size: .76rem; }
 .pilot-form select { height: 44px; }
 .pilot-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.pilot-briefing { display: flex; gap: 18px; align-items: flex-start; border: 1px solid var(--border); border-radius: 16px; background: var(--mineral-surface); padding: 22px 24px; }
-.pilot-briefing h1 { margin: 2px 0 6px; font-family: var(--font-display); font-size: 1.7rem; font-weight: 500; }
-.pilot-briefing p { margin: 4px 0; }
-.pilot-briefing-mark { flex: 0 0 auto; }
-.pilot-callout { margin-top: 16px; border: 1px dashed var(--mineral-subtle); border-radius: 14px; padding: 18px 20px; background: var(--surface); }
-.pilot-callout h2 { margin: 0 0 6px; font-size: 1rem; }
-.pilot-referral-row .lam-row-main { display: grid; gap: 3px; }
-.pilot-type { margin-left: 8px; color: var(--text-secondary); font-weight: 500; font-size: .66rem; }
-.pilot-row-meta { color: var(--text-secondary); font-size: .64rem; }
 .pilot-status-pill { flex: 0 0 auto; border-radius: 999px; padding: 4px 10px; font-size: .62rem; font-weight: 600; background: var(--slate-surface); color: var(--slate); white-space: nowrap; }
 .pilot-status-pill.status-triaged, .pilot-status-pill.status-received { background: var(--mineral-surface); color: var(--mineral-deep); }
 .pilot-status-pill.status-needs_information { background: #f6ecdf; color: var(--warning); }
 .pilot-status-pill.status-ready_for_review { background: #e6efe9; color: var(--success); }
 .pilot-status-pill.status-declined, .pilot-status-pill.status-redirected { background: #f4e7e5; color: var(--danger); }
-.pilot-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
-.pilot-detail-head p { margin: 2px 0; color: var(--text-secondary); font-size: .74rem; }
 .pilot-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 16px; align-items: start; }
 .pilot-facts { display: grid; gap: 10px; margin: 0; }
 .pilot-facts div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; }
@@ -3126,7 +3115,7 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .pilot-pre { white-space: pre-wrap; }
 .pilot-triage-head { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
 .pilot-triage-head h2 { margin: 0; }
-.pilot-requirements, .pilot-documents, .pilot-members { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pilot-requirements, .pilot-documents { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .pilot-requirement { display: flex; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; flex-wrap: wrap; }
 .pilot-requirement.state-missing { border-left: 3px solid var(--warning); }
 .pilot-requirement.state-proposed_from_document { border-left: 3px solid var(--mineral); }
@@ -3147,48 +3136,26 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .pilot-check input { width: auto; }
 .pilot-decision { margin: 10px 0 0; font-size: .7rem; color: var(--mineral-deep); }
 .pilot-disposition { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 4px; }
-.pilot-draft p { margin: 0; font-size: .74rem; }
 .pilot-upload { display: grid; gap: 4px; margin-top: 12px; font-size: .66rem; color: var(--text-secondary); }
-.pilot-documents li, .pilot-members li { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.pilot-documents li { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
 .pilot-link { display: block; overflow-wrap: anywhere; font-size: .66rem; background: var(--slate-surface); border-radius: 8px; padding: 8px 10px; }
-.pilot-history summary { cursor: pointer; font-weight: 600; font-size: .76rem; }
-.pilot-history ul { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: .7rem; }
-.pilot-history span { color: var(--text-secondary); margin-right: 6px; }
-.pilot-history small { color: var(--text-secondary); }
-.pilot-user { color: var(--text-secondary); font-size: .66rem; }
 .pilot-search-results .lam-row { min-height: 70px; }
 @media (max-width: 900px) {
   .pilot-detail-grid, .pilot-form-row { grid-template-columns: 1fr; }
   .pilot-facts div { grid-template-columns: 1fr; gap: 2px; }
-  .pilot-section-head, .pilot-detail-head { flex-direction: column; }
+  .pilot-section-head { flex-direction: column; }
 }
 
 /* ------------------------------------------------- Pilot agent layer + public surfaces */
-.pilot-home-section { margin-top: 22px; }
-.pilot-home-section h2 { margin: 0 0 10px; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); }
-.pilot-home-row { min-height: 64px; }
-.pilot-home-row .lam-row-main { display: grid; gap: 3px; }
-.pilot-home-row .lam-row-main span { color: var(--text-secondary); font-size: .68rem; }
-.pilot-home-dot { flex: 0 0 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--mineral-subtle); }
-.pilot-home-dot.kind-ready_for_review, .pilot-home-dot.kind-learning_question, .pilot-home-dot.kind-proposed_learning { background: var(--mineral-deep); }
-.pilot-home-dot.kind-triage_uncertain, .pilot-home-dot.kind-confirm_evidence { background: var(--warning); }
-.pilot-home-dot.kind-waiting_sender, .pilot-home-dot.kind-waiting_physician { background: var(--slate); }
-.pilot-home-dot.kind-draft_request { background: var(--mineral); }
-.pilot-teach-inline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; margin-top: 22px; }
-.pilot-teach-inline label { display: grid; gap: 6px; }
-.pilot-teach-inline input { height: 42px; border: 1px solid var(--border); border-radius: 9px; padding: 0 12px; font: inherit; font-size: .76rem; background: #fffdf9; }
-.pilot-teach-inline p { grid-column: 1 / -1; margin: 0; }
 .pilot-subhead { margin: 26px 0 10px; font-size: 1rem; }
 .pilot-quote { font-family: var(--font-display); font-size: 1.05rem; margin: 0 0 8px; }
 .pilot-proposal-body ul { margin: 6px 0; padding-left: 18px; font-size: .74rem; display: grid; gap: 4px; }
 .pilot-question { border-left: 3px solid var(--mineral-deep); }
-.pilot-question h2 { font-size: 1rem; line-height: 1.35; }
 .pilot-message { white-space: pre-wrap; font: inherit; font-size: .72rem; margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; max-height: 260px; overflow: auto; }
 .pilot-request.status-draft { border-left: 3px solid var(--mineral); }
 .pilot-request .pilot-section-head { margin: 0; }
 .pilot-status-pill.request-sent, .pilot-status-pill.request-partially_resolved { background: #f6ecdf; color: var(--warning); }
 .pilot-status-pill.request-resolved { background: #e6efe9; color: var(--success); }
-.pilot-weekly { font-family: var(--font-display); font-size: 1.15rem; line-height: 1.45; margin: 4px 0; }
 .pilot-public-preview { max-height: 80vh; overflow: auto; }
 /* The preview sits in a half-width card: stack the public layout when it is narrow. */
 .pilot-public-preview { container-type: inline-size; }
@@ -3201,7 +3168,7 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .public-main { max-width: 1040px; margin: 0 auto; padding: 28px 20px 48px; }
 .public-footer { max-width: 1040px; margin: 0 auto; padding: 0 20px 32px; color: var(--text-secondary); font-size: .64rem; }
 .public-hero { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 18px; }
-.public-hero h1, .public-title { margin: 2px 0 6px; font-family: var(--font-display); font-size: 2.1rem; font-weight: 500; }
+.public-hero h1, .public-title { margin: 2px 0 6px; font-family: var(--font-display); font-size: 2.1rem; font-weight: 400; }
 .public-intro { max-width: 620px; color: var(--text-secondary); }
 .public-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; }
 .public-type + .public-type { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
@@ -3215,5 +3182,69 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 @media (max-width: 900px) {
   .public-grid { grid-template-columns: 1fr; }
   .public-hero { flex-direction: column; }
-  .pilot-teach-inline { grid-template-columns: 1fr; }
+}
+
+/* ------------------------------------------------- Pilot × demo parity (Step 14)
+ * The pilot renders the demo's own components and classes; these few rules only
+ * adapt pilot-only content (workflow controls, evidence rows, forms) to that
+ * vocabulary. Every selector is scoped to a pilot-only class, so no demo surface
+ * can change. */
+
+/* Referral detail: evidence rows read like the demo's clinical record, not cards. */
+.pilot-referral-page .pilot-requirements { gap: 0; margin-top: 4px; }
+.pilot-referral-page .pilot-requirement { align-items: flex-start; border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 12px 2px 12px 14px; position: relative; }
+.pilot-referral-page .pilot-requirement::before { content: ""; position: absolute; left: 0; top: 17px; width: 6px; height: 6px; border-radius: 50%; background: var(--mineral-subtle); }
+.pilot-referral-page .pilot-requirement.state-missing::before { background: var(--warning); }
+.pilot-referral-page .pilot-requirement.state-proposed_from_document::before { background: var(--mineral); }
+.pilot-referral-page .pilot-requirement.state-satisfied::before { background: var(--success); }
+.pilot-referral-page .pilot-requirement-main strong { color: var(--clinical); font-family: var(--font-display); font-size: .88rem; font-weight: 500; }
+.pilot-referral-page .pilot-requirement-state { color: var(--text-secondary); font-size: .64rem; font-weight: 600; letter-spacing: .02em; }
+.pilot-referral-page .pilot-requirement .muted-note { font-size: .66rem; }
+.pilot-referral-page .pilot-requirement blockquote { margin-top: 6px; font-family: var(--font-display); font-size: .74rem; }
+.pilot-referral-page .pilot-requirement > .text-button { flex: 0 0 auto; white-space: nowrap; }
+.pilot-referral-page details.pilot-why { border: 0; border-radius: 0; background: none; padding: 20px 0 0; margin-top: 26px; border-top: 1px solid var(--border); }
+.pilot-referral-page details.pilot-why > summary { min-height: 0; margin: 0 0 11px; color: var(--text-secondary); font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.pilot-referral-page details.pilot-why .clinical-list small { margin-left: 4px; }
+.pilot-referral-page details.pilot-why > .muted-note { margin: 10px 0 0; font-size: .62rem; }
+.pilot-referral-page .clinical-block .pilot-pre { margin: 0; color: var(--clinical); font-size: var(--type-body); line-height: 1.6; white-space: pre-wrap; }
+.pilot-referral-page .clinical-block .pilot-documents li { padding: 6px 0; }
+.pilot-referral-page .next-step-card .pilot-actions { margin-top: 18px; }
+.pilot-referral-page .next-step-card .pilot-actions .text-button { margin-top: 0; }
+.pilot-referral-page .next-step-card .pilot-panel { background: var(--surface); }
+.pilot-referral-page .next-step-card .pilot-disposition h3 { margin: 16px 0 0; font-size: 1rem; }
+.pilot-referral-page .patient-next-step > .pilot-panel { margin-top: 14px; }
+.pilot-referral-page .source-record .record-rows li { font-size: var(--type-body); }
+
+/* New referral: the intake form sits at the demo's reading width. */
+.pilot-form-page .pilot-form { max-width: 820px; margin-top: 26px; }
+.pilot-form-page .selector-header p:last-child { max-width: 640px; }
+
+/* My Agent: Teach + Rules tabs in the demo's agent-page rhythm. */
+.pilot-agent-page .agent-overview-v2, .pilot-teach-tab, .pilot-rules-tab { max-width: 760px; }
+.pilot-teach-tab > .page-intro, .pilot-rules-tab .page-intro { margin: 0; max-width: 620px; }
+.pilot-teach-composer { margin: 18px 0 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 16px 18px; }
+.pilot-teach-composer label { display: grid; gap: 8px; }
+.pilot-teach-composer textarea, .pilot-inline-label textarea { width: 100%; border: 1px solid var(--border); border-radius: 9px; background: #fffdf9; padding: 10px 12px; font-size: .78rem; line-height: 1.5; resize: vertical; }
+.pilot-teach-composer .pilot-actions { margin-top: 12px; }
+.pilot-question { margin: 18px 0 6px; }
+.pilot-question-text { margin: 6px 0 6px; font-size: 1.15rem; line-height: 1.4; }
+.pilot-inline-label { display: grid; gap: 6px; margin-top: 10px; font-size: .66rem; color: var(--text-secondary); }
+.pilot-agent-page .pilot-card { border-radius: 12px; }
+.pilot-agent-page .pilot-proposal { margin-top: 12px; }
+.pilot-agent-page .pilot-rules-tab .pilot-section-head { align-items: center; margin-top: 0; }
+.pilot-agent-page .pilot-rule h2 { font-size: 1.15rem; }
+
+/* Profile / metrics / public settings: demo profile sections. */
+.professional-profile-page .profile-section-v2 > .pilot-facts, .pilot-metrics-page .profile-section-v2 > .pilot-facts { margin-top: 12px; max-width: 720px; }
+.professional-profile-page .pilot-form { max-width: 720px; margin-top: 12px; }
+.professional-profile-page .profile-item-row > div > p { margin: 3px 0 0; color: var(--text-secondary); font-size: .7rem; }
+.pilot-metrics-page .pilot-weekly-card, .pilot-public-settings .page-intro { margin: 22px 0 6px; max-width: 760px; }
+.pilot-public-settings .pilot-detail-grid { margin-top: 18px; }
+.public-agent-head .agent-avatar { width: 44px; height: 44px; flex: 0 0 44px; }
+/* Pilot next-step labels are longer than the demo's; on phones let them span the row
+ * instead of widening the avatar column. */
+@media (max-width: 760px) {
+  .pilot-referral-row { grid-template-areas: "avatar main" "status status" "step step" "updated updated"; }
+  .pilot-referral-row .worklist-next-step { white-space: normal; }
+  .pilot-referral-row .worklist-updated { justify-self: start; }
 }

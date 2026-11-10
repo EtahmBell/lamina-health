@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { ApiError } from './api.ts'
-import { LaminaMark } from './LaminaMark.tsx'
+import { AgentAvatar } from './AgentAvatar.tsx'
 import {
   askPublicAgent, getPublicProfile, getSenderStatus, markReferralStarted, respondAsSender, submitPublicReferral, uploadAsSender,
   type PublicAnswer, type PublicSnapshot, type SenderView,
@@ -84,7 +84,7 @@ function PublicAsk({ slug, onStart, canRefer }: { slug: string; onStart: () => v
     } catch (err) { setError(errorMessage(err, 'Could not get an answer right now.')) } finally { setBusy(false) }
   }
   return <section className="pilot-card public-ask">
-    <div className="pilot-triage-head"><LaminaMark active /><div><p className="eyebrow">Ask about this practice</p><h2>Referral questions, answered from what the practice published</h2></div></div>
+    <div className="pilot-triage-head public-agent-head"><AgentAvatar tone="copper" /><div><p className="eyebrow">Ask about this practice</p><h2>Referral questions, answered from what the practice published</h2></div></div>
     <ul className="public-answers">{answers.map((item, index) => <li key={index}>
       <p className="public-q">{item.question}</p><p className="public-a">{item.answer.answer}</p>
       {item.answer.suggest_referral && canRefer && <button className="text-button" onClick={onStart}>Start a referral →</button>}

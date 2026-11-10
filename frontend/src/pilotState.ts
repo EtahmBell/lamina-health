@@ -1,10 +1,11 @@
-import type { Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement } from './pilotApi.ts'
+import type { Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, PilotStatus, PracticeRule, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement } from './pilotApi.ts'
 
 /** Pure presentation + routing helpers for the real practice pilot. Everything here is
  * a projection of backend state; nothing is persisted client-side. */
 
 export const pilotPaths = {
   home: '/me/home',
+  forYou: '/me/for-you',
   onboarding: '/me/onboarding',
   join: '/me/join',
   referrals: '/me/referrals',
@@ -13,6 +14,7 @@ export const pilotPaths = {
   practice: '/me/practice',
   rules: '/me/rules',
   agent: '/me/agent',
+  agentTab: (tab: AgentTab) => (tab === 'overview' ? '/me/agent' : tab === 'rules' ? '/me/rules' : `/me/agent?tab=${tab}`),
   publicProfile: '/me/public',
   metrics: '/me/metrics',
   publicPage: (slug: string) => `/p/${encodeURIComponent(slug)}`,
@@ -21,7 +23,7 @@ export const pilotPaths = {
 } as const
 
 export type PilotRoute =
-  | { kind: 'home' } | { kind: 'onboarding' } | { kind: 'join' }
+  | { kind: 'home' } | { kind: 'for_you' } | { kind: 'onboarding' } | { kind: 'join' }
   | { kind: 'referrals' } | { kind: 'new_referral' } | { kind: 'referral'; id: string }
   | { kind: 'practice' } | { kind: 'rules' } | { kind: 'agent' } | { kind: 'public_settings' } | { kind: 'metrics' }
   | { kind: 'public_profile'; slug: string } | { kind: 'public_refer'; slug: string } | { kind: 'sender'; token: string }
@@ -33,6 +35,7 @@ export type PilotRoute =
 export function resolvePilotRoute(path: string): PilotRoute {
   const clean = path.replace(/\/+$/, '') || '/'
   if (clean === '/me' || clean === '/me/home') return { kind: 'home' }
+  if (clean === '/me/for-you') return { kind: 'for_you' }
   if (clean === '/me/onboarding') return { kind: 'onboarding' }
   if (clean === '/me/join') return { kind: 'join' }
   if (clean === '/me/referrals') return { kind: 'referrals' }
@@ -239,3 +242,125 @@ export function itemLabel(key: string, detail: Pick<ReferralDetail, 'recommendat
   const words = key.replace(/_/g, ' ').trim()
   return words ? words[0].toUpperCase() + words.slice(1) : key
 }
+
+/* --------------------------------------------------- demo-parity presentation */
+
+/** My Agent sections, in the demo's tab order (Overview first). Rules live under the
+ * agent because they ARE the agent's confirmed representation of the practice. */
+export const AGENT_TABS = ['overview', 'teach', 'rules'] as const
+export type AgentTab = typeof AGENT_TABS[number]
+export const resolveAgentTab = (value: string | null | undefined): AgentTab =>
+  value && (AGENT_TABS as readonly string[]).includes(value) ? (value as AgentTab) : 'overview'
+
+const titleCase = (value: string) => value.toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (_, lead: string, char: string) => lead + char.toUpperCase())
+
+/** Who the shell greets and shows in the account pill — only from the server-confirmed
+ * physician profile. Staff have no confirmed profile, so they are greeted without a name. */
+export function accountIdentity(status: Pick<PilotStatus, 'role' | 'physician_onboarding'>, email?: string | null): { name: string; firstName: string | null; initials: string; role: string } {
+  const identity = status.physician_onboarding?.confirmed_identity?.identity
+  if (status.role === 'physician' && identity) {
+    const first = identity.first_name ? titleCase(identity.first_name) : null
+    const last = identity.last_name ? titleCase(identity.last_name) : null
+    const name = first && last ? `Dr. ${first} ${last}` : identity.display_name
+    const initials = (first && last ? `${first[0]}${last[0]}` : name.replace(/^Dr\.?\s+/i, '').split(/\s+/).map((part) => part[0] ?? '').join('').slice(0, 2)).toUpperCase()
+    return { name, firstName: first, initials, role: 'Physician' }
+  }
+  const local = (email ?? '').split('@')[0] ?? ''
+  return { name: status.role === 'physician' ? 'Physician' : 'Practice staff', firstName: null, initials: (local.slice(0, 2) || 'ST').toUpperCase(), role: status.role === 'physician' ? 'Physician' : 'Staff' }
+}
+
+export const patientInitials = (name: string) => name.trim().split(/\s+/).map((part) => part[0] ?? '').join('').slice(0, 2).toUpperCase() || '·'
+
+/** The demo worklist's status-chip tones, applied to real intake status. */
+export function statusTone(status: IntakeStatus): 'copper' | 'slate' | 'quiet' | 'success' {
+  if (status === 'accepted') return 'success'
+  if (status === 'redirected' || status === 'declined') return 'quiet'
+  if (status === 'needs_information') return 'slate'
+  return 'copper'
+}
+
+/** The demo Patients page groups by care state ("Active patients" / "Previous care"); the
+ * pilot list groups by intake state. Each referral lands in exactly one group. */
+export function referralGroups(items: ReferralSummary[]): { review: ReferralSummary[]; waiting: ReferralSummary[]; closed: ReferralSummary[] } {
+  const groups = { review: [] as ReferralSummary[], waiting: [] as ReferralSummary[], closed: [] as ReferralSummary[] }
+  for (const item of items) {
+    if (isClosed(item.status)) groups.closed.push(item)
+    else if (item.status === 'needs_information') groups.waiting.push(item)
+    else groups.review.push(item)
+  }
+  const urgency = (item: ReferralSummary) => (item.priority === 'urgent' ? 0 : item.priority === 'soon' ? 1 : 2)
+  groups.review.sort((a, b) => urgency(a) - urgency(b) || b.received_at.localeCompare(a.received_at))
+  groups.waiting.sort((a, b) => b.received_at.localeCompare(a.received_at))
+  groups.closed.sort((a, b) => b.received_at.localeCompare(a.received_at))
+  return groups
+}
+
+/** The row's "next step" column: what the team does next, or that it's closed. */
+export function referralNextStep(item: Pick<ReferralSummary, 'status' | 'next_step'>): string {
+  if (isClosed(item.status)) return 'View referral'
+  if (item.status === 'needs_information') return 'Waiting on the referring office'
+  if (item.status === 'ready_for_review') return 'Physician decision'
+  return item.next_step ? NEXT_STEP_LABELS[item.next_step] : 'Review triage'
+}
+
+export const matchesReferral = (item: ReferralSummary, query: string) =>
+  `${item.patient_name} ${item.referral_type} ${item.sender_name} ${item.sender_practice ?? ''}`.toLowerCase().includes(query.trim().toLowerCase())
+
+/** "Your agent currently represents your practice as …" — built only from the practice
+ * record and its confirmed rules. Never invents a preference the physician didn't confirm. */
+export function practicePortrait(practice: { name: string; specialty: string | null } | null, rules: Pick<PracticeRule, 'referral_type'>[]): string {
+  const who = practice?.specialty ? `${practice.specialty} practice` : 'Specialty practice'
+  if (!rules.length) return `${who}. No referral rules are confirmed yet, so your agent can record referrals but can’t judge fit or completeness.`
+  const types = [...new Set(rules.map((rule) => rule.referral_type))]
+  const list = types.length <= 3 ? types.join(', ') : `${types.slice(0, 3).join(', ')} and ${types.length - 3} more`
+  return `${who}. Your agent triages ${plural(types.length, 'referral type', 'referral types')} from your confirmed rules: ${list}.`
+}
+
+const HISTORY_LABELS: Record<string, string> = {
+  referral_received: 'Referral received',
+  staff_entered: 'Referral entered by your team',
+  referral_triaged: 'Lamina triaged the referral',
+  recommendation_generated: 'Lamina prepared a triage recommendation',
+  recommendation_accepted: 'Triage approved',
+  recommendation_edited: 'Triage edited',
+  recommendation_rejected: 'Triage rejected',
+  missing_information_detected: 'Missing information detected',
+  document_uploaded: 'Document attached',
+  document_confirmed: 'Document evidence confirmed',
+  document_viewed: 'Document opened',
+  referral_item_recorded: 'Information recorded',
+  referral_escalated: 'Flagged for physician review',
+  information_requested: 'Information requested',
+  missing_information_request_created: 'Information request drafted',
+  missing_information_request_edited: 'Information request edited',
+  missing_information_request_sent: 'Information request sent',
+  missing_information_request_cancelled: 'Information request cancelled',
+  missing_information_resolved: 'Missing information resolved',
+  sender_response_received: 'Referring office replied',
+  referral_became_ready: 'Ready for physician review',
+  referral_status_changed: 'Status changed',
+  referral_accepted: 'Referral accepted',
+  referral_redirected: 'Referral redirected',
+  referral_declined: 'Referral declined',
+}
+/** Readable label for a pilot event type; unknown types fall back to sentence case. */
+export function historyLabel(eventType: string): string {
+  if (HISTORY_LABELS[eventType]) return HISTORY_LABELS[eventType]
+  const words = eventType.replace(/_/g, ' ').trim()
+  return words ? words[0].toUpperCase() + words.slice(1) : eventType
+}
+
+/** What the agent understood from a teaching instruction, as plain lines. */
+export function proposalLines(content: Pick<PracticeRule['content'], 'required' | 'helpful' | 'good_fit' | 'redirect' | 'urgent_signals' | 'modality' | 'modality_notes'>): string[] {
+  const lines: string[] = []
+  if (content.required.length) lines.push(`Require before review: ${content.required.map((item) => item.freshness_days ? `${item.label} (within ${item.freshness_days} days)` : item.label).join(', ')}`)
+  if (content.helpful.length) lines.push(`Helpful: ${content.helpful.map((item) => item.label).join(', ')}`)
+  if (content.good_fit.length) lines.push(`Good fit: ${content.good_fit.join('; ')}`)
+  if (content.redirect.length) lines.push(`Outside your scope: ${content.redirect.join('; ')}`)
+  if (content.urgent_signals.length) lines.push(`Treat as urgent: ${content.urgent_signals.join('; ')}`)
+  if (content.modality !== 'unspecified') lines.push(`Default modality: ${MODALITY_LABELS[content.modality]}${content.modality_notes ? ` — ${content.modality_notes}` : ''}`)
+  return lines
+}
+
+const NUMBER_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten']
+export const countWord = (count: number) => NUMBER_WORDS[count] ?? String(count)
