@@ -13,7 +13,7 @@ fail at startup; they never fall back.
 | Purpose | Synthetic YC/investor demonstration | Real authenticated specialist-practice pilot |
 | Users | Anonymous cookie workspaces (Lucy, Chen, Iain personas) | Supabase-authenticated physicians and invited staff |
 | Data | Synthetic fixtures only, never PHI | Real practice data; PHI only under the deployment assumptions in `docs/PILOT_PHI_READINESS.md` |
-| Backend routes | Every demo router (`backend/main.py: DEMO_ROUTERS`) | Onboarding, internal pilot approval, `/api/me/practice/*` only (`PILOT_ROUTERS`) |
+| Backend routes | Every demo router (`backend/main.py: DEMO_ROUTERS`) | Onboarding, internal pilot approval/metrics, `/api/me/practice/*`, and `/api/public/p|r/*` (`PILOT_ROUTERS`) |
 | Frontend | Existing demo `App` routes | `PilotApp` (`frontend/src/Pilot.tsx`) only |
 | Code | `backend/` demo modules, `frontend/src/*` demo surfaces | `backend/pilot/`, `frontend/src/Pilot.tsx`, `pilotApi.ts`, `pilotState.ts` |
 
@@ -53,7 +53,9 @@ Rules that keep the modes separate:
 - Public referral-facing agent conversations are allowed **in pilot mode only**, and only from
   explicitly published practice information (internal representation → explicit publication layer
   → public practice representation → public agent). Never expose internal rules, unpublished
-  preferences, or any patient data publicly. (Not built yet.)
+  preferences, or any patient data publicly. Implemented in `backend/pilot/publication.py`
+  (versioned immutable snapshots) and `backend/pilot/public_agent.py` (snapshot-only, deterministic
+  by default). Unauthenticated routes live only in `backend/pilot/public_api.py`.
 - Do not introduce time-series language models (TSLMs) unless explicitly requested.
 
 ## Clinical data and claims
@@ -98,6 +100,12 @@ Rules that keep the modes separate:
   `supersedes_id`. Every recommendation stores the exact rules snapshot it used. Do not add a second
   rule source for triage; legacy learning tables stay intact and are not read by pilot triage.
 - Emit a `pilot_events` row for every meaningful pilot action (see `docs/PILOT_FOUNDATION.md`).
+- External messages leave Lamina ONLY through `MissingInformationService.approve_and_send` after a
+  human approval; the model never sends anything. Real email providers go behind `MailSender`
+  (`backend/pilot/messaging.py`) and need a BAA first.
+- Teaching and correction learning only ever create `inferred` proposals; a physician confirms.
+  Unstructured instructions stay notes and can never be confirmed as rules.
+- `scripts/dev_pilot_server.py` (fictional NPPES) is for local trials only; never deploy it.
 
 ## Clinical interoperability (demo)
 

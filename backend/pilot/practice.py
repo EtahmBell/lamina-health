@@ -41,6 +41,8 @@ class PracticeContext:
     member: dict
     role: str
     owner_scope_id: str | None
+    # Set for non-user actors (e.g. "public:sender:<link>") acting on a practice's behalf.
+    actor_label: str | None = None
 
     @property
     def practice_id(self) -> str:
@@ -48,7 +50,7 @@ class PracticeContext:
 
     @property
     def actor(self) -> str:
-        return f"user:{self.user_id}"
+        return self.actor_label or f"user:{self.user_id}"
 
     def require_physician(self, action: str) -> None:
         if self.role != "physician":

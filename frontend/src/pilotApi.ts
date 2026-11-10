@@ -117,6 +117,8 @@ export type ReferralDetail = {
   effective_triage: EffectiveTriage | null
   history: Array<{ event_type: string; actor: string; autonomy: 'automatic' | 'human'; metadata: Record<string, unknown>; created_at: string }>
   allowed_actions: ReferralAction[]
+  information_requests?: InformationRequest[]
+  sender_responses?: SenderResponse[]
 }
 export type ReferralSummary = {
   id: string; status: IntakeStatus; patient_name: string; referral_type: string
@@ -180,4 +182,134 @@ export async function openReferralDocument(documentId: string): Promise<void> {
   const url = URL.createObjectURL(await response.blob())
   window.open(url, '_blank', 'noopener')
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+/* ---------------------------------------------------- information requests */
+
+export type InformationRequest = {
+  id: string; referral_id: string; items: Array<{ label: string; key: string | null }>
+  recipient: string | null; channel: 'email' | 'manual'; subject: string; draft_message: string
+  status: 'draft' | 'approved' | 'sent' | 'partially_resolved' | 'resolved' | 'cancelled'
+  created_by: string; approved_by: string | null; approved_at: string | null; sent_at: string | null
+  sent_via: string | null; resolved_at: string | null; cancelled_at: string | null
+  evidence: Array<{ type: 'document' | 'response'; id: string }>; created_at: string
+  /** Present only on the send response: shown once, never stored by the client. */
+  status_link?: string
+}
+export type SenderResponse = { id: string; message: string | null; items: SubmittedItem[]; created_at: string }
+const requestPath = (id: string, action = '') => `/api/me/practice/information-requests/${encodeURIComponent(id)}${action ? `/${action}` : ''}`
+export const editInformationRequest = (id: string, changes: { message?: string; recipient?: string; subject?: string }) =>
+  apiRequest<InformationRequest>(requestPath(id), { ...json(changes), method: 'PUT' })
+export const sendInformationRequest = (id: string, mode: 'send' | 'mark_sent') => apiRequest<InformationRequest>(requestPath(id, 'send'), json({ mode }))
+export const cancelInformationRequest = (id: string) => apiRequest<InformationRequest>(requestPath(id, 'cancel'), { method: 'POST' })
+export const resolveInformationRequest = (id: string) => apiRequest<InformationRequest>(requestPath(id, 'resolve'), { method: 'POST' })
+
+/* --------------------------------------------------------------------- home */
+
+export type HomeItem = {
+  kind: string; title: string; detail?: string; path: string; action?: string
+  referral_id?: string; question_id?: string; proposal_id?: string; at?: string; by_agent?: boolean
+}
+export type HomeProjection = {
+  briefing: { lead: string; detail: string; tail: string; away: string }
+  needs_you: HomeItem[]; waiting: HomeItem[]; prepared: HomeItem[]; done: HomeItem[]
+  learned: Array<{ referral_type: string; version: number; confirmed_at: string | null }>
+  since: string; role: PracticeRole
+}
+export const getHome = () => apiRequest<HomeProjection>('/api/me/practice/home')
+
+/* ----------------------------------------------------------------- teaching */
+
+export type Proposal = {
+  id: string; referral_type: string; source_text: string
+  content: PracticeRule['content'] & { interpretation_note?: string | null }
+  confidence: number | null; operational_status: PracticeRule['operational_status']; physician_confirmed: boolean
+  source: string; structured: boolean
+  clarification: { question: string; options: string[] } | null; interpreter: string | null
+  question_id: string | null; created_at: string
+}
+export type LearningQuestion = { id: string; question: string; proposal_id: string; evidence_count: number; status: string; created_at: string }
+export const getTeaching = () => apiRequest<{ proposals: Proposal[]; question: LearningQuestion | null; referral_types: string[] }>('/api/me/practice/teach')
+export const teachAgent = (text: string) => apiRequest<Proposal>('/api/me/practice/teach', json({ text }))
+export const clarifyProposal = (id: string, answer: string) => apiRequest<Proposal>(`/api/me/practice/teach/${encodeURIComponent(id)}/clarify`, json({ answer }))
+export const confirmProposal = (id: string, edits?: PracticeRuleInput) => apiRequest<{ rule: PracticeRule; proposal_id: string }>(`/api/me/practice/teach/${encodeURIComponent(id)}/confirm`, json({ edits: edits ?? null }))
+export const rejectProposal = (id: string, reason?: string) => apiRequest<Proposal>(`/api/me/practice/teach/${encodeURIComponent(id)}/reject`, json({ reason: reason ?? null }))
+export const answerLearningQuestion = (id: string, answer: 'yes' | 'edit' | 'depends' | 'ignore', note?: string, edits?: PracticeRuleInput) =>
+  apiRequest<unknown>(`/api/me/practice/learning/questions/${encodeURIComponent(id)}/answer`, json({ answer, note: note || null, edits: edits ?? null }))
+
+/* ----------------------------------------------------------- public profile */
+
+export type PublicReferralType = {
+  name: string; good_fit: string[]; not_seen: string[]
+  required: Array<{ label: string; within_days: number | null }>; helpful: string[]; modality: Modality
+}
+export type PublicSnapshot = {
+  practice: { name: string; specialty: string | null; phone: string | null; website: string | null; contact_email: string | null }
+  physicians: Array<{ name: string; specialty: string | null }>; locations: string[]
+  intro: string; insurance: string; how_to_refer: string; hours: string
+  referral_types: PublicReferralType[]; modalities: Modality[]; accepts_public_referrals: boolean
+}
+export type PublicSettings = { intro: string; insurance: string; how_to_refer: string; hours: string; locations: string[]; show_physicians: boolean; accepts_public_referrals: boolean }
+export type PublicProfilePreview = {
+  slug: string; status: 'draft' | 'published' | 'unpublished'; settings: PublicSettings
+  draft_snapshot: PublicSnapshot; published_version: { version: number; published_at: string } | null
+  unpublished_changes: boolean; rules: Array<{ id: string; referral_type: string; version: number; publishable: boolean }>
+}
+export const getPublicProfilePreview = () => apiRequest<PublicProfilePreview>('/api/me/practice/public-profile')
+export const savePublicProfileSettings = (changes: Partial<PublicSettings> & { slug?: string }) => apiRequest<PublicProfilePreview>('/api/me/practice/public-profile', { ...json(changes), method: 'PUT' })
+export const publishPublicProfile = () => apiRequest<PublicProfilePreview>('/api/me/practice/public-profile/publish', { method: 'POST' })
+export const unpublishPublicProfile = () => apiRequest<PublicProfilePreview>('/api/me/practice/public-profile/unpublish', { method: 'POST' })
+export const setRulePublishable = (id: string, publishable: boolean) => apiRequest<PracticeRule>(`/api/me/practice/rules/${encodeURIComponent(id)}/publishable`, { ...json({ publishable }), method: 'PUT' })
+
+/* ------------------------------------------------------------------ metrics */
+
+export type MetricSection = 'usage' | 'referral_quality' | 'agent_trust' | 'learning' | 'public' | 'operations'
+export type PilotMetrics = Record<MetricSection, Record<string, unknown>> & { window_start: string | null }
+export const getPilotMetrics = () => apiRequest<{ all_time: PilotMetrics; weekly: { since: string; text: string; metrics: PilotMetrics } }>('/api/me/practice/metrics')
+
+/* ------------------------------------------------- public (no account needed) */
+
+export type PublicAnswer = { answer: string; category: string; in_scope: boolean; suggest_referral: boolean; fit: string | null; disclaimer: string }
+export type PublicReferralInput = {
+  sender: { name: string; practice?: string | null; contact?: string | null; npi?: string | null }
+  patient: { name: string; date_of_birth?: string | null; phone?: string | null; insurance?: string | null }
+  referral_type: string; reason: string; clinical_context?: string | null; sender_priority?: Priority | null; website?: string
+}
+export type SenderView = {
+  practice: { name: string; phone: string | null; contact_email: string | null }
+  referral: { patient_initials: string; referral_type: string; received_at: string; status: string; closed: boolean }
+  requested_items: Array<{ label: string; key: string | null; received: boolean }>
+  your_uploads: Array<{ filename: string; uploaded_at: string }>
+  can_respond: boolean
+}
+const publicJson = (body: unknown): RequestInit => ({ ...json(body), credentials: 'omit' })
+async function publicGet<T>(path: string): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, { credentials: 'omit' })
+  if (!response.ok) return raise(response)
+  return response.json() as Promise<T>
+}
+async function publicPost<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, body === undefined ? { method: 'POST', credentials: 'omit' } : publicJson(body))
+  if (!response.ok) return raise(response)
+  if (response.status === 204) return undefined as T
+  return response.json() as Promise<T>
+}
+/* Public calls never attach the signed-in user's token: the public surface is anonymous by design. */
+export const getPublicProfile = (slug: string) => publicGet<{ slug: string; version: number; profile: PublicSnapshot }>(`/api/public/p/${encodeURIComponent(slug)}`)
+export const askPublicAgent = (slug: string, question: string, referralContext?: string) =>
+  publicPost<PublicAnswer>(`/api/public/p/${encodeURIComponent(slug)}/ask`, { question, referral_context: referralContext || null })
+export const markReferralStarted = (slug: string) => publicPost<void>(`/api/public/p/${encodeURIComponent(slug)}/referral-started`)
+export const submitPublicReferral = (slug: string, referral: PublicReferralInput) =>
+  publicPost<{ received: boolean; token: string | null; status_url: string | null; practice_name?: string }>(`/api/public/p/${encodeURIComponent(slug)}/referrals`, referral)
+export const getSenderStatus = (token: string) => publicGet<SenderView>(`/api/public/r/${encodeURIComponent(token)}`)
+export const respondAsSender = (token: string, message: string, items: Array<{ key: string; value: string; observed_date?: string | null }>) =>
+  publicPost<SenderView>(`/api/public/r/${encodeURIComponent(token)}/response`, { message: message || null, items })
+export async function uploadAsSender(token: string, file: File): Promise<SenderView> {
+  const response = await fetch(`${apiBaseUrl}/api/public/r/${encodeURIComponent(token)}/documents`, {
+    method: 'POST', credentials: 'omit',
+    headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) },
+    body: file,
+  })
+  if (!response.ok) return raise(response)
+  return response.json() as Promise<SenderView>
 }

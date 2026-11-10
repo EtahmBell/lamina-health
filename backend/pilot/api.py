@@ -17,7 +17,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.auth import AuthenticatedUser, require_authenticated_user
 
 from .documents import MAX_DOCUMENT_BYTES
+from .home import HomeService
 from .intake import IntakeService
+from .learning import LearningService
+from .messaging import MailSender, mail_sender_from_environment
+from .metrics import practice_metrics, weekly_summary
+from .missing_info import MissingInformationService, SenderService
 from .models import (
     DispositionInput,
     IntakeReferralInput,
@@ -30,10 +35,13 @@ from .models import (
     TriageEditInput,
 )
 from .practice import PilotError, PracticeContext, PracticeService
+from .publication import PublicationService
 from .rules import PracticeRules, RuleConflictError, RuleNotFoundError
 from .store import PilotStore, pilot_store_for
+from .teaching import TeachingService
 
 router = APIRouter(prefix="/api/me/practice", tags=["pilot-practice"])
+internal_router = APIRouter(prefix="/api/internal/pilot-metrics", tags=["pilot-admin"])
 RequiredUser = Annotated[AuthenticatedUser, Depends(require_authenticated_user)]
 
 
@@ -43,10 +51,38 @@ class PilotServices:
     practice: PracticeService
     rules: PracticeRules
     intake: IntakeService
+    missing: MissingInformationService
+    sender: SenderService
+    teaching: TeachingService
+    learning: LearningService
+    publication: PublicationService
+    home: HomeService
 
     @classmethod
-    def build(cls, store: PilotStore, intake: IntakeService | None = None) -> PilotServices:
-        return cls(store, PracticeService(store), PracticeRules(store), intake or IntakeService(store))
+    def build(
+        cls, store: PilotStore, intake: IntakeService | None = None, mailer: MailSender | None = None,
+        teaching_client: object | None = None,
+    ) -> PilotServices:
+        intake = intake or IntakeService(store)
+        rules = PracticeRules(store)
+        missing = MissingInformationService(store, intake, mailer or mail_sender_from_environment(store))
+        sender = SenderService(store, intake, missing)
+        teaching = TeachingService(rules, teaching_client)
+        learning = LearningService(store, rules, teaching)
+        publication = PublicationService(store, rules)
+        home = HomeService(store, intake, missing, rules, learning)
+        # Wire the workflow: drafts go through the persistent request entity; every
+        # re-triage reconciles open requests; human corrections feed pattern detection.
+        intake.request_projection = missing
+        intake.after_triage.append(lambda context, referral_id, recommendation:
+                                   missing.reconcile(context.practice_id, referral_id, recommendation))
+        intake.after_decision.append(learning.on_decision)
+        intake.detail_extensions.append(lambda context, referral_id: {
+            "information_requests": missing.for_referral(context.practice_id, referral_id),
+            "sender_responses": sender.responses(context.practice_id, referral_id),
+        })
+        return cls(store, PracticeService(store), rules, intake, missing, sender, teaching, learning,
+                   publication, home)
 
 
 _default: dict[str, PilotServices] = {}
@@ -327,4 +363,187 @@ def practice_events(
         for event in services.store.events(
             practice_id=context.practice_id, event_type=event_type, referral_id=referral_id
         )
+    ]
+
+
+# ----------------------------------------------------- missing information
+
+
+class RequestEditInput(_Strict):
+    message: str | None = Field(default=None, max_length=6000)
+    recipient: str | None = Field(default=None, max_length=200)
+    subject: str | None = Field(default=None, max_length=200)
+
+
+class SendInput(_Strict):
+    mode: str = Field(pattern=r"^(send|mark_sent)$")
+
+
+@router.put("/information-requests/{request_id}")
+def edit_information_request(
+    request_id: str, update: RequestEditInput, context: Practice, services: Services
+) -> dict:
+    return _run(lambda: services.missing.edit_draft(
+        context, request_id, message=update.message, recipient=update.recipient, subject=update.subject))
+
+
+@router.post("/information-requests/{request_id}/send")
+def send_information_request(
+    request_id: str, update: SendInput, context: Practice, services: Services
+) -> dict:
+    return _run(lambda: services.missing.approve_and_send(context, request_id, update.mode))
+
+
+@router.post("/information-requests/{request_id}/cancel")
+def cancel_information_request(request_id: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.missing.cancel(context, request_id))
+
+
+@router.post("/information-requests/{request_id}/resolve")
+def resolve_information_request(request_id: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.missing.mark_resolved(context, request_id))
+
+
+# -------------------------------------------------------------------- home
+
+
+@router.get("/home")
+def home(context: Practice, services: Services) -> dict:
+    return services.home.projection(context)
+
+
+# ---------------------------------------------------------------- teaching
+
+
+class TeachInput(_Strict):
+    text: str = Field(min_length=3, max_length=2000)
+
+
+class ClarifyInput(_Strict):
+    answer: str = Field(min_length=1, max_length=200)
+
+
+class ConfirmInput(_Strict):
+    edits: PracticeRuleInput | None = None
+
+
+class AnswerInput(_Strict):
+    answer: str = Field(pattern=r"^(yes|edit|depends|ignore)$")
+    note: str | None = Field(default=None, max_length=1000)
+    edits: PracticeRuleInput | None = None
+
+
+@router.get("/teach")
+def list_proposals(context: Practice, services: Services) -> dict:
+    question = None
+    if context.role == "physician":
+        question = services.learning.question_for_today(context.practice_id, mark_shown=False)
+    return {
+        "proposals": [services.teaching.view(rule) for rule in services.rules.proposals(context.practice_id)],
+        "question": question,
+        "referral_types": services.rules.referral_types(context.practice_id),
+    }
+
+
+@router.post("/teach", status_code=201)
+def teach(update: TeachInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.teaching.propose(context, update.text))
+
+
+@router.post("/teach/{proposal_id}/clarify")
+def clarify(proposal_id: str, update: ClarifyInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.teaching.clarify(context, proposal_id, update.answer))
+
+
+@router.post("/teach/{proposal_id}/confirm")
+def confirm_proposal(proposal_id: str, update: ConfirmInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.teaching.confirm(context, proposal_id, update.edits))
+
+
+@router.post("/teach/{proposal_id}/reject")
+def reject_proposal(proposal_id: str, update: ReasonInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.teaching.reject(context, proposal_id, update.reason))
+
+
+@router.post("/learning/questions/{question_id}/answer")
+def answer_learning_question(
+    question_id: str, update: AnswerInput, context: Practice, services: Services
+) -> dict:
+    return _run(lambda: services.learning.answer(context, question_id, update.answer, update.note, update.edits))
+
+
+# ---------------------------------------------------------- public profile
+
+
+class PublicSettingsInput(_Strict):
+    slug: str | None = Field(default=None, max_length=60)
+    intro: str | None = Field(default=None, max_length=600)
+    insurance: str | None = Field(default=None, max_length=800)
+    how_to_refer: str | None = Field(default=None, max_length=800)
+    hours: str | None = Field(default=None, max_length=300)
+    locations: list[str] | None = Field(default=None, max_length=5)
+    show_physicians: bool | None = None
+    accepts_public_referrals: bool | None = None
+
+
+class PublishableInput(_Strict):
+    publishable: bool
+
+
+@router.get("/public-profile")
+def public_profile_preview(context: Practice, services: Services) -> dict:
+    return _run(lambda: services.publication.preview(context))
+
+
+@router.put("/public-profile")
+def public_profile_settings(update: PublicSettingsInput, context: Practice, services: Services) -> dict:
+    settings = update.model_dump(exclude_none=True, exclude={"slug"})
+    return _run(lambda: services.publication.update_settings(context, update.slug, settings))
+
+
+@router.post("/public-profile/publish")
+def public_profile_publish(context: Practice, services: Services) -> dict:
+    return _run(lambda: services.publication.publish(context))
+
+
+@router.post("/public-profile/unpublish")
+def public_profile_unpublish(context: Practice, services: Services) -> dict:
+    return _run(lambda: services.publication.unpublish(context))
+
+
+@router.put("/rules/{rule_id}/publishable")
+def rule_publishable(rule_id: str, update: PublishableInput, context: Practice, services: Services) -> dict:
+    _run(lambda: context.require_physician("change what is published"))
+    return _run(lambda: services.rules.set_publishable(
+        context.practice_id, rule_id, update.publishable, actor=context.actor).model_dump(mode="json"))
+
+
+# ----------------------------------------------------------------- metrics
+
+
+@router.get("/metrics")
+def metrics(context: Practice, services: Services) -> dict:
+    _run(lambda: context.require_physician("view pilot metrics"))
+    return {"all_time": practice_metrics(services.store, context.practice_id),
+            "weekly": weekly_summary(services.store, context.practice_id)}
+
+
+def _require_admin(user: RequiredUser) -> AuthenticatedUser:
+    from backend.api.physician_onboarding import pilot_admin_user_ids
+
+    if user.id not in pilot_admin_user_ids():
+        raise HTTPException(404, "Not Found")
+    return user
+
+
+@internal_router.get("")
+def internal_metrics(
+    admin: Annotated[AuthenticatedUser, Depends(_require_admin)], services: Services
+) -> list[dict]:
+    del admin
+    return [
+        {"practice_id": practice["id"], "practice_name": practice["name"],
+         "weekly": weekly_summary(services.store, practice["id"]),
+         "all_time": practice_metrics(services.store, practice["id"])}
+        for practice in services.store.fetch_all("SELECT id, name FROM practices ORDER BY created_at")
     ]

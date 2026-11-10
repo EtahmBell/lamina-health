@@ -121,7 +121,7 @@ class PracticeRules:
         return _row_to_rule(row)
 
     def list(self, practice_id: str, *, include_history: bool = False) -> list[PracticeRule]:
-        clause = "" if include_history else "AND operational_status IN ('confirmed', 'inferred_active', 'inferred')"
+        clause = "" if include_history else "AND operational_status IN ('confirmed', 'inferred_active')"
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM physician_referral_preferences WHERE practice_id = ? "
@@ -161,8 +161,11 @@ class PracticeRules:
         confidence: float | None = None,
         provenance: dict | None = None,
         supersedes: PracticeRule | None = None,
+        source_text: str | None = None,
+        event_type: str | None = None,
+        content: PracticeRuleContent | None = None,
     ) -> PracticeRule:
-        content = content_from_input(update)
+        content = content or content_from_input(update)
         now = now_iso()
         rule_id = new_id("rule")
         confirmed = operational_status == "confirmed"
@@ -187,7 +190,7 @@ class PracticeRules:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'practice', ?, ?, ?, ?, ?, ?, ?)",
                 (
                     rule_id, practice_workspace_key(practice_id), physician_id,
-                    update.referral_type.strip(), _source_text(update),
+                    update.referral_type.strip(), source_text or _source_text(update),
                     content.model_dump_json(),
                     "confirmed" if confirmed else "draft", source,
                     supersedes.id if supersedes else None, now, now, now if confirmed else None,
@@ -198,9 +201,9 @@ class PracticeRules:
                 ),
             )
             self.store.append_event(
-                "learning_corrected" if supersedes else (
+                event_type or ("learning_corrected" if supersedes else (
                     "learning_confirmed" if confirmed else "learning_proposed"
-                ),
+                )),
                 actor=actor, practice_id=practice_id,
                 metadata={
                     "rule_id": rule_id, "version": version, "referral_type": update.referral_type,
@@ -216,6 +219,8 @@ class PracticeRules:
         *, actor: str,
     ) -> PracticeRule:
         current = self.get(practice_id, rule_id)
+        # Publication is a separate, explicit decision: a content edit keeps it.
+        update = update.model_copy(update={"publishable": current.publishable})
         return self.create(
             practice_id, physician_id, update, actor=actor, supersedes=current,
             provenance={"revision_of": current.id, "revision_of_version": current.version},
@@ -238,6 +243,56 @@ class PracticeRules:
                 metadata={"rule_id": rule_id}, db=db,
             )
         return self.get(practice_id, rule_id)
+
+    def set_status(
+        self, practice_id: str, rule_id: str, operational_status: str, *, actor: str,
+        event_type: str, metadata: dict | None = None, from_statuses: tuple[str, ...] = ("inferred", "inferred_active"),
+    ) -> PracticeRule:
+        """Status-only change (content stays immutable). Confirming in place sets
+        physician_confirmed and confirmed_at."""
+        now = now_iso()
+        confirmed = operational_status == "confirmed"
+        legacy = {"confirmed": "confirmed", "superseded": "superseded", "rejected": "rejected"}.get(operational_status, "draft")
+        placeholders = ", ".join("?" for _ in from_statuses)
+        with self._connect() as db:
+            changed = db.execute(
+                "UPDATE physician_referral_preferences SET operational_status = ?, status = ?, "
+                "physician_confirmed = CASE WHEN ? THEN 1 ELSE physician_confirmed END, "
+                "confirmed_at = CASE WHEN ? THEN ? ELSE confirmed_at END, updated_at = ? "
+                f"WHERE id = ? AND practice_id = ? AND scope = 'practice' AND operational_status IN ({placeholders})",
+                (operational_status, legacy, confirmed, confirmed, now, now, rule_id, practice_id, *from_statuses),
+            ).rowcount
+            if not changed:
+                raise RuleConflictError("This proposal is no longer pending")
+            self.store.append_event(
+                event_type, actor=actor, practice_id=practice_id,
+                metadata={"rule_id": rule_id, "operational_status": operational_status, **(metadata or {})}, db=db,
+            )
+        return self.get(practice_id, rule_id)
+
+    def set_publishable(self, practice_id: str, rule_id: str, publishable: bool, *, actor: str) -> PracticeRule:
+        with self._connect() as db:
+            changed = db.execute(
+                "UPDATE physician_referral_preferences SET publishable = ?, updated_at = ? WHERE id = ? "
+                "AND practice_id = ? AND scope = 'practice' AND operational_status IN ('confirmed', 'inferred_active')",
+                (1 if publishable else 0, now_iso(), rule_id, practice_id),
+            ).rowcount
+            if not changed:
+                raise RuleConflictError("Only an active rule can be published")
+            self.store.append_event(
+                "rule_publication_changed", actor=actor, practice_id=practice_id,
+                metadata={"rule_id": rule_id, "publishable": publishable}, db=db,
+            )
+        return self.get(practice_id, rule_id)
+
+    def proposals(self, practice_id: str) -> list[PracticeRule]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM physician_referral_preferences WHERE practice_id = ? AND scope = 'practice' "
+                "AND operational_status = 'inferred' ORDER BY created_at DESC",
+                (practice_id,),
+            ).fetchall()
+        return [_row_to_rule(dict(row)) for row in rows]
 
     def history(self, practice_id: str, rule_id: str) -> list[PracticeRule]:
         """Full lineage: walk supersedes_id backwards and successors forwards."""

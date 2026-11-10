@@ -3162,3 +3162,52 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
   .pilot-facts div { grid-template-columns: 1fr; gap: 2px; }
   .pilot-section-head, .pilot-detail-head { flex-direction: column; }
 }
+
+/* ------------------------------------------------- Pilot agent layer + public surfaces */
+.pilot-home-section { margin-top: 22px; }
+.pilot-home-section h2 { margin: 0 0 10px; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); }
+.pilot-home-row { min-height: 64px; }
+.pilot-home-row .lam-row-main { display: grid; gap: 3px; }
+.pilot-home-row .lam-row-main span { color: var(--text-secondary); font-size: .68rem; }
+.pilot-home-dot { flex: 0 0 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--mineral-subtle); }
+.pilot-home-dot.kind-ready_for_review, .pilot-home-dot.kind-learning_question, .pilot-home-dot.kind-proposed_learning { background: var(--mineral-deep); }
+.pilot-home-dot.kind-triage_uncertain, .pilot-home-dot.kind-confirm_evidence { background: var(--warning); }
+.pilot-home-dot.kind-waiting_sender, .pilot-home-dot.kind-waiting_physician { background: var(--slate); }
+.pilot-home-dot.kind-draft_request { background: var(--mineral); }
+.pilot-teach-inline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; margin-top: 22px; }
+.pilot-teach-inline label { display: grid; gap: 6px; }
+.pilot-teach-inline input { height: 42px; border: 1px solid var(--border); border-radius: 9px; padding: 0 12px; font: inherit; font-size: .76rem; background: #fffdf9; }
+.pilot-teach-inline p { grid-column: 1 / -1; margin: 0; }
+.pilot-subhead { margin: 26px 0 10px; font-size: 1rem; }
+.pilot-quote { font-family: var(--font-display); font-size: 1.05rem; margin: 0 0 8px; }
+.pilot-proposal-body ul { margin: 6px 0; padding-left: 18px; font-size: .74rem; display: grid; gap: 4px; }
+.pilot-question { border-left: 3px solid var(--mineral-deep); }
+.pilot-question h2 { font-size: 1rem; line-height: 1.35; }
+.pilot-message { white-space: pre-wrap; font: inherit; font-size: .72rem; margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; max-height: 260px; overflow: auto; }
+.pilot-request.status-draft { border-left: 3px solid var(--mineral); }
+.pilot-request .pilot-section-head { margin: 0; }
+.pilot-status-pill.request-sent, .pilot-status-pill.request-partially_resolved { background: #f6ecdf; color: var(--warning); }
+.pilot-status-pill.request-resolved { background: #e6efe9; color: var(--success); }
+.pilot-weekly { font-family: var(--font-display); font-size: 1.15rem; line-height: 1.45; margin: 4px 0; }
+.pilot-public-preview { max-height: 80vh; overflow: auto; }
+.public-shell { min-height: 100vh; background: var(--background); }
+.public-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.public-main { max-width: 1040px; margin: 0 auto; padding: 28px 20px 48px; }
+.public-footer { max-width: 1040px; margin: 0 auto; padding: 0 20px 32px; color: var(--text-secondary); font-size: .64rem; }
+.public-hero { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 18px; }
+.public-hero h1, .public-title { margin: 2px 0 6px; font-family: var(--font-display); font-size: 2.1rem; font-weight: 500; }
+.public-intro { max-width: 620px; color: var(--text-secondary); }
+.public-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; }
+.public-type + .public-type { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+.public-type h3 { margin: 0 0 6px; font-size: .86rem; text-transform: none; letter-spacing: 0; color: var(--clinical); }
+.public-type p { margin: 4px 0; font-size: .74rem; line-height: 1.45; }
+.public-answers { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 10px; }
+.public-q { margin: 0; font-weight: 600; font-size: .74rem; }
+.public-a { margin: 4px 0 0; font-size: .74rem; line-height: 1.5; }
+.public-honeypot { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.public-confirm, .public-sender { max-width: 720px; margin: 0 auto; }
+@media (max-width: 900px) {
+  .public-grid { grid-template-columns: 1fr; }
+  .public-hero { flex-direction: column; }
+  .pilot-teach-inline { grid-template-columns: 1fr; }
+}

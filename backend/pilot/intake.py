@@ -90,6 +90,11 @@ class IntakeService:
         # `True` means "use the configured default" (off unless explicitly enabled).
         self._extractor = extractor
         self._today = today
+        # Wired by PilotServices: missing-info reconciliation, correction learning, etc.
+        self.after_triage: list[Any] = []
+        self.after_decision: list[Any] = []
+        self.request_projection: Any = None
+        self.detail_extensions: list[Any] = []
 
     @property
     def storage(self) -> DocumentStorage:
@@ -170,7 +175,7 @@ class IntakeService:
             row = self.store.recommendation_row(context.practice_id, recommendation.id)
             snapshot = json.loads(row["rules_snapshot_json"]) if row else None
         decision = self.store.decision_for(recommendation.id) if recommendation else None
-        return {
+        result = {
             "referral": referral.model_dump(mode="json"),
             "recommendation": recommendation.model_dump(mode="json") if recommendation else None,
             "rules_snapshot": snapshot,
@@ -189,6 +194,9 @@ class IntakeService:
             ],
             "allowed_actions": self.allowed_actions(context, referral, recommendation),
         }
+        for extend in self.detail_extensions:
+            result.update(extend(context, referral_id))
+        return result
 
     @staticmethod
     def _effective(recommendation: TriageRecommendation | None, referral: IntakeReferral) -> dict | None:
@@ -246,7 +254,7 @@ class IntakeService:
 
     # ---------------------------------------------------------------- creation
 
-    def create(self, context: PracticeContext, update: IntakeReferralInput) -> dict:
+    def create(self, context: PracticeContext, update: IntakeReferralInput, source: str | None = None) -> dict:
         now = now_iso()
         referral_id = new_id("ref")
         items = [
@@ -261,7 +269,7 @@ class IntakeService:
         row = {
             "id": referral_id,
             "practice_id": context.practice_id,
-            "source": update.source,
+            "source": source or update.source,
             "status": S.RECEIVED.value,
             "sender_json": update.sender.model_dump_json(),
             "patient_json": update.patient.model_dump_json(),
@@ -280,7 +288,7 @@ class IntakeService:
         }
         self.store.insert_referral(
             row,
-            {"source": update.source, "referral_type": row["referral_type"], "entered_by_role": context.role},
+            {"source": row["source"], "referral_type": row["referral_type"], "entered_by_role": context.role},
             context.actor,
         )
         self.run_triage(context, referral_id)
@@ -381,7 +389,7 @@ class IntakeService:
             })
         if target == S.READY_FOR_REVIEW and referral.status != S.READY_FOR_REVIEW:
             events.append({
-                "event_type": "referral_ready", "actor": "agent:triage", "autonomy": "automatic",
+                "event_type": "referral_became_ready", "actor": "agent:triage", "autonomy": "automatic",
                 "metadata": {"recommendation_id": recommendation.id, "basis": "deterministic_requirements"},
             })
         self._transition(
@@ -393,6 +401,8 @@ class IntakeService:
                 "rules_snapshot": snapshot, "created_at": recommendation.created_at,
             },
         )
+        for hook in self.after_triage:
+            hook(context, referral_id, recommendation)
         return self.detail(context, referral_id)
 
     # ------------------------------------------------------------- transitions
@@ -501,6 +511,8 @@ class IntakeService:
                 },
             }],
         )
+        for hook in self.after_decision:
+            hook(context, referral_id)
         return self.detail(context, referral_id)
 
     def approve(self, context: PracticeContext, referral_id: str) -> dict:
@@ -518,38 +530,31 @@ class IntakeService:
     def request_information(
         self, context: PracticeContext, referral_id: str, update: RequestInformationInput
     ) -> dict:
-        """Prepares the request and moves to needs_information. Nothing is sent:
-        the external send loop is a later, approval-gated pass."""
+        """Creates a persistent DRAFT MissingInformationRequest and moves the referral to
+        needs_information. Nothing is sent until a human approves the draft."""
         row = self._row(context, referral_id)
-        referral = self._referral(row)
-        recommendation = self.recommendation(context.practice_id, referral.current_recommendation_id)
-        items = [item.strip() for item in update.items if item.strip()] or (
-            recommendation.missing_items if recommendation else []
-        )
-        if not items:
-            raise PilotError("items_required", "Choose at least one item to request", 422)
         current = IntakeStatus(row["status"])
         target = S.NEEDS_INFORMATION
         if current != S.NEEDS_INFORMATION and not can_transition(current, target):
             raise PilotError("invalid_transition", "Information cannot be requested for this referral now")
-        draft = (
-            f"Thank you for referring {referral.patient.name}. To complete our intake review, "
-            f"please send: {', '.join(items)}."
-            + (f" {update.note.strip()}" if update.note and update.note.strip() else "")
-        )
-        request = {
-            "items": items, "note": (update.note or "").strip() or None, "draft_message": draft,
-            "prepared_by": context.actor, "prepared_at": now_iso(), "sent": False,
-            "send_channel": None,
-        }
+        if self.request_projection is None:
+            raise PilotError("not_configured", "Information requests are not available", 500)
+        items = [item.strip() for item in update.items if item.strip()]
+        recommendation = self.recommendation(context.practice_id, row["current_recommendation_id"])
+        flagged = {label.casefold() for label in (recommendation.missing_items if recommendation else [])}
+        extra_items = [item for item in items if item.casefold() not in flagged]
+        draft = self.request_projection.create_draft(context, referral_id, items, update.note)
+        row = self._row(context, referral_id)
         self._transition(
             context, row, target,
-            changes={"information_request_json": json.dumps(request)},
             events=[{
                 "event_type": "information_requested", "actor": context.actor,
-                "metadata": {"items": items, "sent": False},
+                "metadata": {"items": [item["label"] for item in draft["items"]], "request_id": draft["id"],
+                             "sent": False, "extra_items": extra_items},
             }],
         )
+        for hook in self.after_decision:
+            hook(context, referral_id)
         return self.detail(context, referral_id)
 
     def escalate(self, context: PracticeContext, referral_id: str, note: str | None) -> dict:
@@ -572,6 +577,19 @@ class IntakeService:
             }],
         )
         return self.detail(context, referral_id)
+
+    def merge_items(self, context: PracticeContext, referral_id: str, new_items: list[SubmittedItem]) -> None:
+        """Replace same-key submitted items (no re-triage; caller re-triages)."""
+        row = self._row(context, referral_id)
+        items = [SubmittedItem.model_validate(item) for item in json.loads(row["submitted_items_json"] or "[]")]
+        keys = {item.key for item in new_items}
+        items = [item for item in items if item.key not in keys] + list(new_items)
+        self._transition(
+            context, row, IntakeStatus(row["status"]),
+            changes={"submitted_items_json": json.dumps([item.model_dump(mode="json") for item in items])},
+            events=[{"event_type": "referral_item_recorded", "actor": context.actor,
+                     "metadata": {"keys": sorted(keys), "source": new_items[0].source if new_items else None}}],
+        )
 
     def record_item(self, context: PracticeContext, referral_id: str, update: RecordItemInput) -> dict:
         """A human supplies or confirms a requirement. Document confirmation must cite

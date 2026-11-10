@@ -12,12 +12,19 @@ export const pilotPaths = {
   referral: (id: string) => `/me/referrals/${encodeURIComponent(id)}`,
   practice: '/me/practice',
   rules: '/me/rules',
+  agent: '/me/agent',
+  publicProfile: '/me/public',
+  metrics: '/me/metrics',
+  publicPage: (slug: string) => `/p/${encodeURIComponent(slug)}`,
+  publicRefer: (slug: string) => `/p/${encodeURIComponent(slug)}/refer`,
+  sender: (token: string) => `/r/${encodeURIComponent(token)}`,
 } as const
 
 export type PilotRoute =
   | { kind: 'home' } | { kind: 'onboarding' } | { kind: 'join' }
   | { kind: 'referrals' } | { kind: 'new_referral' } | { kind: 'referral'; id: string }
-  | { kind: 'practice' } | { kind: 'rules' }
+  | { kind: 'practice' } | { kind: 'rules' } | { kind: 'agent' } | { kind: 'public_settings' } | { kind: 'metrics' }
+  | { kind: 'public_profile'; slug: string } | { kind: 'public_refer'; slug: string } | { kind: 'sender'; token: string }
   | { kind: 'auth'; page: 'sign-in' | 'sign-up' }
   | { kind: 'redirect'; to: string }
 
@@ -34,6 +41,15 @@ export function resolvePilotRoute(path: string): PilotRoute {
   if (referral) return { kind: 'referral', id: referral }
   if (clean === '/me/practice') return { kind: 'practice' }
   if (clean === '/me/rules') return { kind: 'rules' }
+  if (clean === '/me/agent') return { kind: 'agent' }
+  if (clean === '/me/public') return { kind: 'public_settings' }
+  if (clean === '/me/metrics') return { kind: 'metrics' }
+  const publicSlug = clean.match(/^\/p\/([a-z0-9-]{3,60})$/)?.[1]
+  if (publicSlug) return { kind: 'public_profile', slug: publicSlug }
+  const referSlug = clean.match(/^\/p\/([a-z0-9-]{3,60})\/refer$/)?.[1]
+  if (referSlug) return { kind: 'public_refer', slug: referSlug }
+  const senderToken = clean.match(/^\/r\/([A-Za-z0-9_-]{20,200})$/)?.[1]
+  if (senderToken) return { kind: 'sender', token: senderToken }
   if (clean === '/claim/sign-in') return { kind: 'auth', page: 'sign-in' }
   if (clean === '/claim/sign-up') return { kind: 'auth', page: 'sign-up' }
   return { kind: 'redirect', to: pilotPaths.home }

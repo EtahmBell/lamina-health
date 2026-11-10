@@ -5,6 +5,8 @@ import { ApiError } from './api.ts'
 import { ClaimShell, initials, signInPath, signUpPath, SignInPage, SignUpPage } from './Claim.tsx'
 import { LaminaMark } from './LaminaMark.tsx'
 import { PhysicianOnboardingPage } from './Onboarding.tsx'
+import { AgentPage, MetricsPage, PublicSettingsPage, QuestionCard } from './PilotAgent.tsx'
+import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
   acceptInvitation, approveTriage, createPractice, createPracticeRule, createReferral, decideReferral,
   editTriage, escalateReferral, getPilotStatus, getPracticeMembers, getPracticeRules, getReferral,
@@ -13,7 +15,9 @@ import {
   revokeInvitation, updatePractice, uploadReferralDocument,
   type EffectiveTriage, type Fit, type Modality, type NextStep, type PilotStatus, type PracticeFields,
   type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type ReferralDetail,
-  type ReferralSummary, type RequirementAssessment,
+  type ReferralSummary, type RequirementAssessment, getHome, getTeaching, teachAgent, editInformationRequest,
+  sendInformationRequest, cancelInformationRequest, resolveInformationRequest,
+  type HomeItem, type HomeProjection, type InformationRequest, type LearningQuestion,
 } from './pilotApi.ts'
 import {
   briefingLines, canUse, emptyReferralForm, emptyRuleForm, FIT_LABELS, homeBuckets, isClosed, MODALITY_LABELS,
@@ -46,6 +50,12 @@ export function PilotApp({ path, params, navigate }: { path: string; params: URL
     case 'new_referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="referrals"><NewReferralPage navigate={navigate} /></PilotShell>}</PilotGate>
     case 'referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="referrals"><ReferralDetailPage id={route.id} status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'practice': return <PilotGate navigate={navigate} params={params}>{(status, reload) => <PilotShell status={status} navigate={navigate} section="practice"><PracticePage status={status} reload={reload} /></PilotShell>}</PilotGate>
+    case 'agent': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="agent"><AgentPage status={status} /></PilotShell>}</PilotGate>
+    case 'public_settings': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="public"><PublicSettingsPage status={status} /></PilotShell>}</PilotGate>
+    case 'metrics': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="metrics"><MetricsPage navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'public_profile': return <PublicProfilePage slug={route.slug} navigate={navigate} />
+    case 'public_refer': return <PublicReferralPage slug={route.slug} navigate={navigate} />
+    case 'sender': return <SenderStatusPage token={route.token} />
     case 'rules': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="rules"><RulesPage status={status} /></PilotShell>}</PilotGate>
   }
 }
@@ -175,10 +185,13 @@ function JoinPracticePage({ navigate, params }: { navigate: Navigate; params: UR
 /* ----------------------------------------------------------------- shell */
 
 const NAV = [
-  { id: 'home', title: 'Home', icon: '⌂', path: pilotPaths.home },
-  { id: 'referrals', title: 'Referrals', icon: '↘', path: pilotPaths.referrals },
-  { id: 'rules', title: 'Referral rules', icon: '≡', path: pilotPaths.rules },
-  { id: 'practice', title: 'Practice', icon: '◎', path: pilotPaths.practice },
+  { id: 'home', title: 'Home', icon: '⌂', path: pilotPaths.home, physicianOnly: false },
+  { id: 'referrals', title: 'Referrals', icon: '↘', path: pilotPaths.referrals, physicianOnly: false },
+  { id: 'agent', title: 'Teach your agent', icon: '✦', path: pilotPaths.agent, physicianOnly: false },
+  { id: 'rules', title: 'Referral rules', icon: '≡', path: pilotPaths.rules, physicianOnly: false },
+  { id: 'public', title: 'Public page', icon: '◇', path: pilotPaths.publicProfile, physicianOnly: true },
+  { id: 'metrics', title: 'Pilot metrics', icon: '▤', path: pilotPaths.metrics, physicianOnly: true },
+  { id: 'practice', title: 'Practice', icon: '◎', path: pilotPaths.practice, physicianOnly: false },
 ] as const
 
 function PilotShell({ status, navigate, section, children }: { status: PilotStatus; navigate: Navigate; section: string; children: ReactNode }) {
@@ -190,7 +203,7 @@ function PilotShell({ status, navigate, section, children }: { status: PilotStat
         <button className="brand-button" onClick={() => navigate(pilotPaths.home)} aria-label="Lamina home"><div className="brand" aria-label="Lamina"><span className="brand-symbol" aria-hidden="true"><img src={laminaLogo} alt="" /></span><span className="wordmark">LAMINA</span></div></button>
         <p className="brand-subtitle">{practice?.name ?? 'Your practice'}</p>
         <nav aria-label="Primary navigation">
-          {NAV.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span><b>{item.title}</b></span></button>)}
+          {NAV.filter((item) => !item.physicianOnly || status.role === 'physician').map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => navigate(item.path)}><span className="nav-icon">{item.icon}</span><span><b>{item.title}</b></span></button>)}
         </nav>
       </div>
       <div className="sidebar-clinician pilot-agent-card">
@@ -225,41 +238,79 @@ function ReferralRow({ item, navigate }: { item: ReferralSummary; navigate: Navi
   </button>
 }
 
+function HomeRow({ item, navigate }: { item: HomeItem; navigate: Navigate }) {
+  return <button className="lam-row pilot-home-row" onClick={() => navigate(item.path)}>
+    <span className={`pilot-home-dot kind-${item.kind}`} aria-hidden="true" />
+    <span className="lam-row-main"><strong>{item.title}</strong>{item.detail && <span>{item.detail}</span>}</span>
+    {item.action && <span className="lam-row-action">{item.action} <b>→</b></span>}
+  </button>
+}
+
+function HomeSection({ title, items, navigate, empty }: { title: string; items: HomeItem[]; navigate: Navigate; empty?: string }) {
+  if (!items.length && !empty) return null
+  return <section className="pilot-home-section">
+    <h2>{title}</h2>
+    {items.length ? <div className="lam-list">{items.map((item, index) => <HomeRow key={`${item.kind}-${item.referral_id ?? item.proposal_id ?? index}`} item={item} navigate={navigate} />)}</div>
+      : <p className="muted-note">{empty}</p>}
+  </section>
+}
+
 function PilotHomePage({ status, navigate }: { status: PilotStatus; navigate: Navigate; reload: () => void }) {
-  const [items, setItems] = useState<ReferralSummary[] | null>(null)
+  const [home, setHome] = useState<HomeProjection | null>(null)
   const [rules, setRules] = useState<PracticeRule[] | null>(null)
+  const [question, setQuestion] = useState<LearningQuestion | null>(null)
+  const [teachText, setTeachText] = useState('')
+  const [teachBusy, setTeachBusy] = useState(false)
+  const [teachNote, setTeachNote] = useState('')
   const [error, setError] = useState('')
-  useEffect(() => {
-    listReferrals().then(setItems).catch((err) => setError(errorText(err, 'Could not load referrals')))
+  const physician = status.role === 'physician'
+  const load = useCallback(() => {
+    getHome().then(setHome).catch((err) => setError(errorText(err, 'Could not load your day')))
     getPracticeRules().then(setRules).catch(() => setRules([]))
-  }, [])
-  const role = status.role ?? 'staff'
-  const buckets = items ? homeBuckets(items) : null
-  const lines = buckets ? briefingLines(buckets, role) : []
-  const openItems = buckets ? [...buckets.attention, ...buckets.ready, ...buckets.missing] : []
+    if (physician) getTeaching().then((data) => setQuestion(data.question)).catch(() => setQuestion(null))
+  }, [physician])
+  useEffect(() => { load() }, [load])
+  const teach = async (event: FormEvent) => {
+    event.preventDefault()
+    if (teachText.trim().length < 3) return
+    setTeachBusy(true); setTeachNote('')
+    try { await teachAgent(teachText.trim()); setTeachText(''); setTeachNote('Got it — I drafted a rule for you to confirm.'); load() }
+    catch (err) { setTeachNote(errorText(err, 'I couldn’t interpret that.')) } finally { setTeachBusy(false) }
+  }
+  const needs = (home?.needs_you ?? []).filter((item) => item.kind !== 'learning_question')
   return <main className="page-shell home-page pilot-home">
     <section className="pilot-briefing">
       <div className="pilot-briefing-mark"><LaminaMark active /></div>
       <div>
         <p className="eyebrow">Your practice agent</p>
-        {!items && !error && <h1>Reviewing your referrals…</h1>}
-        {items && (lines.length
-          ? <><h1>{lines[0]}</h1>{lines.slice(1).map((line) => <p key={line}>{line}</p>)}</>
-          : <h1>Nothing needs you right now.</h1>)}
-        <p className="muted-note">Shadow mode: I prepare triage and drafts; nothing is sent, scheduled, or decided without your team.</p>
+        {!home && !error && <h1>Catching up on your referrals…</h1>}
+        {home && <><h1>{home.briefing.lead}</h1>
+          {home.briefing.detail && <p>{home.briefing.detail}</p>}
+          {home.briefing.tail && <p>{home.briefing.tail}</p>}
+          {home.briefing.away && <p className="muted-note">{home.briefing.away}</p>}</>}
       </div>
     </section>
     {error && <div className="error-banner" role="alert">{error}</div>}
     {rules && rules.length === 0 && <section className="pilot-callout">
       <h2>Teach Lamina your referral criteria</h2>
-      <p>{role === 'physician'
-        ? 'Add a rule for each kind of referral you see — what fits, what is out of scope, and what information you need. Until then I can record referrals but can’t judge fit or completeness.'
+      <p>{physician
+        ? 'Tell me how you handle each kind of referral — what fits, what’s out of scope, what you need before review. Until then I can record referrals but can’t judge fit or completeness.'
         : 'The physician hasn’t added referral rules yet, so I can record referrals but can’t judge fit or completeness.'}</p>
-      {role === 'physician' && <button className="button-primary" onClick={() => navigate(pilotPaths.rules)}>Add referral rules <span>→</span></button>}
+      {physician && <button className="button-primary" onClick={() => navigate(pilotPaths.rules)}>Add referral rules <span>→</span></button>}
     </section>}
-    <div className="pilot-section-head"><h2>Needs attention</h2><button className="button-primary" onClick={() => navigate(pilotPaths.newReferral)}>New referral <span>+</span></button></div>
-    {items && openItems.length === 0 && <div className="empty-state"><h2>No open referrals</h2><p>Enter a referral you received by fax, email, or phone to get a triage in seconds.</p></div>}
-    {openItems.length > 0 && <div className="lam-list needs-attention">{openItems.map((item) => <ReferralRow key={item.id} item={item} navigate={navigate} />)}</div>}
+    {physician && question && <QuestionCard question={question} onChange={load} />}
+    {home && <>
+      <HomeSection title="Needs you" items={needs} navigate={navigate} empty="Nothing needs your judgment right now." />
+      <HomeSection title="Prepared for you" items={home.prepared} navigate={navigate} />
+      <HomeSection title="Waiting on others" items={home.waiting} navigate={navigate} />
+      <HomeSection title="While you were away" items={home.done} navigate={navigate} />
+    </>}
+    {physician && <form className="pilot-card pilot-teach-inline" onSubmit={(event) => void teach(event)}>
+      <label><span className="eyebrow">Teach your agent</span><input value={teachText} onChange={(event) => setTeachText(event.target.value)} placeholder="e.g. I prefer eConsult first for stable thyroid medication questions." maxLength={2000} disabled={teachBusy} /></label>
+      <button className="button-secondary" type="submit" disabled={teachBusy}>{teachBusy ? 'Interpreting…' : 'Teach'}</button>
+      {teachNote && <p className="muted-note">{teachNote} <button type="button" className="text-button" onClick={() => navigate(pilotPaths.agent)}>Review →</button></p>}
+    </form>}
+    <div className="pilot-section-head"><span /><button className="button-primary" onClick={() => navigate(pilotPaths.newReferral)}>New referral <span>+</span></button></div>
   </main>
 }
 
@@ -398,6 +449,46 @@ function RequirementRow({ requirement, referralId, canRecord, onDetail }: { requ
   </li>
 }
 
+const REQUEST_STATUS: Record<InformationRequest['status'], string> = {
+  draft: 'Draft — needs your approval', approved: 'Approved', sent: 'Sent — waiting on the referring office',
+  partially_resolved: 'Partly answered', resolved: 'Resolved', cancelled: 'Cancelled',
+}
+
+/** Approval-gated missing-information request. Nothing leaves Lamina until a person
+ * clicks "Approve & email" (dev outbox / configured adapter) or "Mark as sent". */
+function InformationRequestPanel({ request, senderName, onChanged }: { request: InformationRequest; senderName: string; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [message, setMessage] = useState(request.draft_message)
+  const [recipient, setRecipient] = useState(request.recipient ?? '')
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const run = async (action: () => Promise<InformationRequest>, keepLink = false) => {
+    setBusy(true); setError('')
+    try { const result = await action(); if (keepLink && result.status_link) setLink(result.status_link); setEditing(false); onChanged() }
+    catch (err) { setError(errorText(err, 'That didn’t work.')) } finally { setBusy(false) }
+  }
+  const draft = request.status === 'draft'
+  return <div className={`pilot-panel pilot-request status-${request.status}`}>
+    <div className="pilot-section-head"><h3>Information request</h3><span className={`pilot-status-pill request-${request.status}`}>{REQUEST_STATUS[request.status]}</span></div>
+    <p className="muted-note">Asks {senderName} for: {request.items.map((item) => item.label).join(', ')}{request.sent_at ? ` · sent ${formatDateTime(request.sent_at)} via ${request.sent_via === 'manual' ? 'your own fax/email' : request.sent_via}` : ''}</p>
+    {editing ? <div className="pilot-inline-form">
+      <label><span>Recipient email (leave blank to send it yourself)</span><input value={recipient} onChange={(event) => setRecipient(event.target.value)} disabled={busy} /></label>
+      <label><span>Message — keep {'{status_link}'} where the secure link should go</span><textarea rows={8} value={message} onChange={(event) => setMessage(event.target.value)} disabled={busy} /></label>
+      <div className="onboarding-actions"><button className="button-primary" disabled={busy} onClick={() => void run(() => editInformationRequest(request.id, { message, recipient }))}>Save draft</button><button className="text-button" onClick={() => setEditing(false)}>Cancel</button></div>
+    </div> : <pre className="pilot-message">{request.draft_message}</pre>}
+    {link && <div className="pilot-panel"><p><strong>Secure link for the referring office</strong> — included in the message. Shown once.</p><code className="pilot-link">{link}</code><button className="text-button" onClick={() => void navigator.clipboard?.writeText(link)}>Copy link</button></div>}
+    {error && <p className="error-banner" role="alert">{error}</p>}
+    <div className="pilot-actions">
+      {draft && !editing && <button className="button-secondary" disabled={busy} onClick={() => setEditing(true)}>Edit</button>}
+      {draft && request.channel === 'email' && request.recipient && <button className="button-primary" disabled={busy} onClick={() => void run(() => sendInformationRequest(request.id, 'send'), true)}>Approve &amp; email {request.recipient}</button>}
+      {draft && <button className={request.channel === 'email' ? 'text-button' : 'button-primary'} disabled={busy} onClick={() => void run(() => sendInformationRequest(request.id, 'mark_sent'), true)}>{request.channel === 'email' ? 'I’ll send it myself' : 'Approve — I’ll fax/send it'}</button>}
+      {(request.status === 'sent' || request.status === 'partially_resolved') && <button className="text-button" disabled={busy} onClick={() => void run(() => resolveInformationRequest(request.id))}>Mark resolved</button>}
+      {request.status !== 'resolved' && <button className="text-button" disabled={busy} onClick={() => void run(() => cancelInformationRequest(request.id))}>Cancel request</button>}
+    </div>
+  </div>
+}
+
 type Panel = null | 'edit' | 'reject' | 'request' | 'escalate' | 'accept' | 'redirect' | 'decline'
 
 function ReferralDetailPage({ id, status, navigate }: { id: string; status: PilotStatus; navigate: Navigate }) {
@@ -515,7 +606,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
         </div>}
         {panel === 'request' && <div className="pilot-panel">
           <h3>Request information</h3>
-          <p className="muted-note">Lamina prepares the request; nothing is sent from Lamina in this pilot phase.</p>
+          <p className="muted-note">Lamina drafts the request; nothing is sent until you review and approve it.</p>
           {(recommendation?.missing_items ?? []).map((item) => <label key={item} className="pilot-check"><input type="checkbox" checked={requestItems.includes(item)} onChange={(event) => setRequestItems(event.target.checked ? [...requestItems, item] : requestItems.filter((value) => value !== item))} /> {item}</label>)}
           <label><span>Other item or note</span><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></label>
           <div className="onboarding-actions"><button className="button-primary" disabled={busy} onClick={() => void act(() => requestInformation(referral.id, requestItems, note))}>Prepare request</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
@@ -526,12 +617,8 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           <div className="onboarding-actions"><button className="button-primary" disabled={busy} onClick={() => void act(() => escalateReferral(referral.id, note))}>Flag</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
         </div>}
 
-        {referral.information_request && <div className="pilot-panel pilot-draft">
-          <h3>Prepared information request</h3>
-          <p>{referral.information_request.draft_message}</p>
-          <p className="muted-note">Not sent. Copy it into your fax or email to {referral.sender.name}{referral.sender.contact ? ` (${referral.sender.contact})` : ''}.</p>
-          <button className="text-button" onClick={() => void navigator.clipboard?.writeText(referral.information_request?.draft_message ?? '')}>Copy request</button>
-        </div>}
+        {(detail.information_requests ?? []).filter((request) => request.status !== 'cancelled').map((request) => <InformationRequestPanel key={request.id} request={request} senderName={referral.sender.name} onChanged={() => void load()} />)}
+        {(detail.sender_responses ?? []).length > 0 && <div className="pilot-panel"><h3>Replies from the referring office</h3><ul className="pilot-documents">{(detail.sender_responses ?? []).map((response) => <li key={response.id}><span>{response.message ?? 'Provided requested values'}</span><span className="muted-note">{response.items.map((item) => item.key.replace(/_/g, ' ')).join(', ')} · {formatDateTime(response.created_at)}</span></li>)}</ul></div>}
 
         {referral.disposition && <div className="pilot-panel"><h3>Decision</h3><p>{referral.disposition.decision === 'accept' ? 'Accepted' : referral.disposition.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : 'Declined'} · {formatDateTime(referral.disposition.at)}{referral.disposition.reason ? ` — “${referral.disposition.reason}”` : ''}</p></div>}
 

@@ -38,7 +38,7 @@ test('pilot routes resolve only onboarding, join, auth, and /me pilot pages', ()
   assert.deepEqual(resolvePilotRoute('/me/referrals/ref_abc-123'), { kind: 'referral', id: 'ref_abc-123' })
   assert.deepEqual(resolvePilotRoute('/claim/sign-in'), { kind: 'auth', page: 'sign-in' })
   for (const demo of ['/', '/home', '/for-you', '/patients', '/patients/patient-ckd-htn-001', '/chen', '/chen/patients/tonjit',
-    '/specialist', '/consultations/3', '/network', '/agent', '/claim', '/me/agent', '/me/profile', '/settings/agent-evaluations']) {
+    '/specialist', '/consultations/3', '/network', '/agent', '/claim', '/me/profile', '/me/agent/train', '/p/Bad_Slug', '/r/short', '/settings/agent-evaluations']) {
     assert.deepEqual(resolvePilotRoute(demo), { kind: 'redirect', to: pilotPaths.home }, demo)
   }
 })
@@ -130,6 +130,6 @@ test('review card exposes the four triage actions plus physician-only dispositio
     assert.ok(pilot.includes(label), label)
   }
   assert.match(pilot, /physician && canUse\(actions, 'accept'\)/, 'disposition renders only for physicians')
-  assert.match(pilot, /nothing is sent from Lamina in this pilot phase/)
+  assert.match(pilot, /nothing is sent until you review and approve it/)
   assert.match(pilot, /<summary>Why<\/summary>/)
 })

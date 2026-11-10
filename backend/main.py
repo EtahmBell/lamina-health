@@ -12,8 +12,10 @@ from backend.api.referrals import router as referrals_router
 from backend.api.specialist import router as specialist_router
 from backend.api.workspace import router as workspace_router
 from backend.demo_workspace import configured_cors_origins
+from backend.pilot.api import internal_router as pilot_metrics_router
 from backend.pilot.api import router as pilot_practice_router
 from backend.pilot.mode import ProductMode, product_mode
+from backend.pilot.public_api import router as pilot_public_router
 from backend.provider_network import router as provider_network_router
 
 # Synthetic demo surface: anonymous Lucy/Chen/Iain workspaces, fixture patients,
@@ -37,6 +39,8 @@ PILOT_ROUTERS = (
     physician_onboarding_router,
     pilot_admin_router,
     pilot_practice_router,
+    pilot_metrics_router,
+    pilot_public_router,
 )
 
 

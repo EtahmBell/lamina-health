@@ -169,6 +169,103 @@ BEFORE DELETE ON recommendation_decisions
 BEGIN SELECT RAISE(ABORT, 'recommendation decisions are immutable'); END;
 """
 
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS sender_links (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  referral_id TEXT NOT NULL REFERENCES intake_referrals(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  purpose TEXT NOT NULL CHECK(purpose IN ('submission', 'information_request')),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS sender_links_referral ON sender_links(practice_id, referral_id);
+CREATE TABLE IF NOT EXISTS missing_information_requests (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  referral_id TEXT NOT NULL REFERENCES intake_referrals(id),
+  items_json TEXT NOT NULL,
+  recipient TEXT,
+  channel TEXT NOT NULL CHECK(channel IN ('email', 'manual')),
+  subject TEXT NOT NULL,
+  draft_message TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN (
+    'draft', 'approved', 'sent', 'partially_resolved', 'resolved', 'cancelled')),
+  created_by TEXT NOT NULL,
+  approved_by TEXT,
+  approved_at TEXT,
+  sent_at TEXT,
+  sent_via TEXT,
+  sender_link_id TEXT REFERENCES sender_links(id),
+  resolved_at TEXT,
+  cancelled_at TEXT,
+  evidence_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mir_referral ON missing_information_requests(practice_id, referral_id);
+CREATE TABLE IF NOT EXISTS sender_responses (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  referral_id TEXT NOT NULL REFERENCES intake_referrals(id),
+  sender_link_id TEXT NOT NULL REFERENCES sender_links(id),
+  message TEXT,
+  items_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS outbound_messages (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  referral_id TEXT,
+  adapter TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  approved_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS learning_questions (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  proposal_rule_id TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  question TEXT NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL CHECK(status IN ('pending', 'confirmed', 'edited', 'depends', 'ignored', 'rejected')),
+  answer_note TEXT,
+  last_shown_at TEXT,
+  answered_by TEXT,
+  answered_at TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(practice_id, signature)
+);
+CREATE TABLE IF NOT EXISTS public_profiles (
+  practice_id TEXT PRIMARY KEY REFERENCES practices(id),
+  slug TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK(status IN ('draft', 'published', 'unpublished')),
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  current_snapshot_id TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public_profile_snapshots (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  version INTEGER NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  published_by TEXT NOT NULL,
+  published_at TEXT NOT NULL,
+  UNIQUE(practice_id, version)
+);
+CREATE TRIGGER IF NOT EXISTS public_snapshots_no_update BEFORE UPDATE ON public_profile_snapshots
+BEGIN SELECT RAISE(ABORT, 'public snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS public_snapshots_no_delete BEFORE DELETE ON public_profile_snapshots
+BEGIN SELECT RAISE(ABORT, 'public snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS outbound_messages_no_update BEFORE UPDATE ON outbound_messages
+BEGIN SELECT RAISE(ABORT, 'outbound messages are immutable'); END;
+"""
+
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -194,12 +291,45 @@ class PilotStore:
         self.path = self.workflow.path
         with self._connect() as db:
             db.executescript(_SCHEMA)
+            db.executescript(_SCHEMA_V2)
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=5)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys = ON")
         return db
+
+    # ------------------------------------------------------------- generic rows
+
+    def fetch_all(self, sql: str, values: tuple | list = ()) -> list[dict]:
+        with self._connect() as db:
+            return [dict(row) for row in db.execute(sql, values).fetchall()]
+
+    def fetch_one(self, sql: str, values: tuple | list = ()) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(sql, values).fetchone()
+        return dict(row) if row else None
+
+    def execute(self, statements: list[tuple[str, tuple | list]], events: list[dict] | None = None) -> int:
+        """Run several writes plus their pilot events in ONE transaction.
+        Returns the rowcount of the first statement (used as an optimistic guard:
+        if it is 0 the whole transaction is rolled back)."""
+        with self._connect() as db:
+            first = None
+            for sql, values in statements:
+                count = db.execute(sql, values).rowcount
+                if first is None:
+                    first = count
+                    if count == 0:
+                        db.rollback()
+                        return 0
+            for event in events or []:
+                self.append_event(
+                    event["event_type"], actor=event["actor"],
+                    autonomy=event.get("autonomy", "human"), practice_id=event.get("practice_id"),
+                    referral_id=event.get("referral_id"), metadata=event.get("metadata"), db=db,
+                )
+        return first or 0
 
     # ------------------------------------------------------------------ events
 

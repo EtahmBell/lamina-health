@@ -155,7 +155,8 @@ def test_product_mode_defaults_to_demo_and_rejects_unknown_values() -> None:
 def test_pilot_mode_exposes_no_demo_routes(pilot: Pilot) -> None:
     paths = set(create_app("pilot").openapi()["paths"])
     assert all(
-        path.startswith(("/api/me/onboarding", "/api/me/practice", "/api/internal/pilot-physicians"))
+        path.startswith(("/api/me/onboarding", "/api/me/practice", "/api/internal/pilot-physicians",
+                         "/api/internal/pilot-metrics", "/api/public/p/", "/api/public/r/"))
         or path == "/health"
         for path in paths
     ), paths
@@ -611,8 +612,9 @@ def test_missing_information_flow_reaches_ready_only_with_human_evidence(pilot: 
     base = f"/api/me/practice/referrals/{rid}"
     requested = pilot.post(f"{base}/request-information", "user-c", {}).json()
     assert requested["referral"]["status"] == "needs_information"
-    request = requested["referral"]["information_request"]
-    assert request["items"] == ["Recent HbA1c", "Renal function"] and request["sent"] is False
+    request = requested["information_requests"][0]
+    assert [item["label"] for item in request["items"]] == ["Recent HbA1c", "Renal function"]
+    assert request["status"] == "draft" and request["sent_at"] is None
 
     document = pilot.client.post(
         f"{base}/documents", headers={**_h("user-c"), "Content-Type": "text/plain",
@@ -637,9 +639,9 @@ def test_missing_information_flow_reaches_ready_only_with_human_evidence(pilot: 
     events = _event_types(pilot.store, referral_id=rid)
     for expected in ("referral_received", "referral_triaged", "recommendation_generated",
                      "missing_information_detected", "information_requested", "document_uploaded",
-                     "referral_item_recorded", "referral_ready"):
+                     "referral_item_recorded", "referral_became_ready"):
         assert expected in events, expected
-    ready_event = next(e for e in pilot.store.events(referral_id=rid) if e["event_type"] == "referral_ready")
+    ready_event = next(e for e in pilot.store.events(referral_id=rid) if e["event_type"] == "referral_became_ready")
     assert ready_event["autonomy"] == "automatic"
 
     accepted = pilot.post(f"{base}/disposition", "user-a", {"decision": "accept"}).json()
