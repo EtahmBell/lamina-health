@@ -283,8 +283,12 @@ def test_history_is_private_per_user_and_practice_and_ids_cannot_cross(agent: Pi
     other = agent.get("/api/me/practice/assistant", "user-b").json()
     assert other["messages"] == []
     # Another practice's referral id as page context or a reference resolves to nothing.
-    leak = say(agent, "Why did you recommend in-person?", user="user-b", referral_id=rid)
-    assert "Alex Example" not in json.dumps(leak) and leak["focus_referral_id"] is None
+    # Another practice's referral as screen context is refused, with the same answer as a missing one.
+    foreign = agent.post(MSG, "user-b", {"text": "Why did you recommend in-person?", "referral_id": rid})
+    missing = agent.post(MSG, "user-b", {"text": "Why did you recommend in-person?", "referral_id": "ref_doesnotexist"})
+    assert foreign.status_code == missing.status_code == 404
+    assert foreign.json()["detail"] == missing.json()["detail"]
+    assert "Alex Example" not in foreign.text
     _services(agent).assistant._client = Scripted(plans=[plan("referral_query", referral_refs=[rid, "Alex Example"])])
     leak2 = say(agent, "tell me about that referral", user="user-b")
     assert "Alex Example" not in json.dumps(leak2["reply"])
@@ -340,3 +344,144 @@ def test_requested_items_use_the_triage_labels(agent: Pilot) -> None:
                                                               requested_items=["recent hba1c", "Recent HbA1c"])])
     card = say(agent, "ask for the a1c")["reply"]["cards"][0]
     assert card["execute"]["items"] == ["Recent HbA1c"]
+
+
+# ------------------------------------------------- step 15 follow-up: context + lifecycle
+
+
+def _beta(p: Pilot) -> str:
+    return p.referral(patient={"name": "Test Patient Beta"}, reason="Type 2 diabetes not at goal")["referral"]["id"]
+
+
+def test_screen_context_answers_about_the_referral_on_screen(agent: Pilot) -> None:
+    alex = agent.referral()["referral"]["id"]
+    beta = _beta(agent)
+    say(agent, "Tell me about Test Patient Beta")  # conversation focus is Beta...
+    why = say(agent, "Why did you recommend in-person?", referral_id=alex)  # ...but the screen is Alex
+    assert why["focus_referral_id"] == alex and "Alex Example" in json.dumps(why["reply"])
+    missing = say(agent, "What's missing?", referral_id=alex)
+    assert missing["focus_referral_id"] == alex
+    assert missing["reply"]["bullets"][:2] == ["Recent HbA1c", "Renal function"]
+    request = say(agent, "Prepare a request for the missing information.", referral_id=alex)
+    assert request["reply"]["cards"][0]["execute"]["referral_id"] == alex
+    summary = say(agent, "Summarize what happened.", referral_id=alex)
+    assert summary["intent"] == "summarize_history" and summary["focus_referral_id"] == alex
+    assert any("Lamina triaged the referral" in bullet for bullet in summary["reply"]["bullets"])
+    assert all("conversation" not in bullet.casefold() for bullet in summary["reply"]["bullets"])
+    # Switching pages switches context: the same question now answers about Beta.
+    assert say(agent, "What's missing?", referral_id=beta)["focus_referral_id"] == beta
+
+
+def test_list_questions_on_a_patient_page_still_list(agent: Pilot) -> None:
+    alex = agent.referral()["referral"]["id"]
+    _beta(agent)
+    reply = say(agent, "Which referrals need attention?", referral_id=alex)
+    assert reply["focus_referral_id"] is None
+    assert "Test Patient Beta" in json.dumps(reply["reply"]) and "Alex Example" in json.dumps(reply["reply"])
+
+
+def test_explicitly_named_other_patient_is_honoured_and_said_out_loud(agent: Pilot) -> None:
+    alex = agent.referral()["referral"]["id"]
+    beta = _beta(agent)
+    reply = say(agent, "What's missing for Test Patient Beta?", referral_id=alex)
+    assert reply["focus_referral_id"] == beta
+    assert "not the referral open on your screen" in reply["reply"]["paragraphs"][0]
+
+
+def test_model_cannot_silently_switch_away_from_the_screen(agent: Pilot) -> None:
+    alex = agent.referral()["referral"]["id"]
+    _beta(agent)
+    # The model "remembers" Beta from the conversation, but the user didn't name her.
+    _services(agent).assistant._client = Scripted(plans=[plan("explain_recommendation", referral_refs=["Test Patient Beta"])],
+                                                  compose={"paragraphs": ["ok"], "bullets": []})
+    reply = say(agent, "why in person?", referral_id=alex)
+    assert reply["focus_referral_id"] == alex
+    payload = _services(agent).assistant._client.calls[0][1]
+    assert payload["current_referral"]["id"] == alex
+
+
+def test_same_name_episodes_stay_on_the_one_on_screen_and_ask_elsewhere(agent: Pilot) -> None:
+    first = agent.referral()["referral"]["id"]
+    second = agent.referral()["referral"]["id"]
+    on_page = say(agent, "Why did you recommend in-person for Alex Example?", referral_id=second)
+    assert on_page["focus_referral_id"] == second
+    off_page = say(agent, "Why did you recommend in-person for Alex Example?")
+    assert "More than one" in off_page["reply"]["paragraphs"][0]
+    assert {card["path"] for card in off_page["reply"]["cards"]} == {f"/me/referrals/{first}", f"/me/referrals/{second}"}
+
+
+def test_cards_follow_the_object_lifecycle_and_history_never_reexecutes(agent: Pilot) -> None:
+    alex = agent.referral()["referral"]["id"]
+    card = say(agent, "Prepare a request for the missing information.", referral_id=alex)["reply"]["cards"][0]
+    assert card["state"] == "ready" and card["execute"]["type"] == "create_information_request"
+    flag = say(agent, "Flag this for physician review", referral_id=alex)["reply"]["cards"][0]
+    assert flag["state"] == "ready"
+    before = len(agent.store.events(event_type="missing_information_request_created"))
+    # The human click: existing endpoints.
+    assert agent.post(f"/api/me/practice/referrals/{alex}/request-information", "user-a", {"items": card["execute"]["items"]}).status_code == 200
+    # Duplicate click is refused by the BACKEND, not just a disabled button.
+    duplicate = agent.post(f"/api/me/practice/referrals/{alex}/request-information", "user-a", {"items": card["execute"]["items"]})
+    assert duplicate.status_code == 409 and duplicate.json()["detail"]["code"] == "draft_exists"
+    assert agent.post(f"/api/me/practice/referrals/{alex}/escalate", "user-a", {}).status_code == 200
+    again = agent.post(f"/api/me/practice/referrals/{alex}/escalate", "user-a", {})
+    assert again.status_code == 409 and again.json()["detail"]["code"] == "already_escalated"
+    history = agent.get("/api/me/practice/assistant", "user-a").json()["messages"]
+    states = [c["state"] for m in history if m["role"] == "agent" for c in (m["reply"] or {}).get("cards", [])]
+    assert "draft_created" in states and "flagged" in states
+    # Reading history twice changes nothing: no new drafts or flags.
+    agent.get("/api/me/practice/assistant", "user-a")
+    assert len(agent.store.events(event_type="missing_information_request_created")) == before + 1
+    # A fresh preparation for the same referral now reports the existing draft.
+    fresh = say(agent, "Prepare a request for the missing information.", referral_id=alex)
+    assert "already a draft" in fresh["reply"]["paragraphs"][0]
+
+
+def test_proposal_cards_show_confirmed_and_rejected(agent: Pilot) -> None:
+    first = say(agent, "I always need a recent lipid panel before diabetes management referrals.")["reply"]["cards"][0]
+    second = say(agent, "Pediatric patients are outside my scope for diabetes management.")["reply"]["cards"][0]
+    assert first["state"] == second["state"] == "pending"
+    assert agent.post(f"/api/me/practice/teach/{first['proposal_id']}/confirm", "user-a", {}).status_code == 200
+    assert agent.post(f"/api/me/practice/teach/{second['proposal_id']}/reject", "user-a", {"reason": None}).status_code == 200
+    cards = {c["proposal_id"]: c for m in agent.get("/api/me/practice/assistant", "user-a").json()["messages"]
+             if m["role"] == "agent" for c in (m["reply"] or {}).get("cards", []) if c.get("proposal_id")}
+    assert cards[first["proposal_id"]]["state"] == "confirmed"
+    assert cards[second["proposal_id"]]["state"] == "rejected"
+    # Home reflects the same backend state: no stale "Confirm what I learned" items.
+    home = agent.get("/api/me/practice/home", "user-a").json()
+    assert not [item for item in home["needs_you"] if item.get("proposal_id") in cards]
+
+
+def test_agent_proposals_and_drafts_appear_on_home(agent: Pilot) -> None:
+    alex = agent.referral()["referral"]["id"]
+    proposal = say(agent, "I always need a recent lipid panel before diabetes management referrals.")["reply"]["cards"][0]
+    home = agent.get("/api/me/practice/home", "user-a").json()
+    assert any(item.get("proposal_id") == proposal["proposal_id"] for item in home["needs_you"])
+    card = say(agent, "Prepare a request for the missing information.", referral_id=alex)["reply"]["cards"][0]
+    agent.post(f"/api/me/practice/referrals/{alex}/request-information", "user-a", {"items": card["execute"]["items"]})
+    home = agent.get("/api/me/practice/home", "user-a").json()
+    assert any(item["kind"] == "draft_request" and item["referral_id"] == alex for item in home["prepared"])
+
+
+def test_chat_never_appears_in_the_referral_history(agent: Pilot) -> None:
+    alex = agent.referral()["referral"]["id"]
+    say(agent, "Summarize what happened.", referral_id=alex)
+    detail = agent.get(f"/api/me/practice/referrals/{alex}", "user-a").json()
+    assert "agent_conversation_turn" not in [event["event_type"] for event in detail["history"]]
+
+
+def test_staff_on_a_patient_page(agent: Pilot) -> None:
+    agent.add_staff()
+    alex = agent.referral()["referral"]["id"]
+    assert say(agent, "What's missing?", user="user-c", referral_id=alex)["focus_referral_id"] == alex
+    flag = say(agent, "Flag this for physician review", user="user-c", referral_id=alex)
+    assert flag["reply"]["cards"][0]["execute"] == {"type": "escalate", "referral_id": alex}
+    denied = say(agent, "I always need a lipid panel before review.", user="user-c", referral_id=alex)
+    assert "Only the physician" in denied["reply"]["paragraphs"][0]
+
+
+def test_model_failure_on_a_patient_page_falls_back_with_the_same_context(agent: Pilot) -> None:
+    alex = agent.referral()["referral"]["id"]
+    _beta(agent)
+    _services(agent).assistant._client = Scripted(fail=True)
+    reply = say(agent, "What's missing?", referral_id=alex)
+    assert reply["interpreter"] == "deterministic_fallback" and reply["focus_referral_id"] == alex

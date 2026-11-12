@@ -12,6 +12,7 @@ import {
   AGENT_TABS, emptyRuleForm, isClosed, MODALITY_LABELS, pilotErrorCopy, pilotPaths, practicePortrait, proposalLines,
   ruleFormFrom, ruleInput, type AgentTab, type RuleForm,
 } from './pilotState.ts'
+import { useOnPilotDataChange } from './pilotSync.ts'
 import { TrainingReminderBand } from './pilotUi.tsx'
 import { PublicProfileView } from './PublicPages.tsx'
 
@@ -116,6 +117,8 @@ export function AgentPage({ status, navigate, tab }: { status: PilotStatus; navi
     listReferrals().then(setReferrals).catch(() => setReferrals([]))
     if (physician) getPilotMetrics().then((data) => setWeekly(data.weekly.text)).catch(() => setWeekly(null))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Proposals confirmed from chat, Home, or here: every view re-reads the backend.
+  useOnPilotDataChange(() => { reload(); listReferrals().then(setReferrals).catch(() => undefined) })
   const practice = status.practice
   return <main className="page-shell agent-page pilot-agent-page">
     <section className="agent-hero"><div className="agent-hero-mark"><AgentAvatar tone="copper" /></div><div>

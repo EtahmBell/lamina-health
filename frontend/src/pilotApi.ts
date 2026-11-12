@@ -1,9 +1,18 @@
-import { ApiError, apiBaseUrl, apiRequest, parseErrorDetail, type NppesIdentity, type OnboardingStatus } from './api.ts'
+import { ApiError, apiBaseUrl, apiRequest as baseApiRequest, parseErrorDetail, type NppesIdentity, type OnboardingStatus } from './api.ts'
 import { getAccessToken } from './authClient.ts'
+import { notifyPilotDataChanged } from './pilotSync.ts'
 
 /** Client for the real, authenticated practice pilot (`/api/me/practice/*`).
  * The client never sends a user id, practice id, owner scope, or role: the backend
  * derives all of them from the verified Supabase token. */
+
+/** Every successful pilot WRITE tells the app its server state changed, so each view
+ * re-reads from the backend (see pilotSync.ts). Reads never notify. */
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const result = await baseApiRequest<T>(path, init)
+  if (init?.method && init.method.toUpperCase() !== 'GET') notifyPilotDataChanged()
+  return result
+}
 
 const json = (body: unknown): RequestInit => ({
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -170,7 +179,9 @@ export async function uploadReferralDocument(id: string, file: File): Promise<Re
     credentials: 'include',
   })
   if (!response.ok) return raise(response)
-  return response.json() as Promise<ReferralDetail>
+  const detail = await response.json() as ReferralDetail
+  notifyPilotDataChanged()
+  return detail
 }
 
 /** Authenticated download into a short-lived object URL (no bearer token in a link). */

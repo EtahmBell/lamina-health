@@ -34,7 +34,7 @@ from typing import Any
 from .intake import IntakeService
 from .missing_info import MissingInformationService
 from .practice import PilotError, PracticeContext
-from .rules import PracticeRules
+from .rules import PracticeRules, RuleNotFoundError
 from .store import PilotStore, new_id, now_iso
 from .teaching import TeachingService
 
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS agent_messages_owner ON agent_messages(practice_id, u
 """
 
 INTENTS = (
-    "greeting", "conversation", "practice_question", "referral_query", "explain_recommendation",
+    "greeting", "conversation", "practice_question", "referral_query", "explain_recommendation", "summarize_history",
     "teach", "prepare_referral", "prepare_information_request", "prepare_physician_review",
     "action_request", "unavailable", "clarify",
 )
@@ -115,6 +115,7 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
     Tool("triage_explanation", "read", "Why the agent recommended what it did: rule versions, evidence, and human edits.", needs_referral=True),
     Tool("practice_rules", "read", "The practice's confirmed referral rules (active preferences)."),
     Tool("pending_work", "read", "What needs the team, what the agent prepared, and what is waiting on others."),
+    Tool("referral_timeline", "read", "One referral's recorded history (who did what, when), oldest first.", needs_referral=True),
     Tool("propose_preference", "prepare", "Draft a practice preference from an explicit instruction, for the physician to confirm.", physician_only=True),
     Tool("prepare_information_request", "prepare", "Preview a missing-information request for a referral. Creating the draft needs a click; sending needs approval.", needs_referral=True),
     Tool("prepare_physician_review", "prepare", "Preview flagging a referral for physician review. Flagging needs a click.", needs_referral=True),
@@ -142,6 +143,8 @@ class Plan:
     query_filter: str = "attention"
     reply: str | None = None
     unavailable: str | None = None
+    # True when the message is about the patient/referral on screen (or in focus), not a list question.
+    about_current: bool = True
     interpreter: str = "deterministic"
 
 
@@ -191,6 +194,8 @@ def deterministic_plan(text: str, referral_names: list[str]) -> Plan:
         return Plan("action_request", referral_refs=mentioned)
     if lower.startswith("why") or re.search(r"\b(explain|reason|rationale|how did you (decide|triage|recommend))\b", lower):
         return Plan("explain_recommendation", referral_refs=mentioned)
+    if _SUMMARY.search(lower) and not _LISTY.search(lower):
+        return Plan("summarize_history", referral_refs=mentioned)
     if _TEACH.search(text) and not lower.endswith("?") and not mentioned:
         return Plan("teach", teach_text=text.strip())
     if re.search(r"\b(rule|rules|preference|preferences|specialty|my practice|our practice|you know|what can you do|help me|capabilit)", lower):
@@ -199,7 +204,7 @@ def deterministic_plan(text: str, referral_names: list[str]) -> Plan:
         return Plan("referral_query", referral_refs=mentioned, query_filter="all")
     if re.search(r"\b(referral|referrals|patient|patients|attention|waiting|pending|today|queue|need|needs|urgent|missing|closed|accepted|declined)\b", lower):
         query = "waiting" if "waiting" in lower or "missing" in lower else "closed" if re.search(r"\b(closed|accepted|declined|redirected)\b", lower) else "all" if re.search(r"\b(all|every|list)\b", lower) else "attention"
-        return Plan("referral_query", query_filter=query)
+        return Plan("referral_query", query_filter=query, about_current=not _LISTY.search(lower))
     return Plan("conversation")
 
 
@@ -234,6 +239,7 @@ Intents:
 - practice_question: about the practice, its rules/preferences, or what Lamina can do.
 - referral_query: find or summarize patients/referrals (needs attention, waiting, a specific patient).
 - explain_recommendation: why the agent triaged/recommended something.
+- summarize_history: summarize what has happened on a referral (its timeline).
 - teach: ONLY an explicit instruction about how the practice wants referrals handled (requirements, scope, urgency, modality). Questions are never teaching.
 - prepare_referral: draft a referral intake for a patient.
 - prepare_information_request: draft a request to a referring office for missing information.
@@ -242,8 +248,13 @@ Intents:
 - unavailable: needs a capability Lamina lacks (scheduling, contacting patients, outbound referrals, colleague network, literature research, clinical advice).
 - clarify: genuinely ambiguous; ask one short question in `reply`.
 
-referral_refs: patient names or referral ids from the provided referral index that the message refers to (use the
-conversation for "this patient"/"her"). Only copy values from the index. teach_text: the instruction to learn,
+referral_refs: patient names or referral ids from the provided referral index that the message EXPLICITLY names.
+If `current_referral` is present, the user is looking at that referral: "this patient", "her", "this referral", and
+unqualified questions ("what's missing?") mean it -- leave referral_refs empty for those. Without `current_referral`,
+use the conversation for "this patient"/"her". Only copy values from the index. Several referrals can share one
+patient name (separate episodes, possibly different people); never assume they are one patient.
+about_current: true if the message is about one patient/referral (the current or named one); false for questions
+about lists or the whole practice ("which referrals need attention?"). teach_text: the instruction to learn,
 verbatim, else null. requested_items: items the user wants requested, else empty. query_filter: attention|waiting|closed|all.
 draft: fields for prepare_referral taken only from the message (null when absent). unavailable_kind: schedule|contact|outbound|network|research|clinical or null.
 reply: only for greeting/conversation/clarify (1-2 sentences, plain, no clinical advice), else null.
@@ -265,9 +276,10 @@ _PLAN_SCHEMA = {
         "query_filter": {"type": "string", "enum": ["attention", "waiting", "closed", "all"]},
         "draft": _DRAFT_SCHEMA,
         "unavailable_kind": {"type": ["string", "null"], "enum": [*UNAVAILABLE.keys(), None]},
+        "about_current": {"type": "boolean"},
         "reply": {"type": ["string", "null"]},
     },
-    "required": ["intent", "referral_refs", "teach_text", "requested_items", "query_filter", "draft", "unavailable_kind", "reply"],
+    "required": ["intent", "referral_refs", "teach_text", "requested_items", "query_filter", "draft", "unavailable_kind", "about_current", "reply"],
     "additionalProperties": False,
 }
 
@@ -303,6 +315,7 @@ class AssistantService:
             "practice_context": self._practice_context, "list_referrals": self._list_referrals,
             "referral_detail": self._referral_detail, "triage_explanation": self._triage_explanation,
             "practice_rules": self._practice_rules, "pending_work": self._pending_work,
+            "referral_timeline": self._referral_timeline,
             "propose_preference": self._propose_preference,
             "prepare_information_request": self._prepare_information_request,
             "prepare_physician_review": self._prepare_physician_review,
@@ -331,7 +344,7 @@ class AssistantService:
             "SELECT * FROM agent_messages WHERE practice_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?",
             (context.practice_id, context.user_id, limit),
         )
-        return [self._view(row) for row in reversed(rows)]
+        return [self._decorated(context, self._view(row)) for row in reversed(rows)]
 
     def clear(self, context: PracticeContext) -> None:
         self.store.execute(
@@ -360,14 +373,22 @@ class AssistantService:
     # ------------------------------------------------------------------- turn
 
     def respond(self, context: PracticeContext, text: str, focus_referral_id: str | None = None) -> dict:
+        """One turn. `focus_referral_id` is the referral on screen: explicit, structured context
+        from the page. It is validated against this practice's own referrals (a missing or
+        foreign id is refused, same answer for both) and outranks conversational memory."""
         text = " ".join(text.split())
         if not 1 <= len(text) <= 2000:
             raise PilotError("invalid_message", "Write a message up to 2,000 characters", 422)
         recent = self._recent(context)
         index = self._referral_index(context)
-        plan = self._plan(context, text, recent, index)
-        focus = self._resolve(context, plan, index, recent, focus_referral_id)
-        user_message = self._save(context, "user", text)
+        current = None
+        if focus_referral_id is not None:
+            current = next((item for item in index if item["id"] == focus_referral_id), None)
+            if current is None:
+                raise PilotError("referral_not_found", "This referral isn’t available any more. Reopen it from Patients.", 404)
+        plan = self._plan(context, text, recent, index, current)
+        focus = self._resolve(context, plan, index, recent, current, text)
+        user_message = self._save(context, "user", text, payload={"context_referral_id": current and current["id"]})
         try:
             reply, tools_used = self._execute(context, plan, focus, index, text)
         except PilotError as error:  # a backend rule refused: say so, never pretend it happened
@@ -375,19 +396,20 @@ class AssistantService:
         payload = {"reply": reply, "interpreter": plan.interpreter, "tools": tools_used,
                    "focus_referral_id": reply.pop("_focus", None)}
         agent_message = self._save(context, "agent", " ".join(reply["paragraphs"])[:4000], plan.intent, payload)
-        # Audit WITHOUT message text: intent, tools, and which interpreter ran.
+        # Audit WITHOUT message text: intent, tools, and which interpreter ran. Not attached to
+        # the referral itself, so chat never shows up in a referral's clinical history.
         self.store.append_event(
             "agent_conversation_turn", actor=context.actor, practice_id=context.practice_id,
-            referral_id=payload["focus_referral_id"],
-            metadata={"intent": plan.intent, "tools": tools_used, "interpreter": plan.interpreter},
+            metadata={"intent": plan.intent, "tools": tools_used, "interpreter": plan.interpreter,
+                      "focus_referral_id": payload["focus_referral_id"], "screen_context": bool(current)},
         )
-        return {"user_message": user_message, "reply": agent_message}
+        return {"user_message": user_message, "reply": self._decorated(context, agent_message)}
 
     def _referral_index(self, context: PracticeContext) -> list[dict]:
         return [{"id": item["id"], "patient_name": item["patient_name"], "referral_type": item["referral_type"],
                  "status": item["status"]} for item in self.intake.list(context)]
 
-    def _plan(self, context: PracticeContext, text: str, recent: list[dict], index: list[dict]) -> Plan:
+    def _plan(self, context: PracticeContext, text: str, recent: list[dict], index: list[dict], current: dict | None = None) -> Plan:
         fallback = deterministic_plan(text, [item["patient_name"] for item in index])
         client = self.model()
         if client is None:
@@ -401,6 +423,7 @@ class AssistantService:
                     "practice": {"name": context.practice.get("name"), "specialty": context.practice.get("specialty"), "user_role": context.role},
                     "referral_types": self.rules.referral_types(context.practice_id),
                     "referral_index": index[:60],
+                    "current_referral": current,
                 },
                 _PLAN_SCHEMA, use_case="pilot_agent_plan", schema_name="agent_turn_plan",
             )
@@ -412,7 +435,8 @@ class AssistantService:
                 intent=intent, referral_refs=[str(ref)[:120] for ref in result.get("referral_refs") or []][:5],
                 teach_text=(result.get("teach_text") or None), requested_items=[str(i)[:200] for i in result.get("requested_items") or []][:10],
                 draft=draft, query_filter=result.get("query_filter") or "attention",
-                reply=(result.get("reply") or None), unavailable=result.get("unavailable_kind"), interpreter="model",
+                reply=(result.get("reply") or None), unavailable=result.get("unavailable_kind"),
+                about_current=bool(result.get("about_current", True)), interpreter="model",
             )
             # Guardrail: the deterministic planner sees an explicit action/unavailable request the
             # model missed -> keep the safer reading. Teaching needs explicit instruction text.
@@ -427,19 +451,37 @@ class AssistantService:
             fallback.interpreter = "deterministic_fallback"
             return fallback
 
-    def _resolve(self, context: PracticeContext, plan: Plan, index: list[dict], recent: list[dict], focus_id: str | None) -> dict:
-        """Map references to THIS practice's referrals only. Unknown ids resolve to nothing."""
+    def _resolve(self, context: PracticeContext, plan: Plan, index: list[dict], recent: list[dict],
+                 current: dict | None, text: str) -> dict:
+        """Map references to THIS practice's referrals only. Unknown ids resolve to nothing.
+
+        Precedence: a patient the user's OWN words name > the referral on screen > the
+        conversation's last focus. A model-supplied reference to a different patient is only
+        honoured if the message itself names that patient, so the agent never silently
+        switches away from the screen. Same-name referrals are separate episodes."""
         ids = {item["id"]: item for item in index}
+        lower = text.casefold()
         matches: list[dict] = []
         for ref in plan.referral_refs:
             if ref in ids:
                 matches.append(ids[ref])
                 continue
-            lower = ref.casefold()
-            matches += [item for item in index if item["patient_name"].casefold() == lower or _name_mentioned(item["patient_name"], lower)]
+            ref_lower = ref.casefold()
+            matches += [item for item in index if item["patient_name"].casefold() == ref_lower or _name_mentioned(item["patient_name"], ref_lower)]
         unique = list({item["id"]: item for item in matches}.values())
-        if not unique and focus_id in ids:
-            unique = [ids[focus_id]]
+        switched_from = None
+        if current is not None:
+            if any(item["id"] == current["id"] for item in unique):
+                unique = [current]  # same patient name on another episode: stay on the one on screen
+            else:
+                explicit = [item for item in unique if _name_mentioned(item["patient_name"], lower)]
+                if explicit:
+                    unique, switched_from = explicit, current
+                elif plan.intent == "referral_query" and not plan.about_current:
+                    unique = []  # a list question asked from a patient page
+                else:
+                    unique = [current]
+            return {"matches": unique, "unresolved": False, "switched_from": switched_from if len(unique) == 1 else None}
         if not unique and not plan.referral_refs:
             for message in reversed(recent):
                 previous = message.get("focus_referral_id") if message["role"] == "agent" else None
@@ -449,7 +491,7 @@ class AssistantService:
         if len(unique) > 1:  # same patient name on several referrals: prefer open ones, else ask
             open_ = [item for item in unique if item["status"] not in CLOSED]
             unique = open_ if len(open_) == 1 else unique
-        return {"matches": unique, "unresolved": bool(plan.referral_refs) and not unique}
+        return {"matches": unique, "unresolved": bool(plan.referral_refs) and not unique, "switched_from": None}
 
     # ---------------------------------------------------------------- execute
 
@@ -485,19 +527,38 @@ class AssistantService:
 
         if TOOLS_NEED_REFERRAL.get(intent) and not first:
             return self._which_referral(matches, focus["unresolved"], intent), tools
+        reply, _ = self._execute_intent(context, plan, intent, first, text, run)
+        switched = focus.get("switched_from")
+        if switched and first and first["id"] != switched["id"]:
+            reply["paragraphs"] = [f"This is about {first['patient_name']} ({first['referral_type']}), not the referral open on your screen.", *reply["paragraphs"]]
+        return reply, tools
+
+    def _execute_intent(self, context: PracticeContext, plan: Plan, intent: str, first: dict | None, text: str, run: Callable) -> tuple[dict, None]:
+        if intent == "summarize_history":
+            facts = run("referral_timeline", {"referral_id": first["id"]})
+            deterministic = self._timeline_answer(facts)
+            reply = self._compose(text, {"timeline": facts}, deterministic)
+            reply["bullets"] = deterministic["bullets"]  # the recorded events, verbatim from the log
+            reply["cards"] = [{"kind": "link", "label": f"{facts['patient_name']} — referral", "detail": "Full activity log", "action": "Open", "path": f"/me/referrals/{first['id']}"}]
+            reply["_focus"] = first["id"]
+            return reply, None
 
         if intent == "practice_question":
             facts = {"practice": run("practice_context"), "rules": run("practice_rules")}
-            return self._compose(text, facts, self._practice_answer(facts)), tools
+            return self._compose(text, facts, self._practice_answer(facts)), None
         if intent == "referral_query":
             if first:
                 facts = {"referral": run("referral_detail", {"referral_id": first["id"]})}
-                reply = self._compose(text, facts, self._referral_answer(facts["referral"]))
+                asks_missing = bool(_MISSING.search(text.casefold()))
+                deterministic = self._missing_answer(facts["referral"]) if asks_missing else self._referral_answer(facts["referral"])
+                reply = self._compose(text, facts, deterministic)
+                if asks_missing:  # the outstanding items always come verbatim from the triage record
+                    reply["bullets"] = deterministic.get("bullets", [])
                 reply["cards"] = [self._open_card(facts["referral"])]
                 reply["_focus"] = first["id"]
-                return reply, tools
+                return reply, None
             facts = {"referrals": run("list_referrals", {"filter": plan.query_filter}), "pending": run("pending_work")}
-            return self._compose(text, facts, self._list_answer(facts, plan.query_filter)), tools
+            return self._compose(text, facts, self._list_answer(facts, plan.query_filter)), None
         if intent == "explain_recommendation":
             facts = run("triage_explanation", {"referral_id": first["id"]})
             deterministic = self._explain_answer(facts)
@@ -507,20 +568,20 @@ class AssistantService:
             reply["bullets"] = deterministic.get("bullets", [])
             reply["cards"] = [{"kind": "link", "label": f"{facts['patient_name']} — referral", "detail": "Evidence, rule versions, and history", "action": "Open", "path": f"/me/referrals/{first['id']}"}]
             reply["_focus"] = first["id"]
-            return reply, tools
+            return reply, None
         if intent == "teach":
             result = run("propose_preference", {"text": plan.teach_text or text})
-            return self._teach_reply(result), tools
+            return self._teach_reply(result), None
         if intent == "prepare_information_request":
             result = run("prepare_information_request", {"referral_id": first["id"], "items": plan.requested_items})
-            return {**self._prepared_reply(result), "_focus": first["id"]}, tools
+            return {**self._prepared_reply(result), "_focus": first["id"]}, None
         if intent == "prepare_physician_review":
             result = run("prepare_physician_review", {"referral_id": first["id"], "note": None})
-            return {**self._prepared_reply(result), "_focus": first["id"]}, tools
+            return {**self._prepared_reply(result), "_focus": first["id"]}, None
         if intent == "prepare_referral":
             result = run("prepare_referral_draft", {"draft": plan.draft, "referral_id": first["id"] if first else None})
-            return self._prepared_reply(result), tools
-        return self._chat_reply(context, plan, "conversation"), tools
+            return self._prepared_reply(result), None
+        return self._chat_reply(context, plan, "conversation"), None
 
     # -------------------------------------------------------------- read tools
 
@@ -607,6 +668,15 @@ class AssistantService:
             "generator": recommendation["generator"], "human_decision": decision and decision["decision"],
             "untrusted_document_text": quotes,
         }
+
+    def _referral_timeline(self, context: PracticeContext, args: dict) -> dict:
+        detail = self._detail(context, args["referral_id"])
+        referral = detail["referral"]
+        events = [{"at": event["created_at"][:16].replace("T", " ") + " UTC", "what": _event_label(event["event_type"]),
+                   "by": _actor_label(event["actor"], event["autonomy"])}
+                  for event in detail["history"] if event["event_type"] != "agent_conversation_turn"]
+        return {"referral_id": referral["id"], "patient_name": referral["patient"]["name"], "referral_type": referral["referral_type"],
+                "status": STATUS_TEXT.get(referral["status"], referral["status"]), "events": events[-25:], "event_count": len(events)}
 
     def _practice_rules(self, context: PracticeContext, _args: dict) -> dict:
         rules = []
@@ -719,6 +789,8 @@ class AssistantService:
         bullets = []
         if content["required"]:
             bullets.append("Require before review: " + ", ".join(i["label"] for i in content["required"]))
+        if content["helpful"]:
+            bullets.append("Helpful before review: " + ", ".join(i["label"] for i in content["helpful"]))
         if content["good_fit"]:
             bullets.append("Good fit: " + "; ".join(content["good_fit"]))
         if content["redirect"]:
@@ -764,6 +836,52 @@ class AssistantService:
                 "cards": [{"kind": "referral_draft", "label": f"Referral draft — {label}", "detail": draft.get("referral_type") or "Referral type not set",
                            "action": "Open form", "path": "/me/referrals/new", "execute": {"type": "open_referral_draft", "draft": draft}}]}
 
+    # ------------------------------------------------------------ card lifecycle
+
+    def _decorated(self, context: PracticeContext, message: dict) -> dict:
+        """Cards show the CURRENT state of the object they refer to, computed from the backend
+        on every read. Restoring history never re-runs anything; a resolved card offers no action."""
+        reply = message.get("reply")
+        if not reply or not reply.get("cards"):
+            return message
+        return {**message, "reply": {**reply, "cards": [{**card, **self._card_state(context, card)} for card in reply["cards"]]}}
+
+    def _card_state(self, context: PracticeContext, card: dict) -> dict:
+        kind = card.get("kind")
+        if kind == "proposal" and card.get("proposal_id"):
+            try:
+                rule = self.rules.get(context.practice_id, card["proposal_id"])
+            except RuleNotFoundError:
+                return {"state": "unavailable", "state_label": "No longer available"}
+            return {
+                "inferred": {"state": "pending"},
+                "confirmed": {"state": "confirmed", "state_label": "Confirmed — now active", "action": "View rules", "path": "/me/rules"},
+                "inferred_active": {"state": "confirmed", "state_label": "Confirmed — now active", "action": "View rules", "path": "/me/rules"},
+                "rejected": {"state": "rejected", "state_label": "Rejected — not used", "action": "Open"},
+                # A proposal is only superseded when confirmation merged it into the active rule.
+                "superseded": {"state": "confirmed", "state_label": "Confirmed — merged into your rule", "action": "View rules", "path": "/me/rules"},
+            }.get(rule.operational_status, {"state": "pending"})
+        referral_id = (card.get("execute") or {}).get("referral_id")
+        path = card.get("path") or ""
+        if not referral_id and path.startswith("/me/referrals/") and path.count("/") == 3 and not path.endswith("/new"):
+            referral_id = path.rsplit("/", 1)[1]
+        if not referral_id:
+            return {"state": "ready"}
+        row = self.store.referral_row(context.practice_id, referral_id)
+        if not row:
+            return {"state": "unavailable", "state_label": "No longer available"}
+        if kind == "information_request":
+            statuses = [r["status"] for r in self.missing.for_referral(context.practice_id, referral_id)]
+            if "draft" in statuses:
+                return {"state": "draft_created", "state_label": "Draft created — review it before sending", "action": "View draft"}
+            if {"sent", "partially_resolved"} & set(statuses):
+                return {"state": "sent", "state_label": "Request sent — waiting on the referring office", "action": "View"}
+        if kind == "physician_review" and row["escalated_at"]:
+            return {"state": "flagged", "state_label": "Flagged for physician review", "action": "View"}
+        if kind in {"information_request", "physician_review"} and row["status"] in CLOSED:
+            return {"state": "closed", "state_label": "Referral closed", "action": "View"}
+        return {"state": "ready"}
+
     @staticmethod
     def _open_card(referral: dict) -> dict:
         return {"kind": "link", "label": f"{referral['patient_name']} — referral", "detail": f"{referral['referral_type']} · {referral['status']}",
@@ -802,6 +920,23 @@ class AssistantService:
             bullets.append(f"Documents: {', '.join(referral['documents'])}")
         return {"paragraphs": lines, "bullets": bullets, "cards": []}
 
+    def _missing_answer(self, referral: dict) -> dict:
+        name = referral["patient_name"]
+        if referral["missing"]:
+            paragraphs = [f"Still missing for {name}’s {referral['referral_type']} referral, per your rules:"]
+            bullets = list(referral["missing"])
+            if referral["information_requests"]:
+                bullets.append("Requests so far: " + "; ".join(f"{r['status']} ({', '.join(r['items'])})" for r in referral["information_requests"]))
+            return {"paragraphs": paragraphs, "bullets": bullets, "cards": []}
+        return {"paragraphs": [f"Nothing required is missing for {name}’s referral per your confirmed rules. Status: {referral['status']}."], "cards": []}
+
+    def _timeline_answer(self, facts: dict) -> dict:
+        events = facts["events"]
+        if not events:
+            return {"paragraphs": [f"Nothing has been recorded on {facts['patient_name']}’s referral yet."], "bullets": [], "cards": []}
+        return {"paragraphs": [f"{facts['patient_name']}’s {facts['referral_type']} referral: {_plural(facts['event_count'], 'recorded event')}; it’s now {facts['status']}."],
+                "bullets": [f"{e['at']} — {e['what']} ({e['by']})" for e in events[-8:]], "cards": []}
+
     def _explain_answer(self, facts: dict) -> dict:
         if not facts.get("has_recommendation"):
             return {"paragraphs": [f"I haven’t triaged {facts['patient_name']}’s referral yet, so there’s no recommendation to explain."], "cards": []}
@@ -830,4 +965,35 @@ class AssistantService:
             return deterministic
 
 
-TOOLS_NEED_REFERRAL = {"explain_recommendation": True, "prepare_information_request": True, "prepare_physician_review": True}
+TOOLS_NEED_REFERRAL = {"explain_recommendation": True, "summarize_history": True, "prepare_information_request": True, "prepare_physician_review": True}
+
+# Pilot events -> plain words for timeline summaries (unknown types fall back to sentence case).
+EVENT_LABELS = {
+    "referral_received": "Referral received", "staff_entered": "Entered by your team", "referral_triaged": "Lamina triaged the referral",
+    "recommendation_generated": "Lamina prepared a triage recommendation", "recommendation_accepted": "Triage approved",
+    "recommendation_edited": "Triage edited", "recommendation_rejected": "Triage rejected",
+    "missing_information_detected": "Missing information detected", "document_uploaded": "Document attached",
+    "document_confirmed": "Document evidence confirmed", "document_viewed": "Document opened",
+    "referral_item_recorded": "Information recorded", "referral_escalated": "Flagged for physician review",
+    "information_requested": "Information requested", "missing_information_request_created": "Information request drafted",
+    "missing_information_request_edited": "Information request edited", "missing_information_request_sent": "Information request sent",
+    "missing_information_request_cancelled": "Information request cancelled", "missing_information_resolved": "Missing information resolved",
+    "sender_response_received": "Referring office replied", "referral_became_ready": "Ready for physician review",
+    "referral_status_changed": "Status changed", "referral_accepted": "Referral accepted",
+    "referral_redirected": "Referral redirected", "referral_declined": "Referral declined",
+}
+_LISTY = re.compile(r"\b(which|all|any|list|every|referrals|patients|today|queue|anyone|anything else)\b")
+_SUMMARY = re.compile(r"\b(summari[sz]e|summary|what happened|what has happened|timeline|history|so far|catch me up|recap)\b")
+_MISSING = re.compile(r"\b(missing|outstanding|still need|still needed|what do we need|what'?s needed)\b")
+
+
+def _event_label(event_type: str) -> str:
+    return EVENT_LABELS.get(event_type) or event_type.replace("_", " ").capitalize()
+
+
+def _actor_label(actor: str, autonomy: str) -> str:
+    if autonomy == "automatic" or actor.startswith("agent:") or actor == "system":
+        return "Lamina"
+    if actor.startswith("public:"):
+        return "Referring office"
+    return "Your team"

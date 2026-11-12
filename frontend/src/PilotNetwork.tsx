@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { LaminaMark } from './LaminaMark.tsx'
 import { listReferrals, type PilotStatus } from './pilotApi.ts'
 import { pilotPaths, referringClinicians, type ReferringClinician } from './pilotState.ts'
+import { useOnPilotDataChange } from './pilotSync.ts'
 import { NetworkGlobeArt } from './pilotUi.tsx'
 
 type Navigate = (path: string) => void
@@ -19,9 +20,9 @@ export function NetworkPage({ status, navigate }: { status: PilotStatus; navigat
   const physician = status.role === 'physician'
   const [referrers, setReferrers] = useState<ReferringClinician[] | null>(null)
   const [error, setError] = useState('')
-  useEffect(() => {
-    listReferrals().then((items) => setReferrers(referringClinicians(items))).catch(() => setError('Could not load referring clinicians'))
-  }, [])
+  const load = () => { listReferrals().then((items) => setReferrers(referringClinicians(items))).catch(() => setError('Could not load referring clinicians')) }
+  useEffect(load, [])
+  useOnPilotDataChange(load)
 
   return <main className="page-shell physician-directory-page pilot-network-page">
     <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians and practices you work with, and how their agents and yours will coordinate care.</p></div></header>

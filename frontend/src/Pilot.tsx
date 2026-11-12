@@ -8,6 +8,7 @@ import { PhysicianOnboardingPage } from './Onboarding.tsx'
 import { AgentPage, MetricsPage, PublicSettingsPage } from './PilotAgent.tsx'
 import { NetworkPage } from './PilotNetwork.tsx'
 import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavIcon, LaminaShell, NetworkNavIcon, type DockCard, type DockReply, type NavEntry } from './pilotUi.tsx'
+import { useOnPilotDataChange, usePilotDataVersion } from './pilotSync.ts'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
   acceptInvitation, approveTriage, createPractice, createReferral, decideReferral,
@@ -61,7 +62,7 @@ export function PilotApp({ path, params, navigate }: { path: string; params: URL
     case 'patients': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><PatientsPage navigate={navigate} /></PilotShell>}</PilotGate>
     case 'network': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="network"><NetworkPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'new_referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><NewReferralPage navigate={navigate} /></PilotShell>}</PilotGate>
-    case 'referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><ReferralDetailPage id={route.id} status={status} navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients" agentDock><ReferralDetailPage id={route.id} status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'practice': return <PilotGate navigate={navigate} params={params}>{(status, reload) => <PilotShell status={status} navigate={navigate} section="profile"><ProfilePage status={status} reload={reload} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'agent': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="agent"><AgentPage status={status} navigate={navigate} tab={resolveAgentTab(params.get('tab'))} /></PilotShell>}</PilotGate>
     case 'rules': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="agent"><AgentPage status={status} navigate={navigate} tab="rules" /></PilotShell>}</PilotGate>
@@ -311,6 +312,7 @@ function useHomeData(status: PilotStatus) {
     getPracticeRules().then(setRules).catch(() => setRules([]))
   }, [])
   useEffect(() => { load() }, [load])
+  useOnPilotDataChange(load) // agent drafts/proposals and any other write show up without a reload
   const physician = status.role === 'physician'
   const setup: HomeItem[] = rules && rules.length === 0 ? [{
     kind: 'setup_rules', title: 'Teach Lamina your referral criteria', path: pilotPaths.agentTab('rules'), action: physician ? 'Add rules' : 'View',
@@ -355,14 +357,19 @@ function AwayLog({ done, navigate }: { done: HomeItem[]; navigate: Navigate }) {
  * member of the practice. It answers, explains, and PREPARES; the backend decides what
  * each role may do (staff can't teach), and any card that changes state runs an
  * existing endpoint only when the person clicks it. */
-function PracticeAgentDock({ status, navigate }: { status: PilotStatus; navigate: Navigate }) {
+/** Structured screen context for the dock: the referral EPISODE on screen (not a patient
+ * identity). The backend re-validates it against the signed-in user's own practice. */
+type DockContext = { referralId: string; patientName: string; referralType: string }
+
+function PracticeAgentDock({ status, navigate, context }: { status: PilotStatus; navigate: Navigate; context?: DockContext }) {
   const { user } = useAuth()
   const me = accountIdentity(status, user?.email)
   const physician = status.role === 'physician'
+  const dataVersion = usePilotDataVersion()
   const toReply = (body: AgentReplyBody | null, text: string): DockReply => body ?? { paragraphs: [text] }
   const onSend = async (text: string): Promise<DockReply> => {
     try {
-      const { reply } = await sendAssistantMessage(text)
+      const { reply } = await sendAssistantMessage(text, context?.referralId)
       return toReply(reply.reply, reply.text)
     } catch (err) { throw new Error(errorText(err, 'I couldn’t take that in just now. Try again in a moment.')) }
   }
@@ -371,19 +378,25 @@ function PracticeAgentDock({ status, navigate }: { status: PilotStatus; navigate
     const action = card.execute as AgentCardExecute | undefined
     if (!action) return
     try {
-      if (action.type === 'create_information_request') { await requestInformation(action.referral_id, action.items, ''); navigate(pilotPaths.referral(action.referral_id)) }
-      else if (action.type === 'escalate') { await escalateReferral(action.referral_id, ''); navigate(pilotPaths.referral(action.referral_id)) }
+      // Stay in place: the write notifies the app, every view re-reads the backend, and the
+      // card itself turns into "Draft created · View draft" / "Flagged for physician review".
+      if (action.type === 'create_information_request') await requestInformation(action.referral_id, action.items, '')
+      else if (action.type === 'escalate') await escalateReferral(action.referral_id, '')
       else if (action.type === 'open_referral_draft') { setReferralPrefill(action.draft); navigate(pilotPaths.newReferral) }
     } catch (err) { throw new Error(errorText(err, 'That didn’t work. Open the referral to try again.')) }
   }
-  return <AgentDock
-    title="Your agent" subtitle={`${status.practice?.name ?? 'Your practice'} · prepares, you decide`}
+  const shared = { title: 'Your agent', placeholder: 'Ask or teach your agent…', onSend, navigate, onCard, refreshKey: dataVersion,
+    loadHistory: () => getAssistant().then((data) => dockMessagesFrom(data.messages)) }
+  if (context) return <AgentDock {...shared} greetingAfterHistory
+    subtitle={`${context.patientName} · ${context.referralType}`}
+    greeting={`I’m looking at ${context.patientName}’s ${context.referralType} referral with you. Ask why I recommended what I did, what’s missing, or what has happened so far, or have me prepare the next step.`}
+    suggestions={['Why did you recommend this?', 'What’s missing?', 'Prepare a request for the missing information.', 'Summarize what happened.']} />
+  return <AgentDock {...shared}
+    subtitle={`${status.practice?.name ?? 'Your practice'} · prepares, you decide`}
     greeting={`Hi${me.firstName ? ` ${me.firstName}` : ''}. Ask me what needs attention, why I recommended something, or to prepare a request or referral draft.${physician ? ' You can also teach me how you like to work; I’ll draft it for you to confirm.' : ''}`}
     suggestions={physician
       ? ['What needs my attention today?', 'Which referrals are waiting on information?', 'I prefer eConsult for stable medication questions.']
-      : ['What needs attention today?', 'Which referrals are waiting on information?', 'What can you help with?']}
-    placeholder="Ask or teach your agent…" onSend={onSend} navigate={navigate} onCard={onCard}
-    loadHistory={() => getAssistant().then((data) => dockMessagesFrom(data.messages))} />
+      : ['What needs attention today?', 'Which referrals are waiting on information?', 'What can you help with?']} />
 }
 
 /* ------------------------------------------------------------- referrals */
@@ -405,7 +418,9 @@ function PatientsPage({ navigate }: { navigate: Navigate }) {
   const [items, setItems] = useState<PatientWorkItem[] | null>(null)
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
-  useEffect(() => { listReferrals().then((rows) => setItems(rows.map(receivedReferralWorkItem))).catch((err) => setError(errorText(err, 'Could not load patients'))) }, [])
+  const load = () => { listReferrals().then((rows) => setItems(rows.map(receivedReferralWorkItem))).catch((err) => setError(errorText(err, 'Could not load patients'))) }
+  useEffect(load, [])
+  useOnPilotDataChange(load)
   const { active, previous } = patientWorkSections(items ?? [], query)
   return <main className="page-shell selector-page">
     <header className="selector-header">
@@ -608,6 +623,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const [requestItems, setRequestItems] = useState<string[]>([])
   const load = useCallback(() => getReferral(id).then((next) => { setDetail(next); setError('') }).catch((err) => setError(errorText(err, 'Could not load this referral'))), [id])
   useEffect(() => { void load() }, [load])
+  useOnPilotDataChange(() => void load())
 
   const act = async (action: () => Promise<ReferralDetail>) => {
     setBusy(true); setError('')
@@ -786,6 +802,10 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
         </details>
       </div>
     </div>
+    {/* The same practice agent, told explicitly which referral is on screen. Keyed by the
+      * referral so moving between patients never carries one patient's framing into another. */}
+    <PracticeAgentDock key={referral.id} status={status} navigate={navigate}
+      context={{ referralId: referral.id, patientName: referral.patient.name, referralType: referral.referral_type }} />
   </main>
 }
 
@@ -806,6 +826,7 @@ function ProfilePage({ status, reload, navigate }: { status: PilotStatus; reload
   const identity = status.physician_onboarding.confirmed_identity
   const load = () => getPracticeMembers().then((result) => { setMembers(result.members); setInvitations(result.invitations) }).catch((err) => setError(errorText(err, 'Could not load members')))
   useEffect(() => { void load() }, [])
+  useOnPilotDataChange(() => void load())
   const invite = async (event: FormEvent) => {
     event.preventDefault(); setError('')
     try {

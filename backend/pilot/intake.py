@@ -191,6 +191,8 @@ class IntakeService:
                     "created_at": event["created_at"],
                 }
                 for event in self.store.events(practice_id=context.practice_id, referral_id=referral_id)
+                # Chat audit rows are never part of a referral's clinical history.
+                if event["event_type"] != "agent_conversation_turn"
             ],
             "allowed_actions": self.allowed_actions(context, referral, recommendation),
         }
