@@ -170,6 +170,15 @@ def unavailable_kinds(lower: str) -> list[str]:
     return [kind for kind, hit in checks if hit]
 
 
+# A status question that merely mentions an action word ("where does X stand, and what happens
+# after I accept it?") is a question, not a request to act. Imperatives ("accept X", "can you
+# accept X") still route to the human-only action reply.
+_QUESTION_OPENERS = (
+    "why", "what", "which", "how", "did", "is ", "are ", "where", "when", "has ", "have ",
+    "does ", "should ", "will ",
+)
+
+
 def _unavailable_kind(lower: str) -> str | None:
     kinds = unavailable_kinds(lower)
     return kinds[0] if kinds else None
@@ -190,7 +199,7 @@ def deterministic_plan(text: str, referral_names: list[str]) -> Plan:
     kind = _unavailable_kind(lower)
     if kind:
         return Plan("unavailable", referral_refs=mentioned, unavailable=kind)
-    if _ACTION.search(lower) and mentioned and not lower.startswith(("why", "what", "which", "how", "did", "is ", "are ")):
+    if _ACTION.search(lower) and mentioned and not lower.startswith(_QUESTION_OPENERS):
         return Plan("action_request", referral_refs=mentioned)
     if lower.startswith("why") or re.search(r"\b(explain|reason|rationale|how did you (decide|triage|recommend))\b", lower):
         return Plan("explain_recommendation", referral_refs=mentioned)
@@ -357,7 +366,9 @@ class AssistantService:
         payload = json.loads(row["payload_json"] or "{}")
         return {"id": row["id"], "role": row["role"], "text": row["text"], "intent": row["intent"],
                 "reply": payload.get("reply"), "interpreter": payload.get("interpreter"),
-                "focus_referral_id": payload.get("focus_referral_id"), "created_at": row["created_at"]}
+                "focus_referral_id": payload.get("focus_referral_id"),
+                # The referral that was on screen when the user asked (user messages only).
+                "context_referral_id": payload.get("context_referral_id"), "created_at": row["created_at"]}
 
     def _save(self, context: PracticeContext, role: str, text: str, intent: str | None = None, payload: dict | None = None) -> dict:
         message_id = new_id("msg")
@@ -871,11 +882,20 @@ class AssistantService:
         if not row:
             return {"state": "unavailable", "state_label": "No longer available"}
         if kind == "information_request":
-            statuses = [r["status"] for r in self.missing.for_referral(context.practice_id, referral_id)]
+            requests = self.missing.for_referral(context.practice_id, referral_id)
+            statuses = [r["status"] for r in requests]
             if "draft" in statuses:
                 return {"state": "draft_created", "state_label": "Draft created — review it before sending", "action": "View draft"}
             if {"sent", "partially_resolved"} & set(statuses):
                 return {"state": "sent", "state_label": "Request sent — waiting on the referring office", "action": "View"}
+            # Everything this card offered to ask for has since been received (current triage no
+            # longer lists it as missing): never offer a second request for it.
+            offered = {str(item).casefold() for item in (card.get("execute") or {}).get("items") or []}
+            if offered and requests:
+                current = self.intake.recommendation(context.practice_id, row["current_recommendation_id"])
+                still_missing = {label.casefold() for label in (current.missing_items if current else [])}
+                if not offered & still_missing:
+                    return {"state": "resolved", "state_label": "Information received — nothing left to request", "action": "View"}
         if kind == "physician_review" and row["escalated_at"]:
             return {"state": "flagged", "state_label": "Flagged for physician review", "action": "View"}
         if kind in {"information_request", "physician_review"} and row["status"] in CLOSED:

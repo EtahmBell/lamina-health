@@ -294,7 +294,7 @@ export type AgentCard = {
 export type AgentReplyBody = { paragraphs: string[]; bullets?: string[]; cards?: AgentCard[] }
 export type AgentMessage = {
   id: string; role: 'user' | 'agent'; text: string; intent: string | null; reply: AgentReplyBody | null
-  interpreter: string | null; focus_referral_id: string | null; created_at: string
+  interpreter: string | null; focus_referral_id: string | null; context_referral_id?: string | null; created_at: string
 }
 export const getAssistant = () => apiRequest<{ messages: AgentMessage[]; retention_days: number; model_available: boolean }>('/api/me/practice/assistant')
 export const sendAssistantMessage = (text: string, referralId?: string | null) =>

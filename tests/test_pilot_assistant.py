@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 
 import pytest
 
@@ -96,6 +97,9 @@ def test_deterministic_planner_routes_the_brief_examples() -> None:
         "Draft an information request for Alex Example": "prepare_information_request",
         "Flag Beta for physician review": "prepare_physician_review",
         "Accept Alex Example's referral": "action_request",
+        "Can you accept Alex Example's referral?": "action_request",
+        # A status question that mentions an action word is answered, not refused.
+        "Where does Alex Example's referral stand, and what happens after I accept it?": "referral_query",
         "Schedule Alex for next Tuesday": "unavailable",
         "What does the latest research say about GLP-1s?": "unavailable",
         "What rules do I have?": "practice_question",
@@ -189,6 +193,32 @@ def test_information_request_is_prepared_not_created_or_sent(agent: Pilot) -> No
     assert created.json()["information_requests"][0]["status"] == "draft"
     again = say(agent, "Draft an information request for Alex Example")
     assert "already a draft" in again["reply"]["paragraphs"][0] and "execute" not in again["reply"]["cards"][0]
+
+
+def test_answered_request_card_never_offers_a_second_request(agent: Pilot) -> None:
+    rid = agent.referral()["referral"]["id"]
+    card = say(agent, "Draft an information request for Alex Example")["reply"]["cards"][0]
+    detail = agent.post(f"/api/me/practice/referrals/{rid}/request-information", "user-a",
+                        {"items": card["execute"]["items"]}).json()
+    request_id = detail["information_requests"][0]["id"]
+    assert agent.post(f"/api/me/practice/information-requests/{request_id}/send", "user-a",
+                      {"mode": "mark_sent"}).status_code == 200
+
+    def card_state() -> str:
+        history = agent.get("/api/me/practice/assistant", "user-a").json()["messages"]
+        cards = [c for m in history if m["reply"] for c in m["reply"].get("cards", [])
+                 if c.get("kind") == "information_request"]
+        return cards[0]["state"]
+
+    assert card_state() == "sent"
+    # The office answers: every requested item is recorded, re-triage resolves the request.
+    for requirement in detail["recommendation"]["requirements"]:
+        if requirement["required"]:
+            agent.post(f"/api/me/practice/referrals/{rid}/items", "user-a",
+                       {"key": requirement["key"], "value": "provided", "observed_date": datetime.now(UTC).date().isoformat()})
+    statuses = [r["status"] for r in agent.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["information_requests"]]
+    assert statuses == ["resolved"], statuses
+    assert card_state() == "resolved", "an answered request card must not offer 'Create draft' again"
 
 
 def test_referral_draft_prefills_and_lists_what_is_missing(agent: Pilot) -> None:

@@ -27,7 +27,7 @@ import {
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
   resolvePilotRoute, STATUS_LABELS,
-  dockMessagesFrom, setReferralPrefill, takeReferralPrefill,
+  dockMessagesFrom, setReferralPrefill, takeReferralPrefill, turnsForReferral,
   type PatientWorkItem, type ReferralForm,
 } from './pilotState.ts'
 
@@ -52,6 +52,9 @@ const logTime = (iso: string | undefined) => {
 export function PilotApp({ path, params, navigate }: { path: string; params: URLSearchParams; navigate: Navigate }) {
   const route = resolvePilotRoute(path)
   useEffect(() => { if (route.kind === 'redirect') navigate(route.to) }, [route.kind]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The shared index.html carries the demo's "Consult Network" title; pilot pages (including the
+  // public practice and sender pages that referring offices see) are simply "Lamina".
+  useEffect(() => { document.title = 'Lamina' }, [])
   switch (route.kind) {
     case 'redirect': return <main className="page-shell owner-gate"><p className="muted-note">Opening Lamina…</p></main>
     case 'auth': return route.page === 'sign-in' ? <SignInPage navigate={navigate} params={params} /> : <SignUpPage navigate={navigate} params={params} />
@@ -240,12 +243,20 @@ function PilotHomePage({ status, navigate }: { status: PilotStatus; navigate: Na
   const hidden = needs.length - top.length
   const prepared = home?.prepared ?? []
   const waiting = home?.waiting ?? []
+  // A brand-new practice: the only thing "needing you" is adding rules. Say that plainly rather
+  // than "I've prepared what I can" over a server briefing of "Nothing needs you right now."
+  const setupOnly = needs.length > 0 && needs.every((item) => item.kind === 'setup_rules') && prepared.length === 0 && waiting.length === 0
+  const statusLine = loading ? 'Reviewing what’s come in for your practice…'
+    : setupOnly ? (physician ? 'I need your referral criteria before I can triage.' : 'Waiting on the physician’s referral criteria before I can triage.')
+    : needs.length ? 'I’ve prepared what I can. The rest needs you.' : 'All caught up. I’ll keep watching.'
   return <main className="agent-home" aria-label="Home">
     <h1 className="agent-home-greeting">{me.firstName ? timeAwareGreeting(me.firstName) : `${greetingPrefix(new Date().getHours())}.`}</h1>
-    <div className="agent-status" role="status"><AgentOrb /><span>{loading ? 'Reviewing what’s come in for your practice…' : needs.length ? 'I’ve prepared what I can. The rest needs you.' : 'All caught up. I’ll keep watching.'}</span></div>
+    <div className="agent-status" role="status"><AgentOrb /><span>{statusLine}</span></div>
     {error && <p className="agent-home-error" role="alert">{error}</p>}
     {home && <>
-      <p className="agent-brief">{home.briefing.lead}{home.briefing.detail && <> {home.briefing.detail}</>}{home.briefing.tail && <>{' '}<span className="agent-brief-quiet">{home.briefing.tail}</span></>}</p>
+      {setupOnly
+        ? <p className="agent-brief">{physician ? 'Tell me which referrals you see and what you need with them. Until then I can record referrals, but I can’t judge fit or completeness.' : 'Until the physician adds referral rules, I can record referrals but can’t judge fit or completeness.'}</p>
+        : <p className="agent-brief">{home.briefing.lead}{home.briefing.detail && <> {home.briefing.detail}</>}{home.briefing.tail && <>{' '}<span className="agent-brief-quiet">{home.briefing.tail}</span></>}</p>}
       {top.length > 0 && <section className="agent-needs for-you-section" aria-label="Needs you">
         <h2 className="agent-label">Needs you</h2>
         <div className="agent-list">{top.map((item, index) => <NeedRow key={`${item.kind}-${item.referral_id ?? item.proposal_id ?? item.question_id ?? index}`} item={item} navigate={navigate} />)}</div>
@@ -386,7 +397,8 @@ function PracticeAgentDock({ status, navigate, context }: { status: PilotStatus;
     } catch (err) { throw new Error(errorText(err, 'That didn’t work. Open the referral to try again.')) }
   }
   const shared = { title: 'Your agent', placeholder: 'Ask or teach your agent…', onSend, navigate, onCard, refreshKey: dataVersion,
-    loadHistory: () => getAssistant().then((data) => dockMessagesFrom(data.messages)) }
+    // On a referral, show only the turns asked about THIS referral; Home shows everything.
+    loadHistory: () => getAssistant().then((data) => dockMessagesFrom(context ? turnsForReferral(data.messages, context.referralId) : data.messages)) }
   if (context) return <AgentDock {...shared} greetingAfterHistory
     subtitle={`${context.patientName} · ${context.referralType}`}
     greeting={`I’m looking at ${context.patientName}’s ${context.referralType} referral with you. Ask why I recommended what I did, what’s missing, or what has happened so far, or have me prepare the next step.`}
@@ -572,6 +584,13 @@ const REQUEST_STATUS: Record<InformationRequest['status'], string> = {
 
 /** Approval-gated missing-information request. Nothing leaves Lamina until a person
  * clicks "Approve & email" (dev outbox / configured adapter) or "Mark as sent". */
+/** How a request left Lamina. The dev adapter only writes a local outbox row; saying "sent via
+ * dev_outbox" read as if the office had been emailed. */
+const sentViaText = (via: string | null | undefined, at: string) =>
+  via === 'manual' ? `marked sent ${at} — sent by your team by fax/email`
+    : via === 'dev_outbox' ? `approved ${at} — saved to Lamina’s local test outbox, not delivered to anyone`
+    : `sent ${at} via ${via ?? 'email'}`
+
 function InformationRequestPanel({ request, senderName, onChanged }: { request: InformationRequest; senderName: string; onChanged: () => void }) {
   const [editing, setEditing] = useState(false)
   const [message, setMessage] = useState(request.draft_message)
@@ -587,7 +606,7 @@ function InformationRequestPanel({ request, senderName, onChanged }: { request: 
   const draft = request.status === 'draft'
   return <div className={`pilot-panel pilot-request status-${request.status}`}>
     <div className="pilot-section-head"><h3>Information request</h3><span className={`pilot-status-pill request-${request.status}`}>{REQUEST_STATUS[request.status]}</span></div>
-    <p className="muted-note">Asks {senderName} for: {request.items.map((item) => item.label).join(', ')}{request.sent_at ? ` · sent ${formatDateTime(request.sent_at)} via ${request.sent_via === 'manual' ? 'your own fax/email' : request.sent_via}` : ''}</p>
+    <p className="muted-note">Asks {senderName} for: {request.items.map((item) => item.label).join(', ')}{request.sent_at ? ` · ${sentViaText(request.sent_via, formatDateTime(request.sent_at))}` : ''}</p>
     {editing ? <div className="pilot-inline-form">
       <label><span>Recipient email (leave blank to send it yourself)</span><input value={recipient} onChange={(event) => setRecipient(event.target.value)} disabled={busy} /></label>
       <label><span>Message — keep {'{status_link}'} where the secure link should go</span><textarea rows={8} value={message} onChange={(event) => setMessage(event.target.value)} disabled={busy} /></label>
@@ -643,6 +662,15 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const closed = isClosed(referral.status)
   const readiness = !recommendation ? null : recommendation.readiness === 'ready' ? 'Complete per your rule' : recommendation.readiness === 'unknown' ? 'Unknown — no rule for this type' : `Missing ${recommendation.missing_items.join(', ')}`
   const timeline = [...detail.history].reverse()
+  // "Not specified" alone in a summary line doesn't say WHAT is unspecified.
+  const modalityText = (value: Modality) => value === 'unspecified' ? 'Modality not specified' : MODALITY_LABELS[value]
+  // Once a request exists, "Request missing information" is no longer the next step: the team
+  // either reviews the draft or waits on the referring office. (Display only; triage is unchanged.)
+  const openRequests = (detail.information_requests ?? []).filter((request) => ['draft', 'approved', 'sent', 'partially_resolved'].includes(request.status))
+  const hasDraft = openRequests.some((request) => request.status === 'draft')
+  const nextStepHeading = triage && triage.next_step === 'request_information' && openRequests.length
+    ? (hasDraft ? 'Review and send the information request' : 'Waiting on the referring office')
+    : triage ? NEXT_STEP_LABELS[triage.next_step] : 'Waiting for triage'
   const careContext = [
     { label: 'Referring clinician', value: `${referral.sender.name}${referral.sender.practice ? ` · ${referral.sender.practice}` : ''}` },
     referral.sender.contact && { label: 'Contact', value: referral.sender.contact },
@@ -671,8 +699,8 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
         <p className="page-intro">{closed ? 'This referral is closed.' : 'Lamina prepared this. Your team decides.'}</p>
         <div className={`next-step-card ${closed ? 'idle' : 'ready'}`}>
           <span className={`status-label ${statusLabelTone(referral.status)}`}>{STATUS_LABELS[referral.status]}</span>
-          <h3>{closed ? (referral.disposition?.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : STATUS_LABELS[referral.status]) : triage ? NEXT_STEP_LABELS[triage.next_step] : 'Waiting for triage'}</h3>
-          {triage && <p>{FIT_LABELS[triage.fit]}{readiness ? ` · ${readiness}` : ''} · {PRIORITY_LABELS[triage.suggested_priority].toLowerCase()} priority · {MODALITY_LABELS[triage.suggested_modality]}{triage.requires_physician ? ' · needs physician judgment' : ''}</p>}
+          <h3>{closed ? (referral.disposition?.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : STATUS_LABELS[referral.status]) : nextStepHeading}</h3>
+          {triage && <p>{FIT_LABELS[triage.fit]}{readiness ? ` · ${readiness}` : ''} · {PRIORITY_LABELS[triage.suggested_priority].toLowerCase()} priority · {modalityText(triage.suggested_modality)}{triage.requires_physician ? ' · needs physician judgment' : ''}</p>}
           {!triage && !closed && <p>Lamina hasn’t triaged this referral yet{recommendation ? '' : ' — add a referral rule for this type, then re-run triage'}.</p>}
           {referral.disposition && <p>{referral.disposition.decision === 'accept' ? 'Accepted' : referral.disposition.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : 'Declined'} · {formatDateTime(referral.disposition.at)}{referral.disposition.reason ? ` — “${referral.disposition.reason}”` : ''}</p>}
           {decision && <p className="pilot-decision">Triage {decision.decision === 'accepted' ? 'approved' : decision.decision} by {decision.actor_role} · {formatDateTime(decision.created_at)}{decision.reason ? ` — “${decision.reason}”` : ''}</p>}
@@ -681,7 +709,8 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           {actions.length > 0 && <div className="pilot-actions" role="group" aria-label="Referral actions">
             {canUse(actions, 'approve') && <button className="button-primary" disabled={busy} onClick={() => void act(() => approveTriage(referral.id))}>Approve triage</button>}
             {canUse(actions, 'edit') && <button className="button-secondary" disabled={busy} onClick={() => openPanel('edit')}>Edit</button>}
-            {canUse(actions, 'request_information') && <button className="button-secondary" disabled={busy} onClick={() => openPanel('request')}>Request information</button>}
+            {/* With a draft open, "Request information" would only fail (one draft per referral): edit the draft below instead. */}
+            {canUse(actions, 'request_information') && !hasDraft && <button className="button-secondary" disabled={busy} onClick={() => openPanel('request')}>Request information</button>}
             {canUse(actions, 'escalate') && <button className="button-secondary" disabled={busy} onClick={() => openPanel('escalate')}>Needs physician review</button>}
             {canUse(actions, 'reject') && <button className="text-button" disabled={busy} onClick={() => openPanel('reject')}>Triage is wrong</button>}
             {canUse(actions, 'retriage') && <button className="text-button" disabled={busy} onClick={() => void act(() => retriageReferral(referral.id))}>Re-run triage</button>}
@@ -759,7 +788,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
               <section><h3>Recommendation</h3><ul className="clinical-list">
                 <li>{FIT_LABELS[triage.fit]}</li>
                 <li>{PRIORITY_LABELS[triage.suggested_priority]} priority</li>
-                <li>{MODALITY_LABELS[triage.suggested_modality]}</li>
+                <li>{modalityText(triage.suggested_modality)}</li>
               </ul></section>
               <section><h3>Readiness</h3><ul className="clinical-list">
                 <li>{readiness}</li>

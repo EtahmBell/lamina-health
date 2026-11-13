@@ -473,6 +473,24 @@ export function takeReferralPrefill(): Partial<ReferralForm> | null {
   return value
 }
 
+/** The turns asked from one referral's page: each user message whose on-screen context was
+ * that referral, plus the agent reply that followed it. Keeps another patient's conversation
+ * out of a dock that is labeled with this patient. */
+export function turnsForReferral<T extends { role: 'user' | 'agent'; context_referral_id?: string | null }>(messages: T[], referralId: string): T[] {
+  const kept: T[] = []
+  let keepReply = false
+  for (const message of messages) {
+    if (message.role === 'user') {
+      keepReply = message.context_referral_id === referralId
+      if (keepReply) kept.push(message)
+    } else if (keepReply) {
+      kept.push(message)
+      keepReply = false
+    }
+  }
+  return kept
+}
+
 /** Stored conversation messages → the dock's message shape (no client-side reinterpretation). */
 export function dockMessagesFrom(messages: Array<{ id: string; role: 'user' | 'agent'; text: string; reply: { paragraphs: string[]; bullets?: string[]; cards?: Array<{ label: string; detail: string; action: string; path?: string | null; execute?: unknown }> } | null }>) {
   return messages.map((message) => message.role === 'user'
