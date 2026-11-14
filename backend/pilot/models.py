@@ -100,6 +100,19 @@ class SubmittedItem(_Strict):
     page: int | None = None
     recorded_by: str | None = None
     recorded_at: str | None = None
+    # A practice member who checked this value. Sender-entered values (status link, public
+    # form) start unverified and never satisfy a requirement until someone verifies them.
+    verified_by: str | None = None
+    verified_at: str | None = None
+
+
+def item_verified(item: SubmittedItem) -> bool:
+    """Staff-entered and document-confirmed values are the team's own record. A
+    sender-submitted value counts only once a practice member verified it -- or when a
+    practice member recorded it themselves at intake (legacy rows: recorded_by user:)."""
+    if item.source in {"staff_entered", "document_confirmed"} or item.verified_by:
+        return True
+    return item.source == "sender_submitted" and (item.recorded_by or "").startswith("user:")
 
 
 class IntakeReferralInput(_Strict):
@@ -148,6 +161,9 @@ class IntakeReferral(_Strict):
     received_at: str
     entered_at: str
     entered_by: str
+    # The referral type exactly as it was submitted, kept when the team confirms a
+    # different (canonical) practice type.
+    submitted_referral_type: str | None = None
     current_recommendation_id: str | None = None
     review: dict | None = None
     escalated_at: str | None = None
@@ -165,13 +181,20 @@ class IntakeReferral(_Strict):
 Fit = Literal["strong", "possible", "outside_scope", "unknown"]
 Readiness = Literal["ready", "missing_information", "unknown"]
 NextStep = Literal[
-    "request_information", "confirm_document_evidence", "physician_review", "consider_redirect"
+    "request_information", "confirm_document_evidence", "physician_review", "consider_redirect",
+    "review_sender_information", "confirm_referral_type",
 ]
-RequirementState = Literal["satisfied", "proposed_from_document", "missing", "optional_missing"]
+# sender_reported: the referring office supplied a value that no one has verified yet. It is
+# "received", not "satisfied", and never makes a referral ready on its own.
+RequirementState = Literal[
+    "satisfied", "proposed_from_document", "sender_reported", "missing", "optional_missing"
+]
 
 
 class RationaleSource(_Strict):
-    kind: Literal["practice_rule", "document", "submitted_item", "requirement_logic", "no_rule"]
+    kind: Literal[
+        "practice_rule", "document", "submitted_item", "requirement_logic", "no_rule", "referral_type"
+    ]
     rule_id: str | None = None
     rule_version: int | None = None
     document_id: str | None = None
@@ -213,6 +236,8 @@ class TriageRecommendation(_Strict):
     generator: Literal["deterministic", "deterministic+llm_extraction"]
     model_id: str | None = None
     rules_snapshot_id: str
+    # How the submitted referral type was matched to a practice rule type (see rules.resolve_type).
+    type_match: dict | None = None
     created_at: str
 
 
@@ -264,6 +289,14 @@ class RecordItemInput(_Strict):
     page: int | None = Field(default=None, ge=1)
 
 
+class ReferralTypeInput(_Strict):
+    referral_type: str = Field(min_length=1, max_length=120)
+
+
+class VerifyItemInput(_Strict):
+    note: str | None = Field(default=None, max_length=500)
+
+
 class DispositionInput(_Strict):
     decision: Literal["accept", "redirect", "decline"]
     reason: str | None = Field(default=None, max_length=2000)
@@ -278,6 +311,9 @@ class PracticeRuleContent(StructuredReferralPreference):
     explicit urgency signals. Stored in physician_referral_preferences."""
 
     urgent_signals: list[str] = Field(default_factory=list)
+    # Physician-controlled alternative names for this referral type ("Thyroid nodules",
+    # "Thyroid mass"). Matching is exact after deterministic normalization only.
+    aliases: list[str] = Field(default_factory=list)
 
 
 OperationalStatus = Literal["inferred", "inferred_active", "confirmed", "superseded", "rejected"]
@@ -290,6 +326,7 @@ class PracticeRuleInput(_Strict):
     required: list[ReferralRequirement] = Field(default_factory=list, max_length=30)
     helpful: list[ReferralRequirement] = Field(default_factory=list, max_length=30)
     urgent_signals: list[str] = Field(default_factory=list, max_length=30)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
     modality: Literal["in_person", "econsult", "either", "unspecified"] = "unspecified"
     note: str | None = Field(default=None, max_length=2000)
     publishable: bool = False

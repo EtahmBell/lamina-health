@@ -19,6 +19,7 @@ from .models import PracticeRule, PracticeRuleContent, PracticeRuleInput
 from .practice import PilotError, PracticeContext
 from .rules import PracticeRules, RuleConflictError, normalize_referral_type
 from .triage import _tokens
+from .vocabulary import referral_type_key
 
 logger = logging.getLogger(__name__)
 UNASSIGNED_TYPE = "Unassigned"
@@ -33,12 +34,90 @@ def _clean_phrase(text: str) -> str:
     return " ".join(text.split()).strip(" .,;:!")
 
 
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+                 "nine": 9, "ten": 10, "twelve": 12, "a": 1, "an": 1}
+_AMOUNT = r"(\d+|one|two|three|four|five|six|seven|eight|nine|ten|twelve|a|an)"
+# Every recency qualifier Lamina understands. Each one attaches ONLY to the item whose
+# clause contains it ("an ultrasound and a TSH within 90 days" → only the TSH).
+_WINDOW = re.compile(
+    r"\b(?:within|in)\s+(?:the\s+)?(?:last\s+|past\s+|prior\s+)?" + _AMOUNT + r"\s+(day|week|month|year)s?"
+    r"|\b(?:from|in)\s+the\s+(?:last|past)\s+" + _AMOUNT + r"\s+(day|week|month|year)s?"
+    r"|\b(?:no\s+older\s+than|less\s+than|under|not\s+older\s+than)\s+" + _AMOUNT + r"\s+(day|week|month|year)s?(?:\s+old)?"
+    r"|\b(?:last|past)\s+" + _AMOUNT + r"\s+(day|week|month|year)s?",
+    re.IGNORECASE,
+)
+
+
+def _window_match(text: str) -> re.Match | None:
+    return _WINDOW.search(text)
+
+
 def _freshness(sentence: str) -> int | None:
-    match = re.search(r"within\s+(?:the\s+)?(?:last\s+|past\s+)?(\d+)\s+(day|week|month|year)s?", sentence, re.IGNORECASE)
-    if match:
-        return int(match.group(1)) * _UNITS[match.group(2).lower()]
-    match = re.search(r"(?:last|past)\s+(\d+)\s+(day|week|month|year)s?", sentence, re.IGNORECASE)
-    return int(match.group(1)) * _UNITS[match.group(2).lower()] if match else None
+    match = _window_match(sentence)
+    if not match:
+        return None
+    amount, unit = next((match.group(i), match.group(i + 1)) for i in range(1, 9, 2) if match.group(i))
+    number = int(amount) if amount.isdigit() else _NUMBER_WORDS[amount.lower()]
+    if unit.lower() == "month" and number % 12 == 0:
+        return number // 12 * 365  # "12 months" is a year, not 360 days
+    return number * _UNITS[unit.lower()]
+
+
+_NEGATED_NEED = re.compile(
+    r"\b(?:don'?t|do\s+not|doesn'?t|does\s+not|no\s+longer)\s+(?:need|require|want|have\s+to\s+have)\b"
+    r"|\bno\s+need\s+for\b|\b(?:is|are)\s+(?:not|n'?t)\s+(?:required|needed|necessary)\b|\bisn'?t\s+(?:required|needed)\b",
+    re.IGNORECASE,
+)
+_EXCEPTION = re.compile(r"\s*,?\s*\b(unless|except(?:\s+(?:if|when|for))?|other\s+than|but\s+not\s+(?:if|when))\b(.*)$",
+                        re.IGNORECASE)
+_SHARED_WINDOW = re.compile(r"\b(both|each|all(?:\s+of\s+them)?)\b", re.IGNORECASE)
+_HELPFUL = re.compile(r"\b(nice to have|helpful|if available|ideally|optionally|if possible)\b", re.IGNORECASE)
+
+
+def _split_exception(text: str) -> tuple[str, str | None]:
+    """'X unless Y' → ('X', 'unless Y'). Exceptions are never turned into criteria."""
+    match = _EXCEPTION.search(text)
+    if not match:
+        return text, None
+    return text[:match.start()].strip(" ,;"), f"{match.group(1)}{match.group(2)}".strip(" .;")
+
+
+def _strip_type_words(phrase: str, referral_type: str | None) -> str:
+    """'Thyroid nodule referrals with hyperthyroidism in pregnancy' → 'hyperthyroidism in
+    pregnancy' when the leading words just restate the referral type."""
+    match = re.match(r"^(.*?)\s*\breferrals?\b\s*(?:with|for|in|where|involving|about|that\s+(?:are|have|involve))?\s+(.+)$",
+                     phrase, re.IGNORECASE)
+    if not match:
+        return phrase
+    prefix = _tokens(match.group(1))
+    if not prefix or (referral_type and prefix <= _tokens(referral_type)):
+        return _clean_phrase(match.group(2)) or phrase
+    return phrase
+
+
+def _requirement_items(listed: str, sentence_helpful: bool, review: list[str]) -> list[dict]:
+    """Split a list of requirements and attach each qualifier to its own item only."""
+    shared = None
+    shared_match = re.search(r"\b(?:both|each|all(?:\s+of\s+them)?)\b[^.;]*", listed, re.IGNORECASE)
+    if shared_match and _window_match(shared_match.group(0)):
+        shared = _freshness(shared_match.group(0))
+        listed = listed[:shared_match.start()].strip(" ,;")
+    items = []
+    for part in re.split(r"\s*,\s*(?:and\s+|plus\s+)?|\s+(?:and|plus|as\s+well\s+as)\s+", listed, flags=re.IGNORECASE):
+        window = _window_match(part)
+        freshness = _freshness(part) if window else shared
+        label_text = part[:window.start()] + part[window.end():] if window else part
+        helpful = sentence_helpful or bool(_HELPFUL.search(part))
+        label_text = _HELPFUL.sub(" ", label_text)
+        phrase = _clean_phrase(label_text)
+        if not phrase or len(phrase) > 80:
+            continue
+        label = phrase[:1].upper() + phrase[1:]
+        if re.search(r"\brecent\b", phrase, re.IGNORECASE) and freshness is None:
+            review.append(f"“{label}” has no time window. Add one (e.g. “within 90 days”) if recency matters.")
+        key = "_".join(sorted(_tokens(phrase))) or "item"
+        items.append({"key": key[:80], "label": label, "required": not helpful, "freshness_days": freshness})
+    return items
 
 
 def _specific_tokens(text: str) -> set[str]:
@@ -46,6 +125,10 @@ def _specific_tokens(text: str) -> set[str]:
 
 
 def match_referral_type(text: str, known: list[str]) -> str | None:
+    key = referral_type_key(text)
+    exact = [name for name in known if key and referral_type_key(name) == key]
+    if len(exact) == 1:
+        return exact[0]
     words = _specific_tokens(text)
     best, best_score = None, 0.0
     for name in known:
@@ -64,6 +147,8 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
                                "urgent_signals": [], "modality": "unspecified", "note": None}
     referral_type = match_referral_type(text, known_types)
     inferred_type = None
+    review: list[str] = []  # Plain notes for the physician about what was NOT turned into a rule.
+    kept_notes: list[str] = []
     for sentence in re.split(r"(?<=[.!?;])\s+|\n+", text):
         sentence = sentence.strip()
         if not sentence:
@@ -82,10 +167,24 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
         if re.search(r"\bin[- ]person\b", lowered) and re.search(r"\b(prefer|want|need|default|always)\b", lowered):
             content["modality"] = "in_person"
             continue
+        if _NEGATED_NEED.search(sentence):
+            # "I don't need a CT" is NOT a requirement. Never turn a negation into a rule.
+            kept_notes.append(sentence.strip(" ."))
+            review.append(f"Not turned into a requirement (it says something is not needed): “{sentence.strip(' .')}”.")
+            continue
         outside = re.search(r"\b(?:don'?t|do not|doesn'?t|never|no longer|not)\s+(?:usually\s+|typically\s+|generally\s+)?(?:see|take|accept|manage|handle|treat)\s+(.+)$", sentence, re.IGNORECASE) \
             or re.search(r"(.+?)\s+(?:is|are)\s+outside (?:my|our) scope", sentence, re.IGNORECASE)
         if outside:
-            phrase = _clean_phrase(outside.group(1))
+            scope_text, exception = _split_exception(outside.group(1))
+            phrase = _strip_type_words(_clean_phrase(scope_text), referral_type or inferred_type)
+            if exception:
+                # An exception changes WHEN the scope rule applies. Lamina cannot apply that
+                # condition automatically, so it neither adds the scope rule (which would wrongly
+                # exclude the excepted cases) nor guesses: it asks.
+                kept_notes.append(sentence.strip(" ."))
+                review.append(f"Kept as a note, not applied: “{phrase}” is outside your scope {exception}. "
+                              "Add it as an outside-scope criterion if you want those referrals flagged for review.")
+                continue
             if phrase:
                 content["outside_scope"].append(phrase)
             continue
@@ -93,24 +192,28 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
         if urgent:
             content["urgent_signals"].append(_clean_phrase(urgent.group(1)))
             continue
-        required = re.search(r"\b(?:want|need|require|requires|must have|expect|ask for|always get)\b\s+(?:to see\s+|to have\s+)?(.+?)(?:\s+\b(?:before|prior to|with|for|on)\b.*)?$", sentence, re.IGNORECASE)
+        core, exception = _split_exception(sentence)
+        required = re.search(r"\b(?:want|need|require|requires|must have|expect|ask for|always get)\b\s+(?:to see\s+|to have\s+)?(.+?)(?:\s+\b(?:before|prior to|with|for|on)\b\s+(?!the\s+(?:last|past))\D.*)?$", core, re.IGNORECASE)
         if required:
-            listed = _clean_phrase(re.sub(r"\bwithin\b.*$", "", required.group(1), flags=re.IGNORECASE))
-            helpful = bool(re.search(r"\b(nice to have|helpful|if available|ideally)\b", lowered))
-            # "a thyroid ultrasound and a recent TSH" is two requirements, not one.
-            for part in re.split(r"\s*,\s*(?:and\s+|plus\s+)?|\s+(?:and|plus)\s+", listed, flags=re.IGNORECASE):
-                phrase = _clean_phrase(part)
-                if phrase and len(phrase) <= 80:
-                    key = "_".join(sorted(_tokens(phrase))) or "item"
-                    item = {"key": key[:80], "label": phrase[:1].upper() + phrase[1:], "required": not helpful,
-                            "freshness_days": _freshness(sentence)}
-                    content["helpful" if helpful else "required"].append(item)
+            listed = required.group(1)
+            if exception:
+                kept_notes.append(sentence.strip(" ."))
+                review.append(f"The exception “{exception}” is kept as a note; Lamina will still ask for these items "
+                              "every time. Edit the rule if that’s not what you want.")
+            sentence_helpful = bool(re.search(r"\b(nice to have|helpful|if available)\b", lowered)) and not re.search(
+                r"\b(and|plus)\b", listed, re.IGNORECASE)
+            # "a thyroid ultrasound and a recent TSH within 90 days" is two requirements, and the
+            # window belongs only to the TSH.
+            for item in _requirement_items(listed, sentence_helpful, review):
+                content["required" if item["required"] else "helpful"].append(item)
             continue
         good = re.search(r"\b(?:i (?:do |also )?see|we see|happy to see|interested in|good fit(?: for)?|i (?:like|love) to see|i take)\b\s+(.+)$", sentence, re.IGNORECASE)
         if good:
             content["good_fit"].append(_clean_phrase(good.group(1)))
     structured = any(content[key] for key in ("good_fit", "outside_scope", "required", "helpful", "urgent_signals")) \
         or content["modality"] != "unspecified"
+    if kept_notes:
+        content["note"] = "; ".join(filter(None, [content["note"], *kept_notes]))[:2000]
     if referral_type is None and inferred_type:
         referral_type = match_referral_type(inferred_type, known_types) or inferred_type[:1].upper() + inferred_type[1:]
         confidence = 0.5
@@ -128,6 +231,7 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
         "structured": structured,
         "confidence": confidence if structured else 0.0,
         "clarification": clarification,
+        "review_notes": review,
         "interpreter": "deterministic",
     }
 
@@ -223,6 +327,8 @@ def merge_content(base: PracticeRuleContent, addition: dict) -> PracticeRuleInpu
         outside_scope=union(base.redirect, addition["outside_scope"]),
         required=union_req(base.required, addition["required"]), helpful=union_req(base.helpful, addition["helpful"]),
         urgent_signals=union(base.urgent_signals, addition["urgent_signals"]), modality=modality, note=notes,
+        # Aliases are physician-controlled names: a merge keeps every existing one.
+        aliases=union(base.aliases, addition.get("aliases", [])),
     )
 
 
@@ -232,6 +338,7 @@ def _input_from(referral_type: str, content: dict) -> PracticeRuleInput:
         required=[ReferralRequirement(**item) for item in content["required"]],
         helpful=[ReferralRequirement(**item) for item in content["helpful"]],
         urgent_signals=content["urgent_signals"], modality=content["modality"], note=content.get("note"),
+        aliases=content.get("aliases", []),
     )
 
 
@@ -272,6 +379,7 @@ class TeachingService:
             "source": rule.source, "structured": provenance.get("structured", True),
             "clarification": provenance.get("clarification"), "interpreter": provenance.get("interpreter"),
             "question_id": provenance.get("question_id"), "created_at": rule.created_at,
+            "review_notes": provenance.get("review_notes", []),
         }
 
     def _physician_key(self, context: PracticeContext) -> str:
@@ -306,6 +414,7 @@ class TeachingService:
             provenance={
                 "raw_text": text, "interpreter": interpretation["interpreter"],
                 "structured": interpretation["structured"], "clarification": interpretation["clarification"],
+                "review_notes": interpretation.get("review_notes", []),
                 **(extra_provenance or {}),
             },
         )
@@ -365,6 +474,7 @@ class TeachingService:
             "urgent_signals": edits.urgent_signals if edits else proposal.content.urgent_signals,
             "modality": edits.modality if edits else proposal.content.modality,
             "note": (edits.note if edits else proposal.content.modality_notes),
+            "aliases": edits.aliases if edits else proposal.content.aliases,
         }
         event = "learning_edited" if edits else "learning_confirmed"
         base = next(iter(self.rules.operational(context.practice_id, referral_type)), None)

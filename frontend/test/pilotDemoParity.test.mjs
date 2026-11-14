@@ -83,7 +83,10 @@ test('Home and For you use the demo dashboard structure and read only the server
 
 test('Patients and referral detail reuse the demo Patients worklist and Patient Detail structure', () => {
   const list = slice(pilot, 'function PatientsPage', 'function NewReferralPage')
-  for (const cls of ['selector-page', 'selector-header', 'patient-search', 'home-section-heading', 'empty-state specialist-empty', 'Active patients', 'Previous care']) assert.ok(list.includes(cls), cls)
+  // Step 16: "Previous care" was misleading for newly accepted referrals (the visit isn't booked).
+  // Same demo section treatment, honest operational section names.
+  for (const cls of ['selector-page', 'selector-header', 'patient-search', 'home-section-heading', 'empty-state specialist-empty', 'Active patients', 'Accepted — awaiting scheduling', 'Closed referrals']) assert.ok(list.includes(cls), cls)
+  assert.ok(!list.includes('Previous care'), 'accepted referrals are not presented as previous care')
   const rows = slice(pilot, 'function PatientWorkRows', 'function PatientsPage')
   assert.match(rows, /lam-list patient-worklist/)
   assert.doesNotMatch(rows, /referral|Referral/, 'the reusable row knows nothing referral-specific')
@@ -175,9 +178,15 @@ test('patient work items keep each referral episode distinct and carry its real 
   assert.equal(items[1].nextStep, 'Waiting on the referring office')
   assert.equal(items[1].status.tone, 'slate')
   assert.equal(items[3].flag, 'Urgent')
-  const { active, previous } = patientWorkSections(items)
+  const { active, awaitingScheduling, closed } = patientWorkSections(items)
   assert.deepEqual(active.map((item) => item.key), ['received_referral:4', 'received_referral:1', 'received_referral:2'], 'needs-review (urgent first) before waiting')
-  assert.deepEqual(previous.map((item) => item.key), ['received_referral:3'])
+  // Accepted = awaiting scheduling (no appointment data exists), never "previous care" or "scheduled".
+  assert.deepEqual(awaitingScheduling.map((item) => item.key), ['received_referral:3'])
+  assert.equal(items[2].status.label, 'Accepted — awaiting scheduling')
+  assert.equal(items[2].nextStep, 'Schedule in your scheduling system')
+  assert.deepEqual(closed, [])
+  const declined = receivedReferralWorkItem(summaryOf('5', 'declined'))
+  assert.equal(patientWorkSections([declined]).closed.length, 1)
   assert.equal(patientWorkSections(items, 'nephrology').active.length, 0)
   assert.equal(patientWorkSections(items, 'clinic').active.length, 3)
 })

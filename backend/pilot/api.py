@@ -32,8 +32,10 @@ from .models import (
     PracticeRuleInput,
     ReasonInput,
     RecordItemInput,
+    ReferralTypeInput,
     RequestInformationInput,
     TriageEditInput,
+    VerifyItemInput,
 )
 from .practice import PilotError, PracticeContext, PracticeService
 from .publication import PublicationService
@@ -342,6 +344,22 @@ def record_item(referral_id: str, update: RecordItemInput, context: Practice, se
     return _run(lambda: services.intake.record_item(context, referral_id, update))
 
 
+@router.post("/referrals/{referral_id}/items/{item_key}/verify")
+def verify_item(
+    referral_id: str, item_key: str, update: VerifyItemInput, context: Practice, services: Services
+) -> dict:
+    """A practice member confirms a value the referring office supplied (staff or physician)."""
+    return _run(lambda: services.intake.verify_item(context, referral_id, item_key, update.note))
+
+
+@router.post("/referrals/{referral_id}/referral-type")
+def set_referral_type(
+    referral_id: str, update: ReferralTypeInput, context: Practice, services: Services
+) -> dict:
+    """Confirm which of the practice's referral types this is; the submitted wording is kept."""
+    return _run(lambda: services.intake.set_referral_type(context, referral_id, update.referral_type))
+
+
 @router.post("/referrals/{referral_id}/disposition")
 def disposition(
     referral_id: str, update: DispositionInput, context: Practice, services: Services
@@ -395,6 +413,13 @@ def send_information_request(
     request_id: str, update: SendInput, context: Practice, services: Services
 ) -> dict:
     return _run(lambda: services.missing.approve_and_send(context, request_id, update.mode))
+
+
+@router.post("/information-requests/{request_id}/reissue-link")
+def reissue_information_request_link(
+    request_id: str, update: SendInput, context: Practice, services: Services
+) -> dict:
+    return _run(lambda: services.missing.reissue_link(context, request_id, update.mode))
 
 
 @router.post("/information-requests/{request_id}/cancel")

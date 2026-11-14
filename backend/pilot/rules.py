@@ -20,6 +20,7 @@ from backend.models.referral import ReferralRequirement
 
 from .models import PracticeRule, PracticeRuleContent, PracticeRuleInput
 from .store import PilotStore, new_id, now_iso
+from .vocabulary import referral_type_key, type_key_words
 
 OPERATIONAL = ("confirmed", "inferred_active")
 
@@ -66,9 +67,24 @@ def content_from_input(update: PracticeRuleInput) -> PracticeRuleContent:
         required=_normalize_requirements(update.required, True),
         helpful=_normalize_requirements(update.helpful, False),
         urgent_signals=[value.strip() for value in update.urgent_signals if value.strip()],
+        aliases=_clean_aliases(update.referral_type, update.aliases),
         modality=update.modality,
         modality_notes=update.note.strip() if update.note else None,
     )
+
+
+def _clean_aliases(referral_type: str, aliases: list[str]) -> list[str]:
+    """Trimmed, de-duplicated aliases; drops any that normalize to the type itself."""
+    own = referral_type_key(referral_type)
+    seen: set[str] = set()
+    cleaned = []
+    for alias in aliases:
+        alias = " ".join(alias.split())
+        key = referral_type_key(alias)
+        if alias and key and key != own and key not in seen:
+            seen.add(key)
+            cleaned.append(alias)
+    return cleaned
 
 
 def _source_text(update: PracticeRuleInput) -> str:
@@ -130,9 +146,7 @@ class PracticeRules:
             ).fetchall()
         return [_row_to_rule(dict(row)) for row in rows]
 
-    def operational(self, practice_id: str, referral_type: str) -> list[PracticeRule]:
-        """Exactly the rules triage may act on: confirmed or inferred-active."""
-        target = normalize_referral_type(referral_type)
+    def _operational_rows(self, practice_id: str) -> list[PracticeRule]:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM physician_referral_preferences WHERE practice_id = ? "
@@ -140,11 +154,51 @@ class PracticeRules:
                 "ORDER BY created_at, id",
                 (practice_id,),
             ).fetchall()
-        return [
-            _row_to_rule(dict(row))
-            for row in rows
-            if normalize_referral_type(row["referral_type"]) == target
-        ]
+        return [_row_to_rule(dict(row)) for row in rows]
+
+    def resolve_type(self, practice_id: str, referral_type: str) -> tuple[list[PracticeRule], dict]:
+        """Deterministically map a submitted referral type onto ONE practice referral type.
+
+        Order: exact (whitespace/case) → normalized (plural/punctuation, see vocabulary.py)
+        → a physician-controlled alias. Never semantic similarity. When nothing matches, or
+        two different practice types match, NO rule is applied; the result lists the
+        practice types that share words with the submission as suggestions for a human
+        to confirm ("confirm_referral_type")."""
+        rules = self._operational_rows(practice_id)
+        submitted = " ".join(referral_type.split())
+        by_type: dict[str, list[PracticeRule]] = {}
+        for rule in rules:
+            by_type.setdefault(rule.referral_type, []).append(rule)
+        info = {"submitted": submitted, "kind": "none", "rule_type": None, "matched_alias": None, "suggestions": []}
+
+        exact = [name for name in by_type if normalize_referral_type(name) == normalize_referral_type(submitted)]
+        if len(exact) == 1:
+            return by_type[exact[0]], {**info, "kind": "exact", "rule_type": exact[0]}
+        key = referral_type_key(submitted)
+        normalized = [name for name in by_type if key and referral_type_key(name) == key]
+        if len(normalized) == 1:
+            return by_type[normalized[0]], {**info, "kind": "normalized", "rule_type": normalized[0]}
+        aliased = {
+            name: alias for name, group in by_type.items() for rule in group for alias in rule.content.aliases
+            if key and referral_type_key(alias) == key
+        }
+        if len(aliased) == 1:
+            name, alias = next(iter(aliased.items()))
+            return by_type[name], {**info, "kind": "alias", "rule_type": name, "matched_alias": alias}
+        candidates = sorted(set(exact) | set(normalized) | set(aliased))
+        if len(candidates) > 1:
+            return [], {**info, "kind": "ambiguous", "suggestions": candidates}
+        words = type_key_words(submitted)
+        suggestions = sorted(
+            name for name in by_type
+            if words and (type_key_words(name) & words or any(type_key_words(a) & words for r in by_type[name] for a in r.content.aliases))
+        )
+        return [], {**info, "suggestions": suggestions}
+
+    def operational(self, practice_id: str, referral_type: str) -> list[PracticeRule]:
+        """Exactly the rules triage may act on (confirmed or inferred-active) for an
+        unambiguous exact / normalized / alias match of the referral type, else none."""
+        return self.resolve_type(practice_id, referral_type)[0]
 
     def referral_types(self, practice_id: str) -> list[str]:
         return sorted({rule.referral_type for rule in self.list(practice_id)})
@@ -166,6 +220,8 @@ class PracticeRules:
         content: PracticeRuleContent | None = None,
     ) -> PracticeRule:
         content = content or content_from_input(update)
+        if operational_status in OPERATIONAL:
+            self._check_type_collisions(practice_id, update.referral_type, content.aliases, supersedes)
         now = now_iso()
         rule_id = new_id("rule")
         confirmed = operational_status == "confirmed"
@@ -213,6 +269,24 @@ class PracticeRules:
                 db=db,
             )
         return self.get(practice_id, rule_id)
+
+    def _check_type_collisions(
+        self, practice_id: str, referral_type: str, aliases: list[str], supersedes: PracticeRule | None,
+    ) -> None:
+        """A name (type or alias) may point at only one practice referral type."""
+        own = referral_type_key(referral_type)
+        for rule in self._operational_rows(practice_id):
+            if supersedes is not None and rule.id == supersedes.id:
+                continue
+            if normalize_referral_type(rule.referral_type) == normalize_referral_type(referral_type):
+                continue  # same type, another rule row (allowed today)
+            names = {referral_type_key(rule.referral_type), *(referral_type_key(a) for a in rule.content.aliases)}
+            if own in names:
+                raise RuleConflictError(
+                    f"“{referral_type}” is already a name for your “{rule.referral_type}” referrals")
+            clash = next((a for a in aliases if referral_type_key(a) in names), None)
+            if clash:
+                raise RuleConflictError(f"“{clash}” already names your “{rule.referral_type}” referrals")
 
     def revise(
         self, practice_id: str, rule_id: str, physician_id: str, update: PracticeRuleInput,

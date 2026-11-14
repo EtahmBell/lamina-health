@@ -72,7 +72,9 @@ export const STATUS_LABELS: Record<IntakeStatus, string> = {
   triaged: 'Triaged — needs review',
   needs_information: 'Needs information',
   ready_for_review: 'Ready for physician review',
-  accepted: 'Accepted',
+  // Lamina holds no appointment data: an accepted referral is awaiting scheduling. It is never
+  // shown as "Scheduled" or "Completed" without real workflow evidence for that state.
+  accepted: 'Accepted — awaiting scheduling',
   redirected: 'Redirected',
   declined: 'Declined',
 }
@@ -91,10 +93,13 @@ export const NEXT_STEP_LABELS: Record<NextStep, string> = {
   confirm_document_evidence: 'Confirm what the documents show',
   physician_review: 'Physician review',
   consider_redirect: 'Consider redirecting',
+  review_sender_information: 'Verify what the referring office sent',
+  confirm_referral_type: 'Confirm the referral type',
 }
 export const REQUIREMENT_STATE_LABELS: Record<RequirementState, string> = {
-  satisfied: 'Present',
+  satisfied: 'Satisfied',
   proposed_from_document: 'Possibly in a document — confirm',
+  sender_reported: 'Received — not yet verified',
   missing: 'Missing',
   optional_missing: 'Not provided (helpful)',
 }
@@ -182,8 +187,8 @@ export function referralPayload(form: ReferralForm, hasFile: boolean): NewReferr
 export const slugKey = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 80) || 'item'
 export const splitLines = (text: string) => text.split('\n').map((line) => line.trim()).filter(Boolean)
 
-export type RuleForm = { referralType: string; goodFit: string; outsideScope: string; required: string; helpful: string; urgent: string; modality: Modality; note: string }
-export const emptyRuleForm = (): RuleForm => ({ referralType: '', goodFit: '', outsideScope: '', required: '', helpful: '', urgent: '', modality: 'unspecified', note: '' })
+export type RuleForm = { referralType: string; aliases: string; goodFit: string; outsideScope: string; required: string; helpful: string; urgent: string; modality: Modality; note: string }
+export const emptyRuleForm = (): RuleForm => ({ referralType: '', aliases: '', goodFit: '', outsideScope: '', required: '', helpful: '', urgent: '', modality: 'unspecified', note: '' })
 
 /** "Recent HbA1c | 180" → { label: 'Recent HbA1c', freshness_days: 180 }. */
 export function parseRequirementLines(text: string, required: boolean): RuleRequirement[] {
@@ -197,6 +202,7 @@ export function parseRequirementLines(text: string, required: boolean): RuleRequ
 export function ruleInput(form: RuleForm): PracticeRuleInput {
   return {
     referral_type: form.referralType.trim(),
+    aliases: splitLines(form.aliases ?? ''),
     good_fit: splitLines(form.goodFit),
     outside_scope: splitLines(form.outsideScope),
     required: parseRequirementLines(form.required, true),
@@ -208,10 +214,11 @@ export function ruleInput(form: RuleForm): PracticeRuleInput {
   }
 }
 
-export function ruleFormFrom(rule: { referral_type: string; content: { good_fit: string[]; redirect: string[]; required: RuleRequirement[]; helpful: RuleRequirement[]; urgent_signals: string[]; modality: Modality; modality_notes: string | null } }): RuleForm {
+export function ruleFormFrom(rule: { referral_type: string; content: { good_fit: string[]; redirect: string[]; required: RuleRequirement[]; helpful: RuleRequirement[]; urgent_signals: string[]; modality: Modality; modality_notes: string | null; aliases?: string[] } }): RuleForm {
   const lines = (items: RuleRequirement[]) => items.map((item) => item.freshness_days ? `${item.label} | ${item.freshness_days}` : item.label).join('\n')
   return {
     referralType: rule.referral_type,
+    aliases: (rule.content.aliases ?? []).join('\n'),
     goodFit: rule.content.good_fit.join('\n'),
     outsideScope: rule.content.redirect.join('\n'),
     required: lines(rule.content.required),
@@ -303,6 +310,7 @@ export function referralGroups(items: ReferralSummary[]): { review: ReferralSumm
 
 /** The row's "next step" column: what the team does next, or that it's closed. */
 export function referralNextStep(item: Pick<ReferralSummary, 'status' | 'next_step'>): string {
+  if (item.status === 'accepted') return 'Schedule in your scheduling system'
   if (isClosed(item.status)) return 'View referral'
   if (item.status === 'needs_information') return 'Waiting on the referring office'
   if (item.status === 'ready_for_review') return 'Physician decision'
@@ -390,9 +398,13 @@ export type PatientWorkItem = {
   episode: { title: string; summary: string; source: string; at: string }
   status: { label: string; tone: 'copper' | 'slate' | 'quiet' | 'success' }
   nextStep: string; flag: string
-  /** Active work vs. previous care (the demo Patients page's two sections). */
+  /** Which Patients section: open work, accepted and awaiting scheduling, or closed. */
+  section: PatientWorkSection
+  /** Open work (kept for callers that only need active/inactive). */
   active: boolean; urgency: number; searchText: string
 }
+
+export type PatientWorkSection = 'active' | 'awaiting_scheduling' | 'closed'
 
 export const PATIENT_WORK_KIND_LABELS: Record<PatientWorkKind, string> = { received_referral: 'Received referral' }
 
@@ -412,6 +424,7 @@ export function receivedReferralWorkItem(item: ReferralSummary): PatientWorkItem
     status: { label: STATUS_LABELS[item.status], tone: statusTone(item.status) },
     nextStep: referralNextStep(item),
     flag: item.escalated ? 'Flagged for physician' : item.priority === 'urgent' ? 'Urgent' : '',
+    section: !closed ? 'active' : item.status === 'accepted' ? 'awaiting_scheduling' : 'closed',
     active: !closed,
     // Needs-review work before waiting-on-others; urgent first within each.
     urgency: (item.status === 'needs_information' ? 3 : 0) + (item.priority === 'urgent' ? 0 : item.priority === 'soon' ? 1 : 2),
@@ -419,16 +432,22 @@ export function receivedReferralWorkItem(item: ReferralSummary): PatientWorkItem
   }
 }
 
-/** Splits work items into the demo's "Active patients" / "Previous care" sections. */
-export function patientWorkSections(items: PatientWorkItem[], query = ''): { active: PatientWorkItem[]; previous: PatientWorkItem[] } {
+/** Splits work items into Patients sections. An accepted referral is NOT "previous care":
+ * the visit hasn't been booked, so it waits in its own section until scheduling exists. */
+export function patientWorkSections(items: PatientWorkItem[], query = ''): { active: PatientWorkItem[]; awaitingScheduling: PatientWorkItem[]; closed: PatientWorkItem[] } {
   const q = query.trim().toLowerCase()
   const visible = q ? items.filter((item) => item.searchText.includes(q)) : items
   const newestFirst = (a: PatientWorkItem, b: PatientWorkItem) => b.episode.at.localeCompare(a.episode.at)
   return {
-    active: visible.filter((item) => item.active).sort((a, b) => a.urgency - b.urgency || newestFirst(a, b)),
-    previous: visible.filter((item) => !item.active).sort(newestFirst),
+    active: visible.filter((item) => item.section === 'active').sort((a, b) => a.urgency - b.urgency || newestFirst(a, b)),
+    awaitingScheduling: visible.filter((item) => item.section === 'awaiting_scheduling').sort(newestFirst),
+    closed: visible.filter((item) => item.section === 'closed').sort(newestFirst),
   }
 }
+
+/** A stored request message is a template; show where the secure link will go instead of
+ * the raw placeholder. The link itself is never stored or re-displayed. */
+export const displayTemplate = (message: string) => message.replace(/\{status_link\}/g, '[secure link — added when sent]')
 
 /** Network: the clinicians who have actually referred to this practice, derived only
  * from received referrals. These are real referral relationships — NOT Lamina network

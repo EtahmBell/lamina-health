@@ -31,6 +31,9 @@ function ProposalSummary({ proposal }: { proposal: Proposal }) {
     {proposal.structured
       ? <><p><strong>I understood:</strong> for <em>{proposal.referral_type === 'Unassigned' ? 'which referral type?' : proposal.referral_type}</em> referrals —</p><ul>{lines.map((line) => <li key={line}>{line}</li>)}</ul></>
       : <p className="muted-note">I couldn’t turn this into a structured rule, so I kept it as a note. Edit it into a rule if you want me to act on it.</p>}
+    {/* What was NOT turned into a rule (negations, exceptions, vague recency) — check before confirming. */}
+    {(proposal.review_notes ?? []).length > 0 && <div className="pilot-panel"><p><strong>Check before confirming</strong></p><ul>{(proposal.review_notes ?? []).map((note) => <li key={note}>{note}</li>)}</ul></div>}
+    {proposal.content.modality_notes && <p className="muted-note">Kept as a note (not applied by triage): {proposal.content.modality_notes}</p>}
     <p className="muted-note">{proposal.source === 'correction_pattern' ? 'Learned from your repeated corrections' : 'From your instruction'} · confidence {proposal.confidence != null ? `${Math.round(proposal.confidence * 100)}%` : '—'} · not active until you confirm</p>
   </div>
 }
@@ -57,7 +60,11 @@ function ProposalCard({ proposal, referralTypes, onChange }: { proposal: Proposa
     {editing && <div className="pilot-panel auth-form pilot-form">
       <label><span>Referral type</span><input list="pilot-teach-types" value={form.referralType} onChange={set('referralType')} /></label>
       <datalist id="pilot-teach-types">{referralTypes.map((type) => <option key={type} value={type} />)}</datalist>
-      <label><span>Required — one per line, optional “| days”</span><textarea rows={2} value={form.required} onChange={set('required')} /></label>
+      <label><span>Required — one per line; each item’s own time window after “|” (e.g. “Recent lab result | 90”)</span><textarea rows={3} value={form.required} onChange={set('required')} /></label>
+      <label><span>Helpful but not required — one per line, optional “| days”</span><textarea rows={2} value={form.helpful} onChange={set('helpful')} /></label>
+      <label><span>Urgency signals — one per line</span><textarea rows={2} value={form.urgent} onChange={set('urgent')} /></label>
+      <label><span>Also called — other names for this referral type, one per line</span><textarea rows={2} value={form.aliases} onChange={set('aliases')} /></label>
+      <label><span>Note (not used by triage)</span><input value={form.note} onChange={set('note')} /></label>
       <label><span>Outside scope — one per line</span><textarea rows={2} value={form.outsideScope} onChange={set('outsideScope')} /></label>
       <label><span>Good fit — one per line</span><textarea rows={2} value={form.goodFit} onChange={set('goodFit')} /></label>
       <label><span>Default modality</span><select value={form.modality} onChange={set('modality')}>{Object.entries(MODALITY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -275,6 +282,7 @@ function RuleEditor({ initial, onSave, onCancel }: { initial: RuleForm; onSave: 
   }
   return <form className="auth-form pilot-form pilot-card" onSubmit={(event) => void save(event)}>
     <label><span>Referral type</span><input value={form.referralType} onChange={set('referralType')} placeholder="e.g. Diabetes management" disabled={busy} /></label>
+    <label><span>Also called — other names offices use for this type, one per line</span><textarea rows={2} value={form.aliases} onChange={set('aliases')} placeholder="Other names referring offices use" disabled={busy} /></label>
     <label><span>Good fit — one per line</span><textarea rows={3} value={form.goodFit} onChange={set('goodFit')} placeholder="Type 2 diabetes not at goal on two agents" disabled={busy} /></label>
     <label><span>Outside my scope — one per line</span><textarea rows={2} value={form.outsideScope} onChange={set('outsideScope')} placeholder="Type 1 diabetes pump management" disabled={busy} /></label>
     <label><span>Required before review — one per line, optional “| days” for recency</span><textarea rows={3} value={form.required} onChange={set('required')} placeholder={'Recent HbA1c | 180\nCurrent medication list'} disabled={busy} /></label>
@@ -307,6 +315,7 @@ function RulesTab({ physician, rules, onChange }: { physician: boolean; rules: P
         <div className="pilot-section-head"><div><h2>{rule.referral_type}</h2><p className="muted-note">Version {rule.version} · {rule.physician_confirmed ? 'physician-confirmed' : rule.operational_status.replace('_', ' ')} · since {formatDate(rule.confirmed_at ?? rule.created_at)}</p></div>
           {physician && <div className="onboarding-actions"><button className="text-button" onClick={() => setEditing(rule.id)}>Edit</button><button className="text-button" onClick={() => void retirePracticeRule(rule.id).then(onChange).catch((err) => setError(errorText(err, 'Could not retire rule.')))}>Retire</button></div>}</div>
         <dl className="pilot-facts">
+          {(rule.content.aliases ?? []).length > 0 && <div><dt>Also called</dt><dd>{(rule.content.aliases ?? []).join('; ')}</dd></div>}
           {rule.content.good_fit.length > 0 && <div><dt>Good fit</dt><dd>{rule.content.good_fit.join('; ')}</dd></div>}
           {rule.content.redirect.length > 0 && <div><dt>Outside scope</dt><dd>{rule.content.redirect.join('; ')}</dd></div>}
           {rule.content.required.length > 0 && <div><dt>Required</dt><dd>{rule.content.required.map((item) => item.freshness_days ? `${item.label} (≤${item.freshness_days} days)` : item.label).join('; ')}</dd></div>}

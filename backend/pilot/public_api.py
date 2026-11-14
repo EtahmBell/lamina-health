@@ -16,7 +16,7 @@ from time import monotonic
 from typing import Annotated
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.config import environment
@@ -189,18 +189,29 @@ def _sender_errors(action):
         raise HTTPException(error.status_code, {"code": error.code, "message": error.message}) from error
 
 
+# Sender-link responses must not be cached by intermediaries, and the token-bearing page
+# URL must not leak to other sites through the Referer header.
+_SENDER_HEADERS = {"Cache-Control": "no-store, private", "Referrer-Policy": "no-referrer"}
+
+
+def _sender_headers(response: Response) -> None:
+    response.headers.update(_SENDER_HEADERS)
+
+
 @router.get("/r/{token}")
-def sender_status(token: str, request: Request, services: Services) -> dict:
+def sender_status(token: str, request: Request, response: Response, services: Services) -> dict:
+    _sender_headers(response)
     _limit(request, "sender_view")
     return _sender_errors(lambda: services.sender.view(token))
 
 
 @router.post("/r/{token}/documents", status_code=201)
 async def sender_upload(
-    token: str, request: Request, services: Services,
+    token: str, request: Request, response: Response, services: Services,
     content_type: Annotated[str, Header()] = "application/octet-stream",
     x_filename: Annotated[str | None, Header()] = None,
 ) -> dict:
+    _sender_headers(response)
     _limit(request, "sender_upload")
     chunks, size = [], 0
     async for chunk in request.stream():
@@ -214,7 +225,10 @@ async def sender_upload(
 
 
 @router.post("/r/{token}/response")
-def sender_response(token: str, update: SenderResponseInput, request: Request, services: Services) -> dict:
+def sender_response(
+    token: str, update: SenderResponseInput, request: Request, response: Response, services: Services,
+) -> dict:
+    _sender_headers(response)
     _limit(request, "sender_respond")
     return _sender_errors(lambda: services.sender.respond(
         token, update.message, [item.model_dump() for item in update.items]))

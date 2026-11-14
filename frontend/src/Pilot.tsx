@@ -18,7 +18,7 @@ import {
   type EffectiveTriage, type Fit, type Modality, type NextStep, type PilotStatus, type PracticeFields,
   type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type ReferralDetail,
   type ReferralSummary, type RequirementAssessment, getHome, teachAgent, editInformationRequest,
-  sendInformationRequest, cancelInformationRequest, resolveInformationRequest,
+  sendInformationRequest, cancelInformationRequest, resolveInformationRequest, reissueRequestLink, setReferralType, verifyReferralItem,
   type HomeItem, type HomeProjection, type InformationRequest,
   getAssistant, sendAssistantMessage, type AgentCardExecute, type AgentReplyBody,
 } from './pilotApi.ts'
@@ -27,7 +27,7 @@ import {
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
   resolvePilotRoute, STATUS_LABELS,
-  dockMessagesFrom, setReferralPrefill, takeReferralPrefill, turnsForReferral,
+  dockMessagesFrom, displayTemplate, setReferralPrefill, takeReferralPrefill, turnsForReferral,
   type PatientWorkItem, type ReferralForm,
 } from './pilotState.ts'
 
@@ -433,7 +433,7 @@ function PatientsPage({ navigate }: { navigate: Navigate }) {
   const load = () => { listReferrals().then((rows) => setItems(rows.map(receivedReferralWorkItem))).catch((err) => setError(errorText(err, 'Could not load patients'))) }
   useEffect(load, [])
   useOnPilotDataChange(load)
-  const { active, previous } = patientWorkSections(items ?? [], query)
+  const { active, awaitingScheduling, closed } = patientWorkSections(items ?? [], query)
   return <main className="page-shell selector-page">
     <header className="selector-header">
       <div><p className="eyebrow">Your patients</p><h1>Patients</h1><p>Patients with active work in your practice, including new referrals awaiting review.</p></div>
@@ -446,11 +446,18 @@ function PatientsPage({ navigate }: { navigate: Navigate }) {
       <div className="home-section-heading"><h2>Active patients</h2><span>{active.length}</span></div>
       <PatientWorkRows items={active} navigate={navigate} />
     </section>}
-    {previous.length > 0 && <section className="patient-worklist-section">
-      <div className="home-section-heading"><h2>Previous care</h2><span>{previous.length}</span></div>
-      <PatientWorkRows items={previous} navigate={navigate} />
+    {/* Accepted ≠ previous care: the visit isn't booked. Lamina has no scheduling data, so these
+      * wait here; nothing is shown as scheduled or completed. */}
+    {awaitingScheduling.length > 0 && <section className="patient-worklist-section">
+      <div className="home-section-heading"><h2>Accepted — awaiting scheduling</h2><span>{awaitingScheduling.length}</span></div>
+      <p className="muted-note">Accepted by the physician. Book these visits in your scheduling system — scheduling isn’t connected to Lamina yet.</p>
+      <PatientWorkRows items={awaitingScheduling} navigate={navigate} />
     </section>}
-    {items && active.length + previous.length === 0 && <div className="empty-state specialist-empty">
+    {closed.length > 0 && <section className="patient-worklist-section">
+      <div className="home-section-heading"><h2>Closed referrals</h2><span>{closed.length}</span></div>
+      <PatientWorkRows items={closed} navigate={navigate} />
+    </section>}
+    {items && active.length + awaitingScheduling.length + closed.length === 0 && <div className="empty-state specialist-empty">
       <LaminaMark />
       <h2>{items.length ? 'No patients found' : 'No patients yet'}</h2>
       <p>{items.length ? 'Try a different name, clinical problem, or clinician.' : 'Patients appear here as work arrives. Enter the first referral your practice receives and Lamina will triage it against your rules.'}</p>
@@ -470,6 +477,12 @@ function NewReferralPage({ navigate }: { navigate: Navigate }) {
   useEffect(() => { getPracticeRules().then(setRules).catch(() => setRules([])) }, [])
   const set = (key: keyof ReferralForm) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm((current) => ({ ...current, [key]: event.target.value }))
   const matching = rules.filter((rule) => rule.referral_type.toLowerCase() === form.referralType.trim().toLowerCase())
+  // Structured selector: the practice's own referral types, or "Other" with the sender's wording.
+  // An "Other" type is kept as submitted; triage then asks the team to confirm the type.
+  const types = [...new Set(rules.map((rule) => rule.referral_type))].sort()
+  const knownType = types.find((type) => type.toLowerCase() === form.referralType.trim().toLowerCase())
+  const [otherType, setOtherType] = useState(false)
+  const typeChoice = knownType ?? (otherType || form.referralType ? '__other__' : '')
   const requirementOptions = matching.flatMap((rule) => [...rule.content.required, ...rule.content.helpful])
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -510,8 +523,19 @@ function NewReferralPage({ navigate }: { navigate: Navigate }) {
         <label><span>Chart / MRN (optional)</span><input value={form.patientExternalId} onChange={set('patientExternalId')} disabled={busy} /></label>
       </fieldset>
       <fieldset><legend>Referral</legend>
-        <label><span>Referral type</span><input list="pilot-referral-types" value={form.referralType} onChange={set('referralType')} disabled={busy} placeholder={rules.length ? 'Choose one of your rule types or enter another' : 'e.g. Diabetes management'} /></label>
-        <datalist id="pilot-referral-types">{[...new Set(rules.map((rule) => rule.referral_type))].map((type) => <option key={type} value={type} />)}</datalist>
+        {types.length > 0
+          ? <label><span>Referral type</span><select value={typeChoice} disabled={busy} onChange={(event) => {
+            const value = event.target.value
+            setOtherType(value === '__other__')
+            setForm((current) => ({ ...current, referralType: value === '__other__' ? '' : value }))
+          }}>
+            <option value="">Choose a referral type…</option>
+            {types.map((type) => <option key={type} value={type}>{type}</option>)}
+            <option value="__other__">Other — not one of our types</option>
+          </select></label>
+          : null}
+        {(types.length === 0 || typeChoice === '__other__') && <label><span>{types.length ? 'Referral type as the sender wrote it' : 'Referral type'}</span><input value={form.referralType} onChange={set('referralType')} disabled={busy} placeholder="e.g. Diabetes management" /></label>}
+        {typeChoice === '__other__' && form.referralType.trim() && <p className="muted-note">Lamina keeps this wording and will ask your team to confirm which of your referral types applies before using a rule.</p>}
         <label><span>Reason for referral</span><textarea rows={3} value={form.reason} onChange={set('reason')} disabled={busy} /></label>
         <label><span>Clinical context (optional)</span><textarea rows={4} value={form.clinicalContext} onChange={set('clinicalContext')} disabled={busy} /></label>
         <div className="pilot-form-row">
@@ -542,7 +566,7 @@ function NewReferralPage({ navigate }: { navigate: Navigate }) {
 
 /* -------------------------------------------------------------- detail */
 
-function RequirementRow({ requirement, referralId, canRecord, onDetail }: { requirement: RequirementAssessment; referralId: string; canRecord: boolean; onDetail: (detail: ReferralDetail) => void }) {
+function RequirementRow({ requirement, referralId, canRecord, canVerify, onDetail }: { requirement: RequirementAssessment; referralId: string; canRecord: boolean; canVerify: boolean; onDetail: (detail: ReferralDetail) => void }) {
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(requirement.evidence?.quote ?? '')
   const [date, setDate] = useState('')
@@ -560,6 +584,14 @@ function RequirementRow({ requirement, referralId, canRecord, onDetail }: { requ
       setOpen(false)
     } catch (err) { setError(errorText(err, 'Could not record this item.')) } finally { setBusy(false) }
   }
+  // The referring office typed a value: received, not verified. Verifying keeps the sender's
+  // value and provenance and adds who checked it; only then can the requirement be satisfied.
+  const reported = requirement.state === 'sender_reported'
+  const verify = async () => {
+    setBusy(true); setError('')
+    try { onDetail(await verifyReferralItem(referralId, requirement.key)) }
+    catch (err) { setError(errorText(err, 'Could not verify this item.')) } finally { setBusy(false) }
+  }
   return <li className={`pilot-requirement state-${requirement.state}`}>
     <div className="pilot-requirement-main">
       <strong>{requirement.label}{requirement.required ? '' : ' (helpful)'}</strong>
@@ -567,7 +599,12 @@ function RequirementRow({ requirement, referralId, canRecord, onDetail }: { requ
       <span className="muted-note">{requirement.detail}{requirement.freshness_days ? ` · needed within ${requirement.freshness_days} days` : ''}</span>
       {requirement.evidence?.quote && <blockquote>“{requirement.evidence.quote}”{requirement.evidence.page ? ` — page ${requirement.evidence.page}` : ''}</blockquote>}
     </div>
-    {canRecord && requirement.state !== 'satisfied' && !open && <button className="text-button" onClick={() => setOpen(true)}>{fromDocument ? 'Confirm from document' : 'Record received'}</button>}
+    {reported && canVerify && !open && <div className="pilot-actions">
+      <button className="button-secondary" disabled={busy} onClick={() => void verify()}>{busy ? 'Verifying…' : 'Verify'}</button>
+      <button className="text-button" disabled={busy} onClick={() => setOpen(true)}>Record a different value</button>
+    </div>}
+    {!open && error && <p className="error-banner" role="alert">{error}</p>}
+    {canRecord && !reported && requirement.state !== 'satisfied' && !open && <button className="text-button" onClick={() => setOpen(true)}>{fromDocument ? 'Confirm from document' : 'Record received'}</button>}
     {open && <div className="pilot-inline-form">
       <label><span>Value</span><input value={value} onChange={(event) => setValue(event.target.value)} disabled={busy} /></label>
       <label><span>Date of result</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} disabled={busy} /></label>
@@ -611,20 +648,22 @@ function InformationRequestPanel({ request, senderName, onChanged }: { request: 
       <label><span>Recipient email (leave blank to send it yourself)</span><input value={recipient} onChange={(event) => setRecipient(event.target.value)} disabled={busy} /></label>
       <label><span>Message — keep {'{status_link}'} where the secure link should go</span><textarea rows={8} value={message} onChange={(event) => setMessage(event.target.value)} disabled={busy} /></label>
       <div className="onboarding-actions"><button className="button-primary" disabled={busy} onClick={() => void run(() => editInformationRequest(request.id, { message, recipient }))}>Save draft</button><button className="text-button" onClick={() => setEditing(false)}>Cancel</button></div>
-    </div> : <pre className="pilot-message">{request.draft_message}</pre>}
-    {link && <div className="pilot-panel"><p><strong>Secure link for the referring office</strong> — included in the message. Shown once.</p><code className="pilot-link">{link}</code><button className="text-button" onClick={() => void navigator.clipboard?.writeText(link)}>Copy link</button></div>}
+    </div> : <pre className="pilot-message">{displayTemplate(request.draft_message)}</pre>}
+    {link && <div className="pilot-panel"><p><strong>Secure link for the referring office</strong> — goes where the message says “secure link”. Shown once; Lamina doesn’t keep a copy. Any earlier link for this request no longer works.</p><code className="pilot-link">{link}</code><button className="text-button" onClick={() => void navigator.clipboard?.writeText(link)}>Copy link</button></div>}
     {error && <p className="error-banner" role="alert">{error}</p>}
     <div className="pilot-actions">
       {draft && !editing && <button className="button-secondary" disabled={busy} onClick={() => setEditing(true)}>Edit</button>}
       {draft && request.channel === 'email' && request.recipient && <button className="button-primary" disabled={busy} onClick={() => void run(() => sendInformationRequest(request.id, 'send'), true)}>Approve &amp; email {request.recipient}</button>}
       {draft && <button className={request.channel === 'email' ? 'text-button' : 'button-primary'} disabled={busy} onClick={() => void run(() => sendInformationRequest(request.id, 'mark_sent'), true)}>{request.channel === 'email' ? 'I’ll send it myself' : 'Approve — I’ll fax/send it'}</button>}
+      {/* Lost or exposed link: revoke it and issue a fresh one (shown once here, never stored). */}
+      {(request.status === 'sent' || request.status === 'partially_resolved') && <button className="text-button" disabled={busy} onClick={() => void run(() => reissueRequestLink(request.id, request.channel === 'email' && request.recipient ? 'send' : 'mark_sent'), true)}>{request.channel === 'email' && request.recipient ? `Email a new secure link` : 'New secure link'}</button>}
       {(request.status === 'sent' || request.status === 'partially_resolved') && <button className="text-button" disabled={busy} onClick={() => void run(() => resolveInformationRequest(request.id))}>Mark resolved</button>}
       {request.status !== 'resolved' && <button className="text-button" disabled={busy} onClick={() => void run(() => cancelInformationRequest(request.id))}>Cancel request</button>}
     </div>
   </div>
 }
 
-type Panel = null | 'edit' | 'reject' | 'request' | 'escalate' | 'accept' | 'redirect' | 'decline'
+type Panel = null | 'edit' | 'reject' | 'request' | 'escalate' | 'accept' | 'redirect' | 'decline' | 'type'
 
 const statusLabelTone = (status: ReferralDetail['referral']['status']) =>
   status === 'accepted' ? 'resolved' : status === 'redirected' || status === 'declined' ? '' : 'warning'
@@ -640,6 +679,9 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const [redirectTo, setRedirectTo] = useState('')
   const [edit, setEdit] = useState<Partial<EffectiveTriage>>({})
   const [requestItems, setRequestItems] = useState<string[]>([])
+  const [practiceTypes, setPracticeTypes] = useState<string[]>([])
+  const [chosenType, setChosenType] = useState('')
+  useEffect(() => { getPracticeRules().then((rules) => setPracticeTypes([...new Set(rules.map((rule) => rule.referral_type))].sort())).catch(() => setPracticeTypes([])) }, [])
   const load = useCallback(() => getReferral(id).then((next) => { setDetail(next); setError('') }).catch((err) => setError(errorText(err, 'Could not load this referral'))), [id])
   useEffect(() => { void load() }, [load])
   useOnPilotDataChange(() => void load())
@@ -687,6 +729,8 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
     {back}
     <header className="patient-identity"><span className="patient-row-avatar large">{patientInitials(referral.patient.name)}</span><div><h1>{referral.patient.name}</h1>
       <p>{[referral.referral_type, referral.patient.date_of_birth && `DOB ${referral.patient.date_of_birth}`, `received ${formatDate(referral.received_at)}`].filter(Boolean).join(' · ')}</p>
+      {/* Original wording is always kept when the team confirms a practice referral type. */}
+      {referral.submitted_referral_type && referral.submitted_referral_type !== referral.referral_type && <p className="pilot-episode-note">Submitted as “{referral.submitted_referral_type}”</p>}
       {/* Honest scope: the pilot stores patient details per referral, not a chart. */}
       <p className="pilot-episode-note">Received referral · patient details as recorded on this referral, not a full patient record</p></div></header>
     <p className="patient-current-issue"><span className="section-label">Reason for referral</span>{referral.reason}</p>
@@ -696,17 +740,22 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
     <div className="patient-detail-grid">
       <aside className="patient-next-step patient-top-card">
         <h2>Next step</h2>
-        <p className="page-intro">{closed ? 'This referral is closed.' : 'Lamina prepared this. Your team decides.'}</p>
+        <p className="page-intro">{referral.status === 'accepted'
+          ? 'Accepted. Book the visit in your scheduling system — scheduling isn’t connected to Lamina yet, so Lamina won’t show it as scheduled.'
+          : closed ? 'This referral is closed.' : 'Lamina prepared this. Your team decides.'}</p>
         <div className={`next-step-card ${closed ? 'idle' : 'ready'}`}>
           <span className={`status-label ${statusLabelTone(referral.status)}`}>{STATUS_LABELS[referral.status]}</span>
           <h3>{closed ? (referral.disposition?.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : STATUS_LABELS[referral.status]) : nextStepHeading}</h3>
           {triage && <p>{FIT_LABELS[triage.fit]}{readiness ? ` · ${readiness}` : ''} · {PRIORITY_LABELS[triage.suggested_priority].toLowerCase()} priority · {modalityText(triage.suggested_modality)}{triage.requires_physician ? ' · needs physician judgment' : ''}</p>}
           {!triage && !closed && <p>Lamina hasn’t triaged this referral yet{recommendation ? '' : ' — add a referral rule for this type, then re-run triage'}.</p>}
           {referral.disposition && <p>{referral.disposition.decision === 'accept' ? 'Accepted' : referral.disposition.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : 'Declined'} · {formatDateTime(referral.disposition.at)}{referral.disposition.reason ? ` — “${referral.disposition.reason}”` : ''}</p>}
-          {decision && <p className="pilot-decision">Triage {decision.decision === 'accepted' ? 'approved' : decision.decision} by {decision.actor_role} · {formatDateTime(decision.created_at)}{decision.reason ? ` — “${decision.reason}”` : ''}</p>}
+          {decision && <p className="pilot-decision">Triage {decision.decision === 'accepted' ? 'approved' : decision.decision} by {decision.actor_role} · {formatDateTime(decision.created_at)}{decision.reason ? ` — “${decision.reason}”` : ''}{decision.carried_forward ? ' · still applies: since then only completeness or evidence changed, not the recommendation' : ''}</p>}
+          {/* A consequential change re-opens review; say exactly what changed. */}
+          {!closed && detail.approval?.state === 'needs_review_changed' && Object.keys(detail.approval.changed ?? {}).length > 0 && <p className="pilot-decision" role="status">Triage changed since it was last approved — {Object.entries(detail.approval.changed ?? {}).map(([field, change]) => `${field.replace(/_/g, ' ').replace('suggested ', '')}: ${String(change.from)} → ${String(change.to)}`).join('; ')}. Review it again.</p>}
           {referral.escalated_at && <p className="pilot-decision">Flagged for physician review{referral.escalation_note ? ` — “${referral.escalation_note}”` : ''}</p>}
 
           {actions.length > 0 && <div className="pilot-actions" role="group" aria-label="Referral actions">
+            {canUse(actions, 'set_referral_type') && triage?.next_step === 'confirm_referral_type' && <button className="button-primary" disabled={busy} onClick={() => { openPanel('type'); setChosenType(recommendation?.type_match?.suggestions?.[0] ?? '') }}>Confirm referral type</button>}
             {canUse(actions, 'approve') && <button className="button-primary" disabled={busy} onClick={() => void act(() => approveTriage(referral.id))}>Approve triage</button>}
             {canUse(actions, 'edit') && <button className="button-secondary" disabled={busy} onClick={() => openPanel('edit')}>Edit</button>}
             {/* With a draft open, "Request information" would only fail (one draft per referral): edit the draft below instead. */}
@@ -714,6 +763,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
             {canUse(actions, 'escalate') && <button className="button-secondary" disabled={busy} onClick={() => openPanel('escalate')}>Needs physician review</button>}
             {canUse(actions, 'reject') && <button className="text-button" disabled={busy} onClick={() => openPanel('reject')}>Triage is wrong</button>}
             {canUse(actions, 'retriage') && <button className="text-button" disabled={busy} onClick={() => void act(() => retriageReferral(referral.id))}>Re-run triage</button>}
+            {canUse(actions, 'set_referral_type') && triage?.next_step !== 'confirm_referral_type' && practiceTypes.length > 0 && <button className="text-button" disabled={busy} onClick={() => { openPanel('type'); setChosenType(practiceTypes.find((type) => type === referral.referral_type) ?? '') }}>Change referral type</button>}
           </div>}
 
           {panel === 'edit' && triage && <div className="pilot-panel">
@@ -741,6 +791,15 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
             {(recommendation?.missing_items ?? []).map((item) => <label key={item} className="pilot-check"><input type="checkbox" checked={requestItems.includes(item)} onChange={(event) => setRequestItems(event.target.checked ? [...requestItems, item] : requestItems.filter((value) => value !== item))} /> {item}</label>)}
             <label><span>Other item or note</span><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></label>
             <div className="onboarding-actions"><button className="button-primary" disabled={busy} onClick={() => void act(() => requestInformation(referral.id, requestItems, note))}>Prepare request</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
+          </div>}
+          {panel === 'type' && <div className="pilot-panel">
+            <h3>Which of your referral types is this?</h3>
+            <p className="muted-note">Submitted as “{referral.submitted_referral_type ?? referral.referral_type}”. The original wording is kept.{recommendation?.type_match?.suggestions?.length ? ` Shares words with: ${recommendation.type_match.suggestions.join(', ')}.` : ''}</p>
+            <label><span>Referral type</span><select value={chosenType} onChange={(event) => setChosenType(event.target.value)}>
+              <option value="">Choose…</option>
+              {practiceTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+            </select></label>
+            <div className="onboarding-actions"><button className="button-primary" disabled={busy || !chosenType} onClick={() => void act(() => setReferralType(referral.id, chosenType))}>Use this type</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
           </div>}
           {panel === 'escalate' && <div className="pilot-panel">
             <h3>Flag for physician review</h3>
@@ -799,14 +858,15 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
             <section className="clinical-block">
               <h3>Required information<em>{formatDateTime(recommendation.created_at)}</em></h3>
               {recommendation.requirements.length === 0 && <p className="muted-note">No requirements recorded for this referral type.</p>}
-              <ul className="pilot-requirements">{recommendation.requirements.map((requirement) => <RequirementRow key={requirement.key} requirement={requirement} referralId={referral.id} canRecord={canUse(actions, 'record_item')} onDetail={setDetail} />)}</ul>
+              <ul className="pilot-requirements">{recommendation.requirements.map((requirement) => <RequirementRow key={requirement.key} requirement={requirement} referralId={referral.id} canRecord={canUse(actions, 'record_item')} canVerify={canUse(actions, 'verify_item')} onDetail={setDetail} />)}</ul>
             </section>
             <details className="clinical-block pilot-why" open>
               <summary>Why</summary>
               <ul className="clinical-list">{recommendation.rationale.map((item, index) => <li key={index}>{item.statement} <small className="muted-note">{
                 item.source.kind === 'practice_rule' || item.source.kind === 'requirement_logic' ? `Rule v${item.source.rule_version ?? '?'}`
                   : item.source.kind === 'document' ? `Document, page ${item.source.page ?? '?'}`
-                  : item.source.kind === 'submitted_item' ? 'Submitted with referral' : 'No rule'
+                  : item.source.kind === 'submitted_item' ? 'Submitted with referral'
+                  : item.source.kind === 'referral_type' ? (item.source.rule_version ? `Referral type · rule v${item.source.rule_version}` : 'Referral type') : 'No rule'
               }</small></li>)}</ul>
               <p className="muted-note">Rules snapshot {recommendation.rules_snapshot_id} · {recommendation.generator === 'deterministic' ? 'deterministic rule checks' : `rule checks + model-proposed evidence (${recommendation.model_id})`}</p>
             </details>

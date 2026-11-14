@@ -81,8 +81,11 @@ def test_missing_info_request_is_persistent_and_needs_approval_before_sending(pi
     with sqlite3.connect(pilot.store.path) as db:
         recipient, body = db.execute("SELECT recipient, body FROM outbound_messages").fetchone()
         token_hashes = [row[0] for row in db.execute("SELECT token_hash FROM sender_links")]
-    assert recipient == "office@rivera.test" and sent["status_link"] in body
+    # Step 16: the token-bearing link is delivered (returned once) but never stored.
+    assert recipient == "office@rivera.test" and _token(sent["status_link"]) not in body
+    assert "/r/[secure link removed]" in body
     assert _token(sent["status_link"]) not in json.dumps(token_hashes)
+    assert "{status_link}" in sent["draft_message"], "the stored message stays a template"
     events = _event_types(pilot.store, referral_id=rid)
     assert {"missing_information_request_created", "missing_information_request_sent"} <= set(events)
     again = pilot.post(f"/api/me/practice/information-requests/{draft['id']}/send", "user-a", {"mode": "send"})
@@ -123,8 +126,28 @@ def test_sender_link_is_limited_and_new_information_resolves_the_loop(pilot: Pil
     })
     assert responded.status_code == 200, responded.text
     assert all(item["received"] for item in responded.json()["requested_items"])
+    # Step 16: the office's typed values are RECEIVED, not verified. Nothing becomes ready.
+    assert {item["state"] for item in responded.json()["requested_items"]} == {"received"}
     detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
+    states = {r["key"]: r["state"] for r in detail["recommendation"]["requirements"]}
+    assert states["recent_a1c"] == states["renal_function"] == "sender_reported", states
+    assert detail["referral"]["status"] == "needs_information"
+    assert detail["information_requests"][0]["status"] == "partially_resolved"
+    assert detail["recommendation"]["next_step"] == "review_sender_information"
+    assert "verify_item" in detail["allowed_actions"]
+    # A practice member verifies each value (provenance kept); then the loop resolves.
+    verified = pilot.post(f"/api/me/practice/referrals/{rid}/items/recent_a1c/verify", "user-a", {})
+    assert verified.status_code == 200, verified.text
+    sender_view = pilot.client.get(f"/api/public/r/{token}").json()
+    assert {i["key"]: i["state"] for i in sender_view["requested_items"]} == {
+        "recent_a1c": "verified", "renal_function": "received"}
+    verified = pilot.post(f"/api/me/practice/referrals/{rid}/items/renal_function/verify", "user-a", {})
+    assert verified.status_code == 200, verified.text
+    detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
+    item = next(i for i in detail["referral"]["submitted_items"] if i["key"] == "renal_function")
+    assert item["source"] == "sender_submitted" and item["recorded_by"].startswith("sender:") and item["verified_by"] == "user:user-a"
     assert detail["referral"]["status"] == "ready_for_review"
+    assert pilot.client.get(f"/api/public/r/{token}").json()["requested_items"] == [], "nothing left outstanding"
     assert detail["information_requests"][0]["status"] == "resolved"
     assert detail["sender_responses"][0]["message"].startswith("Attached")
     events = _event_types(pilot.store, referral_id=rid)
@@ -437,6 +460,8 @@ def test_metrics_and_weekly_summary_come_from_recorded_events(pilot: Pilot) -> N
     pilot.client.post(f"/api/public/r/{token}/response", json={"items": [
         {"key": "recent_a1c", "value": "8%", "observed_date": RECENT},
         {"key": "renal_function", "value": "ok", "observed_date": RECENT}]})
+    for key in ("recent_a1c", "renal_function"):  # Step 16: sender values count once verified
+        pilot.post(f"/api/me/practice/referrals/{rid}/items/{key}/verify", "user-a", {})
     approved = pilot.referral()["referral"]["id"]
     pilot.post(f"/api/me/practice/referrals/{approved}/approve", "user-a")
     data = pilot.get("/api/me/practice/metrics", "user-a").json()

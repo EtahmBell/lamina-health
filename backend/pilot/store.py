@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -266,6 +267,39 @@ CREATE TRIGGER IF NOT EXISTS outbound_messages_no_update BEFORE UPDATE ON outbou
 BEGIN SELECT RAISE(ABORT, 'outbound messages are immutable'); END;
 """
 
+# Step 16 (additive). An unchanged recommendation after a re-triage inherits the human
+# decision on the previous one; the carry-over is its own append-only record so
+# `recommendation_decisions` keeps holding only real human decisions.
+_SCHEMA_V3 = """
+CREATE TABLE IF NOT EXISTS recommendation_carryovers (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  referral_id TEXT NOT NULL REFERENCES intake_referrals(id),
+  recommendation_id TEXT NOT NULL UNIQUE REFERENCES triage_recommendations(id),
+  from_recommendation_id TEXT NOT NULL REFERENCES triage_recommendations(id),
+  decision_id TEXT NOT NULL REFERENCES recommendation_decisions(id),
+  nonmaterial_changes_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS recommendation_carryovers_no_update
+BEFORE UPDATE ON recommendation_carryovers
+BEGIN SELECT RAISE(ABORT, 'carryovers are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS recommendation_carryovers_no_delete
+BEFORE DELETE ON recommendation_carryovers
+BEGIN SELECT RAISE(ABORT, 'carryovers are append-only'); END;
+"""
+
+# A raw sender access link path (`/r/<token>`). Tokens are urlsafe base64, >= 20 chars.
+SENDER_LINK_PATTERN = re.compile(r"/r/[A-Za-z0-9_-]{20,200}")
+# The same link including any scheme/host prefix, for restoring templates.
+_FULL_SENDER_LINK = re.compile(r"(?:https?://[^\s/]+)?/r/[A-Za-z0-9_-]{20,200}")
+REDACTED_LINK = "/r/[secure link removed]"
+
+
+def redact_sender_links(text: str | None) -> str | None:
+    """Remove any raw sender access token from text that is about to be stored or shown."""
+    return SENDER_LINK_PATTERN.sub(REDACTED_LINK, text) if text else text
+
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -292,6 +326,65 @@ class PilotStore:
         with self._connect() as db:
             db.executescript(_SCHEMA)
             db.executescript(_SCHEMA_V2)
+            db.executescript(_SCHEMA_V3)
+            self._add_column(db, "intake_referrals", "submitted_referral_type", "TEXT")
+            self._scrub_stored_sender_tokens(db)
+
+    @staticmethod
+    def _add_column(db: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+        columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+    def _scrub_stored_sender_tokens(self, db: sqlite3.Connection) -> None:
+        """One-time, idempotent repair of rows written before Step 16, when an approved
+        request's body (including its raw `/r/<token>` link) was saved back into
+        `missing_information_requests.draft_message` and the dev outbox.
+
+        * The saved request text is restored to its template (`{status_link}` placeholder).
+        * Every link that appeared in stored text is REVOKED: it was exposed, so it must not
+          keep working. Staff can issue a fresh link from the request ("New secure link").
+        * Dev-outbox bodies are redacted. That table is otherwise immutable; its no-update
+          trigger is lifted only for this redaction and restored in the same transaction.
+        Each repair is recorded as a `sender_tokens_redacted` event (counts and ids only).
+        """
+        requests = [dict(row) for row in db.execute(
+            "SELECT id, practice_id, draft_message FROM missing_information_requests WHERE draft_message LIKE '%/r/%'"
+        ).fetchall() if SENDER_LINK_PATTERN.search(row["draft_message"])]
+        outbox = [dict(row) for row in db.execute(
+            "SELECT id, practice_id, body FROM outbound_messages WHERE body LIKE '%/r/%'"
+        ).fetchall() if SENDER_LINK_PATTERN.search(row["body"])]
+        if not requests and not outbox:
+            return
+        now = now_iso()
+        texts = [row["draft_message"] for row in requests] + [row["body"] for row in outbox]
+        hashes = {hash_token(match.group(0)[3:]) for text in texts for match in SENDER_LINK_PATTERN.finditer(text)}
+        revoked = 0
+        for token_hash in sorted(hashes):
+            revoked += db.execute(
+                "UPDATE sender_links SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL", (now, token_hash),
+            ).rowcount
+        for row in requests:
+            template = _FULL_SENDER_LINK.sub("{status_link}", row["draft_message"])
+            db.execute("UPDATE missing_information_requests SET draft_message = ? WHERE id = ?", (template, row["id"]))
+        if outbox:
+            db.execute("DROP TRIGGER IF EXISTS outbound_messages_no_update")
+            for row in outbox:
+                db.execute("UPDATE outbound_messages SET body = ? WHERE id = ?", (redact_sender_links(row["body"]), row["id"]))
+            db.execute(
+                "CREATE TRIGGER outbound_messages_no_update BEFORE UPDATE ON outbound_messages "
+                "BEGIN SELECT RAISE(ABORT, 'outbound messages are immutable'); END"
+            )
+        for practice_id in sorted({row["practice_id"] for row in [*requests, *outbox]}):
+            self.append_event(
+                "sender_tokens_redacted", actor="system:migration", autonomy="automatic", practice_id=practice_id,
+                metadata={
+                    "requests": [row["id"] for row in requests if row["practice_id"] == practice_id],
+                    "outbox_messages": sum(1 for row in outbox if row["practice_id"] == practice_id),
+                    "links_revoked": revoked,
+                },
+                db=db,
+            )
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=5)
@@ -606,6 +699,7 @@ class PilotStore:
         events: list[dict],
         decision: dict | None = None,
         recommendation: dict | None = None,
+        carryover: dict | None = None,
     ) -> bool:
         """Optimistic, single-transaction transition: the row must still be in
         `expected_status`, so two concurrent actions cannot both apply."""
@@ -633,6 +727,15 @@ class PilotStore:
                         decision.get("reason"), decision["actor"], decision["actor_role"],
                         decision["created_at"],
                     ),
+                )
+            if carryover is not None:
+                db.execute(
+                    "INSERT INTO recommendation_carryovers (id, practice_id, referral_id, recommendation_id, "
+                    "from_recommendation_id, decision_id, nonmaterial_changes_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (carryover["id"], practice_id, referral_id, carryover["recommendation_id"],
+                     carryover["from_recommendation_id"], carryover["decision_id"],
+                     json.dumps(carryover.get("nonmaterial_changes", {}), sort_keys=True), now_iso()),
                 )
             for event in events:
                 self.append_event(
@@ -724,6 +827,25 @@ class PilotStore:
         return [
             {**dict(row), "changed_fields": _loads(row["changed_fields_json"], {})} for row in rows
         ]
+
+    def carryover_for(self, recommendation_id: str) -> dict | None:
+        return self.fetch_one("SELECT * FROM recommendation_carryovers WHERE recommendation_id = ?", (recommendation_id,))
+
+    def effective_decision(self, recommendation_id: str) -> dict | None:
+        """The human decision that covers this recommendation: its own, or the one carried
+        forward from an earlier, materially identical recommendation."""
+        own = self.decision_for(recommendation_id)
+        if own:
+            return {**own, "carried_forward": False}
+        carry = self.carryover_for(recommendation_id)
+        if not carry:
+            return None
+        original = self.fetch_one("SELECT * FROM recommendation_decisions WHERE id = ?", (carry["decision_id"],))
+        if not original:
+            return None
+        return {**original, "changed_fields": _loads(original["changed_fields_json"], {}), "carried_forward": True,
+                "carried_from_recommendation_id": carry["from_recommendation_id"],
+                "nonmaterial_changes": _loads(carry["nonmaterial_changes_json"], {})}
 
     def decision_for(self, recommendation_id: str) -> dict | None:
         with self._connect() as db:

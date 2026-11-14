@@ -62,7 +62,9 @@ INTENTS = (
 CLOSED = {"accepted", "redirected", "declined"}
 STATUS_TEXT = {
     "received": "received", "triaged": "triaged — needs review", "needs_information": "waiting on information",
-    "ready_for_review": "ready for the physician's decision", "accepted": "accepted",
+    "ready_for_review": "ready for the physician's decision",
+    # Lamina has no scheduling data: an accepted referral is awaiting scheduling, never "scheduled".
+    "accepted": "accepted — awaiting scheduling (scheduling isn’t connected to Lamina)",
     "redirected": "redirected", "declined": "declined",
 }
 FIT_TEXT = {"strong": "a strong fit", "possible": "a possible fit", "outside_scope": "outside your scope", "unknown": "of unknown fit (no rule)"}
@@ -70,6 +72,8 @@ MODALITY_TEXT = {"in_person": "in-person", "econsult": "eConsult", "either": "ei
 NEXT_STEP_TEXT = {
     "request_information": "request missing information", "confirm_document_evidence": "confirm what the documents show",
     "physician_review": "physician review", "consider_redirect": "consider redirecting",
+    "review_sender_information": "verify what the referring office sent",
+    "confirm_referral_type": "confirm the referral type",
 }
 UNAVAILABLE = {
     "outbound": "Sending referrals to other physicians isn’t available in Lamina yet. I can help you record a referral your practice received.",
@@ -643,6 +647,10 @@ class AssistantService:
             "fit": triage and FIT_TEXT.get(triage["fit"]), "modality": triage and MODALITY_TEXT.get(triage["suggested_modality"]),
             "priority": triage and triage["suggested_priority"], "next_step": triage and NEXT_STEP_TEXT.get(triage["next_step"]),
             "missing": recommendation["missing_items"] if recommendation else [],
+            # Received from the referring office but not verified by the team yet.
+            "unverified": [item["label"] for item in (recommendation or {}).get("requirements", [])
+                           if item["state"] == "sender_reported"],
+            "redirect_to": (referral["disposition"] or {}).get("redirect_to"),
             "documents": [doc["filename"] for doc in referral["documents"]],
             "information_requests": [{"status": request["status"], "items": [i["label"] for i in request["items"]]} for request in detail.get("information_requests", [])],
             "sender_replies": len(detail.get("sender_responses", [])),
@@ -933,7 +941,11 @@ class AssistantService:
         lines = [f"{referral['patient_name']} — {referral['referral_type']} from {referral['from']}, received {referral['received_at']}. Status: {referral['status']}."]
         if referral["fit"]:
             lines.append(f"I triaged it as {referral['fit']}, {referral['modality']}, next step: {referral['next_step']}.")
+        if referral.get("redirect_to"):
+            lines.append(f"Redirected to {referral['redirect_to']}.")
         bullets = [f"Missing: {', '.join(referral['missing'])}"] if referral["missing"] else []
+        if referral.get("unverified"):
+            bullets.append(f"Received from the referring office, not yet verified: {', '.join(referral['unverified'])}")
         if referral["information_requests"]:
             bullets.append("Information requests: " + "; ".join(f"{r['status']} ({', '.join(r['items'])})" for r in referral["information_requests"]))
         if referral["documents"]:
@@ -944,7 +956,9 @@ class AssistantService:
         name = referral["patient_name"]
         if referral["missing"]:
             paragraphs = [f"Still missing for {name}’s {referral['referral_type']} referral, per your rules:"]
-            bullets = list(referral["missing"])
+            unverified = set(referral.get("unverified") or [])
+            bullets = [f"{item} — received from the referring office, needs your team to verify" if item in unverified else item
+                       for item in referral["missing"]]
             if referral["information_requests"]:
                 bullets.append("Requests so far: " + "; ".join(f"{r['status']} ({', '.join(r['items'])})" for r in referral["information_requests"]))
             return {"paragraphs": paragraphs, "bullets": bullets, "cards": []}

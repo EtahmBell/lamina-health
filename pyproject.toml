@@ -35,3 +35,4 @@ line-length = 100
 [tool.ruff.lint.per-file-ignores]
 # Shared pytest fixtures imported from another test module look like redefinitions.
 "tests/test_pilot_agent.py" = ["F811"]
+"tests/test_pilot_step16.py" = ["F811"]

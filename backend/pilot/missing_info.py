@@ -14,9 +14,15 @@ from typing import Any
 
 from .intake import IntakeService
 from .messaging import EMAIL_PATTERN, MailNotConfiguredError, MailSender, public_app_url
-from .models import TERMINAL_STATUSES, IntakeStatus, SubmittedItem, TriageRecommendation
+from .models import (
+    TERMINAL_STATUSES,
+    IntakeStatus,
+    SubmittedItem,
+    TriageRecommendation,
+    item_verified,
+)
 from .practice import PilotError, PracticeContext
-from .store import PilotStore, hash_token, new_id, now_iso
+from .store import PilotStore, hash_token, new_id, now_iso, redact_sender_links
 
 OPEN_STATUSES = ("draft", "approved", "sent", "partially_resolved")
 SENT_STATUSES = ("sent", "partially_resolved")
@@ -76,7 +82,9 @@ class MissingInformationService:
             "id": row["id"], "referral_id": row["referral_id"],
             "items": json.loads(row["items_json"]), "recipient": row["recipient"],
             "channel": row["channel"], "subject": row["subject"],
-            "draft_message": row["draft_message"], "status": row["status"],
+            # The stored text is a TEMPLATE: `{status_link}` marks where the secure link goes.
+            # The link itself is rendered only at delivery time and never stored.
+            "draft_message": redact_sender_links(row["draft_message"]), "status": row["status"],
             "created_by": row["created_by"], "approved_by": row["approved_by"],
             "approved_at": row["approved_at"], "sent_at": row["sent_at"], "sent_via": row["sent_via"],
             "resolved_at": row["resolved_at"], "cancelled_at": row["cancelled_at"],
@@ -201,28 +209,16 @@ class MissingInformationService:
                 "email_recipient_required",
                 "Add the referring office's email address, or send it yourself and mark it as sent", 422,
             )
-        link, token = self.links.issue(context.practice_id, row["referral_id"], "information_request")
-        status_link = self.links.url(token)
-        body = row["draft_message"].replace("{status_link}", status_link)
-        sent_via = "manual"
-        if mode == "send":
-            try:
-                receipt = self.mailer.send(
-                    practice_id=context.practice_id, referral_id=row["referral_id"],
-                    recipient=row["recipient"], subject=row["subject"], body=body,
-                    approved_by=context.actor,
-                )
-            except MailNotConfiguredError as error:
-                self.store.execute([("UPDATE sender_links SET revoked_at = ? WHERE id = ?", (now_iso(), link["id"]))])
-                raise PilotError("mail_not_configured", str(error), 409) from error
-            sent_via = receipt.adapter
+        link, status_link, sent_via = self._deliver(context, row, mode)
         now = now_iso()
+        # The template (with its `{status_link}` placeholder) stays as the stored message.
+        # The token-bearing body existed only for delivery and is returned once below.
         changed = self.store.execute(
             [(
                 ("UPDATE missing_information_requests SET status = 'sent', approved_by = ?, approved_at = ?, "
-                "sent_at = ?, sent_via = ?, sender_link_id = ?, draft_message = ?, updated_at = ? "
+                "sent_at = ?, sent_via = ?, sender_link_id = ?, updated_at = ? "
                 "WHERE id = ? AND status = 'draft'"),
-                (context.actor, now, now, sent_via, link["id"], body, now, request_id),
+                (context.actor, now, now, sent_via, link["id"], now, request_id),
             )],
             [{
                 "event_type": "missing_information_request_sent", "actor": context.actor,
@@ -236,6 +232,64 @@ class MissingInformationService:
             self.intake._transition(context, referral_row, IntakeStatus.NEEDS_INFORMATION)
         result = self.view(self._row(context, request_id))
         # Returned once so staff can paste it into a fax; only its hash is stored.
+        result["status_link"] = status_link
+        return result
+
+    def _deliver(self, context: PracticeContext, row: dict, mode: str) -> tuple[dict, str, str]:
+        """Issue a fresh link and hand the rendered message to the mail adapter (mode
+        'send'), or leave delivery to the team (mode 'mark_sent'). Returns (link row,
+        status link, sent_via). The rendered body is never persisted by this method."""
+        link, token = self.links.issue(context.practice_id, row["referral_id"], "information_request")
+        status_link = self.links.url(token)
+        sent_via = "manual"
+        if mode == "send":
+            body = (row["draft_message"] or "").replace("{status_link}", status_link)
+            try:
+                receipt = self.mailer.send(
+                    practice_id=context.practice_id, referral_id=row["referral_id"],
+                    recipient=row["recipient"], subject=row["subject"], body=body,
+                    approved_by=context.actor,
+                )
+            except MailNotConfiguredError as error:
+                self.store.execute([("UPDATE sender_links SET revoked_at = ? WHERE id = ?", (now_iso(), link["id"]))])
+                raise PilotError("mail_not_configured", str(error), 409) from error
+            sent_via = receipt.adapter
+        return link, status_link, sent_via
+
+    def reissue_link(self, context: PracticeContext, request_id: str, mode: str) -> dict:
+        """A new secure link for an open (sent) request: revokes the previous link, issues a
+        new one, and delivers it the same way as the original send. The new link is returned
+        once and never stored. Used when a link was lost, expired, or must be rotated."""
+        row = self._row(context, request_id)
+        if row["status"] not in SENT_STATUSES:
+            raise PilotError("request_not_open", "Only a sent, open request can get a new secure link")
+        referral_row = self.store.referral_row(context.practice_id, row["referral_id"])
+        if IntakeStatus(referral_row["status"]) in TERMINAL_STATUSES:
+            raise PilotError("referral_closed", "This referral is closed")
+        if mode == "send" and (row["channel"] != "email" or not row["recipient"]):
+            raise PilotError(
+                "email_recipient_required",
+                "Add the referring office's email address, or send the new link yourself", 422,
+            )
+        link, status_link, sent_via = self._deliver(context, row, mode)
+        statements = [(
+            ("UPDATE missing_information_requests SET sender_link_id = ?, sent_via = ?, updated_at = ? "
+             "WHERE id = ? AND status IN ('sent', 'partially_resolved')"),
+            (link["id"], sent_via, now_iso(), request_id),
+        )]
+        if row["sender_link_id"]:
+            statements.append(("UPDATE sender_links SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                               (now_iso(), row["sender_link_id"])))
+        changed = self.store.execute(statements, [{
+            "event_type": "sender_link_reissued", "actor": context.actor,
+            "practice_id": context.practice_id, "referral_id": row["referral_id"],
+            "metadata": {"request_id": request_id, "revoked_link_id": row["sender_link_id"],
+                         "new_link_id": link["id"], "sent_via": sent_via, "role": context.role},
+        }])
+        if not changed:
+            self.store.execute([("UPDATE sender_links SET revoked_at = ? WHERE id = ?", (now_iso(), link["id"]))])
+            raise PilotError("stale_request", "This request changed while you were working")
+        result = self.view(self._row(context, request_id))
         result["status_link"] = status_link
         return result
 
@@ -370,6 +424,10 @@ class SenderService:
                     requested.append(item)
         recommendation = self.intake.recommendation(context.practice_id, referral.current_recommendation_id)
         satisfied = {item.key for item in (recommendation.requirements if recommendation else []) if item.state == "satisfied"}
+        # Something the office supplied that the practice has not verified yet: "received",
+        # never "accepted as complete".
+        supplied = {item.key for item in referral.submitted_items if item.value.strip()}
+        verified = {item.key for item in referral.submitted_items if item_verified(item)}
         uploads = [
             {"filename": document.filename, "uploaded_at": document.uploaded_at}
             for document in referral.documents if document.uploaded_by.startswith("sender:")
@@ -384,7 +442,11 @@ class SenderService:
                 "closed": referral.status in TERMINAL_STATUSES,
             },
             "requested_items": [
-                {"label": item["label"], "key": item.get("key"), "received": bool(item.get("key")) and item["key"] in satisfied}
+                {"label": item["label"], "key": item.get("key"),
+                 "received": bool(item.get("key")) and (item["key"] in satisfied or item["key"] in supplied),
+                 "state": ("verified" if item.get("key") and item["key"] in satisfied and item["key"] in verified
+                           else "received" if item.get("key") and (item["key"] in supplied or item["key"] in satisfied)
+                           else "requested")}
                 for item in requested
             ],
             "your_uploads": uploads,

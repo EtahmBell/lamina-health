@@ -149,6 +149,14 @@ class HomeService:
                               "path": f"/me/referrals/{referral_id}",
                               "title": f"Confirm what {summary['patient_name']}’s documents show",
                               "detail": f"Possibly found: {', '.join(proposed)}", "action": "Confirm"})
+            # The referring office replied with values: received, not yet verified. Staff and
+            # physicians both see this -- verifying is intake work, not a physician decision.
+            reported = [r.label for r in (recommendation.requirements if recommendation else []) if r.state == "sender_reported"]
+            if reported:
+                items.append({"kind": "verify_sender_information", "rank": 3, "referral_id": referral_id,
+                              "path": f"/me/referrals/{referral_id}",
+                              "title": f"Verify what the referring office sent for {summary['patient_name']}",
+                              "detail": f"Received, not yet verified: {', '.join(reported)}", "action": "Verify"})
         return items
 
     @staticmethod
@@ -167,6 +175,9 @@ class HomeService:
         evidence = kinds.count("confirm_evidence")
         if evidence:
             parts.append(f"{_plural(evidence, 'referral needs', 'referrals need').lower()} document evidence confirmed")
+        replies = kinds.count("verify_sender_information")
+        if replies:
+            parts.append(f"{_plural(replies, 'referral has', 'referrals have').lower()} a reply from the referring office to verify")
         if "learning_question" in kinds or "proposed_learning" in kinds:
             parts.append("I noticed something I’d like you to confirm")
         if needs:

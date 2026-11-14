@@ -48,6 +48,11 @@ PILOT_ROUTERS = (
 
 def create_app(mode: str | None = None) -> FastAPI:
     resolved: ProductMode = product_mode(mode)
+    if resolved == "pilot":
+        # Sender access tokens travel in /api/public/r/<token> paths: keep them out of logs.
+        from backend.pilot.log_redaction import install_sender_token_log_redaction
+
+        install_sender_token_log_redaction()
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         if resolved == "pilot":

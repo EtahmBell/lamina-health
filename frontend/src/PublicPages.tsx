@@ -193,6 +193,13 @@ export function SenderStatusPage({ token }: { token: string }) {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  // This page's URL carries the sender's access token: never send it to other sites as a Referer.
+  useEffect(() => {
+    const meta = document.createElement('meta')
+    meta.name = 'referrer'; meta.content = 'no-referrer'
+    document.head.appendChild(meta)
+    return () => { meta.remove() }
+  }, [])
   useEffect(() => { getSenderStatus(token).then(setView).catch((err) => setError(err instanceof ApiError && err.status === 404 ? 'This link is invalid or has expired. Contact the practice for a new one.' : errorMessage(err, 'Could not load this referral.'))) }, [token])
   const act = async (action: () => Promise<SenderView>, success: string) => {
     setBusy(true); setError(''); setNotice('')
@@ -217,9 +224,9 @@ export function SenderStatusPage({ token }: { token: string }) {
         <h2>Information requested</h2>
         <form className="auth-form pilot-form" onSubmit={submitResponse}>
           {view.requested_items.map((item) => <div key={item.label} className="pilot-form-row">
-            <label><span>{item.label}{item.received ? ' — received ✓' : ''}</span>{item.key && !item.received
+            <label><span>{item.label}{item.state === 'verified' ? ' — received and checked ✓' : item.received ? ' — received, the practice will review it' : ''}</span>{item.key && !item.received
               ? <input value={values[item.key]?.value ?? ''} onChange={(event) => setValues((current) => ({ ...current, [item.key as string]: { value: event.target.value, date: current[item.key as string]?.date ?? '' } }))} placeholder="Value or summary" disabled={busy || !view.can_respond} />
-              : <input value={item.received ? 'Received' : 'Upload a document or describe below'} disabled />}</label>
+              : <input value={item.state === 'verified' ? 'Received and checked by the practice' : item.received ? 'Received — awaiting the practice’s review' : 'Upload a document or describe below'} disabled />}</label>
             {item.key && !item.received && <label><span>Date of result</span><input type="date" value={values[item.key]?.date ?? ''} onChange={(event) => setValues((current) => ({ ...current, [item.key as string]: { value: current[item.key as string]?.value ?? '', date: event.target.value } }))} disabled={busy || !view.can_respond} /></label>}
           </div>)}
           <label><span>Message to the practice (optional)</span><textarea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} maxLength={4000} disabled={busy || !view.can_respond} /></label>

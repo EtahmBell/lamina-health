@@ -17,7 +17,6 @@ earlier deterministic result):
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
@@ -31,9 +30,11 @@ from .models import (
     RationaleSource,
     RequirementAssessment,
     TriageRecommendation,
+    item_verified,
 )
 from .rules import rules_snapshot
 from .store import new_id, now_iso
+from .vocabulary import canonical_word, canonical_words, type_key_words
 
 _STOPWORDS = {
     "the", "and", "for", "with", "from", "that", "this", "are", "was", "has", "have",
@@ -67,22 +68,45 @@ class EvidenceExtractor(Protocol):
     ) -> list[EvidenceProposal]: ...
 
 
+_CANONICAL_STOPWORDS = {canonical_word(word) for word in _STOPWORDS}
+
+
 def _tokens(text: str) -> set[str]:
+    """Canonical content words (see vocabulary.py): "pregnant" and "pregnancy", or
+    "nodules" and "nodule", compare equal; different words never do."""
     return {
         token
-        for token in re.findall(r"[a-z0-9]+", text.casefold())
-        if (len(token) >= 2 or token.isdigit()) and token not in _STOPWORDS
+        for token in canonical_words(text)
+        if (len(token) >= 2 or token.isdigit()) and token not in _CANONICAL_STOPWORDS
     }
 
 
-def _phrase_match(phrase: str, haystack_tokens: set[str]) -> tuple[bool, list[str]]:
+def _criterion_tokens(phrase: str, ignore: set[str] | frozenset[str] = frozenset()) -> set[str]:
+    """A criterion's distinguishing words. The rule's own referral-type words are dropped
+    (every referral of that type has them), unless that would leave nothing."""
     wanted = _tokens(phrase)
+    return (wanted - set(ignore)) or wanted
+
+
+def _phrase_match(
+    phrase: str, haystack_tokens: set[str], ignore: set[str] | frozenset[str] = frozenset()
+) -> tuple[bool, list[str]]:
+    wanted = _criterion_tokens(phrase, ignore)
     if not wanted:
         return False, []
     hits = sorted(wanted & haystack_tokens)
     # Numbers are discriminating ("type 1" vs "type 2", "stage 4"): all must match.
     numbers_match = all(token in haystack_tokens for token in wanted if token.isdigit())
     return numbers_match and len(hits) / len(wanted) >= FIT_MATCH_THRESHOLD, hits
+
+
+def _partial_match(phrase: str, haystack_tokens: set[str], ignore: set[str]) -> tuple[list[str], list[str]] | None:
+    """Some, but not enough, of a criterion's distinguishing words appear: (hits, missing)."""
+    wanted = _criterion_tokens(phrase, ignore)
+    hits = sorted(wanted & haystack_tokens)
+    if not hits or len(wanted) < 2 or len(hits) / len(wanted) >= FIT_MATCH_THRESHOLD:
+        return None
+    return hits, sorted(wanted - haystack_tokens)
 
 
 def _normalize_ws(text: str) -> str:
@@ -150,11 +174,30 @@ def triage_referral(
     *,
     today: date | None = None,
     extractor: EvidenceExtractor | None = None,
+    type_match: dict | None = None,
 ) -> tuple[TriageRecommendation, dict[str, Any]]:
     """Pure function: returns the recommendation and the rules snapshot it used."""
     reference_day = today or datetime.now(UTC).date()
     snapshot_id, snapshot = rules_snapshot(rules)
     rationale: list[RationaleItem] = []
+    type_match = type_match or {"kind": "exact" if rules else "none", "submitted": referral.referral_type,
+                                "rule_type": rules[0].referral_type if rules else None, "suggestions": []}
+    needs_type_confirmation = not rules and (type_match.get("kind") == "ambiguous" or bool(type_match.get("suggestions")))
+    if type_match.get("kind") in {"normalized", "alias"}:
+        rationale.append(RationaleItem(
+            statement=(f"Submitted as “{type_match['submitted']}”; matched your “{type_match['rule_type']}” rule"
+                       + (f" through its alias “{type_match['matched_alias']}”." if type_match["kind"] == "alias"
+                          else " (same words after normalizing plurals and punctuation).")),
+            source=RationaleSource(kind="referral_type", rule_id=rules[0].id, rule_version=rules[0].version),
+        ))
+    elif needs_type_confirmation:
+        options = ", ".join(f"“{name}”" for name in type_match.get("suggestions", []))
+        rationale.append(RationaleItem(
+            statement=(f"“{type_match['submitted']}” doesn’t exactly match one of your referral types"
+                       + (f" (possible: {options})" if options else "")
+                       + ". I didn’t apply a rule — confirm the referral type so the right criteria are used."),
+            source=RationaleSource(kind="referral_type"),
+        ))
     # Criteria are matched against the clinical text only; the referral-type label
     # selects which rules apply and must not inflate fit or urgency matches.
     text_tokens = _tokens(" ".join(filter(None, [referral.reason, referral.clinical_context])))
@@ -163,24 +206,42 @@ def triage_referral(
         return RationaleSource(kind="practice_rule", rule_id=rule.id, rule_version=rule.version)
 
     # ---------------------------------------------------------------- fit
+    escalations: list[str] = []
     if not rules:
         fit = "unknown"
-        rationale.append(RationaleItem(
-            statement=(
-                f"No confirmed practice rule covers “{referral.referral_type}”, so fit and "
-                "required information cannot be assessed automatically."
-            ),
-            source=RationaleSource(kind="no_rule"),
-        ))
+        if not needs_type_confirmation:
+            rationale.append(RationaleItem(
+                statement=(
+                    f"No confirmed practice rule covers “{referral.referral_type}”, so fit and "
+                    "required information cannot be assessed automatically."
+                ),
+                source=RationaleSource(kind="no_rule"),
+            ))
     else:
+        type_words = type_key_words(rules[0].referral_type)
         outside = [
             (rule, phrase, hits) for rule in rules for phrase in rule.content.redirect
-            for matched, hits in [_phrase_match(phrase, text_tokens)] if matched
+            for matched, hits in [_phrase_match(phrase, text_tokens, type_words)] if matched
         ]
         good = [
             (rule, phrase, hits) for rule in rules for phrase in rule.content.good_fit
-            for matched, hits in [_phrase_match(phrase, text_tokens)] if matched
+            for matched, hits in [_phrase_match(phrase, text_tokens, type_words)] if matched
         ]
+        # Clinically important uncertainty: part of an outside-scope criterion appears. Do
+        # not guess either way -- flag it for the physician with what matched and what didn't.
+        if not outside:
+            for rule in rules:
+                for phrase in rule.content.redirect:
+                    partial = _partial_match(phrase, text_tokens, type_words)
+                    if partial:
+                        hits, missing = partial
+                        escalations.append(phrase)
+                        rationale.append(RationaleItem(
+                            statement=(f"Partly matches your outside-scope criterion “{phrase}” "
+                                       f"(found: {', '.join(hits)}; not found: {', '.join(missing)}). "
+                                       "A physician should check whether it applies."),
+                            source=rule_source(rule),
+                        ))
         if outside:
             fit = "outside_scope"
             for rule, phrase, hits in outside:
@@ -218,26 +279,47 @@ def triage_referral(
                 continue
             seen.add(requirement.key)
             item = submitted.get(requirement.key)
-            if item is not None and item.value.strip() and _is_fresh(
+            fresh = item is not None and item.value.strip() and _is_fresh(
                 item.observed_date, requirement.freshness_days, reference_day
-            ):
+            )
+            if fresh and not item_verified(item):
+                # The referring office SAID it -- recorded and shown, never counted as met
+                # until a practice member verifies it (or confirms a document).
+                requirements.append(RequirementAssessment(
+                    key=requirement.key, label=requirement.label, required=requirement.required,
+                    freshness_days=requirement.freshness_days, state="sender_reported",
+                    rule_id=rule.id, rule_version=rule.version,
+                    evidence=RationaleSource(kind="submitted_item", item_key=item.key),
+                    detail=f"Reported by the referring office: “{item.value.strip()[:120]}”"
+                           + (f", dated {item.observed_date}" if item.observed_date else "")
+                           + " — not yet verified",
+                ))
+                continue
+            if fresh:
                 evidence = RationaleSource(
                     kind="document" if item.source == "document_confirmed" else "submitted_item",
                     item_key=item.key, document_id=item.document_id, page=item.page,
+                )
+                provenance = (
+                    "confirmed from a document" if item.source == "document_confirmed"
+                    else "entered by your team" if item.source == "staff_entered"
+                    else "sent by the referring office, verified by your team" if item.verified_by
+                    else "recorded by your team from the referral"
                 )
                 requirements.append(RequirementAssessment(
                     key=requirement.key, label=requirement.label, required=requirement.required,
                     freshness_days=requirement.freshness_days, state="satisfied",
                     rule_id=rule.id, rule_version=rule.version, evidence=evidence,
-                    detail=f"Provided ({item.source.replace('_', ' ')})"
+                    detail=f"Verified — {provenance}"
                            + (f", dated {item.observed_date}" if item.observed_date else ""),
                 ))
                 continue
-            if item is not None and requirement.freshness_days is not None:
+            if item is not None and item.value.strip() and requirement.freshness_days is not None:
+                who = "Provided" if item_verified(item) else "Reported by the referring office"
                 detail = (
-                    "Provided without a date, so recency cannot be confirmed"
+                    f"{who} without a date, so recency cannot be confirmed"
                     if not item.observed_date
-                    else f"Provided, but older than {requirement.freshness_days} days"
+                    else f"{who}, but older than {requirement.freshness_days} days"
                 )
             else:
                 detail = "Not found in the submitted referral"
@@ -301,6 +383,7 @@ def triage_referral(
 
     required_open = [item for item in requirements if item.required and item.state != "satisfied"]
     proposed = [item for item in requirements if item.state == "proposed_from_document"]
+    reported = [item for item in requirements if item.state == "sender_reported"]
     if not rules:
         readiness = "unknown"
     elif required_open:
@@ -318,7 +401,7 @@ def triage_referral(
     # ------------------------------------------------------------ priority
     urgent_hits = [
         (rule, phrase) for rule in rules for phrase in rule.content.urgent_signals
-        if _phrase_match(phrase, text_tokens)[0]
+        if _phrase_match(phrase, text_tokens, type_key_words(rule.referral_type))[0]
     ]
     if urgent_hits:
         priority = "urgent"
@@ -348,11 +431,15 @@ def triage_referral(
         ))
 
     # ---------------------------------------------------- next step / flags
-    requires_physician = fit != "strong" or priority == "urgent" or readiness == "unknown"
-    if fit == "outside_scope":
+    requires_physician = fit != "strong" or priority == "urgent" or readiness == "unknown" or bool(escalations)
+    if needs_type_confirmation:
+        next_step = "confirm_referral_type"
+    elif fit == "outside_scope":
         next_step = "consider_redirect"
     elif proposed and any(item.required for item in proposed):
         next_step = "confirm_document_evidence"
+    elif reported and any(item.required for item in reported):
+        next_step = "review_sender_information"
     elif required_open:
         next_step = "request_information"
     else:
@@ -374,6 +461,7 @@ def triage_referral(
         generator=generator,
         model_id=model_id,
         rules_snapshot_id=snapshot_id,
+        type_match=type_match,
         created_at=now_iso(),
     )
     return TriageRecommendation.model_validate(recommendation.model_dump()), snapshot

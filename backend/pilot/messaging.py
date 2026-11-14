@@ -18,7 +18,7 @@ from typing import Protocol
 
 from backend.config import environment
 
-from .store import PilotStore, new_id, now_iso
+from .store import PilotStore, new_id, now_iso, redact_sender_links
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -58,8 +58,10 @@ class DevOutboxMailer:
         self.store.execute([(
             ("INSERT INTO outbound_messages (id, practice_id, referral_id, adapter, recipient, "
             "subject, body, approved_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
-            (message_id, practice_id, referral_id, self.name, recipient, subject, body,
-             approved_by, now_iso()),
+            # A real provider transmits `body` (with the secure link) and keeps nothing.
+            # This local outbox is storage, so it keeps the message with the link removed.
+            (message_id, practice_id, referral_id, self.name, recipient, subject,
+             redact_sender_links(body), approved_by, now_iso()),
         )])
         return MailReceipt(self.name, message_id)
 

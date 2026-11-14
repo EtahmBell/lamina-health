@@ -63,6 +63,8 @@ export type PracticeRuleInput = {
   referral_type: string; good_fit: string[]; outside_scope: string[]
   required: RuleRequirement[]; helpful: RuleRequirement[]; urgent_signals: string[]
   modality: Modality; note: string | null; publishable: boolean
+  /** Physician-controlled other names for this referral type. */
+  aliases?: string[]
 }
 export type PracticeRule = {
   id: string; referral_type: string; version: number; supersedes_id: string | null
@@ -72,6 +74,7 @@ export type PracticeRule = {
   content: {
     good_fit: string[]; redirect: string[]; required: RuleRequirement[]; helpful: RuleRequirement[]
     urgent_signals: string[]; modality: Modality; modality_notes: string | null
+    aliases?: string[]
   }
 }
 export const getPracticeRules = (includeHistory = false) => apiRequest<PracticeRule[]>(`/api/me/practice/rules${includeHistory ? '?include_history=true' : ''}`)
@@ -85,9 +88,15 @@ export type IntakeStatus = 'received' | 'triaged' | 'needs_information' | 'ready
 export type Fit = 'strong' | 'possible' | 'outside_scope' | 'unknown'
 export type Priority = 'routine' | 'soon' | 'urgent'
 export type NextStep = 'request_information' | 'confirm_document_evidence' | 'physician_review' | 'consider_redirect'
-export type RequirementState = 'satisfied' | 'proposed_from_document' | 'missing' | 'optional_missing'
+  | 'review_sender_information' | 'confirm_referral_type'
+/** sender_reported: the referring office supplied it; nobody has verified it yet (not satisfied). */
+export type RequirementState = 'satisfied' | 'proposed_from_document' | 'sender_reported' | 'missing' | 'optional_missing'
+export type TypeMatch = {
+  kind: 'exact' | 'normalized' | 'alias' | 'ambiguous' | 'none'; submitted: string
+  rule_type: string | null; matched_alias?: string | null; suggestions: string[]
+}
 export type RationaleSource = {
-  kind: 'practice_rule' | 'document' | 'submitted_item' | 'requirement_logic' | 'no_rule'
+  kind: 'practice_rule' | 'document' | 'submitted_item' | 'requirement_logic' | 'no_rule' | 'referral_type'
   rule_id: string | null; rule_version: number | null; document_id: string | null
   page: number | null; quote: string | null; item_key: string | null
 }
@@ -102,27 +111,36 @@ export type TriageRecommendation = {
   next_step: NextStep; rationale: Array<{ statement: string; source: RationaleSource }>
   generator: 'deterministic' | 'deterministic+llm_extraction'; model_id: string | null
   rules_snapshot_id: string; created_at: string
+  type_match?: TypeMatch | null
 }
 export type EffectiveTriage = Pick<TriageRecommendation, 'fit' | 'suggested_priority' | 'suggested_modality' | 'requires_physician' | 'next_step'>
-export type SubmittedItem = { key: string; label?: string | null; value: string; observed_date?: string | null; source?: string; document_id?: string | null; page?: number | null }
+export type SubmittedItem = {
+  key: string; label?: string | null; value: string; observed_date?: string | null; source?: string
+  document_id?: string | null; page?: number | null; recorded_by?: string | null
+  verified_by?: string | null; verified_at?: string | null
+}
 export type ReferralDocument = { id: string; filename: string; content_type: string; size_bytes: number; uploaded_at: string; extraction_status: 'extracted' | 'unsupported' | 'failed' | 'empty'; page_count: number | null }
 export type IntakeReferral = {
   id: string; status: IntakeStatus; source: 'manual' | 'upload' | 'public_form'
   sender: { name: string; practice: string | null; contact: string | null; npi: string | null }
   patient: { name: string; date_of_birth: string | null; sex: string | null; phone: string | null; insurance: string | null; external_id: string | null }
   referral_type: string; reason: string; clinical_context: string | null; sender_priority: Priority | null
+  /** The referral type exactly as submitted (kept when the team confirms a practice type). */
+  submitted_referral_type?: string | null
   submitted_items: SubmittedItem[]; received_at: string; entered_at: string
   escalated_at: string | null; escalation_note: string | null
   information_request: { items: string[]; draft_message: string; sent: boolean; prepared_at: string } | null
   disposition: { decision: 'accept' | 'redirect' | 'decline'; reason: string | null; redirect_to: string | null; at: string } | null
   documents: ReferralDocument[]
 }
-export type ReferralAction = 'upload_document' | 'record_item' | 'retriage' | 'approve' | 'edit' | 'reject' | 'request_information' | 'escalate' | 'accept' | 'redirect' | 'decline'
+export type ReferralAction = 'upload_document' | 'record_item' | 'retriage' | 'approve' | 'edit' | 'reject' | 'request_information' | 'escalate' | 'accept' | 'redirect' | 'decline' | 'verify_item' | 'set_referral_type'
 export type ReferralDetail = {
   referral: IntakeReferral
   recommendation: TriageRecommendation | null
   rules_snapshot: { rules: Array<{ rule_id: string; version: number; referral_type: string }> } | null
-  decision: { id: string; decision: 'accepted' | 'edited' | 'rejected'; changed_fields: Record<string, { from: unknown; to: unknown }>; reason: string | null; actor_role: PracticeRole; created_at: string } | null
+  decision: { id: string; decision: 'accepted' | 'edited' | 'rejected'; changed_fields: Record<string, { from: unknown; to: unknown }>; reason: string | null; actor_role: PracticeRole; created_at: string; carried_forward?: boolean } | null
+  /** Why approval is or isn't being asked for on the CURRENT recommendation. */
+  approval?: { state: 'decided' | 'carried_forward' | 'needs_first_review' | 'needs_review_changed'; changed?: Record<string, { from: unknown; to: unknown }>; nonmaterial_changes?: Record<string, { from: unknown; to: unknown }> } | null
   effective_triage: EffectiveTriage | null
   history: Array<{ event_type: string; actor: string; autonomy: 'automatic' | 'human'; metadata: Record<string, unknown>; created_at: string }>
   allowed_actions: ReferralAction[]
@@ -153,6 +171,8 @@ export const editTriage = (id: string, changes: Partial<EffectiveTriage> & { rea
 export const rejectTriage = (id: string, reason: string) => apiRequest<ReferralDetail>(referralPath(id, 'reject'), json({ reason }))
 export const requestInformation = (id: string, items: string[], note: string) => apiRequest<ReferralDetail>(referralPath(id, 'request-information'), json({ items, note: note || null }))
 export const escalateReferral = (id: string, note: string) => apiRequest<ReferralDetail>(referralPath(id, 'escalate'), json({ note: note || null }))
+export const verifyReferralItem = (id: string, key: string) => apiRequest<ReferralDetail>(referralPath(id, `items/${encodeURIComponent(key)}/verify`), json({}))
+export const setReferralType = (id: string, referralType: string) => apiRequest<ReferralDetail>(referralPath(id, 'referral-type'), json({ referral_type: referralType }))
 export const recordReferralItem = (id: string, item: { key: string; value: string; observed_date?: string | null; document_id?: string | null; page?: number | null }) => apiRequest<ReferralDetail>(referralPath(id, 'items'), json(item))
 export const decideReferral = (id: string, decision: 'accept' | 'redirect' | 'decline', reason: string, redirectTo: string) =>
   apiRequest<ReferralDetail>(referralPath(id, 'disposition'), json({ decision, reason: reason || null, redirect_to: redirectTo || null }))
@@ -212,6 +232,8 @@ const requestPath = (id: string, action = '') => `/api/me/practice/information-r
 export const editInformationRequest = (id: string, changes: { message?: string; recipient?: string; subject?: string }) =>
   apiRequest<InformationRequest>(requestPath(id), { ...json(changes), method: 'PUT' })
 export const sendInformationRequest = (id: string, mode: 'send' | 'mark_sent') => apiRequest<InformationRequest>(requestPath(id, 'send'), json({ mode }))
+/** Revokes the request's current secure link and issues a new one (returned once, never stored). */
+export const reissueRequestLink = (id: string, mode: 'send' | 'mark_sent') => apiRequest<InformationRequest>(requestPath(id, 'reissue-link'), json({ mode }))
 export const cancelInformationRequest = (id: string) => apiRequest<InformationRequest>(requestPath(id, 'cancel'), { method: 'POST' })
 export const resolveInformationRequest = (id: string) => apiRequest<InformationRequest>(requestPath(id, 'resolve'), { method: 'POST' })
 
@@ -238,6 +260,8 @@ export type Proposal = {
   source: string; structured: boolean
   clarification: { question: string; options: string[] } | null; interpreter: string | null
   question_id: string | null; created_at: string
+  /** What the agent did NOT turn into a rule, and why (negations, exceptions, vague recency). */
+  review_notes?: string[]
 }
 export type LearningQuestion = { id: string; question: string; proposal_id: string; evidence_count: number; status: string; created_at: string }
 export const getTeaching = () => apiRequest<{ proposals: Proposal[]; question: LearningQuestion | null; referral_types: string[] }>('/api/me/practice/teach')
@@ -312,7 +336,7 @@ export type PublicReferralInput = {
 export type SenderView = {
   practice: { name: string; phone: string | null; contact_email: string | null }
   referral: { patient_initials: string; referral_type: string; received_at: string; status: string; closed: boolean }
-  requested_items: Array<{ label: string; key: string | null; received: boolean }>
+  requested_items: Array<{ label: string; key: string | null; received: boolean; state?: 'requested' | 'received' | 'verified' }>
   your_uploads: Array<{ filename: string; uploaded_at: string }>
   can_respond: boolean
 }
