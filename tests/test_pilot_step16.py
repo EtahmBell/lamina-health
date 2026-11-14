@@ -396,14 +396,21 @@ def test_multiple_requirements_across_sentences_and_versioned_confirmation(pilot
     assert labels["Calcium level"] == 30 and labels["Recent TSH"] == 90, "existing items keep their own windows"
 
 
-# =================================================================== 5. approvals
+# =================================================================== 5. sign-off model
+# Step 17 decision: there is no separate "approve triage" step. The physician's accept /
+# redirect / decline is the sign-off; carry-over and re-approval are gone. These replace the
+# Step 16 carry-over tests.
 
 
-def test_unchanged_recommendation_keeps_its_approval(pilot: Pilot) -> None:
+def test_no_approval_step_and_retriage_never_asks_for_one(pilot: Pilot) -> None:
     _ready(pilot)
     rid = pilot.referral()["referral"]["id"]
-    approved = pilot.post(f"/api/me/practice/referrals/{rid}/approve", "user-a").json()
-    assert "approve" not in approved["allowed_actions"]
+    detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
+    assert not {"approve", "edit", "reject"} & set(detail["allowed_actions"])
+    assert {"correct", "accept", "redirect", "decline"} <= set(detail["allowed_actions"])
+    gone = pilot.post(f"/api/me/practice/referrals/{rid}/approve", "user-a")
+    assert gone.status_code == 410 and gone.json()["detail"]["code"] == "triage_approval_removed"
+    assert pilot.post(f"/api/me/practice/referrals/{rid}/reject", "user-a", {"reason": "x"}).status_code == 410
     token = _token(_send_request(pilot, rid)["status_link"])
     pilot.client.post(f"/api/public/r/{token}/response", json={"items": [
         {"key": "recent_a1c", "value": "8.1%", "observed_date": RECENT},
@@ -411,40 +418,89 @@ def test_unchanged_recommendation_keeps_its_approval(pilot: Pilot) -> None:
     for key in ("recent_a1c", "renal_function"):
         detail = pilot.post(f"/api/me/practice/referrals/{rid}/items/{key}/verify", "user-a", {}).json()
     assert detail["referral"]["status"] == "ready_for_review"
-    assert "approve" not in detail["allowed_actions"], "same recommendation: no second approval"
-    assert detail["decision"]["carried_forward"] and detail["approval"]["state"] == "carried_forward"
-    assert "readiness" in detail["approval"]["nonmaterial_changes"]
+    assert "approval" not in detail and detail["legacy_review"] is None
     events = _event_types(pilot.store, referral_id=rid)
-    assert "recommendation_approval_carried_forward" in events
+    assert "recommendation_approval_carried_forward" not in events
+    assert "recommendation_changed" not in events, "only completeness moved: not a clinical change"
     with sqlite3.connect(pilot.store.path) as db:
-        assert db.execute("SELECT COUNT(*) FROM recommendation_decisions WHERE referral_id = ?", (rid,)).fetchone()[0] == 1
-        assert db.execute("SELECT COUNT(*) FROM recommendation_carryovers WHERE referral_id = ?", (rid,)).fetchone()[0] >= 1
-    metrics = pilot.get("/api/me/practice/metrics", "user-a").json()["all_time"]
-    assert metrics["agent_trust"]["accepted"] == 1, "carry-overs are not counted as new human decisions"
+        assert db.execute("SELECT COUNT(*) FROM recommendation_carryovers").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM recommendation_decisions").fetchone()[0] == 0
 
 
-def test_material_change_requires_a_fresh_review_with_the_reason(pilot: Pilot) -> None:
+def test_material_change_is_recorded_with_who_prompted_it(pilot: Pilot) -> None:
     _ready(pilot)
+    pilot.add_staff()
     rid = pilot.referral(reason="Referred for diabetes follow-up")["referral"]["id"]
-    first = pilot.post(f"/api/me/practice/referrals/{rid}/approve", "user-a").json()
+    first = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
     assert first["recommendation"]["fit"] == "possible"
+    assert first["changes_since_seen"] == [], "nothing to compare on a first look"
+    pilot.post(f"/api/me/practice/referrals/{rid}/seen", "user-a")
     rule = pilot.get("/api/me/practice/rules", "user-a").json()[0]
     pilot.client.put(f"/api/me/practice/rules/{rule['id']}", headers=_h("user-a"),
                      json={**DIABETES_RULE, "good_fit": ["diabetes follow-up"]})
-    detail = pilot.post(f"/api/me/practice/referrals/{rid}/triage", "user-a").json()
-    assert detail["recommendation"]["fit"] == "strong"
-    assert "approve" in detail["allowed_actions"], "a consequential change needs a new review"
-    assert detail["approval"]["state"] == "needs_review_changed"
-    assert detail["approval"]["changed"]["fit"] == {"from": "possible", "to": "strong"}
-    assert "recommendation_changed_after_approval" in _event_types(pilot.store, referral_id=rid)
+    staff_view = pilot.post(f"/api/me/practice/referrals/{rid}/triage", "user-c").json()  # staff re-runs triage
+    assert staff_view["recommendation"]["fit"] == "strong"
+    changed = [e for e in staff_view["history"] if e["event_type"] == "recommendation_changed"]
+    assert changed and changed[-1]["metadata"]["changed_fields"]["fit"] == {"from": "possible", "to": "strong"}
+    assert changed[-1]["metadata"]["requested_by_name"] == "Front desk"
+    detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
+    notes = {item["field"]: item for item in detail["changes_since_seen"]}
+    assert notes["fit"] == {"field": "fit", "from": "possible", "to": "strong", "by": "Lamina",
+                            "after": "Front desk", "at": changed[-1]["created_at"]}
+    assert set(notes) <= {"fit", "requires_physician"}, "only clinical fields are reported"
+    assert "approve" not in detail["allowed_actions"], "a change is a note, not a new approval"
+    pilot.post(f"/api/me/practice/referrals/{rid}/seen", "user-a")
+    assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["changes_since_seen"] == []
 
 
-def test_carryover_keeps_human_edits(pilot: Pilot) -> None:
+def test_physician_corrections_persist_across_retriage_and_are_not_shown_back_to_them(pilot: Pilot) -> None:
     _ready(pilot)
     rid = pilot.referral()["referral"]["id"]
-    pilot.post(f"/api/me/practice/referrals/{rid}/edit", "user-a", {"suggested_modality": "econsult", "reason": "stable"})
+    pilot.post(f"/api/me/practice/referrals/{rid}/seen", "user-a")
+    corrected = pilot.post(f"/api/me/practice/referrals/{rid}/correct", "user-a",
+                           {"suggested_modality": "econsult", "reason": "stable"}).json()
+    assert corrected["effective_triage"]["suggested_modality"] == "econsult"
     detail = pilot.post(f"/api/me/practice/referrals/{rid}/triage", "user-a").json()
-    assert detail["decision"]["carried_forward"] and detail["effective_triage"]["suggested_modality"] == "econsult"
+    assert detail["effective_triage"]["suggested_modality"] == "econsult", "a correction is not undone by re-triage"
+    assert detail["recommendation"]["suggested_modality"] != "econsult", "the agent's own value is kept"
+    assert detail["changes_since_seen"] == [], "your own correction is not news to you"
+
+
+def test_legacy_staff_approval_is_relabelled_as_staff_review_not_physician_agreement(pilot: Pilot) -> None:
+    """Approvals written before this change stay in the immutable decision table. A STAFF
+    approval/edit is shown as a staff review, never counts as physician agreement, and no longer
+    changes the clinical triage."""
+    _ready(pilot)
+    pilot.add_staff()
+    rid = pilot.referral()["referral"]["id"]
+    detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
+    rec = detail["recommendation"]
+    practice_id = detail["referral"]["practice_id"]
+    staff_user = pilot.store.membership_for_user("user-c")["user_id"]
+    with pilot.store._connect() as db:  # an old staff "edited" approval, as Step 16 stored it
+        db.execute(
+            "INSERT INTO recommendation_decisions (id, recommendation_id, referral_id, practice_id, decision, "
+            "changed_fields_json, reason, actor, actor_role, created_at) VALUES (?, ?, ?, ?, 'edited', ?, NULL, ?, 'staff', ?)",
+            ("dec_legacy", rec["id"], rid, practice_id,
+             json.dumps({"suggested_priority": {"from": "routine", "to": "urgent"}}), f"user:{staff_user}",
+             "2026-11-01T00:00:00+00:00"))
+        db.execute("UPDATE intake_referrals SET review_json = ? WHERE id = ?", (json.dumps({
+            "recommendation_id": rec["id"], "decision_id": "dec_legacy", "decision": "edited",
+            "fields": {"suggested_priority": "urgent", "requires_physician": True},
+            "by": f"user:{staff_user}", "role": "staff", "at": "2026-11-01T00:00:00+00:00"}), rid))
+    detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
+    review = detail["legacy_review"]
+    assert review["kind"] == "staff_review" and review["actor_name"] == "Front desk"
+    assert review["counts_as_physician_signoff"] is False
+    assert detail["effective_triage"]["suggested_priority"] == rec["suggested_priority"], \
+        "a staff edit of a clinical field is history, not the working triage"
+    assert detail["effective_triage"]["requires_physician"] is True, "a staff flag for the physician still stands"
+    agent_trust = pilot.get("/api/me/practice/metrics", "user-a").json()["all_time"]["agent_trust"]
+    assert agent_trust["edited"] == 0 and agent_trust["acceptance_rate"] is None
+    assert agent_trust["legacy_staff_reviews"] == {"edited": 1}
+    link = [row for row in pilot.get("/api/me/practice/representation/linkage", "user-a").json() if row["referral_id"] == rid]
+    assert link[0]["legacy_review"]["actor_role"] == "staff"
+    assert link[0]["legacy_review"]["counts_as_physician_agreement"] is False and link[0]["signoff"] is None
 
 
 def test_legacy_recommendation_without_type_match_is_not_a_material_change(tmp_path) -> None:
@@ -463,18 +519,19 @@ def test_legacy_recommendation_without_type_match_is_not_a_material_change(tmp_p
     assert "rule_type" in material_changes(moved, current)
 
 
-def test_carryover_survives_an_intermediate_unreviewed_recommendation(pilot: Pilot) -> None:
+def test_agent_changes_back_and_forth_are_each_recorded_with_no_approval(pilot: Pilot) -> None:
+    """Replaces the Step 16 carry-over test: each clinical change is recorded, and nothing asks
+    for a fresh approval at any point."""
     _ready(pilot)
     rid = pilot.referral(reason="Referred for diabetes follow-up")["referral"]["id"]
-    pilot.post(f"/api/me/practice/referrals/{rid}/approve", "user-a")
     rule = pilot.get("/api/me/practice/rules", "user-a").json()[0]
     pilot.client.put(f"/api/me/practice/rules/{rule['id']}", headers=_h("user-a"),
                      json={**DIABETES_RULE, "good_fit": ["diabetes follow-up"]})
     changed = pilot.post(f"/api/me/practice/referrals/{rid}/triage", "user-a").json()
-    assert "approve" in changed["allowed_actions"]  # fit changed: unreviewed version
     revised = pilot.get("/api/me/practice/rules", "user-a").json()[0]
     pilot.client.put(f"/api/me/practice/rules/{revised['id']}", headers=_h("user-a"), json=DIABETES_RULE)
     back = pilot.post(f"/api/me/practice/referrals/{rid}/triage", "user-a").json()
-    assert back["recommendation"]["fit"] == "possible"
-    assert "approve" not in back["allowed_actions"] and back["decision"]["carried_forward"], \
-        "identical to the approved recommendation again: the original approval applies"
+    assert changed["recommendation"]["fit"] == "strong" and back["recommendation"]["fit"] == "possible"
+    moves = [e["metadata"]["changed_fields"]["fit"] for e in back["history"] if e["event_type"] == "recommendation_changed"]
+    assert moves == [{"from": "possible", "to": "strong"}, {"from": "strong", "to": "possible"}]
+    assert not {"approve", "reject"} & (set(changed["allowed_actions"]) | set(back["allowed_actions"]))

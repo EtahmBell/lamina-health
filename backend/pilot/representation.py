@@ -85,10 +85,13 @@ def _hash(value: Any) -> str:
 
 
 class RepresentationService:
-    def __init__(self, store: PilotStore, rules: PracticeRules, teaching: TeachingService) -> None:
+    def __init__(self, store: PilotStore, rules: PracticeRules, teaching: TeachingService,
+                 learning: Any = None) -> None:
         self.store = store
         self.rules = rules
         self.teaching = teaching
+        # LearningService: decides which ONE question is answerable today (pacing lives there).
+        self.learning = learning
 
     # ------------------------------------------------------------- physicians
 
@@ -184,8 +187,7 @@ class RepresentationService:
                           "source": "your practice record (from NPPES)"},
             "display_name": identity.get("display_name"),
         }
-        specialty = (setup.get("profile") or {}).get("specialty") or prefill["specialty"]["value"] or ""
-        starters = next((types for stem, types in STARTER_TYPES.items() if stem in specialty.casefold()), [])
+        starters = self._starters(setup, prefill["specialty"]["value"])
         known = self.rules.referral_types(context.practice_id, context.owner_scope_id)
         known_keys = {referral_type_key(name) for name in known}
         return {
@@ -240,8 +242,21 @@ class RepresentationService:
                 self.rules.set_status(context.practice_id, rule.id, "rejected", actor=context.actor,
                                       event_type="setup_answer_replaced", metadata={"stage": stage})
 
+    def _registry_specialty(self, context: PracticeContext) -> str | None:
+        """The specialty prefill uses: NPPES first, then the practice record."""
+        scope = self.store.workflow.physician_owner_scope(context.owner_scope_id or "") or {}
+        return (scope.get("provider_identity") or {}).get("specialty") or context.practice.get("specialty")
+
+    @staticmethod
+    def _starters(setup: dict, fallback_specialty: str | None) -> list[str]:
+        """Approved starter suggestions: referral-type NAMES only (no clinical content), always
+        labelled "Suggested", each confirmed individually."""
+        specialty = (setup.get("profile") or {}).get("specialty") or fallback_specialty or ""
+        return next((types for stem, types in STARTER_TYPES.items() if stem in specialty.casefold()), [])
+
     def _propose(self, context: PracticeContext, stage: str, referral_type: str, text: str, content: dict,
-                 interpreter: str = "setup", review_notes: list[str] | None = None) -> dict:
+                 interpreter: str = "setup", review_notes: list[str] | None = None,
+                 suggested: bool = False) -> dict:
         self._replace_pending(context, stage, referral_type)
         base = {"good_fit": [], "outside_scope": [], "required": [], "helpful": [], "urgent_signals": [],
                 "modality": "unspecified", "note": None}
@@ -250,13 +265,15 @@ class RepresentationService:
             interpretation={"referral_type": referral_type, "content": {**base, **content}, "structured": True,
                             "confidence": 1.0, "clarification": None, "interpreter": interpreter,
                             "review_notes": review_notes or []},
-            extra_provenance={"setup_stage": stage},
+            extra_provenance={"setup_stage": stage, **({"suggested": True} if suggested else {})},
         )
 
     def save_scope(self, context: PracticeContext, types: list[dict]) -> dict:
         """Stage B. Each answered type becomes a PROPOSED scope statement ("unknown" answers
         create nothing -- they stay unknown)."""
         row = self._require_own_setup(context)
+        starter_keys = {referral_type_key(name) for name in self._starters(
+            self._setup(row), self._registry_specialty(context))}
         proposals = []
         for entry in types:
             name = " ".join(str(entry.get("referral_type") or "").split())[:120]
@@ -271,7 +288,10 @@ class RepresentationService:
             content = {"scope_policy": policy, "aliases": aliases, "answered_topics": ["scope"]}
             if policy == "case_by_case":
                 content["judgment"] = [f"Decides {name} referrals case by case"]
-            proposals.append(self._propose(context, "scope", name, text, content))
+            # The label survives into review: a starter suggestion stays "Suggested" even after
+            # the physician picks a policy for it (only names on the approved list qualify).
+            suggested = bool(entry.get("suggested")) and referral_type_key(name) in starter_keys
+            proposals.append(self._propose(context, "scope", name, text, content, suggested=suggested))
         setup = self._mark(self._setup(row), "scope", "done", answered=len(proposals))
         self._save_setup(context, setup, "setup_stage_completed", {"stage": "scope", "proposals": len(proposals)})
         return {"proposals": proposals, "setup": self.setup_view(context)}
@@ -591,44 +611,69 @@ class RepresentationService:
         questions = [dict(row) for row in self.store.fetch_all(
             "SELECT id, question, proposal_rule_id, created_at FROM learning_questions WHERE practice_id = ? "
             "AND status = 'pending' ORDER BY created_at", (context.practice_id,))]
-        # Each thing to review is counted ONCE: a learning the agent is asking about is an open
-        # question, not also a pending learning.
+        # Each thing to review is counted ONCE: a learning the agent is asking about (today or
+        # queued) is a question, never also a pending learning, and never "learned".
         asked = {question["proposal_rule_id"] for question in questions}
         pending = [item for item in proposals if not item.get("setup_stage") and item["id"] not in asked]
+        # One question a day: only today's question is actionable; the rest are queued. The
+        # choice is the same one Home shows (LearningService.question_for_today).
+        today = (self.learning.question_for_today(context.practice_id, mark_shown=False)
+                 if self.learning is not None else (questions[0] if questions else None))
+        today_id = (today or {}).get("id")
+        open_now = [question for question in questions if question["id"] == today_id]
+        queued = [question for question in questions if question["id"] != today_id]
         return {
             "since": since,
             "confirmed_this_week": confirmed,
             "pending_learnings": pending,
-            "open_questions": questions,
+            "open_questions": open_now,
+            "queued_questions": queued,
             "setup_pending": setup_pending,
             "lifecycle": self.lifecycle(context),
             "counts": {"confirmed_this_week": len(confirmed), "pending_learnings": len(pending),
-                       "open_questions": len(questions), "setup_pending": len(setup_pending)},
+                       "open_questions": len(open_now), "queued_questions": len(queued),
+                       "setup_pending": len(setup_pending)},
         }
 
     # -------------------------------------------------------------- linkage
 
     def linkage(self, context: PracticeContext) -> list[dict]:
         """For Step 18: every recommendation with the representation version and statements it
-        used, the human triage decision on it, and the referral's final decision."""
+        used and the referral's final decision. For decided referrals, the physician sign-off: the
+        recommendation the agent had at that moment, its representation version, the physician's
+        corrections and the decision. Reviews from the retired approval step are reported as
+        `legacy_review` with the reviewer's role, and never count as physician agreement."""
         context.require_physician("view agreement data")
         rows = self.store.fetch_all(
             "SELECT r.id, r.referral_id, r.representation_version_id, r.recommendation_json, r.created_at, "
             "i.referral_type, i.disposition_json FROM triage_recommendations r JOIN intake_referrals i "
             "ON i.id = r.referral_id WHERE r.practice_id = ? ORDER BY r.created_at, r.rowid", (context.practice_id,))
+        signoffs = {item["referral_id"]: self.store.signoff(context.practice_id, item["referral_id"])
+                    for item in self.store.fetch_all(
+                        "SELECT referral_id FROM referral_signoffs WHERE practice_id = ?", (context.practice_id,))}
         result = []
         for row in rows:
             recommendation = json.loads(row["recommendation_json"])
             decision = self.store.effective_decision(row["id"])
             disposition = json.loads(row["disposition_json"]) if row["disposition_json"] else None
+            signoff = signoffs.get(row["referral_id"])
             result.append({
                 "recommendation_id": row["id"], "referral_id": row["referral_id"],
                 "referral_type": row["referral_type"], "representation_version_id": row["representation_version_id"],
                 "statement_kinds": sorted({item["kind"] for item in recommendation.get("statements_used", []) if item.get("drives", True)}),
                 "fit": recommendation.get("fit"), "readiness": recommendation.get("readiness"),
-                "triage_decision": (decision or {}).get("decision"),
-                "triage_decision_carried_forward": bool((decision or {}).get("carried_forward")),
+                "legacy_review": decision and {
+                    "decision": decision["decision"], "actor_role": decision["actor_role"],
+                    "carried_forward": bool(decision.get("carried_forward")), "counts_as_physician_agreement": False},
                 "final_decision": (disposition or {}).get("decision"),
+                # Set only on the recommendation the physician decided on.
+                "signoff": signoff and signoff["recommendation_id"] == row["id"] and {
+                    "id": signoff["id"], "decision": signoff["decision"],
+                    "representation_version_id": signoff["representation_version_id"],
+                    "corrections": [{"field": c["field"], "from": c["from_value"], "to": c["to_value"],
+                                     "agent_value": c["agent_value"]} for c in signoff["corrections"]],
+                    "effective_triage": signoff["effective_triage"], "actor_role": signoff["actor_role"],
+                    "created_at": signoff["created_at"]} or None,
                 "created_at": row["created_at"],
             })
         return result

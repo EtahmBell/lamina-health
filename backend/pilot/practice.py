@@ -52,6 +52,15 @@ class PracticeContext:
     def actor(self) -> str:
         return self.actor_label or f"user:{self.user_id}"
 
+    @property
+    def is_admin(self) -> bool:
+        """Practice admin: membership and practice settings. Not a clinical authority."""
+        return self.role == "physician" and bool(self.member.get("is_admin"))
+
+    def require_admin(self, action: str) -> None:
+        if not self.is_admin:
+            raise PilotError("practice_admin_required", f"Only a practice admin can {action}", 403)
+
     def require_physician(self, action: str) -> None:
         if self.role != "physician":
             raise PilotError(
@@ -172,7 +181,10 @@ class PracticeService:
         return {
             "next_step": next_step,
             "role": role,
+            "is_admin": bool(membership and membership["role"] == "physician" and membership.get("is_admin")),
             "practice": self._practice_view(practice) if practice else None,
+            # Whose agent this is ("Dr. X"), so staff copy can name the physician.
+            "physician_name": self._physician_name(practice["id"]) if practice else None,
             "physician_onboarding": physician_onboarding,
             "practice_defaults": (
                 self._practice_defaults(user_id) if next_step == "practice_setup" else None
@@ -237,13 +249,19 @@ class PracticeService:
         return practice
 
     def update_practice(self, context: PracticeContext, fields: dict[str, Any]) -> dict:
-        context.require_physician("edit practice information")
+        context.require_admin("edit practice information")
         cleaned = {key: (value.strip() if isinstance(value, str) else value) or None for key, value in fields.items()}
         if not cleaned.get("name"):
             raise PilotError("invalid_practice", "Practice name is required", 422)
         return self._practice_view(self.store.update_practice(context.practice_id, cleaned, context.actor))
 
     # ---------------------------------------------------------------- members
+
+    def _physician_name(self, practice_id: str) -> str | None:
+        from .attribution import ActorDirectory
+
+        scopes = self.store.physician_scope_ids(practice_id)
+        return ActorDirectory(self.store, practice_id).physician_name(scopes[0]) if len(scopes) == 1 else None
 
     def members_view(self, context: PracticeContext) -> dict:
         members = []
@@ -257,10 +275,11 @@ class PracticeService:
                 "role": member["role"],
                 "label": member["label"] or (identity or {}).get("display_name"),
                 "is_you": member["user_id"] == context.user_id,
+                "is_admin": bool(member.get("is_admin")),
                 "joined_at": member["created_at"],
             })
         invitations = []
-        if context.role == "physician":
+        if context.is_admin:
             now = datetime.now(UTC).isoformat(timespec="seconds")
             for invitation in self.store.invitations(context.practice_id):
                 state = (
@@ -276,7 +295,7 @@ class PracticeService:
         return {"members": members, "invitations": invitations}
 
     def invite(self, context: PracticeContext, role: str, label: str | None) -> dict:
-        context.require_physician("invite staff")
+        context.require_admin("invite staff")
         invitation, token = self.store.create_invitation(
             context.practice_id, role=role, label=(label or "").strip() or None, actor=context.actor
         )
@@ -288,14 +307,26 @@ class PracticeService:
         }
 
     def revoke_invitation(self, context: PracticeContext, invitation_id: str) -> None:
-        context.require_physician("revoke invitations")
+        context.require_admin("revoke invitations")
         if not self.store.revoke_invitation(context.practice_id, invitation_id, context.actor):
             raise PilotError("invitation_unavailable", "This invitation is no longer pending", 404)
 
     def remove_member(self, context: PracticeContext, member_id: str) -> None:
-        context.require_physician("remove staff")
+        context.require_admin("remove staff")
         if not self.store.remove_member(context.practice_id, member_id, context.actor):
             raise PilotError("member_not_found", "Staff member not found", 404)
+
+    def set_admin(self, context: PracticeContext, member_id: str, is_admin: bool) -> dict:
+        context.require_admin("change who administers the practice")
+        result = self.store.set_admin(context.practice_id, member_id, is_admin, context.actor)
+        if result == "not_found":
+            raise PilotError("member_not_found", "Member not found", 404)
+        if result == "not_physician":
+            # Gap (Step 17 follow-up): there is no non-physician admin role yet.
+            raise PilotError("admin_requires_physician", "Only physicians can be practice admins for now", 422)
+        if result == "last_admin":
+            raise PilotError("last_admin", "A practice needs at least one admin. Make someone else an admin first", 409)
+        return self.members_view(context)
 
     def _usable_invitation(self, token: str) -> dict:
         invitation = self.store.invitation_by_token(token) if token else None

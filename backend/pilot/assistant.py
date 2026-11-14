@@ -130,7 +130,7 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
     Tool("representation", "read", "How the agent represents this physician: each statement's kind (requirement, scope, preference, exception, judgment), status (confirmed / proposed), version, and what is still unknown."),
     Tool("pending_work", "read", "What needs the team, what the agent prepared, and what is waiting on others."),
     Tool("referral_timeline", "read", "One referral's recorded history (who did what, when), oldest first.", needs_referral=True),
-    Tool("propose_preference", "prepare", "Draft a practice preference from an explicit instruction, for the physician to confirm.", physician_only=True),
+    Tool("propose_preference", "prepare", "Draft a practice preference from an explicit instruction, for the physician to confirm. From staff it becomes a pending suggestion for the physician."),
     Tool("prepare_information_request", "prepare", "Preview a missing-information request for a referral. Creating the draft needs a click; sending needs approval.", needs_referral=True),
     Tool("prepare_physician_review", "prepare", "Preview flagging a referral for physician review. Flagging needs a click.", needs_referral=True),
     Tool("prepare_referral_draft", "prepare", "Prefill a received-referral intake form and list what is still missing. Nothing is saved until submitted."),
@@ -693,7 +693,8 @@ class AssistantService:
             if source.get("quote"):
                 quotes.append(source["quote"][:300])
         snapshot = detail.get("rules_snapshot") or {}
-        decision = detail.get("decision")
+        signoff = detail.get("signoff")
+        corrections = detail.get("corrections") or []
         return {
             **base, "has_recommendation": True,
             "recommended": {"fit": FIT_TEXT.get(recommendation["fit"]), "modality": MODALITY_TEXT.get(recommendation["suggested_modality"]),
@@ -707,7 +708,11 @@ class AssistantService:
                             "referral_type": item["referral_type"]}
                            for item in recommendation.get("statements_used", []) if item.get("drives", True)],
             "conflicts": recommendation.get("conflicts", []),
-            "generator": recommendation["generator"], "human_decision": decision and decision["decision"],
+            "generator": recommendation["generator"],
+            # Only the physician's decision is a sign-off; corrections are named with who made them.
+            "physician_decision": signoff and {"decision": signoff["decision"], "by": signoff["actor_name"]},
+            "corrections": [{"field": item["field"], "from": item["from"], "to": item["to"], "by": item["actor_name"]}
+                            for item in corrections],
             "untrusted_document_text": quotes,
         }
 
@@ -715,7 +720,7 @@ class AssistantService:
         detail = self._detail(context, args["referral_id"])
         referral = detail["referral"]
         events = [{"at": event["created_at"][:16].replace("T", " ") + " UTC", "what": _event_label(event["event_type"]),
-                   "by": _actor_label(event["actor"], event["autonomy"])}
+                   "by": event.get("actor_name") or _actor_label(event["actor"], event["autonomy"])}
                   for event in detail["history"] if event["event_type"] != "agent_conversation_turn"]
         return {"referral_id": referral["id"], "patient_name": referral["patient"]["name"], "referral_type": referral["referral_type"],
                 "status": STATUS_TEXT.get(referral["status"], referral["status"]), "events": events[-25:], "event_count": len(events)}
@@ -832,8 +837,13 @@ class AssistantService:
 
     def _teach_reply(self, result: dict) -> dict:
         if result.get("denied"):
-            return {"paragraphs": ["Only the physician can teach me practice preferences. I can flag this for the physician if you’d like, or help with a referral."], "cards": []}
+            return {"paragraphs": ["Only a physician can confirm how I handle referrals. Your instruction wasn’t saved."], "cards": []}
         proposal = result["proposal"]
+        if proposal.get("suggested_by_role") == "staff":
+            # Staff never set clinical preferences: this is a suggestion the physician sees.
+            return {"paragraphs": ["I passed this to the physician as a suggestion. It doesn’t change triage unless they confirm it."],
+                    "cards": [{"kind": "proposal", "label": "Suggestion for the physician", "detail": "Waiting for the physician to confirm",
+                               "action": "View", "path": "/me/agent?tab=teach", "proposal_id": proposal["id"]}]}
         rtype = proposal["referral_type"]
         card = {"kind": "proposal", "label": f"{'New' if rtype == 'Unassigned' else rtype} — draft preference", "detail": "Not active until you confirm",
                 "action": "Review", "path": "/me/agent?tab=teach", "proposal_id": proposal["id"]}
@@ -1039,8 +1049,13 @@ class AssistantService:
         rec = facts["recommended"]
         rules = ", ".join(f"{r['referral_type']} v{r['version']}" for r in facts["rules_used"]) or "no confirmed rule"
         paragraphs = [f"For {facts['patient_name']} ({facts['referral_type']}) I recommended {rec['modality']}, {rec['priority']} priority, next step: {rec['next_step']}. I judged it {rec['fit']} using {rules}."]
-        if facts.get("human_decision"):
-            paragraphs.append(f"Your team {facts['human_decision']} that triage.")
+        for item in facts.get("corrections") or []:
+            paragraphs.append(f"{item['by']} changed {CORRECTION_FIELD_TEXT.get(item['field'], item['field'])} "
+                              f"from {item['from']} to {item['to']}.")
+        if facts.get("physician_decision"):
+            decided = facts["physician_decision"]
+            verb = {"accept": "accepted", "redirect": "redirected", "decline": "declined"}.get(decided["decision"], decided["decision"])
+            paragraphs.append(f"{decided['by']} {verb} the referral; that decision is the sign-off on this triage.")
         bullets = [f"Rules used: {rules}", *(f"{r['statement']} ({r['source']})" for r in facts["rationale"][:8])]
         relied = [f"Relied on {KIND_TEXT.get(item['kind'], item['kind'])}: {item['item'].replace('_', ' ')} "
                   f"({item['referral_type']} v{item['version']}{', your own' if item['layer'] == 'physician' else ''})"
@@ -1066,13 +1081,20 @@ class AssistantService:
             return deterministic
 
 
+CORRECTION_FIELD_TEXT = {"fit": "fit", "suggested_priority": "priority", "suggested_modality": "visit type"}
+
 TOOLS_NEED_REFERRAL = {"explain_recommendation": True, "summarize_history": True, "prepare_information_request": True, "prepare_physician_review": True}
 
 # Pilot events -> plain words for timeline summaries (unknown types fall back to sentence case).
 EVENT_LABELS = {
     "referral_received": "Referral received", "staff_entered": "Entered by your team", "referral_triaged": "Lamina triaged the referral",
-    "recommendation_generated": "Lamina prepared a triage recommendation", "recommendation_accepted": "Triage approved",
-    "recommendation_edited": "Triage edited", "recommendation_rejected": "Triage rejected",
+    "recommendation_generated": "Lamina prepared a triage recommendation",
+    # Retired approval step: recorded reviews, not sign-offs.
+    "recommendation_accepted": "Triage reviewed (earlier approval step)",
+    "recommendation_edited": "Triage edited (earlier approval step)",
+    "recommendation_rejected": "Triage sent to the physician (earlier approval step)",
+    "recommendation_changed": "Lamina’s recommendation changed", "triage_corrected": "Triage corrected by the physician",
+    "referral_marked_ready": "Marked ready for the physician",
     "missing_information_detected": "Missing information detected", "document_uploaded": "Document attached",
     "document_confirmed": "Document evidence confirmed", "document_viewed": "Document opened",
     "referral_item_recorded": "Information recorded", "referral_escalated": "Flagged for physician review",

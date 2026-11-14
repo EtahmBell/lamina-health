@@ -15,7 +15,7 @@ const pages = source('PublicPages.tsx')
 const slice = (text, from, to) => text.slice(text.indexOf(from), to ? text.indexOf(to, text.indexOf(from)) : undefined)
 
 test('stored request text is a template; the secure link is never re-displayed', () => {
-  assert.equal(displayTemplate('Upload here: {status_link}\nThanks'), 'Upload here: [secure link — added when sent]\nThanks')
+  assert.equal(displayTemplate('Upload here: {status_link}\nThanks'), 'Upload here: [Secure link included when sent (not stored)]\nThanks')
   const panel = slice(pilot, 'function InformationRequestPanel', 'type Panel')
   assert.match(panel, /displayTemplate\(request\.draft_message\)/)
   assert.match(panel, /reissueRequestLink\(request\.id/, 'a lost or exposed link can be replaced')
@@ -56,10 +56,11 @@ test('rule aliases round-trip through the rule form', () => {
   assert.match(agent, /proposal\.review_notes/, 'what was not turned into a rule is shown before confirming')
 })
 
-test('an unchanged recommendation keeps its approval; a changed one says what changed', () => {
+test('no re-approval: a change since you last looked is a note naming who changed what', () => {
   const detail = slice(pilot, 'function ReferralDetailPage', 'function ProfilePage')
-  assert.match(detail, /decision\.carried_forward \?/)
-  assert.match(detail, /detail\.approval\?\.state === 'needs_review_changed'/)
+  assert.doesNotMatch(detail, /carried_forward|detail\.approval/)
+  assert.match(detail, /Changed since you last looked: \{changes\.map\(changeText\)/)
+  assert.match(detail, /markReferralSeen\(id\)/, 'the visit is recorded after the note is computed')
 })
 
 test('accepted referrals await scheduling; nothing is shown as scheduled or completed', () => {

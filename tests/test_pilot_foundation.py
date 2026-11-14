@@ -336,17 +336,24 @@ def test_staff_invitation_is_single_use_and_staff_permissions_are_limited(pilot:
     pilot.add_rule()
     detail = pilot.referral("user-c")  # Staff can do intake.
     referral_id = detail["referral"]["id"]
-    assert pilot.post(f"/api/me/practice/referrals/{referral_id}/approve", "user-c").status_code == 200
-    for method, path, body in (
-        ("POST", "/api/me/practice/rules", DIABETES_RULE),
-        ("POST", "/api/me/practice/invitations", {"label": "x"}),
-        ("PUT", "/api/me/practice", {"name": "Renamed"}),
-        ("POST", f"/api/me/practice/referrals/{referral_id}/disposition", {"decision": "accept"}),
-        ("GET", "/api/me/practice/events", None),
+    # Staff do the paperwork: they mark a referral ready for the physician. They can't approve
+    # (no such step any more) or change the clinical triage.
+    assert pilot.post(f"/api/me/practice/referrals/{referral_id}/mark-ready", "user-c", {"note": "all here"}).status_code == 200
+    assert pilot.post(f"/api/me/practice/referrals/{referral_id}/approve", "user-c").status_code == 410
+    refused = pilot.post(f"/api/me/practice/referrals/{referral_id}/correct", "user-c", {"suggested_priority": "urgent"})
+    assert refused.status_code == 403 and refused.json()["detail"]["code"] == "physician_required"
+    # Clinical and referral decisions need a physician; membership and practice settings need a
+    # practice admin (Step 17 follow-up). Staff are refused both.
+    for method, path, body, code in (
+        ("POST", "/api/me/practice/rules", DIABETES_RULE, "physician_required"),
+        ("POST", "/api/me/practice/invitations", {"label": "x"}, "practice_admin_required"),
+        ("PUT", "/api/me/practice", {"name": "Renamed"}, "practice_admin_required"),
+        ("POST", f"/api/me/practice/referrals/{referral_id}/disposition", {"decision": "accept"}, "physician_required"),
+        ("GET", "/api/me/practice/events", None, "physician_required"),
     ):
         response = pilot.client.request(method, path, headers=_h("user-c"), json=body)
         assert response.status_code == 403, (path, response.text)
-        assert response.json()["detail"]["code"] == "physician_required"
+        assert response.json()["detail"]["code"] == code, path
     assert {"staff_invited", "staff_joined"} <= set(_event_types(pilot.store))
 
 
@@ -559,49 +566,45 @@ def test_fit_priority_and_outside_scope_are_rule_driven(tmp_path: Path) -> None:
     assert unclear.fit == "possible" and unclear.requires_physician
 
 
-def test_decisions_accepted_edited_rejected_persist_and_are_immutable(pilot: Pilot) -> None:
+def test_corrections_and_signoff_persist_and_are_immutable(pilot: Pilot) -> None:
+    """Replaces the approve/edit/reject test: the physician corrects fit, priority or visit type
+    (each an append-only correction), and the accept/redirect/decline is the sign-off."""
     pilot.ready_physician()
     pilot.add_rule()
 
-    approved = pilot.referral()
-    rid = approved["referral"]["id"]
-    after = pilot.post(f"/api/me/practice/referrals/{rid}/approve", "user-a").json()
-    assert after["decision"]["decision"] == "accepted"
-    assert after["referral"]["status"] == "needs_information"  # next_step was request_information
-    again = pilot.post(f"/api/me/practice/referrals/{rid}/approve", "user-a")
-    assert again.status_code == 409 and again.json()["detail"]["code"] == "already_decided"
+    rid = pilot.referral()["referral"]["id"]
+    assert pilot.post(f"/api/me/practice/referrals/{rid}/approve", "user-a").status_code == 410
+    no_change = pilot.post(f"/api/me/practice/referrals/{rid}/correct", "user-a", {"fit": "strong"})
+    assert no_change.status_code == 422 and no_change.json()["detail"]["code"] == "no_changes"
+    workflow = pilot.post(f"/api/me/practice/referrals/{rid}/correct", "user-a", {"next_step": "physician_review"})
+    assert workflow.status_code == 422 and workflow.json()["detail"]["code"] == "not_correctable"
+    corrected = pilot.post(f"/api/me/practice/referrals/{rid}/correct", "user-a", {
+        "suggested_priority": "soon", "reason": "Seen before; A1c rising"}).json()
+    assert corrected["effective_triage"]["suggested_priority"] == "soon"
+    assert corrected["recommendation"]["suggested_priority"] == "routine"  # Original preserved.
+    assert corrected["referral"]["status"] == "triaged", "a correction is not a decision"
+    [correction] = corrected["corrections"]
+    assert (correction["field"], correction["from"], correction["to"], correction["agent_value"]) == \
+        ("suggested_priority", "routine", "soon", "routine")
+    assert correction["actor_role"] == "physician" and correction["reason"] == "Seen before; A1c rising"
 
-    edited_id = pilot.referral()["referral"]["id"]
-    no_change = pilot.post(f"/api/me/practice/referrals/{edited_id}/edit", "user-a", {"fit": "strong"})
-    assert no_change.status_code == 422
-    edited = pilot.post(f"/api/me/practice/referrals/{edited_id}/edit", "user-a", {
-        "suggested_priority": "soon", "next_step": "physician_review", "reason": "Seen before; A1c rising",
-    }).json()
-    assert edited["decision"]["decision"] == "edited"
-    assert edited["decision"]["changed_fields"] == {
-        "next_step": {"from": "request_information", "to": "physician_review"},
-        "suggested_priority": {"from": "routine", "to": "soon"},
-    }
-    assert edited["effective_triage"]["suggested_priority"] == "soon"
-    assert edited["recommendation"]["suggested_priority"] == "routine"  # Original preserved.
-    assert edited["referral"]["status"] == "ready_for_review"
-
-    rejected_id = pilot.referral()["referral"]["id"]
-    assert pilot.post(f"/api/me/practice/referrals/{rejected_id}/reject", "user-a", {}).status_code == 422
-    rejected = pilot.post(f"/api/me/practice/referrals/{rejected_id}/reject", "user-a",
-                          {"reason": "This is a thyroid question, not diabetes"}).json()
-    assert rejected["decision"]["decision"] == "rejected"
-    assert rejected["effective_triage"]["requires_physician"] is True
-    assert rejected["referral"]["status"] == "ready_for_review"
-
-    practice_id = approved["referral"]["practice_id"]
-    decisions = [row["decision"] for rid_ in (rid, edited_id, rejected_id)
-                 for row in pilot.store.decision_rows(practice_id, rid_)]
-    assert decisions == ["accepted", "edited", "rejected"]
-    with sqlite3.connect(pilot.store.path) as db, pytest.raises(sqlite3.DatabaseError):
-        db.execute("DELETE FROM recommendation_decisions")
+    decided = pilot.post(f"/api/me/practice/referrals/{rid}/disposition", "user-a", {"decision": "accept"}).json()
+    signoff = decided["signoff"]
+    assert signoff["decision"] == "accept" and signoff["actor_role"] == "physician"
+    assert signoff["recommendation_id"] == corrected["recommendation"]["id"]
+    assert [item["field"] for item in signoff["corrections"]] == ["suggested_priority"]
+    practice_id = decided["referral"]["practice_id"]
+    stored = pilot.store.signoff(practice_id, rid)
+    assert stored["recommendation"]["suggested_priority"] == "routine", "the agent's recommendation at decision time"
+    assert stored["effective_triage"]["suggested_priority"] == "soon"
+    assert stored["representation_version_id"] == corrected["recommendation"]["representation_version_id"]
+    with sqlite3.connect(pilot.store.path) as db:
+        for table in ("triage_corrections", "referral_signoffs"):
+            with pytest.raises(sqlite3.DatabaseError):
+                db.execute(f"DELETE FROM {table}")
     types = _event_types(pilot.store, practice_id=practice_id)
-    assert {"recommendation_accepted", "recommendation_edited", "recommendation_rejected"} <= set(types)
+    assert {"triage_corrected", "referral_accepted"} <= set(types)
+    assert not {"recommendation_accepted", "recommendation_edited", "recommendation_rejected"} & set(types)
 
 
 def test_missing_information_flow_reaches_ready_only_with_human_evidence(pilot: Pilot) -> None:

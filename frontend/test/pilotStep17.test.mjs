@@ -98,3 +98,28 @@ test('Your Agent: one source for learning counts, honest lifecycle, resume entry
 test('staff see an explanation, not the setup flow', () => {
   assert.match(setup, /Only the physician sets up their agent/)
 })
+
+/* Step 17 follow-up. */
+
+test('only today\'s question is counted as actionable; the rest show as queued', () => {
+  const overview = slice(agent, 'function AgentOverview', 'function PracticeRepresentation')
+  assert.match(overview, /counts\.queued_questions > 0 && <li><strong>\{counts\.queued_questions\}<\/strong> queued/)
+  assert.match(overview, /one question a day/)
+  assert.match(api, /queued_questions: number/)
+  // The Train badge still reads only actionable items from the same summary.
+  assert.match(slice(agent, 'export function AgentPage', 'function AgentOverview'), /pending_learnings \+ summary\.counts\.open_questions/)
+  assert.doesNotMatch(slice(agent, 'export function AgentPage', 'function AgentOverview'), /queued_questions/)
+})
+
+test('team management is for practice admins; transfer is grant-then-step-down', () => {
+  const profile = slice(pilot, 'function ProfilePage')
+  assert.match(profile, /Make admin/)
+  assert.match(profile, /Step down as admin/)
+  assert.match(profile, /item\.is_admin\)\.length > 1/, 'the last admin is never offered a step-down')
+  assert.match(api, /\/admin`/)
+})
+
+test('a starter suggestion stays labelled Suggested through review', () => {
+  assert.match(setup, /suggested: row\.suggested/)
+  assert.match(agent, /proposal\.suggested && <p><span className="pilot-suggested-tag">Suggested<\/span>/)
+})

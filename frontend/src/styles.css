@@ -3345,3 +3345,7 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .pilot-representation-chips .practice-chip { text-transform: none; }
 .pilot-requirements-card .pilot-check input[type="checkbox"], .pilot-setup-page .pilot-check input[type="checkbox"] { width: 16px; height: 16px; padding: 0; margin: 0; }
 .pilot-setup-resume .button-primary { flex: 0 0 auto; white-space: nowrap; }
+/* Step 17 staff walkthrough: spacing fixes and the sign-off model. */
+.public-sender-notice { margin: 18px 0 22px; padding: 12px 14px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
+.pilot-setup-staff-actions { margin-top: 24px; }
+.pilot-change-note { padding: 8px 10px; border-left: 3px solid var(--mineral-deep); background: var(--surface); }

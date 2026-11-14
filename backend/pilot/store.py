@@ -320,6 +320,63 @@ CREATE TRIGGER IF NOT EXISTS representation_versions_no_delete BEFORE DELETE ON 
 BEGIN SELECT RAISE(ABORT, 'representation versions are append-only'); END;
 """
 
+# Triage sign-off model (additive). The physician's accept/redirect/decline IS the sign-off
+# on the triage; there is no separate approval step. Before deciding, a physician may correct
+# fit, priority or visit type: each correction is its own append-only row. Every decision
+# stores what the agent recommended at that moment, the representation version it used, the
+# physician's corrections and the final decision, separate from anything staff did.
+# Older `recommendation_decisions` / `recommendation_carryovers` rows are kept unchanged.
+_SCHEMA_V5 = """
+CREATE TABLE IF NOT EXISTS triage_corrections (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  referral_id TEXT NOT NULL REFERENCES intake_referrals(id),
+  recommendation_id TEXT NOT NULL REFERENCES triage_recommendations(id),
+  field TEXT NOT NULL CHECK(field IN ('fit', 'suggested_priority', 'suggested_modality')),
+  from_value TEXT NOT NULL,
+  to_value TEXT NOT NULL,
+  agent_value TEXT NOT NULL,
+  reason TEXT,
+  actor TEXT NOT NULL,
+  actor_role TEXT NOT NULL CHECK(actor_role = 'physician'),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS triage_corrections_referral ON triage_corrections(practice_id, referral_id, created_at);
+CREATE TRIGGER IF NOT EXISTS triage_corrections_no_update BEFORE UPDATE ON triage_corrections
+BEGIN SELECT RAISE(ABORT, 'triage corrections are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS triage_corrections_no_delete BEFORE DELETE ON triage_corrections
+BEGIN SELECT RAISE(ABORT, 'triage corrections are append-only'); END;
+CREATE TABLE IF NOT EXISTS referral_signoffs (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  referral_id TEXT NOT NULL UNIQUE REFERENCES intake_referrals(id),
+  recommendation_id TEXT REFERENCES triage_recommendations(id),
+  recommendation_json TEXT,
+  representation_version_id TEXT,
+  rules_snapshot_id TEXT,
+  corrections_json TEXT NOT NULL DEFAULT '[]',
+  effective_triage_json TEXT,
+  decision TEXT NOT NULL CHECK(decision IN ('accept', 'redirect', 'decline')),
+  reason TEXT,
+  redirect_to TEXT,
+  actor TEXT NOT NULL,
+  actor_role TEXT NOT NULL CHECK(actor_role = 'physician'),
+  created_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS referral_signoffs_no_update BEFORE UPDATE ON referral_signoffs
+BEGIN SELECT RAISE(ABORT, 'referral sign-offs are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS referral_signoffs_no_delete BEFORE DELETE ON referral_signoffs
+BEGIN SELECT RAISE(ABORT, 'referral sign-offs are append-only'); END;
+CREATE TABLE IF NOT EXISTS referral_views (
+  practice_id TEXT NOT NULL,
+  referral_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  seen_at TEXT NOT NULL,
+  last_event_id INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (referral_id, user_id)
+);
+"""
+
 # A raw sender access link path (`/r/<token>`). Tokens are urlsafe base64, >= 20 chars.
 SENDER_LINK_PATTERN = re.compile(r"/r/[A-Za-z0-9_-]{20,200}")
 # The same link including any scheme/host prefix, for restoring templates.
@@ -366,6 +423,18 @@ class PilotStore:
             self._add_column(db, "physician_referral_preferences", "owner_scope_id", "TEXT")
             self._add_column(db, "practices", "allow_physician_loosening", "INTEGER NOT NULL DEFAULT 0")
             self._add_column(db, "triage_recommendations", "representation_version_id", "TEXT")
+            # Practice admins (membership + settings). The creator is admin by default; several
+            # physicians may be admins. Backfilled once for practices that have no admin yet.
+            self._add_column(db, "practice_members", "is_admin", "INTEGER NOT NULL DEFAULT 0")
+            db.execute(
+                "UPDATE practice_members SET is_admin = 1 WHERE role = 'physician' AND status = 'active' "
+                "AND user_id = (SELECT created_by_user_id FROM practices WHERE practices.id = practice_members.practice_id) "
+                "AND NOT EXISTS (SELECT 1 FROM practice_members admin WHERE admin.practice_id = practice_members.practice_id "
+                "AND admin.is_admin = 1 AND admin.status = 'active')"
+            )
+            db.executescript(_SCHEMA_V5)
+            # Staff paperwork hand-off to the physician: {"kind": "ready" | "flag", note, by, role, at}.
+            self._add_column(db, "intake_referrals", "handoff_json", "TEXT")
 
     @staticmethod
     def _add_column(db: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
@@ -539,8 +608,8 @@ class PilotStore:
             )
             db.execute(
                 "INSERT INTO practice_members (id, practice_id, user_id, physician_owner_scope_id, "
-                "role, status, label, invited_by, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, 'physician', 'active', NULL, NULL, ?, ?)",
+                "role, status, label, invited_by, created_at, updated_at, is_admin) "
+                "VALUES (?, ?, ?, ?, 'physician', 'active', NULL, NULL, ?, ?, 1)",
                 (member_id, practice_id, user_id, owner_scope_id, now, now),
             )
             self.append_event(
@@ -592,6 +661,33 @@ class PilotStore:
             for member in self.members(practice_id)
             if member["role"] == "physician" and member["physician_owner_scope_id"]
         ]
+
+    def set_admin(self, practice_id: str, member_id: str, is_admin: bool, actor: str) -> str:
+        """Grant or revoke practice admin in one transaction. Returns 'ok', 'not_found',
+        'not_physician', or 'last_admin' (a practice always keeps at least one admin)."""
+        with self._connect() as db:
+            member = db.execute(
+                "SELECT * FROM practice_members WHERE id = ? AND practice_id = ? AND status = 'active'",
+                (member_id, practice_id),
+            ).fetchone()
+            if not member:
+                return "not_found"
+            if member["role"] != "physician":
+                return "not_physician"
+            if not is_admin:
+                admins = db.execute(
+                    "SELECT COUNT(*) FROM practice_members WHERE practice_id = ? AND status = 'active' AND is_admin = 1",
+                    (practice_id,),
+                ).fetchone()[0]
+                if member["is_admin"] and admins <= 1:
+                    return "last_admin"
+            db.execute("UPDATE practice_members SET is_admin = ?, updated_at = ? WHERE id = ?",
+                       (1 if is_admin else 0, now_iso(), member_id))
+            self.append_event(
+                "practice_admin_granted" if is_admin else "practice_admin_revoked", actor=actor,
+                practice_id=practice_id, metadata={"member_id": member_id}, db=db,
+            )
+        return "ok"
 
     def remove_member(self, practice_id: str, member_id: str, actor: str) -> bool:
         with self._connect() as db:
@@ -737,9 +833,11 @@ class PilotStore:
         decision: dict | None = None,
         recommendation: dict | None = None,
         carryover: dict | None = None,
+        inserts: list[tuple[str, tuple]] | None = None,
     ) -> bool:
         """Optimistic, single-transaction transition: the row must still be in
-        `expected_status`, so two concurrent actions cannot both apply."""
+        `expected_status`, so two concurrent actions cannot both apply. `inserts` are extra
+        append-only rows (corrections, sign-offs) written in the same transaction."""
         changes = {**changes, "updated_at": now_iso()}
         with self._connect() as db:
             if recommendation is not None:
@@ -774,6 +872,8 @@ class PilotStore:
                      carryover["from_recommendation_id"], carryover["decision_id"],
                      json.dumps(carryover.get("nonmaterial_changes", {}), sort_keys=True), now_iso()),
                 )
+            for sql, values in inserts or []:
+                db.execute(sql, values)
             for event in events:
                 self.append_event(
                     event["event_type"], actor=event["actor"],
@@ -883,6 +983,43 @@ class PilotStore:
         return {**original, "changed_fields": _loads(original["changed_fields_json"], {}), "carried_forward": True,
                 "carried_from_recommendation_id": carry["from_recommendation_id"],
                 "nonmaterial_changes": _loads(carry["nonmaterial_changes_json"], {})}
+
+    def corrections(self, practice_id: str, referral_id: str) -> list[dict]:
+        return [
+            {**row, "from_value": json.loads(row["from_value"]), "to_value": json.loads(row["to_value"]),
+             "agent_value": json.loads(row["agent_value"])}
+            for row in self.fetch_all(
+                "SELECT * FROM triage_corrections WHERE practice_id = ? AND referral_id = ? ORDER BY created_at, rowid",
+                (practice_id, referral_id))
+        ]
+
+    def signoff(self, practice_id: str, referral_id: str) -> dict | None:
+        row = self.fetch_one(
+            "SELECT * FROM referral_signoffs WHERE practice_id = ? AND referral_id = ?", (practice_id, referral_id))
+        if not row:
+            return None
+        recommendation = _loads(row.pop("recommendation_json"), None)
+        corrections = _loads(row.pop("corrections_json"), [])
+        effective = _loads(row.pop("effective_triage_json"), None)
+        return {**row, "recommendation": recommendation, "corrections": corrections, "effective_triage": effective}
+
+    def last_seen_event(self, referral_id: str, user_id: str) -> int | None:
+        """The newest referral event this person had when they last looked (None: never looked)."""
+        row = self.fetch_one("SELECT last_event_id FROM referral_views WHERE referral_id = ? AND user_id = ?",
+                             (referral_id, user_id))
+        return row["last_event_id"] if row else None
+
+    def mark_seen(self, practice_id: str, referral_id: str, user_id: str) -> str:
+        now = now_iso()
+        with self._connect() as db:
+            last = db.execute("SELECT COALESCE(MAX(id), 0) FROM pilot_events WHERE referral_id = ?",
+                              (referral_id,)).fetchone()[0]
+            db.execute(
+                "INSERT INTO referral_views (practice_id, referral_id, user_id, seen_at, last_event_id) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(referral_id, user_id) DO UPDATE SET "
+                "seen_at = excluded.seen_at, last_event_id = excluded.last_event_id",
+                (practice_id, referral_id, user_id, now, last))
+        return now
 
     def decision_for(self, recommendation_id: str) -> dict | None:
         with self._connect() as db:

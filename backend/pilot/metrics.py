@@ -45,10 +45,18 @@ def practice_metrics(store: PilotStore, practice_id: str, *, since: str | None =
     first_rec: dict[str, dict] = {}
     for row in recommendations:
         first_rec.setdefault(row["referral_id"], row)
-    decisions = [d for d in store.fetch_all("SELECT * FROM recommendation_decisions WHERE practice_id = ?", (practice_id,))
-                 if d["referral_id"] in referral_ids]
+    legacy = [d for d in store.fetch_all("SELECT * FROM recommendation_decisions WHERE practice_id = ?", (practice_id,))
+              if d["referral_id"] in referral_ids]
+    # The retired approval step: only PHYSICIAN reviews ever counted as physician agreement.
+    decisions = [d for d in legacy if d["actor_role"] == "physician"]
+    staff_reviews = Counter(d["decision"] for d in legacy if d["actor_role"] != "physician")
     decision_counts = Counter(d["decision"] for d in decisions)
-    correction_types = Counter(
+    signoffs = [s for s in store.fetch_all("SELECT * FROM referral_signoffs WHERE practice_id = ?", (practice_id,))
+                if s["referral_id"] in referral_ids]
+    corrections = [c for c in store.fetch_all("SELECT * FROM triage_corrections WHERE practice_id = ?", (practice_id,))
+                   if c["referral_id"] in referral_ids]
+    unchanged = sum(1 for s in signoffs if json.loads(s["corrections_json"]) == [])
+    correction_types = Counter(c["field"] for c in corrections) + Counter(
         field for d in decisions if d["decision"] == "edited" for field in json.loads(d["changed_fields_json"]))
     requests = [m for m in store.fetch_all("SELECT * FROM missing_information_requests WHERE practice_id = ?", (practice_id,))
                 if m["referral_id"] in referral_ids]
@@ -92,6 +100,13 @@ def practice_metrics(store: PilotStore, practice_id: str, *, since: str | None =
             "accepted": decision_counts.get("accepted", 0), "edited": decision_counts.get("edited", 0),
             "rejected": decision_counts.get("rejected", 0),
             "acceptance_rate": round(decision_counts.get("accepted", 0) / total_decisions, 3) if total_decisions else None,
+            # Current model: the physician's decision is the sign-off; corrections are physician-only.
+            "physician_signoffs": len(signoffs),
+            "signed_off_without_corrections": unchanged,
+            "agreement_rate": round(unchanged / len(signoffs), 3) if signoffs else None,
+            "physician_corrections": len(corrections),
+            # Staff reviews from the retired approval step: shown, never counted as agreement.
+            "legacy_staff_reviews": dict(staff_reviews),
             "common_correction_fields": dict(correction_types.most_common(5)),
             "escalations": by_type.get("referral_escalated", 0),
         },

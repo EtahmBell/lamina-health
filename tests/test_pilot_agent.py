@@ -187,7 +187,8 @@ def test_home_shows_needs_waiting_prepared_and_done_from_real_state_only(pilot: 
     ready = pilot.referral(submitted_items=[
         {"key": "recent_a1c", "value": "8%", "observed_date": RECENT},
         {"key": "renal_function", "value": "ok", "observed_date": RECENT}])["referral"]["id"]
-    pilot.post(f"/api/me/practice/referrals/{ready}/approve", "user-a")
+    pilot.add_staff()  # no approval step: staff mark the complete referral ready for the physician
+    pilot.post(f"/api/me/practice/referrals/{ready}/mark-ready", "user-c", {})
     home = pilot.get("/api/me/practice/home", "user-a").json()
     kinds = {item["kind"]: item for item in home["needs_you"]}
     assert kinds["ready_for_review"]["path"] == f"/me/referrals/{ready}"
@@ -198,7 +199,6 @@ def test_home_shows_needs_waiting_prepared_and_done_from_real_state_only(pilot: 
     assert "ready for review" in home["briefing"]["detail"]
     assert "waiting on missing records for one referral" in home["briefing"]["tail"]
     assert any(item["kind"] == "missing_information_request_sent" for item in home["done"])
-    pilot.add_staff()
     staff = pilot.get("/api/me/practice/home", "user-c").json()
     assert "ready_for_review" not in {item["kind"] for item in staff["needs_you"]}
     assert any(item["kind"] == "waiting_physician" for item in staff["waiting"])
@@ -275,7 +275,11 @@ def test_ambiguous_and_unstructured_instructions_are_never_silently_activated(pi
     rejected = pilot.post(f"/api/me/practice/teach/{note['id']}/reject", "user-a", {"reason": "not a rule"}).json()
     assert rejected["operational_status"] == "rejected"
     pilot.add_staff()
-    assert pilot.post("/api/me/practice/teach", "user-c", {"text": "I need an A1c"}).status_code == 403
+    # Staff can't teach; their instruction becomes a pending suggestion for the physician.
+    suggestion = pilot.post("/api/me/practice/teach", "user-c", {"text": "I need an A1c"})
+    assert suggestion.status_code == 201 and suggestion.json()["operational_status"] == "inferred"
+    assert suggestion.json()["suggested_by_role"] == "staff" and suggestion.json()["suggested_by_name"] == "Front desk"
+    assert pilot.post(f"/api/me/practice/teach/{suggestion.json()['id']}/confirm", "user-c", {}).status_code == 403
 
 
 # ----------------------------------------------------------------- step 8
@@ -468,15 +472,17 @@ def test_metrics_and_weekly_summary_come_from_recorded_events(pilot: Pilot) -> N
         {"key": "renal_function", "value": "ok", "observed_date": RECENT}]})
     for key in ("recent_a1c", "renal_function"):  # Step 16: sender values count once verified
         pilot.post(f"/api/me/practice/referrals/{rid}/items/{key}/verify", "user-a", {})
-    approved = pilot.referral()["referral"]["id"]
-    pilot.post(f"/api/me/practice/referrals/{approved}/approve", "user-a")
+    decided = pilot.referral()["referral"]["id"]
+    pilot.post(f"/api/me/practice/referrals/{decided}/disposition", "user-a", {"decision": "accept"})
     data = pilot.get("/api/me/practice/metrics", "user-a").json()
     all_time = data["all_time"]
     assert all_time["usage"]["referrals_received"] == 3
     assert all_time["usage"]["referrals_by_source"] == {"public_form": 1, "manual": 2}
     assert all_time["referral_quality"]["missing_information_detected"] == 3
     assert all_time["referral_quality"]["made_ready_after_missing_info_request"] == 1
-    assert all_time["agent_trust"]["accepted"] == 1 and all_time["agent_trust"]["acceptance_rate"] == 1.0
+    # The physician's decision is the sign-off; accepted without corrections = agreement.
+    assert all_time["agent_trust"]["physician_signoffs"] == 1 and all_time["agent_trust"]["agreement_rate"] == 1.0
+    assert all_time["agent_trust"]["accepted"] == 0, "no approval-step reviews exist any more"
     assert all_time["public"]["profile_views"] == 1 and all_time["public"]["public_referrals_submitted"] == 1
     assert all_time["operations"]["median_hours_received_to_triaged"] is not None
     assert "time_saved" not in json.dumps(all_time)

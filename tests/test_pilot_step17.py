@@ -222,18 +222,22 @@ def test_scope_conflict_between_layers_is_surfaced_not_resolved(pilot: Pilot) ->
     assert {("scope_policy", "practice"), ("scope_policy", "physician")} <= kinds
 
 
-def test_only_the_practice_admin_edits_practice_level_statements(pilot: Pilot) -> None:
+def test_practice_level_statements_need_an_admin_physician_own_layer_any_physician(pilot: Pilot) -> None:
+    """Decision: only ADMIN physicians confirm practice-level clinical statements; any physician
+    confirms their own physician-level statements; staff confirm neither."""
     from backend.pilot import api as pilot_api
 
     pilot.ready_physician()
     _practice_rule(pilot)
     svc = pilot.client.app.dependency_overrides[pilot_api.get_pilot_services]()
     admin = svc.practice.context("user-a")
-    # Another physician in the same practice (not possible to invite yet): not the admin.
+    assert admin.is_admin
+    # Another physician in the same practice, not an admin.
     other = PracticeContext(user_id="someone-else", practice=admin.practice, member={}, role="physician",
                             owner_scope_id="pos-other")
+    assert not other.is_admin
     own = svc.teaching.propose(other, "For thyroid nodule referrals I need a calcium level.")
-    assert own["layer"] == "physician", "a non-admin physician teaches only their own layer"
+    assert own["layer"] == "physician", "a non-admin physician's teaching defaults to their own layer"
     practice_level = svc.teaching.propose(admin, "For thyroid nodule referrals I need a PTH level.")
     assert practice_level["layer"] == "practice"
     with pytest.raises(PilotError) as denied:
@@ -243,6 +247,115 @@ def test_only_the_practice_admin_edits_practice_level_statements(pilot: Pilot) -
         svc.teaching.confirm(admin, own["id"])  # another physician's private layer
     assert hidden.value.code == "rule_not_found"
     assert svc.teaching.confirm(other, own["id"])["rule"]["layer"] == "physician"
+    assert svc.teaching.confirm(admin, practice_level["id"])["rule"]["layer"] == "practice"
+
+
+def test_admin_rights_follow_the_member_for_practice_statements(pilot: Pilot) -> None:
+    pilot.ready_physician()
+    _second_physician_in_practice(pilot)
+    body = {"referral_type": "Thyroid nodule", "required": [{"key": "pth", "label": "PTH", "required": True}]}
+    denied = pilot.post("/api/me/practice/rules", "user-b", body)
+    assert denied.status_code == 403 and _code(denied) == "practice_admin_required", denied.text
+    assert "your own statement" in denied.text, "the refusal says what the physician CAN do"
+    own = pilot.post("/api/me/practice/rules", "user-b", {**body, "layer": "physician"})
+    assert own.status_code == 201 and own.json()["layer"] == "physician"
+    member_b = pilot.store.membership_for_user("user-b")["id"]
+    assert _put(pilot, f"/api/me/practice/members/{member_b}/admin", "user-a", {"is_admin": True}).status_code == 200
+    assert pilot.post("/api/me/practice/rules", "user-b", body).status_code == 201
+
+
+def _second_physician_in_practice(pilot: Pilot) -> str:
+    """Move an approved second physician (user-b) into user-a's practice. Joining a practice as a
+    physician isn't a product flow yet, so the test arranges it directly."""
+    pilot.ready_physician("user-b", NPI_B)
+    practice_a = pilot.store.membership_for_user("user-a")["practice_id"]
+    with pilot.store._connect() as db:
+        db.execute("UPDATE practice_members SET practice_id = ?, is_admin = 0 WHERE user_id = 'user-b'", (practice_a,))
+    return pilot.store.membership_for_user("user-b")["id"]
+
+
+def _code(response) -> str:
+    body = response.json()
+    detail = body.get("detail", body)
+    return (detail.get("code") if isinstance(detail, dict) else None) or body.get("code") or ""
+
+
+def test_practice_admin_creator_default_transfer_and_multiple_admins(pilot: Pilot) -> None:
+    pilot.ready_physician()
+    assert pilot.status("user-a")["is_admin"] is True, "the practice creator is admin by default"
+    other_id = _second_physician_in_practice(pilot)
+    members = pilot.get("/api/me/practice/members", "user-b").json()["members"]
+    assert [m["is_admin"] for m in members if m["is_you"]] == [False]
+    # A non-admin physician manages neither membership nor settings ...
+    assert pilot.post("/api/me/practice/invitations", "user-b", {"label": "x"}).status_code == 403
+    assert _put(pilot, f"{BASE}/practice-settings", "user-b", {"allow_physician_loosening": True}).status_code == 403
+    assert _put(pilot, f"/api/me/practice/members/{other_id}/admin", "user-b", {"is_admin": True}).status_code == 403
+    # ... until an admin grants it. Several admins are allowed.
+    assert _put(pilot, f"/api/me/practice/members/{other_id}/admin", "user-a", {"is_admin": True}).status_code == 200
+    assert pilot.post("/api/me/practice/invitations", "user-b", {"label": "Desk"}).status_code == 201
+    admins = [m for m in pilot.get("/api/me/practice/members", "user-a").json()["members"] if m["is_admin"]]
+    assert len(admins) == 2
+    # Transfer: the creator steps down; the practice keeps an admin.
+    self_id = pilot.store.membership_for_user("user-a")["id"]
+    assert _put(pilot, f"/api/me/practice/members/{self_id}/admin", "user-a", {"is_admin": False}).status_code == 200
+    assert pilot.status("user-a")["is_admin"] is False
+    assert pilot.post("/api/me/practice/invitations", "user-a", {"label": "x"}).status_code == 403
+    # The last admin can't step down.
+    last = _put(pilot, f"/api/me/practice/members/{other_id}/admin", "user-b", {"is_admin": False})
+    assert last.status_code == 409 and _code(last) == "last_admin", last.text
+    # Staff can't be made admin (no non-physician admin role yet -- a documented gap).
+    pilot.add_staff(physician="user-b")
+    staff_id = pilot.store.membership_for_user("user-c")["id"]
+    refused = _put(pilot, f"/api/me/practice/members/{staff_id}/admin", "user-b", {"is_admin": True})
+    assert refused.status_code == 422 and _code(refused) == "admin_requires_physician", refused.text
+    events = _event_types(pilot.store)
+    assert "practice_admin_granted" in events and "practice_admin_revoked" in events
+
+
+def test_only_todays_question_counts_as_open_the_rest_are_queued(pilot: Pilot) -> None:
+    pilot.ready_physician()
+    _practice_rule(pilot, required=[
+        {"key": "thyroid_ultrasound", "label": "Thyroid ultrasound", "required": True},
+        {"key": "recent_tsh", "label": "Recent TSH", "required": True, "freshness_days": 90},
+    ])
+    for _ in range(3):
+        rid = _thyroid_referral(pilot)["referral"]["id"]
+        pilot.post(f"/api/me/practice/referrals/{rid}/disposition", "user-a", {"decision": "accept"})
+    pending = pilot.store.fetch_all("SELECT id FROM learning_questions WHERE status = 'pending'", ())
+    assert len(pending) == 2, "two learnings to ask about"
+    summary = pilot.get(f"{BASE}/summary", "user-a").json()
+    # One question a day: one is actionable today, the other is queued; neither is "learned".
+    assert summary["counts"]["open_questions"] == 1
+    assert summary["counts"]["queued_questions"] == 1
+    assert summary["counts"]["pending_learnings"] == 0
+    assert summary["counts"]["confirmed_this_week"] == 1, "only the physician's own rule, not the questions"
+    # Today's open question is exactly the one Home shows.
+    home_text = json.dumps(pilot.get("/api/me/practice/home", "user-a").json(), ensure_ascii=False)
+    assert summary["open_questions"][0]["question"] in home_text
+    assert summary["queued_questions"][0]["question"] not in home_text
+    # Answering today's question doesn't unlock the queued one until tomorrow.
+    answered = pilot.post(f"/api/me/practice/learning/questions/{summary['open_questions'][0]['id']}/answer",
+                          "user-a", {"answer": "ignore"})
+    assert answered.status_code == 200, answered.text
+    after = pilot.get(f"{BASE}/summary", "user-a").json()["counts"]
+    assert (after["open_questions"], after["queued_questions"], after["pending_learnings"]) == (0, 1, 0)
+
+
+def test_starter_suggestions_stay_labelled_and_are_confirmed_one_by_one(pilot: Pilot) -> None:
+    pilot.ready_physician()
+    starters = pilot.get(f"{BASE}/setup", "user-a").json()["starter_suggestions"]
+    assert len(starters) >= 2 and all(isinstance(name, str) for name in starters), "names only"
+    response = pilot.post(f"{BASE}/setup/scope", "user-a", {"types": [
+        {"referral_type": starters[0], "policy": "accept", "suggested": True},
+        {"referral_type": starters[1], "policy": "unknown", "suggested": True},
+        {"referral_type": "Made-up type", "policy": "accept", "suggested": True},  # not on the list
+    ]})
+    assert response.status_code == 200, response.text
+    proposals = {p["referral_type"]: p for p in response.json()["proposals"]}
+    assert set(proposals) == {starters[0], "Made-up type"}, "an Unknown answer creates nothing"
+    assert proposals[starters[0]]["suggested"] is True
+    assert proposals["Made-up type"]["suggested"] is False, "only approved starter names carry the label"
+    assert all(p["operational_status"] == "inferred" for p in proposals.values()), "nothing confirmed in bulk"
 
 
 # ============================================================== versions + linkage
@@ -275,11 +388,16 @@ def test_recommendation_links_representation_version_and_decisions(pilot: Pilot)
     with sqlite3.connect(pilot.store.path) as db:
         stored = db.execute("SELECT representation_version_id FROM triage_recommendations WHERE id = ?", (rec["id"],)).fetchone()[0]
     assert stored == rec["representation_version_id"]
-    pilot.post(f"/api/me/practice/referrals/{rid}/edit", "user-a", {"suggested_modality": "econsult"})
+    pilot.post(f"/api/me/practice/referrals/{rid}/correct", "user-a", {"suggested_modality": "econsult"})
     pilot.post(f"/api/me/practice/referrals/{rid}/disposition", "user-a", {"decision": "accept"})
     rows = [row for row in pilot.get(f"{BASE}/linkage", "user-a").json() if row["referral_id"] == rid]
     assert rows[0]["representation_version_id"] == rec["representation_version_id"]
-    assert rows[0]["triage_decision"] == "edited" and rows[0]["final_decision"] == "accept"
+    assert rows[0]["final_decision"] == "accept" and rows[0]["legacy_review"] is None
+    signoff = rows[-1]["signoff"]
+    assert signoff["decision"] == "accept" and signoff["actor_role"] == "physician"
+    assert signoff["representation_version_id"] == rec["representation_version_id"]
+    assert signoff["corrections"] == [{"field": "suggested_modality", "from": rec["suggested_modality"],
+                                       "to": "econsult", "agent_value": rec["suggested_modality"]}]
     assert rows[0]["referral_type"] == "Thyroid nodule" and "scope_policy" in rows[0]["statement_kinds"]
 
 
@@ -437,7 +555,10 @@ def test_home_surfaces_referrals_missing_information_nobody_requested(pilot: Pil
     pilot.ready_physician()
     pilot.add_rule()
     rid = pilot.referral()["referral"]["id"]
-    pilot.post(f"/api/me/practice/referrals/{rid}/edit", "user-a", {"suggested_modality": "econsult"})
+    # The approval step that used to cause this is gone; referrals already in this state
+    # (older data) must still surface. Put one there directly.
+    with pilot.store._connect() as db:
+        db.execute("UPDATE intake_referrals SET status = 'needs_information' WHERE id = ?", (rid,))
     assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["referral"]["status"] == "needs_information"
     needs = pilot.get("/api/me/practice/home", "user-a").json()["needs_you"]
     item = next(n for n in needs if n["kind"] == "request_missing")

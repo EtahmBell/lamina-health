@@ -72,7 +72,7 @@ function ClaimBrand() {
 
 /** A lightweight header distinct from Lucy's clinical-workspace sidebar. The
  * authenticated-account control lives only here — never inside the Lucy demo. */
-export function ClaimShell({ children, navigate }: { children: React.ReactNode; navigate: Navigate }) {
+export function ClaimShell({ children, navigate, physicianLinks = true }: { children: React.ReactNode; navigate: Navigate; physicianLinks?: boolean }) {
   const { configured, loading, user, signOut } = useAuth()
   const handleSignOut = async () => { await signOut(); navigate('/claim') }
   return <div className="claim-shell">
@@ -81,7 +81,7 @@ export function ClaimShell({ children, navigate }: { children: React.ReactNode; 
       <nav className="claim-header-actions" aria-label="Physician account">
         {!configured && <span className="claim-auth-status">Authentication not configured</span>}
         {configured && !loading && user && <>
-          <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities</button>
+          {physicianLinks && <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities</button>}
           <span className="claim-account-chip" title={user.email ?? undefined}>{user.email ?? 'Account'}</span>
           <button className="text-button" onClick={() => void handleSignOut()}>Sign out</button>
         </>}

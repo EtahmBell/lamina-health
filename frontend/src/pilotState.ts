@@ -1,4 +1,4 @@
-import type { Lifecycle, RepresentationItem, RepresentationType, ScopeChoice, SetupStageId, SetupStageStatus, StatementKind, Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, PilotStatus, PracticeRule, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement } from './pilotApi.ts'
+import type { Lifecycle, RepresentationItem, RepresentationType, ScopeChoice, SetupStageId, SetupStageStatus, StatementKind, Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, PilotStatus, PracticeRule, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement, TriageChange, TriageCorrection } from './pilotApi.ts'
 
 /** Pure presentation + routing helpers for the real practice pilot. Everything here is
  * a projection of backend state; nothing is persisted client-side. */
@@ -356,12 +356,18 @@ export function practicePortrait(practice: { name: string; specialty: string | n
 
 const HISTORY_LABELS: Record<string, string> = {
   referral_received: 'Referral received',
-  staff_entered: 'Referral entered by your team',
+  staff_entered: 'Referral entered',
   referral_triaged: 'Lamina triaged the referral',
   recommendation_generated: 'Lamina prepared a triage recommendation',
-  recommendation_accepted: 'Triage approved',
-  recommendation_edited: 'Triage edited',
-  recommendation_rejected: 'Triage rejected',
+  // The retired approval step: recorded reviews, never a physician sign-off.
+  recommendation_accepted: 'Triage reviewed (earlier approval step)',
+  recommendation_edited: 'Triage edited (earlier approval step)',
+  recommendation_rejected: 'Triage sent to the physician (earlier approval step)',
+  recommendation_changed: 'Lamina’s recommendation changed',
+  recommendation_changed_after_approval: 'Lamina’s recommendation changed',
+  recommendation_approval_carried_forward: 'Earlier review still applied (retired step)',
+  triage_corrected: 'Triage corrected',
+  referral_marked_ready: 'Marked ready for the physician',
   missing_information_detected: 'Missing information detected',
   document_uploaded: 'Document attached',
   document_confirmed: 'Document evidence confirmed',
@@ -478,7 +484,48 @@ export function patientWorkSections(items: PatientWorkItem[], query = ''): { act
 
 /** A stored request message is a template; show where the secure link will go instead of
  * the raw placeholder. The link itself is never stored or re-displayed. */
-export const displayTemplate = (message: string) => message.replace(/\{status_link\}/g, '[secure link — added when sent]')
+export const displayTemplate = (message: string) => message.replace(/\{status_link\}/g, '[Secure link included when sent (not stored)]')
+
+/** Who did it, by name: the physician, the staff member, the referring office, or Lamina.
+ * Never a generic "your team". */
+export function actorText(event: Pick<ReferralDetail['history'][number], 'actor_name' | 'autonomy'>): string {
+  if (event.actor_name) return event.actor_name
+  return event.autonomy === 'automatic' ? 'Lamina' : 'A practice member'
+}
+
+/** History label that is honest about the retired approval step: a staff review is a staff review. */
+export function eventLabel(event: Pick<ReferralDetail['history'][number], 'event_type' | 'metadata'>): string {
+  if (event.metadata?.role === 'staff' && ['recommendation_accepted', 'recommendation_edited'].includes(event.event_type)) return 'Staff reviewed triage (earlier approval step; not a physician sign-off)'
+  return historyLabel(event.event_type)
+}
+
+const CHANGE_FIELD_LABELS: Record<string, string> = {
+  fit: 'fit', suggested_priority: 'priority', suggested_modality: 'visit type', requires_physician: 'physician judgment', rule_type: 'referral type rule',
+}
+function changeValue(field: string, value: unknown): string {
+  if (field === 'fit' && typeof value === 'string' && value in FIT_LABELS) return FIT_LABELS[value as Fit].toLowerCase()
+  if (field === 'suggested_priority' && typeof value === 'string' && value in PRIORITY_LABELS) return PRIORITY_LABELS[value as Priority].toLowerCase()
+  if (field === 'suggested_modality' && typeof value === 'string' && value in MODALITY_LABELS) return value === 'unspecified' ? 'unspecified' : MODALITY_LABELS[value as Modality]
+  if (field === 'requires_physician') return value ? 'needed' : 'not needed'
+  return value == null || value === '' ? 'none' : String(value)
+}
+/** "visit type unspecified → eConsult (by Dr. Saru)"; an agent change says what prompted it. */
+export function changeText(change: TriageChange): string {
+  const who = change.by === 'Lamina' && change.after ? `by Lamina, after ${change.after}’s update` : `by ${change.by}`
+  return `${CHANGE_FIELD_LABELS[change.field] ?? change.field.replace(/_/g, ' ')} ${changeValue(change.field, change.from)} → ${changeValue(change.field, change.to)} (${who})`
+}
+export function correctionText(correction: Pick<TriageCorrection, 'field' | 'from' | 'to' | 'actor_name'>): string {
+  return `${CHANGE_FIELD_LABELS[correction.field]} ${changeValue(correction.field, correction.from)} → ${changeValue(correction.field, correction.to)} (by ${correction.actor_name})`
+}
+/** Recommendation text is written to the physician ("Your rule…", "You see…"); staff read it
+ * about the physician instead. Display only. */
+export function thirdPerson(text: string, doctor: string): string {
+  return text.replace(/\bYour rule\b/g, `${doctor}’s rule`).replace(/\byour rule\b/g, `${doctor}’s rule`)
+    .replace(/\bYou see\b/g, `${doctor} sees`).replace(/\byou see\b/g, `${doctor} sees`)
+    .replace(/\bYour practice\b/g, 'The practice').replace(/\byour practice\b/g, 'the practice')
+}
+/** The physician staff hand work to, by name when Lamina knows it. */
+export const physicianLabel = (name: string | null | undefined) => name || 'the physician'
 
 /** Network: the clinicians who have actually referred to this practice, derived only
  * from received referrals. These are real referral relationships — NOT Lamina network

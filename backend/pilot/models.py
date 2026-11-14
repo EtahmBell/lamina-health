@@ -171,6 +171,8 @@ class IntakeReferral(_Strict):
     escalation_note: str | None = None
     information_request: dict | None = None
     disposition: dict | None = None
+    # Staff paperwork hand-off: {"kind": "ready" | "flag", "note", "by", "role", "at"}.
+    handoff: dict | None = None
     documents: list[ReferralDocument] = Field(default_factory=list)
     created_at: str
     updated_at: str

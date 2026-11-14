@@ -168,9 +168,14 @@ def test_staff_cannot_teach_but_can_chat_and_prepare(agent: Pilot) -> None:
     agent.add_staff()
     rid = agent.referral()["referral"]["id"]
     before = _rule_count(agent)
-    denied = say(agent, "I always need a recent lipid panel before review.", user="user-c")
-    assert denied["intent"] == "teach" and "Only the physician" in denied["reply"]["paragraphs"][0]
-    assert _rule_count(agent) == before
+    suggested = say(agent, "I always need a recent lipid panel before review.", user="user-c")
+    # Staff teaching becomes a pending suggestion for the physician, never a confirmed rule.
+    assert suggested["intent"] == "teach" and "passed this to the physician" in suggested["reply"]["paragraphs"][0]
+    assert _rule_count(agent) == before + 1
+    with sqlite3.connect(agent.store.path) as db:
+        statuses = [row[0] for row in db.execute(
+            "SELECT operational_status FROM physician_referral_preferences ORDER BY rowid DESC LIMIT 1")]
+    assert statuses == ["inferred"]
     flag = say(agent, "Flag Alex Example for physician review", user="user-c")
     assert flag["reply"]["cards"][0]["execute"] == {"type": "escalate", "referral_id": rid}
 
@@ -505,8 +510,8 @@ def test_staff_on_a_patient_page(agent: Pilot) -> None:
     assert say(agent, "What's missing?", user="user-c", referral_id=alex)["focus_referral_id"] == alex
     flag = say(agent, "Flag this for physician review", user="user-c", referral_id=alex)
     assert flag["reply"]["cards"][0]["execute"] == {"type": "escalate", "referral_id": alex}
-    denied = say(agent, "I always need a lipid panel before review.", user="user-c", referral_id=alex)
-    assert "Only the physician" in denied["reply"]["paragraphs"][0]
+    suggested = say(agent, "I always need a lipid panel before review.", user="user-c", referral_id=alex)
+    assert "passed this to the physician" in suggested["reply"]["paragraphs"][0]
 
 
 def test_model_failure_on_a_patient_page_falls_back_with_the_same_context(agent: Pilot) -> None:

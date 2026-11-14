@@ -82,11 +82,14 @@ class HomeService:
                                     "detail": f"{item['referral_type']} · ready for review"})
             elif item["status"] in {"received", "triaged"} and not item["decided"]:
                 uncertain = item["fit"] in {"unknown", "possible", "outside_scope"} or item["requires_physician"]
+                # No separate triage approval: physicians decide (accept / redirect / decline);
+                # staff check the paperwork and mark it ready or flag it for the physician.
                 needs.append({**base, "kind": "triage_uncertain" if uncertain else "triage_review",
                               "rank": 0 if item["priority"] == "urgent" else (2 if uncertain else 3),
                               "title": (f"{item['patient_name']} has a routing question" if item["fit"] == "outside_scope" else
                                         f"I’m not sure about {item['patient_name']}’s referral" if uncertain else
-                                        f"{item['patient_name']}’s triage is ready to approve"),
+                                        f"{item['patient_name']}’s referral is triaged and waiting for your decision" if physician else
+                                        f"Check {item['patient_name']}’s referral and mark it ready for the physician"),
                               "detail": f"{item['referral_type']} · from {item['sender_name']}", "action": "Review"})
         for request in self.missing.open_requests(context.practice_id):
             name = names.get(request["referral_id"], "A referral")
@@ -125,8 +128,10 @@ class HomeService:
             summary = self.representation.learning_summary(context) if self.representation else None
             for proposal in (summary or {}).get("pending_learnings", []):
                 if proposal["source"] == "explicit_instruction":
+                    suggested_by = proposal.get("suggested_by_name")
                     needs.append({"kind": "proposed_learning", "rank": 5, "proposal_id": proposal["id"],
-                                  "title": "Confirm what I learned", "detail": f"“{proposal['source_text'][:120]}”",
+                                  "title": f"{suggested_by} suggested something for your agent" if suggested_by else "Confirm what I learned",
+                                  "detail": f"“{proposal['source_text'][:120]}”",
                                   "path": "/me/agent?tab=teach", "action": "Review"})
             lifecycle = (summary or {}).get("lifecycle") or {}
             if lifecycle.get("state") == "initializing":
@@ -196,7 +201,9 @@ class HomeService:
             parts.append(f"{_plural(routing, 'referral has', 'referrals have').lower()} a routing or fit question")
         review = kinds.count("triage_review")
         if review:
-            parts.append(f"{_plural(review, 'triage is', 'triages are').lower()} ready to approve")
+            parts.append(f"{_plural(review, 'triaged referral is', 'triaged referrals are').lower()} waiting for your decision"
+                         if physician else
+                         f"{_plural(review, 'triaged referral needs', 'triaged referrals need').lower()} checking before the physician sees it")
         evidence = kinds.count("confirm_evidence")
         if evidence:
             parts.append(f"{_plural(evidence, 'referral needs', 'referrals need').lower()} document evidence confirmed")

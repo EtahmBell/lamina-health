@@ -76,7 +76,7 @@ class PilotServices:
         teaching = TeachingService(rules, teaching_client)
         learning = LearningService(store, rules, teaching)
         publication = PublicationService(store, rules)
-        representation = RepresentationService(store, rules, teaching)
+        representation = RepresentationService(store, rules, teaching, learning)
         intake.representation = representation
         home = HomeService(store, intake, missing, rules, learning, representation)
         assistant = AssistantService(store, intake, missing, rules, teaching, home, assistant_client, representation)
@@ -184,6 +184,16 @@ def revoke_invitation(invitation_id: str, context: Practice, services: Services)
     return Response(status_code=204)
 
 
+class AdminInput(_Strict):
+    is_admin: bool
+
+
+@router.put("/members/{member_id}/admin")
+def set_member_admin(member_id: str, update: AdminInput, context: Practice, services: Services) -> dict:
+    """Grant / revoke practice admin (transfer = grant to someone, then revoke yourself)."""
+    return _run(lambda: services.practice.set_admin(context, member_id, update.is_admin))
+
+
 @router.delete("/members/{member_id}", status_code=204)
 def remove_member(member_id: str, context: Practice, services: Services) -> Response:
     _run(lambda: services.practice.remove_member(context, member_id))
@@ -222,9 +232,12 @@ def _physician_key(context: PracticeContext, services: PilotServices) -> str:
 
 
 def _require_layer_editor(context: PracticeContext, layer: str) -> None:
+    # Clinical statements always need a physician; practice-wide ones need an admin physician.
     context.require_physician("change practice rules")
-    if layer == "practice" and not is_practice_admin(context):
-        raise PilotError("practice_admin_required", "Only the practice admin can change practice-wide rules", 403)
+    if layer == "practice" and not context.is_admin:
+        raise PilotError("practice_admin_required",
+                         "Only an admin physician can change practice-wide rules. "
+                         "You can add this as your own statement instead", 403)
 
 
 def _editable_rule(context: PracticeContext, services: PilotServices, rule_id: str):
@@ -343,9 +356,26 @@ def approve(referral_id: str, context: Practice, services: Services) -> dict:
     return _run(lambda: services.intake.approve(context, referral_id))
 
 
+@router.post("/referrals/{referral_id}/correct")
+def correct(referral_id: str, update: TriageEditInput, context: Practice, services: Services) -> dict:
+    """Physician corrects fit, priority or visit type before deciding (not a sign-off)."""
+    return _run(lambda: services.intake.correct(context, referral_id, update))
+
+
 @router.post("/referrals/{referral_id}/edit")
 def edit(referral_id: str, update: TriageEditInput, context: Practice, services: Services) -> dict:
-    return _run(lambda: services.intake.edit(context, referral_id, update))
+    """Older name for /correct."""
+    return _run(lambda: services.intake.correct(context, referral_id, update))
+
+
+@router.post("/referrals/{referral_id}/mark-ready")
+def mark_ready(referral_id: str, update: NoteInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.intake.mark_ready(context, referral_id, update.note))
+
+
+@router.post("/referrals/{referral_id}/seen")
+def mark_seen(referral_id: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.intake.mark_seen(context, referral_id))
 
 
 @router.post("/referrals/{referral_id}/reject")
@@ -569,6 +599,8 @@ class ScopeTypeInput(_Strict):
     referral_type: str = Field(min_length=1, max_length=120)
     aliases: list[str] = Field(default_factory=list, max_length=10)
     policy: str = Field(pattern=r"^(accept|out_of_scope|case_by_case|unknown)$")
+    # A starter suggestion (name only); honoured only for names on the approved starter list.
+    suggested: bool = False
 
 
 class ScopeInput(_Strict):

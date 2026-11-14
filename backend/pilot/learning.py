@@ -45,17 +45,28 @@ class LearningService:
     def _patterns(self, practice_id: str) -> list[dict]:
         types = self._referral_types(practice_id)
         groups: dict[str, dict] = {}
-        for decision in self.store.fetch_all(
-            "SELECT * FROM recommendation_decisions WHERE practice_id = ? AND decision = 'edited'", (practice_id,),
-        ):
-            change = json.loads(decision["changed_fields_json"]).get("suggested_modality")
-            referral_type = types.get(decision["referral_id"])
+        # Physician signals only: corrections (current model) and physician edits from the retired
+        # approval step. A staff review was never physician agreement or correction.
+        modality_changes = [
+            ({"decision_id": row["id"]}, row["referral_id"], json.loads(row["changed_fields_json"]).get("suggested_modality"))
+            for row in self.store.fetch_all(
+                "SELECT * FROM recommendation_decisions WHERE practice_id = ? AND decision = 'edited' "
+                "AND actor_role = 'physician'", (practice_id,))
+        ] + [
+            ({"correction_id": row["id"]}, row["referral_id"], {"from": json.loads(row["from_value"]), "to": json.loads(row["to_value"])})
+            for row in self.store.fetch_all(
+                "SELECT * FROM triage_corrections WHERE practice_id = ? AND field = 'suggested_modality'", (practice_id,))
+        ]
+        for ref, referral_id, change in modality_changes:
+            referral_type = types.get(referral_id)
             if not change or not referral_type or change["to"] not in MODALITY_WORDS:
                 continue
             signature = f"modality:{normalize_referral_type(referral_type)}:{change['to']}"
             group = groups.setdefault(signature, {"kind": "modality", "referral_type": referral_type,
                                                   "value": change["to"], "evidence": []})
-            group["evidence"].append({"decision_id": decision["id"], "referral_id": decision["referral_id"]})
+            if any(item["referral_id"] == referral_id for item in group["evidence"]):
+                continue  # one referral is one piece of evidence, however many times it was corrected
+            group["evidence"].append({**ref, "referral_id": referral_id})
         extra = defaultdict(list)
         for event in self.store.events(practice_id=practice_id, event_type="information_requested"):
             referral_type = types.get(event["referral_id"] or "")
@@ -212,7 +223,8 @@ class LearningService:
             status = "edited"
         elif answer in {"depends", "ignore"}:
             result = self.teaching.reject(context, row["proposal_rule_id"], note or answer)
-            status = answer
+            # Stored statuses are 'depends' / 'ignored' (the table's CHECK constraint).
+            status = "ignored" if answer == "ignore" else answer
         else:
             raise PilotError("invalid_answer", "Answer yes, edit, depends, or ignore", 422)
         self.store.execute([(

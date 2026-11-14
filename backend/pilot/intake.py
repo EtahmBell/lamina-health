@@ -3,8 +3,11 @@
 All state changes go through `_transition`, which validates against the explicit
 status machine and applies the change with an optimistic status check in one
 transaction together with its decision row and pilot events. Model output never
-moves a referral by itself: triage only produces a recommendation; humans approve,
-edit, reject, request information, escalate, or decide.
+moves a referral by itself: triage only produces a recommendation. There is no separate
+approval step: the physician's accept / redirect / decline IS the sign-off on the triage.
+Before deciding, the physician may correct fit, priority or visit type (each correction is
+recorded with actor and role). Staff do the paperwork: request information, verify what
+arrives, and mark a referral ready for the physician or flag it.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import secrets
 from datetime import UTC, date, datetime
 from typing import Any
 
+from .attribution import ActorDirectory
 from .documents import (
     DocumentRejectedError,
     DocumentStorage,
@@ -54,11 +58,17 @@ ALLOWED_TRANSITIONS: dict[IntakeStatus, frozenset[IntakeStatus]] = {
     S.DECLINED: frozenset(),
 }
 DISPOSITION_STATUS = {"accept": S.ACCEPTED, "redirect": S.REDIRECTED, "decline": S.DECLINED}
-# What a human approves when they approve a triage. A re-triage that leaves ALL of these
-# unchanged (only completeness/evidence moved) keeps the earlier approval; any change to one
-# of them needs a fresh human review. Readiness, missing items, evidence and next step are
+# The clinical parts of a recommendation. A change to one of these is shown to the physician
+# ("Changed since you last looked"). Readiness, missing items, evidence and next step are
 # workflow progress, not a new clinical recommendation.
 MATERIAL_TRIAGE_FIELDS = ("fit", "suggested_priority", "suggested_modality", "requires_physician")
+# What a physician may correct before deciding. Staff never change these.
+CORRECTABLE_FIELDS = ("fit", "suggested_priority", "suggested_modality")
+# Events that change the clinical triage, for the "changed since you last looked" note.
+CHANGE_EVENTS = {"recommendation_changed", "recommendation_changed_after_approval", "triage_corrected"}
+APPROVAL_REMOVED = (
+    "Triage no longer needs a separate approval. The physician's accept, redirect or decline is the "
+    "sign-off; staff can mark the referral ready for the physician or flag it")
 
 
 def material_changes(previous: TriageRecommendation, current: TriageRecommendation) -> dict[str, dict]:
@@ -173,6 +183,7 @@ class IntakeService:
                 json.loads(row["information_request_json"]) if row["information_request_json"] else None
             ),
             disposition=json.loads(row["disposition_json"]) if row["disposition_json"] else None,
+            handoff=json.loads(row["handoff_json"]) if row.get("handoff_json") else None,
             documents=[
                 self._document(document)
                 for document in self.store.document_rows(row["practice_id"], row["id"])
@@ -204,61 +215,145 @@ class IntakeService:
         if recommendation:
             row = self.store.recommendation_row(context.practice_id, recommendation.id)
             snapshot = json.loads(row["rules_snapshot_json"]) if row else None
-        decision = self.store.effective_decision(recommendation.id) if recommendation else None
+        directory = ActorDirectory(self.store, context.practice_id)
+        sender = referral.sender.model_dump(mode="json")
+        history = []
+        for event in self.store.events(practice_id=context.practice_id, referral_id=referral_id):
+            # Chat audit rows are never part of a referral's clinical history.
+            if event["event_type"] == "agent_conversation_turn":
+                continue
+            who = directory.describe(event["actor"], sender)
+            history.append({
+                "id": event["id"], "event_type": event["event_type"], "actor": event["actor"],
+                "actor_name": who["name"], "actor_role": who["role"],
+                "autonomy": event["autonomy"], "metadata": event["metadata"],
+                "created_at": event["created_at"],
+            })
         result = {
             "referral": referral.model_dump(mode="json"),
             "recommendation": recommendation.model_dump(mode="json") if recommendation else None,
             "rules_snapshot": snapshot,
-            "decision": decision and {
-                **{key: decision[key]
-                   for key in ("id", "decision", "changed_fields", "reason", "actor_role", "created_at")},
-                "carried_forward": decision.get("carried_forward", False),
-            },
-            "approval": self._approval_state(context, referral_id, recommendation, decision),
+            "physician_name": self.physician_name(context.practice_id, directory),
+            # Reviews from the retired "approve triage" step, labelled honestly: a staff review is
+            # never physician agreement. Only the physician's decision (signoff) is a sign-off.
+            "legacy_review": self._legacy_review(referral, recommendation, directory),
+            "corrections": [self._correction_view(row, directory) for row in
+                            self.store.corrections(context.practice_id, referral_id)],
+            "signoff": self._signoff_view(context.practice_id, referral_id, directory),
+            "changes_since_seen": self._changes_since_seen(context, referral_id, history),
             "effective_triage": self._effective(recommendation, referral),
-            "history": [
-                {
-                    "event_type": event["event_type"], "actor": event["actor"],
-                    "autonomy": event["autonomy"], "metadata": event["metadata"],
-                    "created_at": event["created_at"],
-                }
-                for event in self.store.events(practice_id=context.practice_id, referral_id=referral_id)
-                # Chat audit rows are never part of a referral's clinical history.
-                if event["event_type"] != "agent_conversation_turn"
-            ],
+            "history": history,
             "allowed_actions": self.allowed_actions(context, referral, recommendation),
         }
         for extend in self.detail_extensions:
             result.update(extend(context, referral_id))
+        self._name_actors(result, referral, directory, sender)
         return result
 
     @staticmethod
+    def _name_actors(result: dict, referral: IntakeReferral, directory: ActorDirectory, sender: dict) -> None:
+        """Attribution names the person or office, never a generic "your team". Display only:
+        stored recommendations keep their exact text."""
+        office = directory.describe("sender:", sender)["name"]
+        for request in result.get("information_requests") or []:
+            for field in ("created_by", "approved_by"):
+                if request.get(field):
+                    request[f"{field}_name"] = directory.describe(request[field], sender)["name"]
+        items = {item.key: item for item in referral.submitted_items}
+        for requirement in (result.get("recommendation") or {}).get("requirements", []):
+            item = items.get(requirement["key"])
+            if item is None or not requirement.get("detail"):
+                continue
+            text = requirement["detail"]
+            if item.verified_by:
+                text = text.replace("verified by your team", f"verified by {directory.describe(item.verified_by, sender)['name']}")
+            if item.recorded_by:
+                recorder = directory.describe(item.recorded_by, sender)["name"]
+                text = text.replace("entered by your team", f"entered by {recorder}").replace(
+                    "recorded by your team", f"recorded by {recorder}")
+            requirement["detail"] = text.replace("sent by the referring office", f"sent by {office}")
+
+    @staticmethod
     def _effective(recommendation: TriageRecommendation | None, referral: IntakeReferral) -> dict | None:
-        """The triage the team is working from: the recommendation plus any human edits."""
+        """The triage the team is working from: the agent's recommendation, plus the physician's
+        corrections. A review from the retired approval step still applies as it did, except that
+        a STAFF review never changes the clinical fields (fit, priority, visit type): staff can't
+        set those any more, so an old staff edit is history, not the working triage."""
         if recommendation is None:
             return None
         effective = {field: getattr(recommendation, field) for field in EDITABLE_TRIAGE_FIELDS}
         review = referral.review or {}
-        if review.get("recommendation_id") == recommendation.id:
-            effective.update(review.get("fields", {}))
+        legacy = review.get("fields") or {}
+        if legacy:
+            if review.get("role") == "physician":
+                # A physician's earlier edit of a clinical field is a correction: it persists.
+                effective.update({key: value for key, value in legacy.items() if key in CORRECTABLE_FIELDS})
+            if review.get("recommendation_id") == recommendation.id:
+                allowed = EDITABLE_TRIAGE_FIELDS if review.get("role") == "physician" else ("requires_physician",)
+                effective.update({key: value for key, value in legacy.items()
+                                  if key in allowed and key not in CORRECTABLE_FIELDS})
+        effective.update(review.get("corrections") or {})
         return effective
 
-    def _approval_state(
-        self, context: PracticeContext, referral_id: str,
-        recommendation: TriageRecommendation | None, decision: dict | None,
+    def physician_name(self, practice_id: str, directory: ActorDirectory | None = None) -> str | None:
+        owner = self.representation.referral_physician(practice_id) if self.representation else None
+        return (directory or ActorDirectory(self.store, practice_id)).physician_name(owner)
+
+    def _legacy_review(
+        self, referral: IntakeReferral, recommendation: TriageRecommendation | None, directory: ActorDirectory,
     ) -> dict | None:
-        """Why the team is (or isn't) being asked to approve the current triage."""
-        if recommendation is None:
+        rows = self.store.decision_rows(referral.practice_id, referral.id)
+        if not rows:
             return None
-        if decision:
-            return {"state": "carried_forward" if decision.get("carried_forward") else "decided",
-                    "nonmaterial_changes": decision.get("nonmaterial_changes", {})}
-        decided = [row for row in self.store.recommendation_rows(context.practice_id, referral_id)
-                   if row["id"] != recommendation.id and self.store.effective_decision(row["id"])]
-        if not decided:
-            return {"state": "needs_first_review", "changed": {}}
-        previous = TriageRecommendation.model_validate_json(decided[-1]["recommendation_json"])
-        return {"state": "needs_review_changed", "changed": material_changes(previous, recommendation)}
+        row = rows[-1]
+        who = directory.describe(row["actor"])
+        return {
+            "kind": "physician_review" if row["actor_role"] == "physician" else "staff_review",
+            "decision": row["decision"], "changed_fields": row["changed_fields"], "reason": row["reason"],
+            "actor_name": who["name"], "actor_role": row["actor_role"], "created_at": row["created_at"],
+            "on_current_recommendation": bool(recommendation and self.store.effective_decision(recommendation.id)),
+            "counts_as_physician_signoff": False,
+        }
+
+    @staticmethod
+    def _correction_view(row: dict, directory: ActorDirectory) -> dict:
+        return {"id": row["id"], "field": row["field"], "from": row["from_value"], "to": row["to_value"],
+                "agent_value": row["agent_value"], "reason": row["reason"], "recommendation_id": row["recommendation_id"],
+                "actor_name": directory.describe(row["actor"])["name"], "actor_role": row["actor_role"],
+                "created_at": row["created_at"]}
+
+    def _signoff_view(self, practice_id: str, referral_id: str, directory: ActorDirectory) -> dict | None:
+        signoff = self.store.signoff(practice_id, referral_id)
+        if not signoff:
+            return None
+        return {"id": signoff["id"], "decision": signoff["decision"], "recommendation_id": signoff["recommendation_id"],
+                "representation_version_id": signoff["representation_version_id"],
+                "corrections": signoff["corrections"], "actor_name": directory.describe(signoff["actor"])["name"],
+                "actor_role": signoff["actor_role"], "created_at": signoff["created_at"]}
+
+    def _changes_since_seen(self, context: PracticeContext, referral_id: str, history: list[dict]) -> list[dict]:
+        """Clinical triage changes made by someone else (or Lamina) since this person last opened
+        the referral. Nothing on a first visit: everything is new then."""
+        seen = self.store.last_seen_event(referral_id, context.user_id)
+        if seen is None:
+            return []
+        changes = []
+        for event in history:
+            if event["event_type"] not in CHANGE_EVENTS or event["id"] <= seen or event["actor"] == context.actor:
+                continue
+            metadata = event["metadata"]
+            fields = metadata.get("changes") or metadata.get("changed_fields") or {}
+            if not isinstance(fields, dict):
+                continue
+            after = metadata.get("requested_by_name") if event["actor_role"] == "lamina" else None
+            for field, change in fields.items():
+                changes.append({"field": field, "from": change.get("from"), "to": change.get("to"),
+                                "by": event["actor_name"], "after": after, "at": event["created_at"]})
+        return changes
+
+    def mark_seen(self, context: PracticeContext, referral_id: str) -> dict:
+        self._row(context, referral_id)
+        return {"seen_at": self.store.mark_seen(context.practice_id, referral_id, context.user_id)}
 
     def list(self, context: PracticeContext) -> list[dict]:
         items = []
@@ -280,7 +375,9 @@ class IntakeService:
                 "requires_physician": effective.get("requires_physician"),
                 "missing_items": recommendation.missing_items if recommendation else [],
                 "escalated": bool(referral.escalated_at),
-                "decided": bool(recommendation and self.store.effective_decision(recommendation.id)),
+                "handoff": (referral.handoff or {}).get("kind"),
+                # Decided = the physician signed it off (accept / redirect / decline).
+                "decided": bool(referral.disposition),
             })
         return items
 
@@ -292,9 +389,11 @@ class IntakeService:
         if status in TERMINAL_STATUSES:
             return []
         actions = ["upload_document", "record_item", "retriage"]
-        undecided = recommendation is not None and self.store.effective_decision(recommendation.id) is None
-        if undecided:
-            actions += ["approve", "edit", "reject"]
+        # Clinical corrections before deciding: physician only. Staff do the paperwork.
+        if context.role == "physician" and recommendation is not None:
+            actions.append("correct")
+        if context.role == "staff" and status != S.RECEIVED and (referral.handoff or {}).get("kind") != "ready":
+            actions.append("mark_ready")
         if recommendation is not None and any(item.state == "sender_reported" for item in recommendation.requirements):
             actions.append("verify_item")
         actions.append("set_referral_type")
@@ -460,39 +559,22 @@ class IntakeService:
                 "event_type": "referral_became_ready", "actor": "agent:triage", "autonomy": "automatic",
                 "metadata": {"recommendation_id": recommendation.id, "basis": "deterministic_requirements"},
             })
-        carryover, changes = None, {}
-        # Compare with the most recent recommendation a human actually approved (directly or by
-        # carry-over), not merely the previous one: an intermediate, unreviewed version must
-        # not break the link to the approval it is materially identical to.
-        previous, prior_decision = None, None
-        for prior in reversed(self.store.recommendation_rows(context.practice_id, referral_id)):
-            prior_decision = self.store.effective_decision(prior["id"])
-            if prior_decision:
-                previous = TriageRecommendation.model_validate_json(prior["recommendation_json"])
-                break
-        if previous and prior_decision:
+        # No approval to carry or re-request: a clinical change is simply recorded (with what
+        # prompted the re-triage) and shown to the physician as "changed since you last looked".
+        prior_rows = self.store.recommendation_rows(context.practice_id, referral_id)
+        if prior_rows:
+            previous = TriageRecommendation.model_validate_json(prior_rows[-1]["recommendation_json"])
             changed = material_changes(previous, recommendation)
-            if not changed:
-                # Same clinical recommendation; only completeness/evidence moved. Keep the human
-                # approval (and any human edits) instead of asking for it again.
-                carryover = {"id": new_id("car"), "recommendation_id": recommendation.id,
-                             "from_recommendation_id": previous.id, "decision_id": prior_decision["id"],
-                             "nonmaterial_changes": nonmaterial_changes(previous, recommendation)}
-                review = json.loads(row["review_json"]) if row["review_json"] else None
-                if review and review.get("recommendation_id") == previous.id:
-                    changes["review_json"] = json.dumps({**review, "recommendation_id": recommendation.id})
-                events.append({"event_type": "recommendation_approval_carried_forward", "actor": "agent:triage",
+            if changed:
+                trigger = ActorDirectory(self.store, context.practice_id).describe(
+                    context.actor, referral.sender.model_dump(mode="json"))
+                events.append({"event_type": "recommendation_changed", "actor": "agent:triage",
                                "autonomy": "automatic", "metadata": {
                                    "recommendation_id": recommendation.id, "from_recommendation_id": previous.id,
-                                   "decision_id": prior_decision["id"],
-                                   "nonmaterial_changes": sorted(carryover["nonmaterial_changes"])}})
-            else:
-                events.append({"event_type": "recommendation_changed_after_approval", "actor": "agent:triage",
-                               "autonomy": "automatic", "metadata": {
-                                   "recommendation_id": recommendation.id, "from_recommendation_id": previous.id,
-                                   "changed_fields": changed}})
+                                   "changed_fields": changed, "requested_by": context.actor,
+                                   "requested_by_name": trigger["name"]}})
         self._transition(
-            context, row, target, events=events, changes=changes, carryover=carryover,
+            context, row, target, events=events,
             recommendation={
                 "id": recommendation.id, "referral_id": referral_id, "practice_id": context.practice_id,
                 "payload": recommendation.model_dump(mode="json"), "generator": recommendation.generator,
@@ -517,7 +599,7 @@ class IntakeService:
         events: list[dict] | None = None,
         decision: dict | None = None,
         recommendation: dict | None = None,
-        carryover: dict | None = None,
+        inserts: list[tuple[str, tuple]] | None = None,
     ) -> None:
         current = IntakeStatus(row["status"])
         if target != current and not can_transition(current, target):
@@ -539,95 +621,93 @@ class IntakeService:
         applied = self.store.update_referral(
             context.practice_id, row["id"], expected_status=current.value,
             changes=all_changes, events=all_events, decision=decision, recommendation=recommendation,
-            carryover=carryover,
+            inserts=inserts,
         )
         if not applied:
             raise PilotError(
                 "stale_referral", "This referral changed while you were working. Refresh and try again"
             )
 
-    def _current_undecided(self, context: PracticeContext, row: dict) -> TriageRecommendation:
-        recommendation = self.recommendation(context.practice_id, row["current_recommendation_id"])
-        if recommendation is None:
-            raise PilotError("no_recommendation", "This referral has not been triaged yet")
-        if self.store.effective_decision(recommendation.id):
-            raise PilotError("already_decided", "This recommendation has already been reviewed")
-        return recommendation
-
-    @staticmethod
-    def _status_for_next_step(next_step: str) -> IntakeStatus:
-        return S.NEEDS_INFORMATION if next_step == "request_information" else S.READY_FOR_REVIEW
-
-    def _decide(
-        self, context: PracticeContext, referral_id: str, kind: str,
-        fields: dict[str, Any], reason: str | None,
-    ) -> dict:
+    def correct(self, context: PracticeContext, referral_id: str, update: TriageEditInput) -> dict:
+        """A physician corrects fit, priority or visit type before deciding. Each changed field is
+        an append-only correction (actor, role, the agent's value, from -> to). The physician's
+        accept / redirect / decline is still the sign-off; a correction is not a decision."""
+        context.require_physician("change fit, priority or visit type")
+        extra = [field for field in ("next_step", "requires_physician") if getattr(update, field) is not None]
+        if extra:
+            raise PilotError("not_correctable",
+                             "Only fit, priority and visit type can be corrected. Staff mark a referral "
+                             "ready or flag it for the physician", 422)
         row = self._row(context, referral_id)
         if IntakeStatus(row["status"]) in TERMINAL_STATUSES:
             raise PilotError("referral_closed", "This referral is closed")
-        recommendation = self._current_undecided(context, row)
+        referral = self._referral(row)
+        recommendation = self.recommendation(context.practice_id, referral.current_recommendation_id)
+        if recommendation is None:
+            raise PilotError("no_recommendation", "This referral has not been triaged yet")
+        effective = self._effective(recommendation, referral) or {}
+        now = now_iso()
+        reason = (update.reason or "").strip() or None
         changed = {
-            field: {"from": getattr(recommendation, field), "to": value}
-            for field, value in fields.items()
-            if value is not None and value != getattr(recommendation, field)
+            field: {"from": effective[field], "to": getattr(update, field)}
+            for field in CORRECTABLE_FIELDS
+            if getattr(update, field) is not None and getattr(update, field) != effective[field]
         }
-        if kind == "edited" and not changed:
-            raise PilotError("no_changes", "Change at least one triage field, or approve it as is", 422)
-        effective = {field: getattr(recommendation, field) for field in EDITABLE_TRIAGE_FIELDS}
-        effective.update({field: change["to"] for field, change in changed.items()})
-        if kind == "rejected":
-            effective["requires_physician"] = True
-        current = IntakeStatus(row["status"])
-        if current == S.TRIAGED:
-            target = (
-                S.READY_FOR_REVIEW if kind == "rejected"
-                else self._status_for_next_step(effective["next_step"])
-            )
-        else:
-            target = current
-        decision = {
-            "id": new_id("dec"),
-            "recommendation_id": recommendation.id,
-            "decision": kind,
-            "changed_fields": changed,
-            "reason": (reason or "").strip() or None,
-            "actor": context.actor,
-            "actor_role": context.role,
-            "created_at": now_iso(),
-        }
+        if not changed:
+            raise PilotError("no_changes", "Change fit, priority or visit type first", 422)
+        inserts = [(
+            ("INSERT INTO triage_corrections (id, practice_id, referral_id, recommendation_id, field, from_value, "
+            "to_value, agent_value, reason, actor, actor_role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+            (new_id("cor"), context.practice_id, referral_id, recommendation.id, field,
+             json.dumps(change["from"]), json.dumps(change["to"]), json.dumps(getattr(recommendation, field)),
+             reason, context.actor, context.role, now),
+        ) for field, change in changed.items()]
+        review = dict(referral.review or {})
+        review["corrections"] = {**(review.get("corrections") or {}),
+                                 **{field: change["to"] for field, change in changed.items()}}
+        review["corrected_by"], review["corrected_at"] = context.actor, now
         self._transition(
-            context, row, target,
-            changes={"review_json": json.dumps({
-                "recommendation_id": recommendation.id, "decision_id": decision["id"],
-                "decision": kind, "fields": {field: change["to"] for field, change in changed.items()}
-                | ({"requires_physician": True} if kind == "rejected" else {}),
-                "by": context.actor, "role": context.role, "at": decision["created_at"],
-            })},
-            decision=decision,
-            events=[{
-                "event_type": f"recommendation_{kind}", "actor": context.actor,
-                "metadata": {
-                    "recommendation_id": recommendation.id, "decision_id": decision["id"],
-                    "changed_fields": sorted(changed), "has_reason": bool(decision["reason"]),
-                    "role": context.role,
-                },
-            }],
+            context, row, IntakeStatus(row["status"]),
+            changes={"review_json": json.dumps(review)}, inserts=inserts,
+            events=[{"event_type": "triage_corrected", "actor": context.actor, "metadata": {
+                "recommendation_id": recommendation.id, "changes": changed, "role": context.role,
+                "has_reason": bool(reason)}}],
         )
         for hook in self.after_decision:
             hook(context, referral_id)
         return self.detail(context, referral_id)
 
-    def approve(self, context: PracticeContext, referral_id: str) -> dict:
-        return self._decide(context, referral_id, "accepted", {}, None)
-
+    # Kept so older callers get a clear answer instead of a 404.
     def edit(self, context: PracticeContext, referral_id: str, update: TriageEditInput) -> dict:
-        fields = update.model_dump(exclude={"reason"})
-        return self._decide(context, referral_id, "edited", fields, update.reason)
+        return self.correct(context, referral_id, update)
+
+    def approve(self, context: PracticeContext, referral_id: str) -> dict:
+        self._row(context, referral_id)
+        raise PilotError("triage_approval_removed", APPROVAL_REMOVED, 410)
 
     def reject(self, context: PracticeContext, referral_id: str, reason: str | None) -> dict:
-        if not (reason or "").strip():
-            raise PilotError("reason_required", "Say briefly why the triage is wrong", 422)
-        return self._decide(context, referral_id, "rejected", {}, reason)
+        self._row(context, referral_id)
+        raise PilotError("triage_approval_removed", APPROVAL_REMOVED, 410)
+
+    def mark_ready(self, context: PracticeContext, referral_id: str, note: str | None) -> dict:
+        """Staff: the paperwork is done; the referral is ready for the physician's decision."""
+        if context.role != "staff":
+            raise PilotError("staff_only", "Marking a referral ready for the physician is a staff step", 403)
+        row = self._row(context, referral_id)
+        current = IntakeStatus(row["status"])
+        if current in TERMINAL_STATUSES:
+            raise PilotError("referral_closed", "This referral is closed")
+        if current == S.RECEIVED:
+            raise PilotError("invalid_transition", "Wait for triage before marking this referral ready")
+        text = (note or "").strip() or None
+        self._transition(
+            context, row, S.READY_FOR_REVIEW,
+            changes={"handoff_json": json.dumps({"kind": "ready", "note": text, "by": context.actor,
+                                                 "role": context.role, "at": now_iso()})},
+            events=[{"event_type": "referral_marked_ready", "actor": context.actor,
+                     "metadata": {"role": context.role, "has_note": bool(text)}}],
+        )
+        return self.detail(context, referral_id)
 
     def request_information(
         self, context: PracticeContext, referral_id: str, update: RequestInformationInput
@@ -672,6 +752,8 @@ class IntakeService:
             changes={
                 "escalated_at": now_iso(), "escalated_by": context.actor,
                 "escalation_note": (note or "").strip() or None,
+                "handoff_json": json.dumps({"kind": "flag", "note": (note or "").strip() or None,
+                                            "by": context.actor, "role": context.role, "at": now_iso()}),
             },
             events=[{
                 "event_type": "referral_escalated", "actor": context.actor,
@@ -784,15 +866,41 @@ class IntakeService:
             "by": context.actor, "at": now_iso(),
         }
         received = datetime.fromisoformat(row["received_at"])
+        # The decision IS the sign-off on the triage. Store what the agent recommended at this
+        # moment, the representation version it used, the physician's corrections, and the
+        # decision, in a physician-only record kept apart from anything staff did.
+        referral = self._referral(row)
+        recommendation = self.recommendation(context.practice_id, referral.current_recommendation_id)
+        rec_row = self.store.recommendation_row(context.practice_id, recommendation.id) if recommendation else None
+        corrections = [
+            {key: item[key] for key in ("id", "field", "from_value", "to_value", "agent_value", "reason",
+                                         "recommendation_id", "actor", "actor_role", "created_at")}
+            for item in self.store.corrections(context.practice_id, referral_id)
+        ]
+        signoff_id = new_id("sgn")
+        signoff = (
+            ("INSERT INTO referral_signoffs (id, practice_id, referral_id, recommendation_id, recommendation_json, "
+            "representation_version_id, rules_snapshot_id, corrections_json, effective_triage_json, decision, reason, "
+            "redirect_to, actor, actor_role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+            (signoff_id, context.practice_id, referral_id, recommendation.id if recommendation else None,
+             recommendation.model_dump_json() if recommendation else None,
+             (rec_row or {}).get("representation_version_id"),
+             recommendation.rules_snapshot_id if recommendation else None,
+             json.dumps(corrections), json.dumps(self._effective(recommendation, referral)),
+             update.decision, disposition["reason"], disposition["redirect_to"], context.actor, context.role,
+             disposition["at"]),
+        )
         self._transition(
             context, row, target,
-            changes={"disposition_json": json.dumps(disposition)},
+            changes={"disposition_json": json.dumps(disposition)}, inserts=[signoff],
             events=[{
                 "event_type": DISPOSITION_EVENT[update.decision], "actor": context.actor,
                 "metadata": {
                     "from": current.value,
                     "hours_since_received": round((datetime.now(UTC) - received).total_seconds() / 3600, 1),
                     "escalated": bool(row["escalated_at"]),
+                    "signoff_id": signoff_id, "recommendation_id": recommendation.id if recommendation else None,
+                    "corrections": len(corrections), "role": context.role,
                 },
             }],
         )

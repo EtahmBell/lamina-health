@@ -38,11 +38,15 @@ export type PracticeFields = Pick<Practice, 'name' | 'specialty' | 'website' | '
 export type PilotStatus = {
   next_step: PilotNextStep
   role: PracticeRole | null
+  /** Practice admin: membership and practice settings (not clinical authority). */
+  is_admin?: boolean
+  /** Whose agent this is ("Dr. X"); lets staff copy name the physician. */
+  physician_name?: string | null
   practice: Practice | null
   physician_onboarding: OnboardingStatus
   practice_defaults: (Partial<PracticeFields> & { source: string }) | null
 }
-export type PracticeMember = { id: string; role: PracticeRole; label: string | null; is_you: boolean; joined_at: string }
+export type PracticeMember = { id: string; role: PracticeRole; label: string | null; is_you: boolean; is_admin?: boolean; joined_at: string }
 export type PracticeInvitation = { id: string; role: 'staff'; label: string | null; state: 'pending' | 'accepted' | 'revoked' | 'expired'; created_at: string; expires_at: string }
 
 export const getPilotStatus = () => apiRequest<PilotStatus>('/api/me/practice/status')
@@ -51,6 +55,7 @@ export const updatePractice = (fields: PracticeFields) => apiRequest<Practice>('
 export const getPracticeMembers = () => apiRequest<{ members: PracticeMember[]; invitations: PracticeInvitation[] }>('/api/me/practice/members')
 export const inviteStaff = (label: string) => apiRequest<{ id: string; token: string; expires_at: string; label: string | null }>('/api/me/practice/invitations', json({ role: 'staff', label: label || null }))
 export const revokeInvitation = (id: string) => apiRequest<void>(`/api/me/practice/invitations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const setMemberAdmin = (id: string, isAdmin: boolean) => apiRequest<{ members: PracticeMember[]; invitations: PracticeInvitation[] }>(`/api/me/practice/members/${encodeURIComponent(id)}/admin`, { ...json({ is_admin: isAdmin }), method: 'PUT' })
 export const removeStaffMember = (id: string) => apiRequest<void>(`/api/me/practice/members/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const previewInvitation = (token: string) => apiRequest<{ practice_name: string | null; practice_specialty: string | null; role: string; expires_at: string }>('/api/me/practice/invitations/preview', json({ token }))
 export const acceptInvitation = (token: string) => apiRequest<PilotStatus>('/api/me/practice/invitations/accept', json({ token }))
@@ -141,18 +146,31 @@ export type IntakeReferral = {
   escalated_at: string | null; escalation_note: string | null
   information_request: { items: string[]; draft_message: string; sent: boolean; prepared_at: string } | null
   disposition: { decision: 'accept' | 'redirect' | 'decline'; reason: string | null; redirect_to: string | null; at: string } | null
+  /** Staff paperwork hand-off to the physician. */
+  handoff?: { kind: 'ready' | 'flag'; note: string | null; by: string; role: PracticeRole; at: string } | null
   documents: ReferralDocument[]
 }
-export type ReferralAction = 'upload_document' | 'record_item' | 'retriage' | 'approve' | 'edit' | 'reject' | 'request_information' | 'escalate' | 'accept' | 'redirect' | 'decline' | 'verify_item' | 'set_referral_type'
+/** No separate "approve triage": the physician's accept/redirect/decline is the sign-off.
+ * `correct` = physician changes fit/priority/visit type; `mark_ready` = staff hand-off. */
+export type ReferralAction = 'upload_document' | 'record_item' | 'retriage' | 'correct' | 'mark_ready' | 'request_information' | 'escalate' | 'accept' | 'redirect' | 'decline' | 'verify_item' | 'set_referral_type'
+export type ActorRole = 'physician' | 'staff' | 'referring_office' | 'lamina' | 'system'
+export type CorrectableField = 'fit' | 'suggested_priority' | 'suggested_modality'
+export type TriageCorrection = { id: string; field: CorrectableField; from: string; to: string; agent_value: string; reason: string | null; actor_name: string; actor_role: PracticeRole; created_at: string }
+export type TriageChange = { field: string; from: unknown; to: unknown; by: string; after: string | null; at: string }
 export type ReferralDetail = {
   referral: IntakeReferral
   recommendation: TriageRecommendation | null
   rules_snapshot: { rules: Array<{ rule_id: string; version: number; referral_type: string }> } | null
-  decision: { id: string; decision: 'accepted' | 'edited' | 'rejected'; changed_fields: Record<string, { from: unknown; to: unknown }>; reason: string | null; actor_role: PracticeRole; created_at: string; carried_forward?: boolean } | null
-  /** Why approval is or isn't being asked for on the CURRENT recommendation. */
-  approval?: { state: 'decided' | 'carried_forward' | 'needs_first_review' | 'needs_review_changed'; changed?: Record<string, { from: unknown; to: unknown }>; nonmaterial_changes?: Record<string, { from: unknown; to: unknown }> } | null
+  /** The physician whose referrals these are ("Dr. X"), when known. */
+  physician_name?: string | null
+  /** A review from the retired approval step. A staff review is never physician agreement. */
+  legacy_review?: { kind: 'staff_review' | 'physician_review'; decision: 'accepted' | 'edited' | 'rejected'; actor_name: string; actor_role: PracticeRole; created_at: string; reason: string | null } | null
+  corrections?: TriageCorrection[]
+  signoff?: { id: string; decision: 'accept' | 'redirect' | 'decline'; actor_name: string; actor_role: PracticeRole; created_at: string } | null
+  /** Clinical changes by someone else (or Lamina) since you last opened this referral. */
+  changes_since_seen?: TriageChange[]
   effective_triage: EffectiveTriage | null
-  history: Array<{ event_type: string; actor: string; autonomy: 'automatic' | 'human'; metadata: Record<string, unknown>; created_at: string }>
+  history: Array<{ event_type: string; actor: string; actor_name?: string; actor_role?: ActorRole; autonomy: 'automatic' | 'human'; metadata: Record<string, unknown>; created_at: string }>
   allowed_actions: ReferralAction[]
   information_requests?: InformationRequest[]
   sender_responses?: SenderResponse[]
@@ -161,7 +179,7 @@ export type ReferralSummary = {
   id: string; status: IntakeStatus; patient_name: string; referral_type: string
   sender_name: string; sender_practice: string | null; received_at: string
   fit: Fit | null; priority: Priority | null; next_step: NextStep | null; requires_physician: boolean | null
-  missing_items: string[]; escalated: boolean; decided: boolean
+  missing_items: string[]; escalated: boolean; decided: boolean; handoff?: 'ready' | 'flag' | null
 }
 export type NewReferral = {
   source: 'manual' | 'upload'
@@ -176,9 +194,11 @@ export const listReferrals = () => apiRequest<ReferralSummary[]>('/api/me/practi
 export const getReferral = (id: string) => apiRequest<ReferralDetail>(referralPath(id))
 export const createReferral = (referral: NewReferral) => apiRequest<ReferralDetail>('/api/me/practice/referrals', json(referral))
 export const retriageReferral = (id: string) => apiRequest<ReferralDetail>(referralPath(id, 'triage'), { method: 'POST' })
-export const approveTriage = (id: string) => apiRequest<ReferralDetail>(referralPath(id, 'approve'), { method: 'POST' })
-export const editTriage = (id: string, changes: Partial<EffectiveTriage> & { reason?: string | null }) => apiRequest<ReferralDetail>(referralPath(id, 'edit'), json(changes))
-export const rejectTriage = (id: string, reason: string) => apiRequest<ReferralDetail>(referralPath(id, 'reject'), json({ reason }))
+/** Physician only: correct fit, priority or visit type before deciding (recorded, not a sign-off). */
+export const correctTriage = (id: string, changes: Partial<Pick<EffectiveTriage, CorrectableField>> & { reason?: string | null }) => apiRequest<ReferralDetail>(referralPath(id, 'correct'), json(changes))
+/** Staff: the paperwork is done; ready for the physician's decision. */
+export const markReferralReady = (id: string, note: string) => apiRequest<ReferralDetail>(referralPath(id, 'mark-ready'), json({ note: note || null }))
+export const markReferralSeen = (id: string) => apiRequest<{ seen_at: string }>(referralPath(id, 'seen'), { method: 'POST' })
 export const requestInformation = (id: string, items: string[], note: string) => apiRequest<ReferralDetail>(referralPath(id, 'request-information'), json({ items, note: note || null }))
 export const escalateReferral = (id: string, note: string) => apiRequest<ReferralDetail>(referralPath(id, 'escalate'), json({ note: note || null }))
 export const verifyReferralItem = (id: string, key: string) => apiRequest<ReferralDetail>(referralPath(id, `items/${encodeURIComponent(key)}/verify`), json({}))
@@ -232,6 +252,8 @@ export type InformationRequest = {
   recipient: string | null; channel: 'email' | 'manual'; subject: string; draft_message: string
   status: 'draft' | 'approved' | 'sent' | 'partially_resolved' | 'resolved' | 'cancelled'
   created_by: string; approved_by: string | null; approved_at: string | null; sent_at: string | null
+  /** Who drafted / approved it, by name (on referral detail). */
+  created_by_name?: string; approved_by_name?: string
   sent_via: string | null; resolved_at: string | null; cancelled_at: string | null
   evidence: Array<{ type: 'document' | 'response'; id: string }>; created_at: string
   /** Present only on the send response: shown once, never stored by the client. */
@@ -273,6 +295,10 @@ export type Proposal = {
   /** What the agent did NOT turn into a rule, and why (negations, exceptions, vague recency). */
   review_notes?: string[]
   layer?: 'practice' | 'physician'; setup_stage?: string | null
+  /** A starter referral type Lamina suggested (name only); stays labelled "Suggested". */
+  suggested?: boolean
+  /** A staff member's suggestion: pending until a physician confirms it. */
+  suggested_by_name?: string | null; suggested_by_role?: 'staff' | null
 }
 export type LearningQuestion = { id: string; question: string; proposal_id: string; evidence_count: number; status: string; created_at: string }
 export const getTeaching = () => apiRequest<{ proposals: Proposal[]; question: LearningQuestion | null; referral_types: string[] }>('/api/me/practice/teach')
@@ -377,7 +403,9 @@ export type LearningSummary = {
   pending_learnings: Proposal[]; setup_pending: Proposal[]
   open_questions: Array<{ id: string; question: string; proposal_rule_id: string; created_at: string }>
   lifecycle: Lifecycle
-  counts: { confirmed_this_week: number; pending_learnings: number; open_questions: number; setup_pending: number }
+  /** Pending questions beyond today's one (one question a day); not actionable yet. */
+  queued_questions: Array<{ id: string; question: string; proposal_rule_id: string; created_at: string }>
+  counts: { confirmed_this_week: number; pending_learnings: number; open_questions: number; queued_questions: number; setup_pending: number }
 }
 export type RequirementsAnswer = {
   referral_type: string; text?: string | null; required?: Array<{ label: string; freshness_days: number | null }>
@@ -389,7 +417,7 @@ export const getRepresentation = () => apiRequest<Representation>(representation
 export const getLearningSummary = () => apiRequest<LearningSummary>(representationPath('/summary'))
 export const getSetup = () => apiRequest<SetupView>(representationPath('/setup'))
 export const saveSetupIdentity = (profile: SetupProfile) => apiRequest<SetupView>(representationPath('/setup/identity'), { ...json(profile), method: 'PUT' })
-export const saveSetupScope = (types: Array<{ referral_type: string; aliases: string[]; policy: ScopeChoice }>) =>
+export const saveSetupScope = (types: Array<{ referral_type: string; aliases: string[]; policy: ScopeChoice; suggested?: boolean }>) =>
   apiRequest<{ proposals: Proposal[]; setup: SetupView }>(representationPath('/setup/scope'), json({ types }))
 export const saveSetupRequirements = (answer: RequirementsAnswer) =>
   apiRequest<{ proposal: Proposal | null; review_notes: string[]; clarification: { question: string; item: string } | null; setup: SetupView }>(representationPath('/setup/requirements'), json(answer))

@@ -125,10 +125,14 @@ test('rule form parses requirement lines with optional recency and round-trips',
   assert.equal(form.outsideScope, 'C')
 })
 
-test('review card exposes the four triage actions plus physician-only disposition', () => {
-  for (const label of ['Approve triage', 'Edit', 'Request information', 'Needs physician review', 'Triage is wrong', 'Accept referral', 'Redirect', 'Decline']) {
+test('review card: no approval step; staff paperwork actions, physician corrections and disposition', () => {
+  // The physician's accept/redirect/decline is the sign-off; there is no "Approve triage".
+  for (const label of ['Request information', 'Ready for {doctor}', 'Flag for {doctor}', 'Correct fit, priority or visit type', 'Accept referral', 'Redirect', 'Decline']) {
     assert.ok(pilot.includes(label), label)
   }
+  for (const gone of ['Approve triage', 'Triage is wrong', 'approveTriage', 'rejectTriage']) assert.ok(!pilot.includes(gone), gone)
+  assert.match(pilot, /!physician && canUse\(actions, 'mark_ready'\)/, 'Ready for Dr. X is a staff action')
+  assert.match(pilot, /physician && canUse\(actions, 'correct'\)/, 'corrections are physician-only')
   assert.match(pilot, /physician && canUse\(actions, 'accept'\)/, 'disposition renders only for physicians')
   assert.match(pilot, /nothing is sent until you review and approve it/)
   assert.match(pilot, /<summary>Why<\/summary>/)

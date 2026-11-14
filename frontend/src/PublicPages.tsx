@@ -218,7 +218,7 @@ export function SenderStatusPage({ token }: { token: string }) {
       <p className="eyebrow">{view.practice.name}</p>
       <h1>Referral for {view.referral.patient_initials} · {view.referral.referral_type}</h1>
       <p>Status: <strong>{view.referral.status}</strong> · received {new Date(view.referral.received_at).toLocaleDateString()}</p>
-      {notice && <p className="pilot-decision" role="status">{notice}</p>}
+      {notice && <p className="pilot-decision public-sender-notice" role="status">{notice}</p>}
       {error && <p className="error-banner" role="alert">{error}</p>}
       {view.requested_items.length > 0 && <>
         <h2>Information requested</h2>

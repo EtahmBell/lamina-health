@@ -60,8 +60,11 @@ test('physician-only destinations and controls are hidden for staff, never shown
   assert.match(pilot, /suggestions=\{physician\s*\? \[[^\]]*eConsult/)
   assert.match(pilot, /physician && canUse\(actions, 'accept'\)/)
   const profile = slice(pilot, 'function ProfilePage')
-  assert.match(profile, /\{physician && !editing && <button className="button-primary" onClick=\{\(\) => setEditing\(true\)\}>Edit practice/)
-  assert.match(profile, /\{physician && <section className="profile-section-v2">\s*<div className="profile-section-heading"><h2>Invite staff/)
+  // Step 17 follow-up: team and practice management belong to practice admins (a physician
+  // with admin rights), still hidden -- never disabled -- for everyone else.
+  assert.match(profile, /const admin = physician && Boolean\(status\.is_admin\)/)
+  assert.match(profile, /\{admin && !editing && <button className="button-primary" onClick=\{\(\) => setEditing\(true\)\}>Edit practice/)
+  assert.match(profile, /\{admin && <section className="profile-section-v2">\s*<div className="profile-section-heading"><h2>Invite staff/)
   const settings = slice(agent, 'export function PublicSettingsPage', '/* ----------------------------------------------------------------- metrics')
   assert.match(settings, /\{physician && <section className="pilot-card">/, 'staff see only the read-only preview')
   assert.doesNotMatch(settings, /disabled=\{!physician/, 'no disabled physician-only inputs')
@@ -217,6 +220,7 @@ test('general physician wording: no endocrine-only prompts or specialist-only fa
   for (const [name, text] of [['Pilot.tsx', pilot], ['PilotAgent.tsx', agent], ['PilotNetwork.tsx', network], ['PublicPages.tsx', source('PublicPages.tsx')]]) {
     assert.doesNotMatch(text, /[Tt]hyroid|\bTSH\b|[Ii]nsulin pump|'Specialty practice'|specialty practices/, name)
   }
-  assert.match(agent, /<p className="eyebrow">Your physician agent<\/p>/)
+  // Physicians see "Your physician agent"; staff see the physician's agent in the third person.
+  assert.match(agent, /<p className="eyebrow">\{physician \? 'Your physician agent' : `\$\{doctor\}’s agent`\}<\/p>/)
   assert.match(practicePortrait({ name: 'P', specialty: null }, []), /^Your practice\./)
 })

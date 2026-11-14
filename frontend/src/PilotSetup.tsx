@@ -36,7 +36,7 @@ export function SetupPage({ status, navigate, stage }: { status: PilotStatus; na
   if (status.role !== 'physician') {
     return <main className="page-shell pilot-setup-page"><header className="selector-header"><div><p className="eyebrow">Agent setup</p><h1>Only the physician sets up their agent</h1>
       <p>You can see the practice-level requirements that apply to your work under Your Agent.</p></div></header>
-      <button className="button-primary" onClick={() => navigate(pilotPaths.agent)}>Open Your Agent <span>→</span></button></main>
+      <div className="pilot-setup-staff-actions"><button className="button-primary" onClick={() => navigate(pilotPaths.agent)}>Open Your Agent <span>→</span></button></div></main>
   }
   if (error && !setup) return <main className="page-shell pilot-setup-page"><div className="error-banner" role="alert">{error}</div><button className="text-button" onClick={() => void load()}>Try again</button></main>
   if (!setup) return <main className="page-shell pilot-setup-page"><div className="page-state embedded"><div className="loading-line" /><p>Opening setup…</p></div></main>
@@ -145,7 +145,7 @@ function ScopeStage({ setup, onDone, onSkip }: { setup: SetupView; onDone: (next
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('')
     try {
-      const result = await saveSetupScope(rows.map((row) => ({ referral_type: row.referral_type, aliases: lines(row.aliases), policy: row.policy })))
+      const result = await saveSetupScope(rows.map((row) => ({ referral_type: row.referral_type, aliases: lines(row.aliases), policy: row.policy, suggested: row.suggested })))
       onDone(result.setup)
     } catch (err) { setError(errorText(err, 'Could not save')) } finally { setBusy(false) }
   }

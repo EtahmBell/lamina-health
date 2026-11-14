@@ -406,19 +406,23 @@ def _content_dict(content: PracticeRuleContent) -> dict:
 
 
 def is_practice_admin(context: PracticeContext) -> bool:
-    """The practice admin is the physician who created the practice (pilot simplification)."""
-    return context.role == "physician" and context.practice.get("created_by_user_id") == context.user_id
+    """Practice admin (membership + settings): the creator by default; several are allowed."""
+    return context.is_admin
 
 
 def require_can_edit(context: PracticeContext, rule: PracticeRule) -> None:
-    """Practice-level statements: the practice admin. Physician-level: that physician only."""
+    """Clinical statements always need a physician. Practice-level: an ADMIN physician (staff
+    can never confirm them, even if a non-physician admin role is added later). Physician-level:
+    only that physician, admin or not."""
     if context.role != "physician":
-        raise PilotError("physician_required", "Only a physician can change the agent’s representation", 403)
+        raise PilotError("physician_required", "Only a physician can confirm or change clinical statements", 403)
     if rule.layer == "physician":
         if rule.owner_scope_id != context.owner_scope_id:
             raise PilotError("rule_not_found", "Rule not found", 404)
-    elif not is_practice_admin(context):
-        raise PilotError("practice_admin_required", "Only the practice admin can change practice-wide statements", 403)
+    elif not context.is_admin:
+        raise PilotError("practice_admin_required",
+                         "Only an admin physician can confirm or change practice-wide statements. "
+                         "You can add this as your own statement instead", 403)
 
 
 class TeachingService:
@@ -460,6 +464,10 @@ class TeachingService:
             "question_id": provenance.get("question_id"), "created_at": rule.created_at,
             "review_notes": provenance.get("review_notes", []),
             "layer": rule.layer, "setup_stage": provenance.get("setup_stage"),
+            "suggested": bool(provenance.get("suggested")),
+            # A staff member's suggestion: pending until a physician confirms it.
+            "suggested_by_name": provenance.get("suggested_by_name"),
+            "suggested_by_role": provenance.get("suggested_by_role"),
         }
 
     def _physician_key(self, context: PracticeContext) -> str:
@@ -472,12 +480,20 @@ class TeachingService:
         supersedes: PracticeRule | None = None, layer: str | None = None,
     ) -> dict:
         # Correction-pattern proposals come from the team's recorded work (staff included) and
-        # are practice-wide observations; every other proposal is a physician teaching. Either
-        # way it is only a PROPOSAL: confirming still requires the right physician.
-        if source != "correction_pattern":
-            context.require_physician("teach the practice agent")
-        else:
+        # are practice-wide observations. A STAFF instruction becomes a pending suggestion for the
+        # physician (practice layer, labelled with who suggested it). Every other proposal is a
+        # physician teaching. Either way it is only a PROPOSAL: confirming needs the right physician.
+        if source == "correction_pattern":
             layer = "practice"
+        elif context.role == "staff":
+            from .attribution import ActorDirectory
+
+            layer = "practice"
+            who = ActorDirectory(self.rules.store, context.practice_id).describe(context.actor)
+            extra_provenance = {**(extra_provenance or {}), "suggested_by": context.actor,
+                                "suggested_by_role": "staff", "suggested_by_name": who["name"]}
+        else:
+            context.require_physician("teach the practice agent")
         # Default layer: the practice admin teaches the practice; another physician teaches
         # only their own (physician-level) representation.
         layer = (supersedes.layer if supersedes is not None else layer) or (
