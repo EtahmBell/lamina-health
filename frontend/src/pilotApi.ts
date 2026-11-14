@@ -65,6 +65,9 @@ export type PracticeRuleInput = {
   modality: Modality; note: string | null; publishable: boolean
   /** Physician-controlled other names for this referral type. */
   aliases?: string[]
+  scope_policy?: 'accept' | 'out_of_scope' | 'case_by_case' | null
+  preferences?: string[]; exceptions?: string[]; judgment?: string[]; make_optional?: string[]; answered_topics?: string[]
+  layer?: 'practice' | 'physician'
 }
 export type PracticeRule = {
   id: string; referral_type: string; version: number; supersedes_id: string | null
@@ -75,7 +78,10 @@ export type PracticeRule = {
     good_fit: string[]; redirect: string[]; required: RuleRequirement[]; helpful: RuleRequirement[]
     urgent_signals: string[]; modality: Modality; modality_notes: string | null
     aliases?: string[]
+    scope_policy?: 'accept' | 'out_of_scope' | 'case_by_case' | null
+    preferences?: string[]; exceptions?: string[]; judgment?: string[]; make_optional?: string[]; answered_topics?: string[]
   }
+  layer?: 'practice' | 'physician'
 }
 export const getPracticeRules = (includeHistory = false) => apiRequest<PracticeRule[]>(`/api/me/practice/rules${includeHistory ? '?include_history=true' : ''}`)
 export const createPracticeRule = (rule: PracticeRuleInput) => apiRequest<PracticeRule>('/api/me/practice/rules', json(rule))
@@ -112,6 +118,10 @@ export type TriageRecommendation = {
   generator: 'deterministic' | 'deterministic+llm_extraction'; model_id: string | null
   rules_snapshot_id: string; created_at: string
   type_match?: TypeMatch | null
+  /** Step 17: the representation statements relied on, and any layer conflicts. */
+  statements_used?: Array<{ kind: StatementKind; rule_id: string; version: number; layer: 'practice' | 'physician'; referral_type: string; item: string; label?: string | null; drives: boolean }>
+  conflicts?: Array<{ kind: string; referral_type: string }>
+  representation_version_id?: string | null
 }
 export type EffectiveTriage = Pick<TriageRecommendation, 'fit' | 'suggested_priority' | 'suggested_modality' | 'requires_physician' | 'next_step'>
 export type SubmittedItem = {
@@ -262,6 +272,7 @@ export type Proposal = {
   question_id: string | null; created_at: string
   /** What the agent did NOT turn into a rule, and why (negations, exceptions, vague recency). */
   review_notes?: string[]
+  layer?: 'practice' | 'physician'; setup_stage?: string | null
 }
 export type LearningQuestion = { id: string; question: string; proposal_id: string; evidence_count: number; status: string; created_at: string }
 export const getTeaching = () => apiRequest<{ proposals: Proposal[]; question: LearningQuestion | null; referral_types: string[] }>('/api/me/practice/teach')
@@ -324,6 +335,69 @@ export const getAssistant = () => apiRequest<{ messages: AgentMessage[]; retenti
 export const sendAssistantMessage = (text: string, referralId?: string | null) =>
   apiRequest<{ user_message: AgentMessage; reply: AgentMessage }>('/api/me/practice/assistant/messages', json({ text, referral_id: referralId ?? null }))
 export const clearAssistantHistory = () => apiRequest<void>('/api/me/practice/assistant/history', { method: 'DELETE' })
+
+/* ------------------------------------------------------- representation (Step 17) */
+
+export type StatementKind = 'hard_requirement' | 'scope_policy' | 'soft_preference' | 'exception' | 'physician_judgment' | 'unknown'
+export type ScopeChoice = 'accept' | 'out_of_scope' | 'case_by_case' | 'unknown'
+export type SetupStageId = 'identity' | 'scope' | 'requirements' | 'delegation' | 'review'
+export type SetupStageStatus = 'not_started' | 'in_progress' | 'done' | 'skipped'
+export type Lifecycle = {
+  state: 'initializing' | 'shadow' | null; label: string | null; shadow_at?: string | null
+  stages: Array<{ id: SetupStageId; label: string; status: SetupStageStatus; minutes: number }>
+  next_stage: SetupStageId | null; minutes_remaining: number; setup_complete: boolean; migrated: boolean
+}
+export type RepresentationItem = {
+  kind: StatementKind; text: string; status: 'confirmed' | 'proposed'; rule_id: string; version: number
+  layer: 'practice' | 'physician'; source: string; confirmed_at: string | null; key?: string; value?: string
+  /** "urgency": an urgency signal (drives priority), shown with its own label. */
+  subkind?: 'urgency'
+}
+export type RepresentationType = {
+  referral_type: string; aliases: string[]; scope_policy: Exclude<ScopeChoice, 'unknown'> | null
+  layers: string[]; items: RepresentationItem[]; unknown_topics: Array<'scope' | 'requirements' | 'urgency' | 'modality'>
+}
+export type DelegationAnswer = { handled_by: 'physician' | 'staff' | 'agent_prepares'; autonomy: 'off' | 'observe' | 'prepare_drafts' | 'ask_before_acting' }
+export type Representation = {
+  types: RepresentationType[]; conflicts: Array<{ kind: string; referral_type: string; [key: string]: unknown }>
+  delegation: Record<string, DelegationAnswer>; delegation_tasks: Record<string, string>
+  profile: SetupProfile | null; unknowns: string[]; version: { id: string; version: number; created_at: string } | null
+  lifecycle: Lifecycle; view: 'physician' | 'staff_practice_level'; is_practice_admin: boolean
+}
+export type SetupProfile = { specialty: string | null; subspecialty: string | null; locations: string[]; clinical_interests: string[]; sources?: Record<string, string> }
+export type SetupView = {
+  lifecycle: Lifecycle; profile: SetupProfile | null
+  prefill: { specialty: { value: string | null; source: string }; locations: { value: string[]; source: string }; display_name: string | null }
+  delegation: Record<string, DelegationAnswer>; delegation_tasks: Array<{ id: string; label: string }>
+  referral_types: string[]; starter_suggestions: string[]; is_practice_admin: boolean; pending: Proposal[]
+}
+export type LearningSummary = {
+  since: string
+  confirmed_this_week: Array<{ rule_id: string; referral_type: string; version: number; layer: string; confirmed_at: string; source: string }>
+  pending_learnings: Proposal[]; setup_pending: Proposal[]
+  open_questions: Array<{ id: string; question: string; proposal_rule_id: string; created_at: string }>
+  lifecycle: Lifecycle
+  counts: { confirmed_this_week: number; pending_learnings: number; open_questions: number; setup_pending: number }
+}
+export type RequirementsAnswer = {
+  referral_type: string; text?: string | null; required?: Array<{ label: string; freshness_days: number | null }>
+  helpful?: Array<{ label: string; freshness_days: number | null }>; urgent_signals?: string[]
+  modality?: Modality | null; nothing_required?: boolean; no_urgency_signals?: boolean
+}
+const representationPath = (suffix = '') => `/api/me/practice/representation${suffix}`
+export const getRepresentation = () => apiRequest<Representation>(representationPath())
+export const getLearningSummary = () => apiRequest<LearningSummary>(representationPath('/summary'))
+export const getSetup = () => apiRequest<SetupView>(representationPath('/setup'))
+export const saveSetupIdentity = (profile: SetupProfile) => apiRequest<SetupView>(representationPath('/setup/identity'), { ...json(profile), method: 'PUT' })
+export const saveSetupScope = (types: Array<{ referral_type: string; aliases: string[]; policy: ScopeChoice }>) =>
+  apiRequest<{ proposals: Proposal[]; setup: SetupView }>(representationPath('/setup/scope'), json({ types }))
+export const saveSetupRequirements = (answer: RequirementsAnswer) =>
+  apiRequest<{ proposal: Proposal | null; review_notes: string[]; clarification: { question: string; item: string } | null; setup: SetupView }>(representationPath('/setup/requirements'), json(answer))
+export const saveSetupDelegation = (answers: Record<string, DelegationAnswer>) => apiRequest<SetupView>(representationPath('/setup/delegation'), { ...json({ answers }), method: 'PUT' })
+export const finishSetupStage = (stage: SetupStageId) => apiRequest<SetupView>(representationPath(`/setup/${stage}/finish`), { method: 'POST' })
+export const skipSetupStage = (stage: SetupStageId) => apiRequest<SetupView>(representationPath(`/setup/${stage}/skip`), { method: 'POST' })
+export const confirmRepresentation = () => apiRequest<{ version: { id: string; version: number }; lifecycle: Lifecycle; representation: Representation }>(representationPath('/confirm'), { method: 'POST' })
+export const leaveProposalUnknown = (id: string) => apiRequest<Representation>(representationPath(`/proposals/${encodeURIComponent(id)}/leave-unknown`), { method: 'POST' })
 
 /* ------------------------------------------------- public (no account needed) */
 

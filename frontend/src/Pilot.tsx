@@ -7,6 +7,7 @@ import { LaminaMark } from './LaminaMark.tsx'
 import { PhysicianOnboardingPage } from './Onboarding.tsx'
 import { AgentPage, MetricsPage, PublicSettingsPage } from './PilotAgent.tsx'
 import { NetworkPage } from './PilotNetwork.tsx'
+import { SetupPage } from './PilotSetup.tsx'
 import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavIcon, LaminaShell, NetworkNavIcon, type DockCard, type DockReply, type NavEntry } from './pilotUi.tsx'
 import { useOnPilotDataChange, usePilotDataVersion } from './pilotSync.ts'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
@@ -26,7 +27,7 @@ import {
   accountIdentity, canUse, countWord, emptyReferralForm, itemLabel, FIT_LABELS, historyLabel, isClosed,
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
-  resolvePilotRoute, STATUS_LABELS,
+  resolvePilotRoute, resolveSetupStage, STATEMENT_KIND_LABELS, statementText, STATUS_LABELS,
   dockMessagesFrom, displayTemplate, setReferralPrefill, takeReferralPrefill, turnsForReferral,
   type PatientWorkItem, type ReferralForm,
 } from './pilotState.ts'
@@ -68,6 +69,7 @@ export function PilotApp({ path, params, navigate }: { path: string; params: URL
     case 'referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients" agentDock><ReferralDetailPage id={route.id} status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'practice': return <PilotGate navigate={navigate} params={params}>{(status, reload) => <PilotShell status={status} navigate={navigate} section="profile"><ProfilePage status={status} reload={reload} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'agent': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="agent"><AgentPage status={status} navigate={navigate} tab={resolveAgentTab(params.get('tab'))} /></PilotShell>}</PilotGate>
+    case 'setup': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="agent"><SetupPage status={status} navigate={navigate} stage={params.get('stage') ? resolveSetupStage(params.get('stage')) : null} /></PilotShell>}</PilotGate>
     case 'rules': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="agent"><AgentPage status={status} navigate={navigate} tab="rules" /></PilotShell>}</PilotGate>
     case 'public_settings': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="profile"><PublicSettingsPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'metrics': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="profile"><MetricsPage navigate={navigate} /></PilotShell>}</PilotGate>
@@ -245,8 +247,10 @@ function PilotHomePage({ status, navigate }: { status: PilotStatus; navigate: Na
   const waiting = home?.waiting ?? []
   // A brand-new practice: the only thing "needing you" is adding rules. Say that plainly rather
   // than "I've prepared what I can" over a server briefing of "Nothing needs you right now."
-  const setupOnly = needs.length > 0 && needs.every((item) => item.kind === 'setup_rules') && prepared.length === 0 && waiting.length === 0
+  const setupOnly = needs.length > 0 && needs.every((item) => item.kind === 'setup_rules' || item.kind === 'setup') && prepared.length === 0 && waiting.length === 0
+  const inSetup = needs.some((item) => item.kind === 'setup')
   const statusLine = loading ? 'Reviewing what’s come in for your practice…'
+    : setupOnly && inSetup ? 'Let’s finish setting up how I represent you.'
     : setupOnly ? (physician ? 'I need your referral criteria before I can triage.' : 'Waiting on the physician’s referral criteria before I can triage.')
     : needs.length ? 'I’ve prepared what I can. The rest needs you.' : 'All caught up. I’ll keep watching.'
   return <main className="agent-home" aria-label="Home">
@@ -254,7 +258,9 @@ function PilotHomePage({ status, navigate }: { status: PilotStatus; navigate: Na
     <div className="agent-status" role="status"><AgentOrb /><span>{statusLine}</span></div>
     {error && <p className="agent-home-error" role="alert">{error}</p>}
     {home && <>
-      {setupOnly
+      {setupOnly && inSetup
+        ? <p className="agent-brief">A short guided setup — about 5–10 minutes — tells me which referrals you see, what you need with them, and what you decide yourself. Until then I can record referrals but don’t represent you yet.</p>
+        : setupOnly
         ? <p className="agent-brief">{physician ? 'Tell me which referrals you see and what you need with them. Until then I can record referrals, but I can’t judge fit or completeness.' : 'Until the physician adds referral rules, I can record referrals but can’t judge fit or completeness.'}</p>
         : <p className="agent-brief">{home.briefing.lead}{home.briefing.detail && <> {home.briefing.detail}</>}{home.briefing.tail && <>{' '}<span className="agent-brief-quiet">{home.briefing.tail}</span></>}</p>}
       {top.length > 0 && <section className="agent-needs for-you-section" aria-label="Needs you">
@@ -325,7 +331,9 @@ function useHomeData(status: PilotStatus) {
   useEffect(() => { load() }, [load])
   useOnPilotDataChange(load) // agent drafts/proposals and any other write show up without a reload
   const physician = status.role === 'physician'
-  const setup: HomeItem[] = rules && rules.length === 0 ? [{
+  // While the agent is being set up, the server's "Finish setting up" item replaces this one.
+  const serverSetup = (home?.needs_you ?? []).some((item) => item.kind === 'setup')
+  const setup: HomeItem[] = rules && rules.length === 0 && !serverSetup ? [{
     kind: 'setup_rules', title: 'Teach Lamina your referral criteria', path: pilotPaths.agentTab('rules'), action: physician ? 'Add rules' : 'View',
     detail: physician ? 'Until you add a rule I can record referrals but can’t judge fit or completeness.' : 'The physician hasn’t added referral rules yet, so I can record referrals but can’t judge fit or completeness.',
   }] : []
@@ -868,6 +876,15 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
                   : item.source.kind === 'submitted_item' ? 'Submitted with referral'
                   : item.source.kind === 'referral_type' ? (item.source.rule_version ? `Referral type · rule v${item.source.rule_version}` : 'Referral type') : 'No rule'
               }</small></li>)}</ul>
+              {/* Exactly which confirmed statements this recommendation relied on (kind + version). */}
+              {(recommendation.statements_used ?? []).filter((item) => item.drives).length > 0 && <div className="pilot-relied-on">
+                <p className="practice-subheading">Relied on your confirmed representation</p>
+                <ul className="pilot-statement-list">{(recommendation.statements_used ?? []).filter((item) => item.drives).map((item, index) => <li key={`${item.rule_id}-${item.item}-${index}`}>
+                  <span className={`pilot-kind-tag kind-${item.kind}`}>{STATEMENT_KIND_LABELS[item.kind]}</span>
+                  <span>{item.label ?? statementText(item.item)}</span>
+                  <small className="muted-note">{item.referral_type} v{item.version}{item.layer === 'physician' ? ' · your own' : ' · practice'}</small>
+                </li>)}</ul>
+              </div>}
               <p className="muted-note">Rules snapshot {recommendation.rules_snapshot_id} · {recommendation.generator === 'deterministic' ? 'deterministic rule checks' : `rule checks + model-proposed evidence (${recommendation.model_id})`}</p>
             </details>
           </> : <p className="muted-note">Not triaged yet.</p>}

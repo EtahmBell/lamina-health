@@ -140,9 +140,15 @@ def weekly_summary(store: PilotStore, practice_id: str, now: datetime | None = N
     if trust["accepted"] or trust["edited"] or trust["rejected"]:
         lines.append(f"{n(trust['accepted'], 'triage recommendation was', 'triage recommendations were')} accepted without changes"
                      f", {trust['edited']} edited, {trust['rejected']} rejected.")
-    if metrics["learning"]["confirmed"] or metrics["learning"]["edited"]:
-        confirmed = metrics["learning"]["confirmed"] + metrics["learning"]["edited"]
-        lines.append(f"You confirmed {n(confirmed, 'new preference', 'new preferences')}.")
+    # Same definition as Your Agent's learned-this-week panel (one source of truth).
+    from .representation import confirmed_since
+    from .rules import PracticeRules
+
+    physicians = list(store.physician_scope_ids(practice_id))
+    owner = physicians[0] if len(physicians) == 1 else None
+    confirmed = len(confirmed_since(PracticeRules(store), practice_id, owner, since))
+    if confirmed:
+        lines.append(f"{n(confirmed, 'item was', 'items were')} newly confirmed in how your agent represents you.")
     if public["unique_public_referring_clinicians"]:
         clinicians = public["unique_public_referring_clinicians"]
         lines.append(f"{n(clinicians, 'referring clinician', 'referring clinicians')} used your public page.")

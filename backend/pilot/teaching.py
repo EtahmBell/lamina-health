@@ -74,6 +74,14 @@ _SHARED_WINDOW = re.compile(r"\b(both|each|all(?:\s+of\s+them)?)\b", re.IGNORECA
 _HELPFUL = re.compile(r"\b(nice to have|helpful|if available|ideally|optionally|if possible)\b", re.IGNORECASE)
 
 
+_JUDGMENT = re.compile(
+    r"\bcase[- ]by[- ]case\b|\bi(?:'ll| will)? (?:decide|make the call)\b|\bi want to (?:review|decide)\b"
+    r"|\bleave (?:it|that|those|them) to me\b|\bmy (?:call|decision)\b",
+    re.IGNORECASE,
+)
+_PREFERENCE = re.compile(r"\b(?:i |we )?(?:prefer|would rather|ideally)\b", re.IGNORECASE)
+
+
 def _split_exception(text: str) -> tuple[str, str | None]:
     """'X unless Y' → ('X', 'unless Y'). Exceptions are never turned into criteria."""
     match = _EXCEPTION.search(text)
@@ -144,12 +152,17 @@ def match_referral_type(text: str, known: list[str]) -> str | None:
 def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]:
     """Pattern-based interpretation. Returns a normalized interpretation dict."""
     content: dict[str, Any] = {"good_fit": [], "outside_scope": [], "required": [], "helpful": [],
-                               "urgent_signals": [], "modality": "unspecified", "note": None}
+                               "urgent_signals": [], "modality": "unspecified", "note": None,
+                               "preferences": [], "exceptions": [], "judgment": [], "scope_policy": None}
     referral_type = match_referral_type(text, known_types)
     inferred_type = None
     review: list[str] = []  # Plain notes for the physician about what was NOT turned into a rule.
     kept_notes: list[str] = []
-    for sentence in re.split(r"(?<=[.!?;])\s+|\n+", text):
+    # Sentences, then independent clauses ("…, and I don't need a CT" / "…, but we never see …"):
+    # a negation or preference in one clause must not swallow the requirements of another.
+    clauses = [clause for sentence in re.split(r"(?<=[.!?;])\s+|\n+", text)
+               for clause in re.split(r",?\s+(?:and|but)\s+(?=(?:i|we)\b)", sentence, flags=re.IGNORECASE)]
+    for sentence in clauses:
         sentence = sentence.strip()
         if not sentence:
             continue
@@ -159,10 +172,22 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
             if match:
                 inferred_type = _clean_phrase(match.group(1))
         if re.search(r"\be-?consults?\b", lowered) and re.search(r"\b(prefer|default|first|start with|route)\b", lowered):
-            content["modality"] = "econsult"
             condition = re.search(r"\bfor\s+(.+)$", sentence, re.IGNORECASE)
-            if condition:
-                content["note"] = f"eConsult first for {_clean_phrase(condition.group(1))}"
+            phrase = _clean_phrase(condition.group(1)) if condition else ""
+            # "for thyroid nodule referrals" (or no condition) restates the type: the type's default
+            # visit type. A narrower condition ("for stable small nodules") is only a stated
+            # preference -- it must not become the suggestion for every referral of the type.
+            restates_type = not phrase or re.fullmatch(r".*\breferrals?", phrase, re.IGNORECASE) is not None
+            if restates_type:
+                content["modality"] = "econsult"
+            else:
+                content["preferences"].append(f"eConsult first for {phrase}")
+            continue
+        if _JUDGMENT.search(sentence):
+            # The physician keeps this decision. "Case by case" for a type is a scope policy.
+            content["judgment"].append(sentence.strip(" ."))
+            if re.search(r"case[- ]by[- ]case", sentence, re.IGNORECASE):
+                content["scope_policy"] = "case_by_case"
             continue
         if re.search(r"\bin[- ]person\b", lowered) and re.search(r"\b(prefer|want|need|default|always)\b", lowered):
             content["modality"] = "in_person"
@@ -180,8 +205,8 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
             if exception:
                 # An exception changes WHEN the scope rule applies. Lamina cannot apply that
                 # condition automatically, so it neither adds the scope rule (which would wrongly
-                # exclude the excepted cases) nor guesses: it asks.
-                kept_notes.append(sentence.strip(" ."))
+                # exclude the excepted cases) nor guesses: it keeps a reviewable exception.
+                content["exceptions"].append(sentence.strip(" ."))
                 review.append(f"Kept as a note, not applied: “{phrase}” is outside your scope {exception}. "
                               "Add it as an outside-scope criterion if you want those referrals flagged for review.")
                 continue
@@ -197,7 +222,7 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
         if required:
             listed = required.group(1)
             if exception:
-                kept_notes.append(sentence.strip(" ."))
+                content["exceptions"].append(sentence.strip(" ."))
                 review.append(f"The exception “{exception}” is kept as a note; Lamina will still ask for these items "
                               "every time. Edit the rule if that’s not what you want.")
             sentence_helpful = bool(re.search(r"\b(nice to have|helpful|if available)\b", lowered)) and not re.search(
@@ -210,8 +235,13 @@ def deterministic_interpret(text: str, known_types: list[str]) -> dict[str, Any]
         good = re.search(r"\b(?:i (?:do |also )?see|we see|happy to see|interested in|good fit(?: for)?|i (?:like|love) to see|i take)\b\s+(.+)$", sentence, re.IGNORECASE)
         if good:
             content["good_fit"].append(_clean_phrase(good.group(1)))
-    structured = any(content[key] for key in ("good_fit", "outside_scope", "required", "helpful", "urgent_signals")) \
-        or content["modality"] != "unspecified"
+    if not any(content[key] for key in ("good_fit", "outside_scope", "required", "helpful", "urgent_signals",
+                                        "judgment", "preferences", "exceptions")) and content["modality"] == "unspecified" \
+            and _PREFERENCE.search(text) and not kept_notes:
+        content["preferences"].append(" ".join(text.split()).strip(" ."))
+    structured = any(content[key] for key in ("good_fit", "outside_scope", "required", "helpful", "urgent_signals",
+                                              "judgment", "preferences", "exceptions")) \
+        or content["modality"] != "unspecified" or bool(content["scope_policy"])
     if kept_notes:
         content["note"] = "; ".join(filter(None, [content["note"], *kept_notes]))[:2000]
     if referral_type is None and inferred_type:
@@ -322,24 +352,73 @@ def merge_content(base: PracticeRuleContent, addition: dict) -> PracticeRuleInpu
 
     modality = addition["modality"] if addition["modality"] != "unspecified" else base.modality
     notes = "; ".join(filter(None, [base.modality_notes, addition.get("note")])) or None
+    required = union_req(base.required, addition["required"])
+    helpful = union_req(base.helpful, addition["helpful"])
+    # make_optional demotes this rule's own required items to helpful. Keys this rule doesn't
+    # require (e.g. a physician loosening a practice requirement) stay as make_optional.
+    demote = set(addition.get("make_optional", []))
+    moved = [item for item in required if item.key in demote]
+    required = [item for item in required if item.key not in demote]
+    helpful = [*helpful, *[item.model_copy(update={"required": False}) for item in moved
+                           if item.key not in {h.key for h in helpful}]]
+    remaining = [key for key in union(base.make_optional, addition.get("make_optional", []))
+                 if key not in {item.key for item in moved}]
     return PracticeRuleInput(
         referral_type="placeholder", good_fit=union(base.good_fit, addition["good_fit"]),
         outside_scope=union(base.redirect, addition["outside_scope"]),
-        required=union_req(base.required, addition["required"]), helpful=union_req(base.helpful, addition["helpful"]),
+        required=required, helpful=helpful,
         urgent_signals=union(base.urgent_signals, addition["urgent_signals"]), modality=modality, note=notes,
         # Aliases are physician-controlled names: a merge keeps every existing one.
         aliases=union(base.aliases, addition.get("aliases", [])),
+        scope_policy=addition.get("scope_policy") or base.scope_policy,
+        preferences=union(base.preferences, addition.get("preferences", [])),
+        exceptions=union(base.exceptions, addition.get("exceptions", [])),
+        judgment=union(base.judgment, addition.get("judgment", [])),
+        make_optional=remaining,
+        answered_topics=union(base.answered_topics, addition.get("answered_topics", [])),
     )
 
 
-def _input_from(referral_type: str, content: dict) -> PracticeRuleInput:
+def _input_from(referral_type: str, content: dict, layer: str = "practice") -> PracticeRuleInput:
     return PracticeRuleInput(
         referral_type=referral_type, good_fit=content["good_fit"], outside_scope=content["outside_scope"],
         required=[ReferralRequirement(**item) for item in content["required"]],
         helpful=[ReferralRequirement(**item) for item in content["helpful"]],
         urgent_signals=content["urgent_signals"], modality=content["modality"], note=content.get("note"),
-        aliases=content.get("aliases", []),
+        aliases=content.get("aliases", []), scope_policy=content.get("scope_policy"),
+        preferences=content.get("preferences", []), exceptions=content.get("exceptions", []),
+        judgment=content.get("judgment", []), make_optional=content.get("make_optional", []),
+        answered_topics=content.get("answered_topics", []), layer=layer,
     )
+
+
+def _content_dict(content: PracticeRuleContent) -> dict:
+    """A stored rule's content in the interpretation-dict shape used by propose/confirm."""
+    return {
+        "good_fit": content.good_fit, "outside_scope": content.redirect,
+        "required": [item.model_dump() for item in content.required],
+        "helpful": [item.model_dump() for item in content.helpful],
+        "urgent_signals": content.urgent_signals, "modality": content.modality,
+        "note": content.modality_notes, "aliases": content.aliases, "scope_policy": content.scope_policy,
+        "preferences": content.preferences, "exceptions": content.exceptions, "judgment": content.judgment,
+        "make_optional": content.make_optional, "answered_topics": content.answered_topics,
+    }
+
+
+def is_practice_admin(context: PracticeContext) -> bool:
+    """The practice admin is the physician who created the practice (pilot simplification)."""
+    return context.role == "physician" and context.practice.get("created_by_user_id") == context.user_id
+
+
+def require_can_edit(context: PracticeContext, rule: PracticeRule) -> None:
+    """Practice-level statements: the practice admin. Physician-level: that physician only."""
+    if context.role != "physician":
+        raise PilotError("physician_required", "Only a physician can change the agent’s representation", 403)
+    if rule.layer == "physician":
+        if rule.owner_scope_id != context.owner_scope_id:
+            raise PilotError("rule_not_found", "Rule not found", 404)
+    elif not is_practice_admin(context):
+        raise PilotError("practice_admin_required", "Only the practice admin can change practice-wide statements", 403)
 
 
 class TeachingService:
@@ -380,6 +459,7 @@ class TeachingService:
             "clarification": provenance.get("clarification"), "interpreter": provenance.get("interpreter"),
             "question_id": provenance.get("question_id"), "created_at": rule.created_at,
             "review_notes": provenance.get("review_notes", []),
+            "layer": rule.layer, "setup_stage": provenance.get("setup_stage"),
         }
 
     def _physician_key(self, context: PracticeContext) -> str:
@@ -389,9 +469,19 @@ class TeachingService:
     def propose(
         self, context: PracticeContext, text: str, *, source: str = "explicit_instruction",
         interpretation: dict | None = None, extra_provenance: dict | None = None,
-        supersedes: PracticeRule | None = None,
+        supersedes: PracticeRule | None = None, layer: str | None = None,
     ) -> dict:
-        context.require_physician("teach the practice agent")
+        # Correction-pattern proposals come from the team's recorded work (staff included) and
+        # are practice-wide observations; every other proposal is a physician teaching. Either
+        # way it is only a PROPOSAL: confirming still requires the right physician.
+        if source != "correction_pattern":
+            context.require_physician("teach the practice agent")
+        else:
+            layer = "practice"
+        # Default layer: the practice admin teaches the practice; another physician teaches
+        # only their own (physician-level) representation.
+        layer = (supersedes.layer if supersedes is not None else layer) or (
+            "practice" if is_practice_admin(context) else "physician")
         text = " ".join(text.split())
         if not 3 <= len(text) <= 2000:
             raise PilotError("invalid_instruction", "Write a short instruction (up to 2,000 characters)", 422)
@@ -399,11 +489,13 @@ class TeachingService:
         interpretation = interpretation or self.interpret(text, known)
         content = interpretation["content"]
         referral_type = interpretation["referral_type"] or UNASSIGNED_TYPE
-        rule_input = _input_from(referral_type, content)
+        rule_input = _input_from(referral_type, content, layer)
         stored_content = PracticeRuleContent(
             good_fit=rule_input.good_fit, redirect=rule_input.outside_scope, required=rule_input.required,
             helpful=rule_input.helpful, urgent_signals=rule_input.urgent_signals, modality=rule_input.modality,
-            modality_notes=rule_input.note,
+            modality_notes=rule_input.note, aliases=rule_input.aliases, scope_policy=rule_input.scope_policy,
+            preferences=rule_input.preferences, exceptions=rule_input.exceptions, judgment=rule_input.judgment,
+            make_optional=rule_input.make_optional, answered_topics=rule_input.answered_topics,
             interpretation_note=None if interpretation["structured"] else
             "Kept as a note: Lamina could not turn this into a structured rule.",
         )
@@ -411,6 +503,7 @@ class TeachingService:
             context.practice_id, self._physician_key(context), rule_input, actor=context.actor, source=source,
             operational_status="inferred", confidence=interpretation["confidence"], content=stored_content,
             source_text=text, supersedes=supersedes, event_type="learning_proposed",
+            owner_scope_id=context.owner_scope_id,
             provenance={
                 "raw_text": text, "interpreter": interpretation["interpreter"],
                 "structured": interpretation["structured"], "clarification": interpretation["clarification"],
@@ -440,13 +533,7 @@ class TeachingService:
             or match_referral_type(answer, known) or answer[:120]
         interpretation = {
             "referral_type": chosen,
-            "content": {
-                "good_fit": proposal.content.good_fit, "outside_scope": proposal.content.redirect,
-                "required": [item.model_dump() for item in proposal.content.required],
-                "helpful": [item.model_dump() for item in proposal.content.helpful],
-                "urgent_signals": proposal.content.urgent_signals, "modality": proposal.content.modality,
-                "note": proposal.content.modality_notes,
-            },
+            "content": _content_dict(proposal.content),
             "structured": provenance.get("structured", True), "confidence": max(proposal.confidence or 0.0, 0.6),
             "clarification": None, "interpreter": provenance.get("interpreter", "deterministic"),
         }
@@ -458,6 +545,7 @@ class TeachingService:
     def confirm(self, context: PracticeContext, proposal_id: str, edits: PracticeRuleInput | None = None) -> dict:
         context.require_physician("confirm what the practice agent learned")
         proposal = self._proposal(context, proposal_id)
+        require_can_edit(context, proposal)
         provenance = proposal.provenance or {}
         if not provenance.get("structured", True) and edits is None:
             raise PilotError("unstructured_note", "This was kept as a note. Edit it into a rule to confirm it", 422)
@@ -466,18 +554,23 @@ class TeachingService:
         referral_type = (edits.referral_type if edits else proposal.referral_type).strip()
         if referral_type == UNASSIGNED_TYPE:
             raise PilotError("referral_type_required", "Choose which referral type this applies to", 422)
-        addition = {
-            "good_fit": edits.good_fit if edits else proposal.content.good_fit,
-            "outside_scope": edits.outside_scope if edits else proposal.content.redirect,
-            "required": [i.model_dump() for i in (edits.required if edits else proposal.content.required)],
-            "helpful": [i.model_dump() for i in (edits.helpful if edits else proposal.content.helpful)],
-            "urgent_signals": edits.urgent_signals if edits else proposal.content.urgent_signals,
-            "modality": edits.modality if edits else proposal.content.modality,
-            "note": (edits.note if edits else proposal.content.modality_notes),
-            "aliases": edits.aliases if edits else proposal.content.aliases,
-        }
+        addition = _content_dict(proposal.content)
+        if edits:
+            addition = {
+                "good_fit": edits.good_fit, "outside_scope": edits.outside_scope,
+                "required": [i.model_dump() for i in edits.required], "helpful": [i.model_dump() for i in edits.helpful],
+                "urgent_signals": edits.urgent_signals, "modality": edits.modality, "note": edits.note,
+                "aliases": edits.aliases, "scope_policy": edits.scope_policy, "preferences": edits.preferences,
+                "exceptions": edits.exceptions, "judgment": edits.judgment, "make_optional": edits.make_optional,
+                # Editing a proposal answers the same topics it was asking about.
+                "answered_topics": sorted(set(edits.answered_topics) | set(proposal.content.answered_topics)),
+            }
         event = "learning_edited" if edits else "learning_confirmed"
-        base = next(iter(self.rules.operational(context.practice_id, referral_type)), None)
+        # Merge into the current confirmed rule of the SAME layer (and, for a physician layer,
+        # the same physician). Practice and physician statements stay separate rows.
+        base = next((rule for rule in self.rules.operational(context.practice_id, referral_type, context.owner_scope_id)
+                     if rule.layer == proposal.layer
+                     and (rule.layer == "practice" or rule.owner_scope_id == proposal.owner_scope_id)), None)
         lineage = {"from_proposal": proposal.id, "raw_text": provenance.get("raw_text", proposal.source_text),
                    "proposal_source": proposal.source}
         try:
@@ -491,12 +584,12 @@ class TeachingService:
                 )
                 self.rules.set_status(context.practice_id, proposal.id, "superseded", actor=context.actor,
                                       event_type="learning_merged", metadata={"into_rule_id": rule.id})
-            elif edits is None:
+            elif edits is None and not addition.get("make_optional"):
                 rule = self.rules.set_status(context.practice_id, proposal.id, "confirmed", actor=context.actor,
                                              event_type=event)
             else:
                 rule = self.rules.create(
-                    context.practice_id, self._physician_key(context), _input_from(referral_type, addition),
+                    context.practice_id, self._physician_key(context), _input_from(referral_type, addition, proposal.layer),
                     actor=context.actor, source=proposal.source, supersedes=proposal, event_type=event,
                     source_text=lineage["raw_text"], provenance=lineage, confidence=proposal.confidence,
                 )
@@ -506,7 +599,7 @@ class TeachingService:
 
     def reject(self, context: PracticeContext, proposal_id: str, reason: str | None = None, event: str = "learning_rejected") -> dict:
         context.require_physician("reject a proposed learning")
-        self._proposal(context, proposal_id)
+        require_can_edit(context, self._proposal(context, proposal_id))
         rule = self.rules.set_status(context.practice_id, proposal_id, "rejected", actor=context.actor,
                                      event_type=event, metadata={"reason": (reason or "")[:500] or None})
         return self.view(rule)

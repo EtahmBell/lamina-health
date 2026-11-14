@@ -70,7 +70,24 @@ def content_from_input(update: PracticeRuleInput) -> PracticeRuleContent:
         aliases=_clean_aliases(update.referral_type, update.aliases),
         modality=update.modality,
         modality_notes=update.note.strip() if update.note else None,
+        scope_policy=update.scope_policy,
+        preferences=_clean_list(update.preferences),
+        exceptions=_clean_list(update.exceptions),
+        judgment=_clean_list(update.judgment),
+        make_optional=_clean_list(update.make_optional),
+        answered_topics=sorted(set(_clean_list(update.answered_topics))),
     )
+
+
+def _clean_list(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    cleaned = []
+    for value in values:
+        value = " ".join(value.split())
+        if value and value.casefold() not in seen:
+            seen.add(value.casefold())
+            cleaned.append(value)
+    return cleaned
 
 
 def _clean_aliases(referral_type: str, aliases: list[str]) -> list[str]:
@@ -111,7 +128,17 @@ def _row_to_rule(row: dict[str, Any]) -> PracticeRule:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         confirmed_at=row["confirmed_at"],
+        layer=row.get("layer") or "practice",
+        owner_scope_id=row.get("owner_scope_id"),
     )
+
+
+def _layer_clause(owner_scope_id: str | None) -> tuple[str, tuple]:
+    """Practice-layer rows, plus ONE physician's own rows when their owner scope is given.
+    Another physician's layer is never included."""
+    if owner_scope_id:
+        return "AND (COALESCE(layer, 'practice') = 'practice' OR (layer = 'physician' AND owner_scope_id = ?))", (owner_scope_id,)
+    return "AND COALESCE(layer, 'practice') = 'practice'", ()
 
 
 class PracticeRules:
@@ -136,27 +163,33 @@ class PracticeRules:
             raise RuleNotFoundError(rule_id)
         return _row_to_rule(row)
 
-    def list(self, practice_id: str, *, include_history: bool = False) -> list[PracticeRule]:
+    def list(self, practice_id: str, *, include_history: bool = False, owner_scope_id: str | None = None) -> list[PracticeRule]:
+        """Practice-layer rules (what publication and staff views read), plus the given
+        physician's own layer when `owner_scope_id` is passed."""
         clause = "" if include_history else "AND operational_status IN ('confirmed', 'inferred_active')"
+        layer, values = _layer_clause(owner_scope_id)
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM physician_referral_preferences WHERE practice_id = ? "
-                f"AND scope = 'practice' {clause} ORDER BY referral_type, version",
-                (practice_id,),
+                f"AND scope = 'practice' {clause} {layer} ORDER BY referral_type, version",
+                (practice_id, *values),
             ).fetchall()
         return [_row_to_rule(dict(row)) for row in rows]
 
-    def _operational_rows(self, practice_id: str) -> list[PracticeRule]:
+    def _operational_rows(self, practice_id: str, owner_scope_id: str | None = None) -> list[PracticeRule]:
+        layer, values = _layer_clause(owner_scope_id)
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM physician_referral_preferences WHERE practice_id = ? "
                 "AND scope = 'practice' AND operational_status IN ('confirmed', 'inferred_active') "
-                "ORDER BY created_at, id",
-                (practice_id,),
+                f"{layer} ORDER BY created_at, id",
+                (practice_id, *values),
             ).fetchall()
         return [_row_to_rule(dict(row)) for row in rows]
 
-    def resolve_type(self, practice_id: str, referral_type: str) -> tuple[list[PracticeRule], dict]:
+    def resolve_type(
+        self, practice_id: str, referral_type: str, owner_scope_id: str | None = None,
+    ) -> tuple[list[PracticeRule], dict]:
         """Deterministically map a submitted referral type onto ONE practice referral type.
 
         Order: exact (whitespace/case) → normalized (plural/punctuation, see vocabulary.py)
@@ -164,7 +197,7 @@ class PracticeRules:
         two different practice types match, NO rule is applied; the result lists the
         practice types that share words with the submission as suggestions for a human
         to confirm ("confirm_referral_type")."""
-        rules = self._operational_rows(practice_id)
+        rules = self._operational_rows(practice_id, owner_scope_id)
         submitted = " ".join(referral_type.split())
         by_type: dict[str, list[PracticeRule]] = {}
         for rule in rules:
@@ -195,13 +228,13 @@ class PracticeRules:
         )
         return [], {**info, "suggestions": suggestions}
 
-    def operational(self, practice_id: str, referral_type: str) -> list[PracticeRule]:
+    def operational(self, practice_id: str, referral_type: str, owner_scope_id: str | None = None) -> list[PracticeRule]:
         """Exactly the rules triage may act on (confirmed or inferred-active) for an
         unambiguous exact / normalized / alias match of the referral type, else none."""
-        return self.resolve_type(practice_id, referral_type)[0]
+        return self.resolve_type(practice_id, referral_type, owner_scope_id)[0]
 
-    def referral_types(self, practice_id: str) -> list[str]:
-        return sorted({rule.referral_type for rule in self.list(practice_id)})
+    def referral_types(self, practice_id: str, owner_scope_id: str | None = None) -> list[str]:
+        return sorted({rule.referral_type for rule in self.list(practice_id, owner_scope_id=owner_scope_id)})
 
     def create(
         self,
@@ -218,8 +251,13 @@ class PracticeRules:
         source_text: str | None = None,
         event_type: str | None = None,
         content: PracticeRuleContent | None = None,
+        owner_scope_id: str | None = None,
     ) -> PracticeRule:
         content = content or content_from_input(update)
+        layer = supersedes.layer if supersedes is not None else update.layer
+        layer_owner = (supersedes.owner_scope_id if supersedes is not None else owner_scope_id) if layer == "physician" else None
+        if layer == "physician" and not layer_owner:
+            raise RuleConflictError("A physician-level statement needs its physician")
         if operational_status in OPERATIONAL:
             self._check_type_collisions(practice_id, update.referral_type, content.aliases, supersedes)
         now = now_iso()
@@ -242,8 +280,8 @@ class PracticeRules:
                 "case_family, source_text, structured_rules_json, status, source, supersedes_id, "
                 "representation_snapshot_id_at_confirmation, created_at, updated_at, confirmed_at, "
                 "referral_type, scope, practice_id, confidence, operational_status, "
-                "physician_confirmed, provenance_json, publishable, version) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'practice', ?, ?, ?, ?, ?, ?, ?)",
+                "physician_confirmed, provenance_json, publishable, version, layer, owner_scope_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'practice', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     rule_id, practice_workspace_key(practice_id), physician_id,
                     update.referral_type.strip(), source_text or _source_text(update),
@@ -253,7 +291,8 @@ class PracticeRules:
                     update.referral_type.strip(), practice_id, confidence, operational_status,
                     1 if confirmed else 0,
                     json.dumps({**(provenance or {}), "actor": actor}, sort_keys=True),
-                    1 if update.publishable else 0, version,
+                    # Physician-level statements are private to that physician: never publishable.
+                    1 if (update.publishable and layer == "practice") else 0, version, layer, layer_owner,
                 ),
             )
             self.store.append_event(
@@ -264,7 +303,7 @@ class PracticeRules:
                 metadata={
                     "rule_id": rule_id, "version": version, "referral_type": update.referral_type,
                     "supersedes_id": supersedes.id if supersedes else None,
-                    "operational_status": operational_status,
+                    "operational_status": operational_status, "layer": layer,
                 },
                 db=db,
             )
@@ -346,8 +385,11 @@ class PracticeRules:
 
     def set_publishable(self, practice_id: str, rule_id: str, publishable: bool, *, actor: str) -> PracticeRule:
         with self._connect() as db:
-            if not self._row(db, practice_id, rule_id):
+            row = self._row(db, practice_id, rule_id)
+            if not row:
                 raise RuleNotFoundError(rule_id)  # another practice's rule is indistinguishable from none
+            if (row.get("layer") or "practice") != "practice":
+                raise RuleConflictError("Physician-level statements are private and can’t be published")
             changed = db.execute(
                 "UPDATE physician_referral_preferences SET publishable = ?, updated_at = ? WHERE id = ? "
                 "AND practice_id = ? AND scope = 'practice' AND operational_status IN ('confirmed', 'inferred_active')",
@@ -361,18 +403,28 @@ class PracticeRules:
             )
         return self.get(practice_id, rule_id)
 
-    def proposals(self, practice_id: str) -> list[PracticeRule]:
+    def proposals(self, practice_id: str, owner_scope_id: str | None = None) -> list[PracticeRule]:
+        layer, values = _layer_clause(owner_scope_id)
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM physician_referral_preferences WHERE practice_id = ? AND scope = 'practice' "
-                "AND operational_status = 'inferred' ORDER BY created_at DESC",
+                f"AND operational_status = 'inferred' {layer} ORDER BY created_at DESC",
+                (practice_id, *values),
+            ).fetchall()
+        return [_row_to_rule(dict(row)) for row in rows]
+
+    def _all_rows(self, practice_id: str) -> list[PracticeRule]:
+        """Every row of this practice in both layers (history lookups only)."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM physician_referral_preferences WHERE practice_id = ? AND scope = 'practice'",
                 (practice_id,),
             ).fetchall()
         return [_row_to_rule(dict(row)) for row in rows]
 
     def history(self, practice_id: str, rule_id: str) -> list[PracticeRule]:
         """Full lineage: walk supersedes_id backwards and successors forwards."""
-        all_rules = {rule.id: rule for rule in self.list(practice_id, include_history=True)}
+        all_rules = {rule.id: rule for rule in self._all_rows(practice_id)}
         if rule_id not in all_rules:
             raise RuleNotFoundError(rule_id)
         lineage = [all_rules[rule_id]]
@@ -394,6 +446,7 @@ def rules_snapshot(rules: list[PracticeRule]) -> tuple[str, dict]:
             "operational_status": rule.operational_status,
             "physician_confirmed": rule.physician_confirmed,
             "content": rule.content.model_dump(mode="json"),
+            "layer": rule.layer,
         }
         for rule in sorted(rules, key=lambda item: (item.id, item.version))
     ]

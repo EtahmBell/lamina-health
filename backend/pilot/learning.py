@@ -7,6 +7,8 @@ Detected patterns (deliberately few, each maps cleanly onto a rule field):
   referral type at least twice → propose that default modality.
 * required item: the team requested the same extra item (not flagged by triage) for
   the same referral type at least twice → propose it as a required item.
+* optional item (Step 17): the physician ACCEPTED at least three referrals of a type while
+  the same required item was still missing → ask whether it should be optional.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from .teaching import TeachingService
 from .triage import _tokens
 
 REPEAT_THRESHOLD = 2
+ACCEPTED_WITHOUT_THRESHOLD = 3
 QUESTION_INTERVAL = timedelta(hours=24)
 MODALITY_WORDS = {"econsult": "eConsult", "in_person": "an in-person visit", "either": "either modality"}
 
@@ -67,8 +70,30 @@ class LearningService:
                 "kind": "required", "referral_type": hits[0][0], "value": hits[0][1],
                 "evidence": [{"referral_id": hit[2]} for hit in hits],
             }
+        groups.update(self._accepted_without(practice_id, types))
         return [{**group, "signature": signature} for signature, group in groups.items()
-                if len({item["referral_id"] for item in group["evidence"]}) >= REPEAT_THRESHOLD]
+                if len({item["referral_id"] for item in group["evidence"]})
+                >= (ACCEPTED_WITHOUT_THRESHOLD if group["kind"] == "optional" else REPEAT_THRESHOLD)]
+
+    def _accepted_without(self, practice_id: str, types: dict[str, str]) -> dict[str, dict]:
+        """Accepted referrals whose recommendation still listed a required item as missing."""
+        groups: dict[str, dict] = {}
+        for event in self.store.events(practice_id=practice_id, event_type="referral_accepted"):
+            referral = self.store.referral_row(practice_id, event["referral_id"] or "")
+            if not referral or not referral["current_recommendation_id"]:
+                continue
+            row = self.store.recommendation_row(practice_id, referral["current_recommendation_id"])
+            if not row:
+                continue
+            recommendation = json.loads(row["recommendation_json"])
+            for item in recommendation.get("requirements", []):
+                if item.get("required") and item.get("state") != "satisfied":
+                    signature = f"optional:{normalize_referral_type(types[referral['id']])}:{item['key']}"
+                    group = groups.setdefault(signature, {"kind": "optional", "referral_type": types[referral["id"]],
+                                                          "value": item["key"], "label": item["label"], "evidence": []})
+                    if referral["id"] not in {entry["referral_id"] for entry in group["evidence"]}:
+                        group["evidence"].append({"referral_id": referral["id"]})
+        return groups
 
     def _already_true(self, practice_id: str, pattern: dict) -> bool:
         for rule in self.rules.operational(practice_id, pattern["referral_type"]):
@@ -78,6 +103,10 @@ class LearningService:
                 _tokens(item.label) == _tokens(pattern["value"]) for item in rule.content.required
             ):
                 return True
+        if pattern["kind"] == "optional":
+            # Already optional (or no longer required) for this type: nothing to ask.
+            return not any(item.key == pattern["value"] for rule in self.rules.operational(practice_id, pattern["referral_type"])
+                           for item in rule.content.required)
         return False
 
     def detect(self, context: PracticeContext) -> list[dict]:
@@ -96,6 +125,13 @@ class LearningService:
                 question = (f"You’ve changed {pattern['referral_type']} referrals to {MODALITY_WORDS[pattern['value']]} "
                             f"{count} times. Should I treat {MODALITY_WORDS[pattern['value']]} as your default for this type?")
                 text = f"Default modality for {pattern['referral_type']}: {pattern['value']} (from {count} corrections)"
+            elif pattern["kind"] == "optional":
+                content = {"good_fit": [], "outside_scope": [], "required": [], "helpful": [], "urgent_signals": [],
+                           "modality": "unspecified", "note": None, "make_optional": [pattern["value"]],
+                           "answered_topics": ["requirements"]}
+                question = (f"You accepted {count} {pattern['referral_type']} referrals without "
+                            f"“{pattern['label']}”. Should it be optional (helpful, not required) for this type?")
+                text = f"Make {pattern['label']} optional for {pattern['referral_type']} (from {count} acceptances)"
             else:
                 label = pattern["value"][:1].upper() + pattern["value"][1:]
                 key = "_".join(sorted(_tokens(label)))[:80]

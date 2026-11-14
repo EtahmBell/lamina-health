@@ -1,4 +1,4 @@
-import type { Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, PilotStatus, PracticeRule, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement } from './pilotApi.ts'
+import type { Lifecycle, RepresentationItem, RepresentationType, ScopeChoice, SetupStageId, SetupStageStatus, StatementKind, Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, PilotStatus, PracticeRule, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement } from './pilotApi.ts'
 
 /** Pure presentation + routing helpers for the real practice pilot. Everything here is
  * a projection of backend state; nothing is persisted client-side. */
@@ -18,6 +18,8 @@ export const pilotPaths = {
   practice: '/me/practice',
   rules: '/me/rules',
   agent: '/me/agent',
+  /** Guided initialization (Step 17): stages A–E, resumable. */
+  setup: (stage?: string) => (stage ? `/me/setup?stage=${encodeURIComponent(stage)}` : '/me/setup'),
   agentTab: (tab: AgentTab) => (tab === 'overview' ? '/me/agent' : tab === 'rules' ? '/me/rules' : `/me/agent?tab=${tab}`),
   publicProfile: '/me/public',
   metrics: '/me/metrics',
@@ -29,7 +31,7 @@ export const pilotPaths = {
 export type PilotRoute =
   | { kind: 'home' } | { kind: 'for_you' } | { kind: 'onboarding' } | { kind: 'join' }
   | { kind: 'patients' } | { kind: 'network' } | { kind: 'new_referral' } | { kind: 'referral'; id: string }
-  | { kind: 'practice' } | { kind: 'rules' } | { kind: 'agent' } | { kind: 'public_settings' } | { kind: 'metrics' }
+  | { kind: 'practice' } | { kind: 'rules' } | { kind: 'agent' } | { kind: 'public_settings' } | { kind: 'metrics' } | { kind: 'setup' }
   | { kind: 'public_profile'; slug: string } | { kind: 'public_refer'; slug: string } | { kind: 'sender'; token: string }
   | { kind: 'auth'; page: 'sign-in' | 'sign-up' }
   | { kind: 'redirect'; to: string }
@@ -51,6 +53,7 @@ export function resolvePilotRoute(path: string): PilotRoute {
   if (clean === '/me/practice') return { kind: 'practice' }
   if (clean === '/me/rules') return { kind: 'rules' }
   if (clean === '/me/agent') return { kind: 'agent' }
+  if (clean === '/me/setup') return { kind: 'setup' }
   if (clean === '/me/public') return { kind: 'public_settings' }
   if (clean === '/me/metrics') return { kind: 'metrics' }
   const publicSlug = clean.match(/^\/p\/([a-z0-9-]{3,60})$/)?.[1]
@@ -187,8 +190,17 @@ export function referralPayload(form: ReferralForm, hasFile: boolean): NewReferr
 export const slugKey = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 80) || 'item'
 export const splitLines = (text: string) => text.split('\n').map((line) => line.trim()).filter(Boolean)
 
-export type RuleForm = { referralType: string; aliases: string; goodFit: string; outsideScope: string; required: string; helpful: string; urgent: string; modality: Modality; note: string }
-export const emptyRuleForm = (): RuleForm => ({ referralType: '', aliases: '', goodFit: '', outsideScope: '', required: '', helpful: '', urgent: '', modality: 'unspecified', note: '' })
+export type RuleForm = {
+  referralType: string; aliases: string; goodFit: string; outsideScope: string; required: string; helpful: string; urgent: string
+  modality: Modality; note: string
+  /** Step 17 kinds. Carried through edits so editing never drops a statement. */
+  scopePolicy: '' | 'accept' | 'out_of_scope' | 'case_by_case'; preferences: string; exceptions: string; judgment: string
+  makeOptional: string[]; answeredTopics: string[]
+}
+export const emptyRuleForm = (): RuleForm => ({
+  referralType: '', aliases: '', goodFit: '', outsideScope: '', required: '', helpful: '', urgent: '', modality: 'unspecified', note: '',
+  scopePolicy: '', preferences: '', exceptions: '', judgment: '', makeOptional: [], answeredTopics: [],
+})
 
 /** "Recent HbA1c | 180" → { label: 'Recent HbA1c', freshness_days: 180 }. */
 export function parseRequirementLines(text: string, required: boolean): RuleRequirement[] {
@@ -211,10 +223,16 @@ export function ruleInput(form: RuleForm): PracticeRuleInput {
     modality: form.modality,
     note: form.note.trim() || null,
     publishable: false,
+    scope_policy: form.scopePolicy || null,
+    preferences: splitLines(form.preferences ?? ''),
+    exceptions: splitLines(form.exceptions ?? ''),
+    judgment: splitLines(form.judgment ?? ''),
+    make_optional: form.makeOptional ?? [],
+    answered_topics: form.answeredTopics ?? [],
   }
 }
 
-export function ruleFormFrom(rule: { referral_type: string; content: { good_fit: string[]; redirect: string[]; required: RuleRequirement[]; helpful: RuleRequirement[]; urgent_signals: string[]; modality: Modality; modality_notes: string | null; aliases?: string[] } }): RuleForm {
+export function ruleFormFrom(rule: { referral_type: string; content: { good_fit: string[]; redirect: string[]; required: RuleRequirement[]; helpful: RuleRequirement[]; urgent_signals: string[]; modality: Modality; modality_notes: string | null; aliases?: string[]; scope_policy?: 'accept' | 'out_of_scope' | 'case_by_case' | null; preferences?: string[]; exceptions?: string[]; judgment?: string[]; make_optional?: string[]; answered_topics?: string[] } }): RuleForm {
   const lines = (items: RuleRequirement[]) => items.map((item) => item.freshness_days ? `${item.label} | ${item.freshness_days}` : item.label).join('\n')
   return {
     referralType: rule.referral_type,
@@ -226,6 +244,12 @@ export function ruleFormFrom(rule: { referral_type: string; content: { good_fit:
     urgent: rule.content.urgent_signals.join('\n'),
     modality: rule.content.modality,
     note: rule.content.modality_notes ?? '',
+    scopePolicy: rule.content.scope_policy ?? '',
+    preferences: (rule.content.preferences ?? []).join('\n'),
+    exceptions: (rule.content.exceptions ?? []).join('\n'),
+    judgment: (rule.content.judgment ?? []).join('\n'),
+    makeOptional: rule.content.make_optional ?? [],
+    answeredTopics: rule.content.answered_topics ?? [],
   }
 }
 
@@ -365,14 +389,21 @@ export function historyLabel(eventType: string): string {
 }
 
 /** What the agent understood from a teaching instruction, as plain lines. */
-export function proposalLines(content: Pick<PracticeRule['content'], 'required' | 'helpful' | 'good_fit' | 'redirect' | 'urgent_signals' | 'modality' | 'modality_notes'>): string[] {
+export function proposalLines(content: Pick<PracticeRule['content'], 'required' | 'helpful' | 'good_fit' | 'redirect' | 'urgent_signals' | 'modality' | 'modality_notes'> & Partial<Pick<PracticeRule['content'], 'scope_policy' | 'aliases' | 'preferences' | 'exceptions' | 'judgment' | 'make_optional'>>): string[] {
   const lines: string[] = []
+  // Every statement kind is shown — a proposal with only a scope answer must never look empty.
+  if (content.scope_policy) lines.push(`Scope: ${{ accept: 'you see these referrals', out_of_scope: 'out of scope', case_by_case: 'you decide these case by case' }[content.scope_policy]}`)
+  if (content.aliases?.length) lines.push(`Also called: ${content.aliases.join(', ')}`)
+  if (content.make_optional?.length) lines.push(`Make optional (helpful, not required): ${content.make_optional.map((key) => key.replace(/_/g, ' ')).join(', ')}`)
   if (content.required.length) lines.push(`Require before review: ${content.required.map((item) => item.freshness_days ? `${item.label} (within ${item.freshness_days} days)` : item.label).join(', ')}`)
   if (content.helpful.length) lines.push(`Helpful: ${content.helpful.map((item) => item.label).join(', ')}`)
   if (content.good_fit.length) lines.push(`Good fit: ${content.good_fit.join('; ')}`)
   if (content.redirect.length) lines.push(`Outside your scope: ${content.redirect.join('; ')}`)
   if (content.urgent_signals.length) lines.push(`Treat as urgent: ${content.urgent_signals.join('; ')}`)
   if (content.modality !== 'unspecified') lines.push(`Default modality: ${MODALITY_LABELS[content.modality]}${content.modality_notes ? ` — ${content.modality_notes}` : ''}`)
+  if (content.preferences?.length) lines.push(`Preference (suggested only): ${content.preferences.join('; ')}`)
+  if (content.judgment?.length) lines.push(`You decide: ${content.judgment.join('; ')}`)
+  if (content.exceptions?.length) lines.push(`Exception, kept as a note (not applied): ${content.exceptions.join('; ')}`)
   return lines
 }
 
@@ -515,4 +546,85 @@ export function dockMessagesFrom(messages: Array<{ id: string; role: 'user' | 'a
   return messages.map((message) => message.role === 'user'
     ? { id: message.id, role: 'physician' as const, text: message.text }
     : { id: message.id, role: 'agent' as const, reply: message.reply ?? { paragraphs: [message.text] } })
+}
+
+/* ---------------------------------------------------- representation (Step 17) */
+
+/** How each kind of statement is named everywhere. Only requirements and scope drive triage. */
+export const STATEMENT_KIND_LABELS: Record<StatementKind, string> = {
+  hard_requirement: 'Requirement', scope_policy: 'Scope', soft_preference: 'Preference',
+  exception: 'Exception — kept as a note', physician_judgment: 'Your judgment', unknown: 'Unknown',
+}
+export const STATEMENT_KIND_EFFECT: Record<StatementKind, string> = {
+  hard_requirement: 'Decides whether a referral is complete',
+  scope_policy: 'Decides practice fit',
+  soft_preference: 'Suggested only — never blocks a referral',
+  exception: 'Not applied automatically',
+  physician_judgment: 'Always comes to you',
+  unknown: 'Not answered yet',
+}
+/** The label for one representation item (urgency signals get their own). */
+export const itemKindLabel = (item: { kind: StatementKind; subkind?: string }) =>
+  item.subkind === 'urgency' ? 'Urgency' : STATEMENT_KIND_LABELS[item.kind]
+export const itemKindEffect = (item: { kind: StatementKind; subkind?: string }) =>
+  item.subkind === 'urgency' ? 'Raises priority' : STATEMENT_KIND_EFFECT[item.kind]
+export const SCOPE_CHOICE_LABELS: Record<ScopeChoice, string> = {
+  accept: 'I see these', out_of_scope: 'Out of scope', case_by_case: 'I decide case by case', unknown: 'Unknown',
+}
+export const TOPIC_LABELS: Record<'scope' | 'requirements' | 'urgency' | 'modality', string> = {
+  scope: 'Whether you see these', requirements: 'What you need before review',
+  urgency: 'What makes one urgent', modality: 'Preferred visit type',
+}
+export const HANDLED_BY_LABELS = { physician: 'Me', staff: 'My staff', agent_prepares: 'Agent prepares it for review' } as const
+export const AUTONOMY_LABELS = {
+  off: 'Off', observe: 'Observe only', prepare_drafts: 'Prepare drafts for review', ask_before_acting: 'Ask me before acting',
+} as const
+export const SETUP_STAGES: SetupStageId[] = ['identity', 'scope', 'requirements', 'delegation', 'review']
+export const resolveSetupStage = (value: string | null | undefined, fallback: SetupStageId = 'identity'): SetupStageId =>
+  value && (SETUP_STAGES as readonly string[]).includes(value) ? (value as SetupStageId) : fallback
+export const STAGE_STATUS_LABELS: Record<SetupStageStatus, string> = {
+  not_started: 'Not started', in_progress: 'In progress', done: 'Done', skipped: 'Skipped — finish later',
+}
+
+/** "Setup: 3 of 5 stages · about 4 min left" — progress by stage, never a score. */
+export function setupProgressLine(lifecycle: Pick<Lifecycle, 'stages' | 'minutes_remaining'>): string {
+  // Skipped is not done: say both, so a skipped stage never reads as finished.
+  const done = lifecycle.stages.filter((stage) => stage.status === 'done').length
+  const skipped = lifecycle.stages.filter((stage) => stage.status === 'skipped').length
+  const left = lifecycle.minutes_remaining
+  return `${done} of ${lifecycle.stages.length} stages done${skipped ? ` · ${skipped} skipped` : ''}${left > 0 ? ` · about ${left} min left` : ''}`
+}
+
+/** Representation items grouped for display: confirmed first, then proposed, each with its kind. */
+export function representationGroups(type: RepresentationType): { confirmed: RepresentationItem[]; proposed: RepresentationItem[] } {
+  return {
+    confirmed: type.items.filter((item) => item.status === 'confirmed'),
+    proposed: type.items.filter((item) => item.status === 'proposed'),
+  }
+}
+
+/** "Your agent currently represents your practice as …" from the CONFIRMED representation only. */
+export function representationPortrait(practice: { name: string; specialty: string | null } | null, representation: { types: RepresentationType[] }): string {
+  const who = practice?.specialty ? `${practice.specialty} practice` : 'Your practice'
+  const confirmed = representation.types.filter((type) => type.items.some((item) => item.status === 'confirmed'))
+  if (!confirmed.length) return `${who}. Nothing is confirmed yet, so your agent can record referrals but can’t judge fit or completeness.`
+  const by = (policy: string | null) => confirmed.filter((type) => (type.scope_policy ?? 'accept') === policy).map((type) => type.referral_type)
+  const parts = [
+    by('accept').length ? `sees ${by('accept').join(', ')}` : '',
+    by('case_by_case').length ? `decides ${by('case_by_case').join(', ')} case by case` : '',
+    by('out_of_scope').length ? `doesn’t see ${by('out_of_scope').join(', ')}` : '',
+  ].filter(Boolean)
+  return `${who} — ${parts.join('; ')}.`
+}
+
+/** A statements_used `item` as a readable phrase ("accept" → "You see these referrals"). */
+export function statementText(item: string): string {
+  const fixed: Record<string, string> = {
+    accept: 'You see these referrals', out_of_scope: 'Out of scope', case_by_case: 'You decide these case by case',
+  }
+  if (fixed[item]) return fixed[item]
+  if (item.startsWith('fit: ')) return `Good fit: ${item.slice(5)}`
+  if (item.startsWith('outside: ')) return `Not seen: ${item.slice(9)}`
+  if (item.startsWith('modality:')) return `Prefers ${item.slice(9).replace('_', '-')}`
+  return item.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
 }

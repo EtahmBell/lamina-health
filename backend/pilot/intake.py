@@ -122,6 +122,7 @@ class IntakeService:
         self.after_triage: list[Any] = []
         self.after_decision: list[Any] = []
         self.request_projection: Any = None
+        self.representation: Any = None  # RepresentationService, wired by PilotServices
         self.detail_extensions: list[Any] = []
 
     @property
@@ -419,11 +420,19 @@ class IntakeService:
         referral = self._referral(row)
         if referral.status in TERMINAL_STATUSES:
             raise PilotError("referral_closed", "This referral is closed")
-        rules, type_match = self.rules.resolve_type(context.practice_id, referral.referral_type)
+        # Step 17: the practice layer plus this referral's physician's own layer, and the exact
+        # representation version used (recorded if it changed since the last one).
+        owner = self.representation.referral_physician(context.practice_id) if self.representation else None
+        rules, type_match = self.rules.resolve_type(context.practice_id, referral.referral_type, owner)
         recommendation, snapshot = triage_referral(
             referral, rules, self._documents_text(context.practice_id, referral_id),
             today=self._today, extractor=self._resolved_extractor(), type_match=type_match,
+            allow_loosening=bool(context.practice.get("allow_physician_loosening")),
         )
+        version = self.representation.record_version(
+            context.practice_id, owner, actor="agent:triage", reason="triage") if self.representation else None
+        if version:
+            recommendation = recommendation.model_copy(update={"representation_version_id": version["id"]})
         target = referral.status
         if referral.status == S.RECEIVED:
             target = S.TRIAGED
@@ -489,6 +498,7 @@ class IntakeService:
                 "payload": recommendation.model_dump(mode="json"), "generator": recommendation.generator,
                 "model_id": recommendation.model_id, "rules_snapshot_id": recommendation.rules_snapshot_id,
                 "rules_snapshot": snapshot, "created_at": recommendation.created_at,
+                "representation_version_id": recommendation.representation_version_id,
             },
         )
         for hook in self.after_triage:
@@ -786,4 +796,7 @@ class IntakeService:
                 },
             }],
         )
+        # Final decisions are evidence for learning too (e.g. "accepted without X").
+        for hook in self.after_decision:
+            hook(context, referral_id)
         return self.detail(context, referral_id)

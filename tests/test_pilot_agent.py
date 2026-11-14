@@ -174,8 +174,10 @@ def test_cancelled_request_revokes_its_link_and_staff_can_approve(pilot: Pilot) 
 def test_home_shows_needs_waiting_prepared_and_done_from_real_state_only(pilot: Pilot) -> None:
     pilot.ready_physician()
     empty = pilot.get("/api/me/practice/home", "user-a").json()
-    assert empty["needs_you"] == [] and empty["waiting"] == [] and empty["prepared"] == []
-    assert empty["briefing"]["lead"] == "Nothing needs you right now."
+    # Step 17: a brand-new physician's only "need" is finishing agent setup.
+    assert [item["kind"] for item in empty["needs_you"]] == ["setup"]
+    assert empty["waiting"] == [] and empty["prepared"] == []
+    assert "your agent’s setup isn’t finished" in empty["briefing"]["detail"].lower()
     pilot.add_rule()
     unsure = pilot.referral(reason="Please see")["referral"]["id"]  # possible fit → uncertainty
     waiting_id = pilot.referral()["referral"]["id"]
@@ -211,7 +213,11 @@ def test_deterministic_interpreter_never_invents_structure() -> None:
     assert a1c["referral_type"] == "Diabetes management"
     assert [item["label"] for item in a1c["content"]["required"]] == ["Recent A1c"]
     econsult = deterministic_interpret("I prefer eConsult first for stable thyroid medication questions.", known)
-    assert econsult["referral_type"] == "Thyroid" and econsult["content"]["modality"] == "econsult"
+    # Step 17: a CONDITIONAL preference stays a preference; it doesn't become the type's default.
+    assert econsult["referral_type"] == "Thyroid" and econsult["content"]["modality"] == "unspecified"
+    assert econsult["content"]["preferences"] == ["eConsult first for stable thyroid medication questions"]
+    whole_type = deterministic_interpret("I prefer eConsult for thyroid referrals.", known)
+    assert whole_type["content"]["modality"] == "econsult"
     pump = deterministic_interpret("I don't usually see insulin pump management.", known)
     assert pump["content"]["outside_scope"] == ["insulin pump management"]
     assert pump["referral_type"] is None and pump["clarification"]["options"] == known
@@ -493,7 +499,7 @@ def test_new_surfaces_are_practice_isolated(pilot: Pilot) -> None:
     assert pilot.post(f"/api/me/practice/information-requests/{draft['id']}/send", "user-b", {"mode": "mark_sent"}).status_code == 404
     assert pilot.post(f"/api/me/practice/teach/{proposal['id']}/confirm", "user-b", {}).status_code == 404
     assert pilot.get("/api/me/practice/teach", "user-b").json()["proposals"] == []
-    assert pilot.get("/api/me/practice/home", "user-b").json()["needs_you"] == []
+    assert [n for n in pilot.get("/api/me/practice/home", "user-b").json()["needs_you"] if n["kind"] != "setup"] == []
 
 
 def test_publishable_toggle_on_another_practices_rule_is_not_found(pilot: Pilot) -> None:

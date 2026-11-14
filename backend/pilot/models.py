@@ -238,6 +238,12 @@ class TriageRecommendation(_Strict):
     rules_snapshot_id: str
     # How the submitted referral type was matched to a practice rule type (see rules.resolve_type).
     type_match: dict | None = None
+    # Step 17: exactly which representation statements this recommendation relied on
+    # ({kind, rule_id, version, layer, item}), any layer conflicts, and the representation
+    # version id. Absent on recommendations made before Step 17.
+    statements_used: list[dict] = Field(default_factory=list)
+    conflicts: list[dict] = Field(default_factory=list)
+    representation_version_id: str | None = None
     created_at: str
 
 
@@ -306,6 +312,14 @@ class DispositionInput(_Strict):
 # ------------------------------------------------------------------------ rules
 
 
+ScopePolicy = Literal["accept", "out_of_scope", "case_by_case"]
+# The representation's statement kinds (Step 17). Only hard requirements and scope policies
+# drive deterministic triage; the others inform conversation and explanations.
+STATEMENT_KINDS = ("hard_requirement", "scope_policy", "soft_preference", "exception", "physician_judgment", "unknown")
+# Topics a physician can answer for an accepted type; an unanswered topic is "unknown".
+REPRESENTATION_TOPICS = ("scope", "requirements", "urgency", "modality")
+
+
 class PracticeRuleContent(StructuredReferralPreference):
     """Practice rule content: the existing structured preference shape plus
     explicit urgency signals. Stored in physician_referral_preferences."""
@@ -314,6 +328,16 @@ class PracticeRuleContent(StructuredReferralPreference):
     # Physician-controlled alternative names for this referral type ("Thyroid nodules",
     # "Thyroid mass"). Matching is exact after deterministic normalization only.
     aliases: list[str] = Field(default_factory=list)
+    # Step 17 representation fields. All optional: rows written earlier load unchanged
+    # (scope_policy None on a confirmed legacy rule is read as "accept").
+    scope_policy: ScopePolicy | None = None
+    preferences: list[str] = Field(default_factory=list)
+    exceptions: list[str] = Field(default_factory=list)
+    judgment: list[str] = Field(default_factory=list)
+    # A proposal that turns these required item keys into helpful ones (learning / loosening).
+    make_optional: list[str] = Field(default_factory=list)
+    # Topics the physician explicitly answered, even with "nothing" (so it isn't "unknown").
+    answered_topics: list[str] = Field(default_factory=list)
 
 
 OperationalStatus = Literal["inferred", "inferred_active", "confirmed", "superseded", "rejected"]
@@ -327,6 +351,14 @@ class PracticeRuleInput(_Strict):
     helpful: list[ReferralRequirement] = Field(default_factory=list, max_length=30)
     urgent_signals: list[str] = Field(default_factory=list, max_length=30)
     aliases: list[str] = Field(default_factory=list, max_length=20)
+    scope_policy: ScopePolicy | None = None
+    preferences: list[str] = Field(default_factory=list, max_length=30)
+    exceptions: list[str] = Field(default_factory=list, max_length=30)
+    judgment: list[str] = Field(default_factory=list, max_length=30)
+    make_optional: list[str] = Field(default_factory=list, max_length=30)
+    answered_topics: list[str] = Field(default_factory=list, max_length=10)
+    # Which layer this rule belongs to: the whole practice, or only the signed-in physician.
+    layer: Literal["practice", "physician"] = "practice"
     modality: Literal["in_person", "econsult", "either", "unspecified"] = "unspecified"
     note: str | None = Field(default=None, max_length=2000)
     publishable: bool = False
@@ -350,3 +382,6 @@ class PracticeRule(_Strict):
     created_at: str
     updated_at: str
     confirmed_at: str | None = None
+    # "practice" (scope='practice') or "physician" (scope='physician', owner_scope_id set).
+    layer: Literal["practice", "physician"] = "practice"
+    owner_scope_id: str | None = None

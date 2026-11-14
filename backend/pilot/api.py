@@ -39,9 +39,10 @@ from .models import (
 )
 from .practice import PilotError, PracticeContext, PracticeService
 from .publication import PublicationService
+from .representation import RepresentationService
 from .rules import PracticeRules, RuleConflictError, RuleNotFoundError
 from .store import PilotStore, pilot_store_for
-from .teaching import TeachingService
+from .teaching import TeachingService, is_practice_admin, require_can_edit
 
 router = APIRouter(prefix="/api/me/practice", tags=["pilot-practice"])
 internal_router = APIRouter(prefix="/api/internal/pilot-metrics", tags=["pilot-admin"])
@@ -61,6 +62,7 @@ class PilotServices:
     publication: PublicationService
     home: HomeService
     assistant: AssistantService
+    representation: RepresentationService
 
     @classmethod
     def build(
@@ -74,8 +76,10 @@ class PilotServices:
         teaching = TeachingService(rules, teaching_client)
         learning = LearningService(store, rules, teaching)
         publication = PublicationService(store, rules)
-        home = HomeService(store, intake, missing, rules, learning)
-        assistant = AssistantService(store, intake, missing, rules, teaching, home, assistant_client)
+        representation = RepresentationService(store, rules, teaching)
+        intake.representation = representation
+        home = HomeService(store, intake, missing, rules, learning, representation)
+        assistant = AssistantService(store, intake, missing, rules, teaching, home, assistant_client, representation)
         # Wire the workflow: drafts go through the persistent request entity; every
         # re-triage reconciles open requests; human corrections feed pattern detection.
         intake.request_projection = missing
@@ -87,7 +91,7 @@ class PilotServices:
             "sender_responses": sender.responses(context.practice_id, referral_id),
         })
         return cls(store, PracticeService(store), rules, intake, missing, sender, teaching, learning,
-                   publication, home, assistant)
+                   publication, home, assistant, representation)
 
 
 _default: dict[str, PilotServices] = {}
@@ -203,9 +207,12 @@ def accept_invitation(update: TokenInput, user: RequiredUser, services: Services
 
 @router.get("/rules")
 def list_rules(context: Practice, services: Services, include_history: bool = False) -> list[dict]:
+    """Physicians see the practice layer plus their own physician-level statements; staff see
+    the practice-level rules relevant to their work (never a physician's private layer)."""
+    owner = context.owner_scope_id if context.role == "physician" else None
     return [
         rule.model_dump(mode="json")
-        for rule in services.rules.list(context.practice_id, include_history=include_history)
+        for rule in services.rules.list(context.practice_id, include_history=include_history, owner_scope_id=owner)
     ]
 
 
@@ -214,17 +221,31 @@ def _physician_key(context: PracticeContext, services: PilotServices) -> str:
     return (scope or {}).get("physician_id") or context.owner_scope_id or "practice"
 
 
+def _require_layer_editor(context: PracticeContext, layer: str) -> None:
+    context.require_physician("change practice rules")
+    if layer == "practice" and not is_practice_admin(context):
+        raise PilotError("practice_admin_required", "Only the practice admin can change practice-wide rules", 403)
+
+
+def _editable_rule(context: PracticeContext, services: PilotServices, rule_id: str):
+    rule = services.rules.get(context.practice_id, rule_id)
+    require_can_edit(context, rule)
+    return rule
+
+
 @router.post("/rules", status_code=201)
 def create_rule(update: PracticeRuleInput, context: Practice, services: Services) -> dict:
-    _run(lambda: context.require_physician("change practice rules"))
+    _run(lambda: _require_layer_editor(context, update.layer))
     return _run(lambda: services.rules.create(
-        context.practice_id, _physician_key(context, services), update, actor=context.actor
+        context.practice_id, _physician_key(context, services), update, actor=context.actor,
+        owner_scope_id=context.owner_scope_id,
     ).model_dump(mode="json"))
 
 
 @router.put("/rules/{rule_id}")
 def revise_rule(rule_id: str, update: PracticeRuleInput, context: Practice, services: Services) -> dict:
     _run(lambda: context.require_physician("change practice rules"))
+    _run(lambda: _editable_rule(context, services, rule_id))
     return _run(lambda: services.rules.revise(
         context.practice_id, rule_id, _physician_key(context, services), update, actor=context.actor
     ).model_dump(mode="json"))
@@ -233,6 +254,7 @@ def revise_rule(rule_id: str, update: PracticeRuleInput, context: Practice, serv
 @router.post("/rules/{rule_id}/retire")
 def retire_rule(rule_id: str, context: Practice, services: Services) -> dict:
     _run(lambda: context.require_physician("change practice rules"))
+    _run(lambda: _editable_rule(context, services, rule_id))
     return _run(lambda: services.rules.retire(
         context.practice_id, rule_id, actor=context.actor
     ).model_dump(mode="json"))
@@ -240,9 +262,13 @@ def retire_rule(rule_id: str, context: Practice, services: Services) -> dict:
 
 @router.get("/rules/{rule_id}/history")
 def rule_history(rule_id: str, context: Practice, services: Services) -> list[dict]:
-    return _run(lambda: [
-        rule.model_dump(mode="json") for rule in services.rules.history(context.practice_id, rule_id)
-    ])
+    def lineage() -> list[dict]:
+        rules = services.rules.history(context.practice_id, rule_id)
+        # Another physician's private layer is indistinguishable from "not found".
+        if any(rule.layer == "physician" and rule.owner_scope_id != context.owner_scope_id for rule in rules):
+            raise RuleNotFoundError(rule_id)
+        return [rule.model_dump(mode="json") for rule in rules]
+    return _run(lineage)
 
 
 # --------------------------------------------------------------- referrals
@@ -526,6 +552,139 @@ def answer_learning_question(
     question_id: str, update: AnswerInput, context: Practice, services: Services
 ) -> dict:
     return _run(lambda: services.learning.answer(context, question_id, update.answer, update.note, update.edits))
+
+
+# ---------------------------------------------------- representation (Step 17)
+
+
+class IdentityInput(_Strict):
+    specialty: str | None = Field(default=None, max_length=200)
+    subspecialty: str | None = Field(default=None, max_length=200)
+    locations: list[str] = Field(default_factory=list, max_length=10)
+    clinical_interests: list[str] = Field(default_factory=list, max_length=10)
+    sources: dict[str, str] = Field(default_factory=dict)
+
+
+class ScopeTypeInput(_Strict):
+    referral_type: str = Field(min_length=1, max_length=120)
+    aliases: list[str] = Field(default_factory=list, max_length=10)
+    policy: str = Field(pattern=r"^(accept|out_of_scope|case_by_case|unknown)$")
+
+
+class ScopeInput(_Strict):
+    types: list[ScopeTypeInput] = Field(default_factory=list, max_length=40)
+
+
+class SetupItemInput(_Strict):
+    label: str = Field(min_length=1, max_length=120)
+    freshness_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class RequirementsInput(_Strict):
+    referral_type: str = Field(min_length=1, max_length=120)
+    text: str | None = Field(default=None, max_length=2000)
+    required: list[SetupItemInput] = Field(default_factory=list, max_length=30)
+    helpful: list[SetupItemInput] = Field(default_factory=list, max_length=30)
+    urgent_signals: list[str] = Field(default_factory=list, max_length=20)
+    modality: str | None = Field(default=None, pattern=r"^(in_person|econsult|either|unspecified)$")
+    nothing_required: bool = False
+    no_urgency_signals: bool = False
+
+
+class DelegationAnswer(_Strict):
+    handled_by: str = Field(pattern=r"^(physician|staff|agent_prepares)$")
+    autonomy: str = Field(pattern=r"^(off|observe|prepare_drafts|ask_before_acting)$")
+
+
+class DelegationInput(_Strict):
+    answers: dict[str, DelegationAnswer] = Field(default_factory=dict)
+
+
+class PracticeSettingsInput(_Strict):
+    allow_physician_loosening: bool
+
+
+@router.get("/representation")
+def representation_view(context: Practice, services: Services) -> dict:
+    return _run(lambda: services.representation.view(context))
+
+
+@router.get("/representation/summary")
+def representation_summary(context: Practice, services: Services) -> dict:
+    """The single source for learned-this-week, pending-learning, and question counts."""
+    return _run(lambda: services.representation.learning_summary(context))
+
+
+@router.get("/representation/versions")
+def representation_versions(context: Practice, services: Services) -> list[dict]:
+    return _run(lambda: services.representation.versions(context))
+
+
+@router.get("/representation/linkage")
+def representation_linkage(context: Practice, services: Services) -> list[dict]:
+    return _run(lambda: services.representation.linkage(context))
+
+
+@router.get("/representation/setup")
+def setup_view(context: Practice, services: Services) -> dict:
+    return _run(lambda: services.representation.setup_view(context))
+
+
+@router.put("/representation/setup/identity")
+def setup_identity(update: IdentityInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.representation.save_identity(context, update.model_dump()))
+
+
+@router.post("/representation/setup/scope")
+def setup_scope(update: ScopeInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.representation.save_scope(context, [item.model_dump() for item in update.types]))
+
+
+@router.post("/representation/setup/requirements")
+def setup_requirements(update: RequirementsInput, context: Practice, services: Services) -> dict:
+    payload = update.model_dump(exclude={"referral_type"})
+    return _run(lambda: services.representation.save_requirements(context, update.referral_type, payload))
+
+
+@router.put("/representation/setup/delegation")
+def setup_delegation(update: DelegationInput, context: Practice, services: Services) -> dict:
+    answers = {task: answer.model_dump() for task, answer in update.answers.items()}
+    return _run(lambda: services.representation.save_delegation(context, answers))
+
+
+@router.post("/representation/setup/{stage}/finish")
+def setup_finish(stage: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.representation.finish_stage(context, stage))
+
+
+@router.post("/representation/setup/{stage}/skip")
+def setup_skip(stage: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.representation.skip_stage(context, stage))
+
+
+@router.post("/representation/confirm")
+def representation_confirm(context: Practice, services: Services) -> dict:
+    return _run(lambda: services.representation.confirm_representation(context))
+
+
+@router.post("/representation/proposals/{proposal_id}/leave-unknown")
+def representation_leave_unknown(proposal_id: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.representation.leave_unknown(context, proposal_id))
+
+
+@router.put("/representation/practice-settings")
+def representation_practice_settings(update: PracticeSettingsInput, context: Practice, services: Services) -> dict:
+    def apply() -> dict:
+        if not is_practice_admin(context):
+            raise PilotError("practice_admin_required", "Only the practice admin can change this", 403)
+        services.store.execute(
+            [("UPDATE practices SET allow_physician_loosening = ? WHERE id = ?",
+              (1 if update.allow_physician_loosening else 0, context.practice_id))],
+            [{"event_type": "practice_setting_changed", "actor": context.actor, "practice_id": context.practice_id,
+              "metadata": {"allow_physician_loosening": update.allow_physician_loosening}}],
+        )
+        return {"allow_physician_loosening": update.allow_physician_loosening}
+    return _run(apply)
 
 
 # ---------------------------------------------------------- public profile

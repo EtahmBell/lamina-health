@@ -364,9 +364,11 @@ def test_teaching_never_turns_negation_or_exceptions_into_rules() -> None:
     required, _, result = _req("For thyroid nodule referrals I need a TSH unless the patient is on levothyroxine.")
     assert required == [("TSH", None)]
     assert any("unless the patient is on levothyroxine" in note for note in result["review_notes"])
+    # Step 17: exceptions are their own reviewable statement kind (never applied automatically).
+    assert any("levothyroxine" in item for item in result["content"]["exceptions"])
     _, _, result = _req("I don't see thyroid nodules unless they are larger than 1 cm.")
     assert result["content"]["outside_scope"] == [], "an exception-qualified scope rule is not applied"
-    assert "larger than 1 cm" in result["content"]["note"]
+    assert any("larger than 1 cm" in item for item in result["content"]["exceptions"])
     _, _, result = _req("Thyroid nodule referrals with hyperthyroidism in pregnancy are outside our scope.")
     assert result["content"]["outside_scope"] == ["hyperthyroidism in pregnancy"]
     _, _, result = _req("For diabetes management referrals I need a recent A1c.")

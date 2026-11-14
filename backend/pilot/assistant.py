@@ -55,11 +55,20 @@ CREATE INDEX IF NOT EXISTS agent_messages_owner ON agent_messages(practice_id, u
 """
 
 INTENTS = (
-    "greeting", "conversation", "practice_question", "referral_query", "explain_recommendation", "summarize_history",
+    "greeting", "conversation", "practice_question", "setup", "referral_query", "explain_recommendation", "summarize_history",
     "teach", "prepare_referral", "prepare_information_request", "prepare_physician_review",
     "action_request", "unavailable", "clarify",
 )
 CLOSED = {"accepted", "redirected", "declined"}
+# How the assistant names each kind of statement it relies on. It never calls a proposed or
+# unknown item "confirmed".
+KIND_TEXT = {
+    "hard_requirement": "your confirmed requirement", "scope_policy": "your confirmed scope",
+    "soft_preference": "your stated preference", "exception": "an exception you noted (not applied automatically)",
+    "physician_judgment": "you decide this case by case", "unknown": "I don’t know yet",
+}
+_SETUP = re.compile(r"\b(set ?up|setup|initiali[sz]e|onboarding|finish setting up|resume setup|continue setup|"
+                    r"set up my agent|get started)\b", re.IGNORECASE)
 STATUS_TEXT = {
     "received": "received", "triaged": "triaged — needs review", "needs_information": "waiting on information",
     "ready_for_review": "ready for the physician's decision",
@@ -118,6 +127,7 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
     Tool("referral_detail", "read", "One referral's patient, reason, status, missing information, documents, and replies.", needs_referral=True),
     Tool("triage_explanation", "read", "Why the agent recommended what it did: rule versions, evidence, and human edits.", needs_referral=True),
     Tool("practice_rules", "read", "The practice's confirmed referral rules (active preferences)."),
+    Tool("representation", "read", "How the agent represents this physician: each statement's kind (requirement, scope, preference, exception, judgment), status (confirmed / proposed), version, and what is still unknown."),
     Tool("pending_work", "read", "What needs the team, what the agent prepared, and what is waiting on others."),
     Tool("referral_timeline", "read", "One referral's recorded history (who did what, when), oldest first.", needs_referral=True),
     Tool("propose_preference", "prepare", "Draft a practice preference from an explicit instruction, for the physician to confirm.", physician_only=True),
@@ -127,7 +137,8 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
 )}
 
 INTENT_TOOLS = {
-    "practice_question": ["practice_context", "practice_rules"],
+    "practice_question": ["practice_context", "practice_rules", "representation"],
+    "setup": ["representation"],
     "referral_query": ["list_referrals", "pending_work"],
     "explain_recommendation": ["triage_explanation"],
     "teach": ["propose_preference"],
@@ -194,6 +205,8 @@ def deterministic_plan(text: str, referral_names: list[str]) -> Plan:
     mentioned = [name for name in referral_names if _name_mentioned(name, lower)]
     if _GREETING.match(text) and len(words) <= 6:
         return Plan("greeting", reply=None)
+    if _SETUP.search(lower) and not mentioned:
+        return Plan("setup")
     if re.search(r"\b(prepare|draft|start|create|set up|enter)\b.*\breferral\b", lower) and not re.search(r"\b(request|information)\b", lower):
         return Plan("prepare_referral", referral_refs=mentioned, draft=_draft_from_text(text))
     if re.search(r"\b(prepare|draft|write|ask|request)\b.*\b(information|request|missing|labs?|records?)\b", lower) or "information request" in lower:
@@ -250,6 +263,7 @@ and pick what the backend should look up or prepare. You never perform actions y
 Intents:
 - greeting / conversation: small talk or anything not about the practice. Write a short, warm reply. Never treat it as an instruction.
 - practice_question: about the practice, its rules/preferences, or what Lamina can do.
+- setup: start, resume, or finish setting up the agent (guided initialization).
 - referral_query: find or summarize patients/referrals (needs attention, waiting, a specific patient).
 - explain_recommendation: why the agent triaged/recommended something.
 - summarize_history: summarize what has happened on a referral (its timeline).
@@ -318,9 +332,10 @@ _COMPOSE_SCHEMA = {
 class AssistantService:
     def __init__(
         self, store: PilotStore, intake: IntakeService, missing: MissingInformationService,
-        rules: PracticeRules, teaching: TeachingService, home: Any, client: Any = None,
+        rules: PracticeRules, teaching: TeachingService, home: Any, client: Any = None, representation: Any = None,
     ) -> None:
         self.store, self.intake, self.missing, self.rules, self.teaching, self.home = store, intake, missing, rules, teaching, home
+        self.representation = representation
         self._client = client
         with store._connect() as db:
             db.executescript(_SCHEMA)
@@ -328,6 +343,7 @@ class AssistantService:
             "practice_context": self._practice_context, "list_referrals": self._list_referrals,
             "referral_detail": self._referral_detail, "triage_explanation": self._triage_explanation,
             "practice_rules": self._practice_rules, "pending_work": self._pending_work,
+            "representation": self._representation,
             "referral_timeline": self._referral_timeline,
             "propose_preference": self._propose_preference,
             "prepare_information_request": self._prepare_information_request,
@@ -559,8 +575,10 @@ class AssistantService:
             return reply, None
 
         if intent == "practice_question":
-            facts = {"practice": run("practice_context"), "rules": run("practice_rules")}
+            facts = {"practice": run("practice_context"), "rules": run("practice_rules"), "representation": run("representation")}
             return self._compose(text, facts, self._practice_answer(facts)), None
+        if intent == "setup":
+            return self._setup_reply(context, run("representation")), None
         if intent == "referral_query":
             if first:
                 facts = {"referral": run("referral_detail", {"referral_id": first["id"]})}
@@ -684,6 +702,11 @@ class AssistantService:
             "current_after_human_edits": {"fit": FIT_TEXT.get(triage.get("fit", "")), "modality": MODALITY_TEXT.get(triage.get("suggested_modality", ""))},
             "rationale": rationale, "missing": recommendation["missing_items"],
             "rules_used": [{"referral_type": r["referral_type"], "version": r["version"]} for r in snapshot.get("rules", [])],
+            # The exact statements relied on, by kind and version (Step 17).
+            "statements": [{"kind": item["kind"], "item": item.get("label") or item["item"], "version": item["version"], "layer": item["layer"],
+                            "referral_type": item["referral_type"]}
+                           for item in recommendation.get("statements_used", []) if item.get("drives", True)],
+            "conflicts": recommendation.get("conflicts", []),
             "generator": recommendation["generator"], "human_decision": decision and decision["decision"],
             "untrusted_document_text": quotes,
         }
@@ -707,6 +730,20 @@ class AssistantService:
                           "modality": MODALITY_TEXT.get(content.modality, content.modality)})
         pending = len(self.rules.proposals(context.practice_id))
         return {"confirmed_rules": rules, "pending_proposals": pending}
+
+    def _representation(self, context: PracticeContext, _args: dict) -> dict:
+        """Statements grouped by referral type, with kind, status and version. Read only."""
+        if self.representation is None:
+            return {"types": [], "lifecycle": {}, "unknowns": []}
+        view = self.representation.view(context)
+        return {
+            "lifecycle": view["lifecycle"], "unknowns": view["unknowns"], "conflicts": view["conflicts"],
+            "version": view["version"],
+            "types": [{"referral_type": group["referral_type"], "unknown_topics": group["unknown_topics"],
+                       "statements": [{"kind": item["kind"], "text": item["text"], "status": item["status"],
+                                       "version": item["version"], "layer": item["layer"]} for item in group["items"]]}
+                      for group in view["types"]],
+        }
 
     def _pending_work(self, context: PracticeContext, _args: dict) -> dict:
         projection = self.home.projection(context, record_view=False)
@@ -925,7 +962,32 @@ class AssistantService:
             paragraphs.append("Your confirmed preferences cover " + ", ".join(f"{r['referral_type']} (v{r['version']})" for r in rules) + ".")
         else:
             paragraphs.append("You haven’t confirmed any referral preferences yet, so I can record referrals but can’t judge fit or completeness.")
-        return {"paragraphs": paragraphs, "bullets": [f"I can {item}" for item in practice["can_do"]], "cards": []}
+        bullets = []
+        for group in (facts.get("representation") or {}).get("types", [])[:6]:
+            bullets += [_statement_line(group["referral_type"], item) for item in group["statements"][:6]]
+            bullets += [f"{group['referral_type']}: I don’t know yet {_TOPIC_ASK[topic]} — want to tell me?"
+                        for topic in group["unknown_topics"]]
+        lifecycle = (facts.get("representation") or {}).get("lifecycle") or {}
+        if lifecycle.get("label"):
+            paragraphs.append(lifecycle["label"])
+        return {"paragraphs": paragraphs, "bullets": bullets[:16] + [f"I can {item}" for item in practice["can_do"]], "cards": []}
+
+    def _setup_reply(self, context: PracticeContext, facts: dict) -> dict:
+        lifecycle = facts.get("lifecycle") or {}
+        if context.role != "physician":
+            return {"paragraphs": ["Only the physician sets up how their agent represents them. You can see the practice-level requirements under Your Agent."], "cards": []}
+        stage = next((s for s in lifecycle.get("stages", []) if s["id"] == lifecycle.get("next_stage")), None)
+        if lifecycle.get("state") == "shadow" and not stage:
+            paragraphs = ["Setup is done and your agent is in shadow mode: it recommends; you and your staff decide.",
+                          "You can still revisit any stage. Anything you tell me becomes a proposal you confirm on screen."]
+        else:
+            paragraphs = [f"Next up: {stage['label']} (about {lifecycle.get('minutes_remaining', 0)} min left in total)." if stage
+                          else "Everything is answered — review and confirm how your agent represents you.",
+                          "Each stage can be skipped, and “Unknown” is always fine. Nothing becomes part of your representation until you confirm it."]
+        target = lifecycle.get("next_stage") or "review"
+        return {"paragraphs": paragraphs, "cards": [{"kind": "link", "label": "Continue setup" if lifecycle.get("state") == "initializing" else "Open setup",
+                                                     "detail": stage["label"] if stage else "How your agent represents you",
+                                                     "action": "Open", "path": f"/me/setup?stage={target}"}]}
 
     def _list_answer(self, facts: dict, wanted: str) -> dict:
         rows = facts["referrals"]["referrals"]
@@ -980,7 +1042,12 @@ class AssistantService:
         if facts.get("human_decision"):
             paragraphs.append(f"Your team {facts['human_decision']} that triage.")
         bullets = [f"Rules used: {rules}", *(f"{r['statement']} ({r['source']})" for r in facts["rationale"][:8])]
-        return {"paragraphs": paragraphs, "bullets": bullets, "cards": []}
+        relied = [f"Relied on {KIND_TEXT.get(item['kind'], item['kind'])}: {item['item'].replace('_', ' ')} "
+                  f"({item['referral_type']} v{item['version']}{', your own' if item['layer'] == 'physician' else ''})"
+                  for item in facts.get("statements", [])[:6]]
+        if facts.get("conflicts"):
+            relied.append("There is a conflict between your practice’s and your own statements; I didn’t resolve it.")
+        return {"paragraphs": paragraphs, "bullets": bullets + relied, "cards": []}
 
     def _compose(self, question: str, facts: dict, deterministic: dict) -> dict:
         """Model phrasing over the SAME facts when available; the deterministic answer is the fallback."""
@@ -1019,6 +1086,17 @@ EVENT_LABELS = {
 _LISTY = re.compile(r"\b(which|all|any|list|every|referrals|patients|today|queue|anyone|anything else)\b")
 _SUMMARY = re.compile(r"\b(summari[sz]e|summary|what happened|what has happened|timeline|history|so far|catch me up|recap)\b")
 _MISSING = re.compile(r"\b(missing|outstanding|still need|still needed|what do we need|what'?s needed)\b")
+
+
+_TOPIC_ASK = {"scope": "whether you see these", "requirements": "what you need before review",
+             "urgency": "what makes one urgent", "modality": "your preferred visit type"}
+
+
+def _statement_line(referral_type: str, item: dict) -> str:
+    """One statement, labelled by kind -- and never presented as confirmed unless it is."""
+    if item["status"] != "confirmed":
+        return f"{referral_type}: proposed, not confirmed yet — {item['text']}"
+    return f"{referral_type}: {KIND_TEXT.get(item['kind'], item['kind'])} — {item['text']} (v{item['version']})"
 
 
 def _event_label(event_type: str) -> str:

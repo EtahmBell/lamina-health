@@ -14,3 +14,5 @@ dist/
 # Pilot referral documents may contain PHI: never commit them.
 data/pilot_documents/
 data/*.log
+# Local UI review screenshots (never committed).
+ui-review/

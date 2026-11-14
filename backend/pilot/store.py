@@ -289,6 +289,37 @@ BEFORE DELETE ON recommendation_carryovers
 BEGIN SELECT RAISE(ABORT, 'carryovers are append-only'); END;
 """
 
+# Step 17 (additive): the physician agent's lifecycle and guided-setup state, and versioned
+# snapshots of the confirmed representation. Snapshots are append-only.
+_SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS agent_lifecycle (
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  owner_scope_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('initializing', 'shadow')),
+  setup_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  shadow_at TEXT,
+  PRIMARY KEY (practice_id, owner_scope_id)
+);
+CREATE TABLE IF NOT EXISTS representation_versions (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  owner_scope_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(practice_id, owner_scope_id, version)
+);
+CREATE TRIGGER IF NOT EXISTS representation_versions_no_update BEFORE UPDATE ON representation_versions
+BEGIN SELECT RAISE(ABORT, 'representation versions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS representation_versions_no_delete BEFORE DELETE ON representation_versions
+BEGIN SELECT RAISE(ABORT, 'representation versions are append-only'); END;
+"""
+
 # A raw sender access link path (`/r/<token>`). Tokens are urlsafe base64, >= 20 chars.
 SENDER_LINK_PATTERN = re.compile(r"/r/[A-Za-z0-9_-]{20,200}")
 # The same link including any scheme/host prefix, for restoring templates.
@@ -329,6 +360,12 @@ class PilotStore:
             db.executescript(_SCHEMA_V3)
             self._add_column(db, "intake_referrals", "submitted_referral_type", "TEXT")
             self._scrub_stored_sender_tokens(db)
+            db.executescript(_SCHEMA_V4)
+            # Rule layers: practice-wide statements, or one physician's own (Step 17).
+            self._add_column(db, "physician_referral_preferences", "layer", "TEXT NOT NULL DEFAULT 'practice'")
+            self._add_column(db, "physician_referral_preferences", "owner_scope_id", "TEXT")
+            self._add_column(db, "practices", "allow_physician_loosening", "INTEGER NOT NULL DEFAULT 0")
+            self._add_column(db, "triage_recommendations", "representation_version_id", "TEXT")
 
     @staticmethod
     def _add_column(db: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
@@ -789,14 +826,14 @@ class PilotStore:
         db.execute(
             "INSERT INTO triage_recommendations (id, referral_id, practice_id, "
             "recommendation_json, generator, model_id, rules_snapshot_id, rules_snapshot_json, "
-            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_at, representation_version_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 recommendation["id"], recommendation["referral_id"],
                 recommendation["practice_id"], json.dumps(recommendation["payload"]),
                 recommendation["generator"], recommendation.get("model_id"),
                 recommendation["rules_snapshot_id"],
                 json.dumps(recommendation["rules_snapshot"], sort_keys=True),
-                recommendation["created_at"],
+                recommendation["created_at"], recommendation.get("representation_version_id"),
             ),
         )
 

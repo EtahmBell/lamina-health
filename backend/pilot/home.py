@@ -4,6 +4,7 @@ and what happened while you were away — computed only from real pilot state.""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from .intake import IntakeService
 from .learning import LearningService
@@ -42,8 +43,9 @@ def _plural(count: int, one: str, many: str) -> str:
 
 class HomeService:
     def __init__(self, store: PilotStore, intake: IntakeService, missing: MissingInformationService,
-                 rules: PracticeRules, learning: LearningService) -> None:
+                 rules: PracticeRules, learning: LearningService, representation: Any = None) -> None:
         self.store, self.intake, self.missing, self.rules, self.learning = store, intake, missing, rules, learning
+        self.representation = representation
 
     def _since(self, context: PracticeContext, record_view: bool = True) -> str:
         views = [e for e in self.store.events(practice_id=context.practice_id, event_type="home_viewed", actor=context.actor)]
@@ -101,17 +103,40 @@ class HomeService:
                                 "detail": f"Asked for {labels} {('today' if days == 0 else f'{days} day' + ('' if days == 1 else 's') + ' ago')}"
                                           + (" · partial response received" if request["status"] == "partially_resolved" else "")})
         needs.extend(self._document_confirmations(context, summaries))
+        # A referral waiting on information that nobody has asked for yet must not vanish
+        # between "needs you" and "waiting on others".
+        requested = {request["referral_id"] for request in self.missing.open_requests(context.practice_id)}
+        flagged = {item["referral_id"] for item in needs if item.get("referral_id")}
+        for item in summaries.values():
+            if item["status"] == "needs_information" and item["id"] not in requested and item["id"] not in flagged:
+                missing = ", ".join(item["missing_items"]) or "the missing information"
+                needs.append({"kind": "request_missing", "rank": 3, "referral_id": item["id"], "patient_name": item["patient_name"],
+                              "referral_type": item["referral_type"], "path": f"/me/referrals/{item['id']}",
+                              "title": f"Ask for {item['patient_name']}’s missing information",
+                              "detail": f"{item['referral_type']} · missing {missing} · nothing requested yet",
+                              "action": "Prepare request"})
         if physician:
             question = self.learning.question_for_today(context.practice_id, mark_shown=record_view, actor="agent:learning")
             if question:
                 needs.append({"kind": "learning_question", "rank": 4, "question_id": question["id"],
                               "proposal_id": question["proposal_id"], "title": question["question"],
                               "detail": "Based on your recent corrections", "path": "/me/agent", "action": "Answer"})
-            for proposal in self.rules.proposals(context.practice_id):
-                if proposal.source == "explicit_instruction":
-                    needs.append({"kind": "proposed_learning", "rank": 5, "proposal_id": proposal.id,
-                                  "title": "Confirm what I learned", "detail": f"“{(proposal.provenance or {}).get('raw_text', proposal.source_text)[:120]}”",
-                                  "path": "/me/agent", "action": "Review"})
+            # Pending learnings come from the ONE summary every learning count uses.
+            summary = self.representation.learning_summary(context) if self.representation else None
+            for proposal in (summary or {}).get("pending_learnings", []):
+                if proposal["source"] == "explicit_instruction":
+                    needs.append({"kind": "proposed_learning", "rank": 5, "proposal_id": proposal["id"],
+                                  "title": "Confirm what I learned", "detail": f"“{proposal['source_text'][:120]}”",
+                                  "path": "/me/agent?tab=teach", "action": "Review"})
+            lifecycle = (summary or {}).get("lifecycle") or {}
+            if lifecycle.get("state") == "initializing":
+                stage = next((s for s in lifecycle["stages"] if s["id"] == lifecycle.get("next_stage")), None)
+                needs.append({"kind": "setup", "rank": -1, "path": f"/me/setup?stage={lifecycle.get('next_stage') or 'review'}",
+                              "title": "Finish setting up your agent",
+                              "detail": (f"Next: {stage['label']} · about {lifecycle['minutes_remaining']} min left. "
+                                         "Until then it can record referrals but doesn’t represent you yet.") if stage else
+                                        "Review and confirm how your agent represents you.",
+                              "action": "Continue setup"})
 
         for event in self.store.events(practice_id=context.practice_id):
             if event["created_at"] < since or event["event_type"] not in DONE_EVENTS:
@@ -175,6 +200,11 @@ class HomeService:
         evidence = kinds.count("confirm_evidence")
         if evidence:
             parts.append(f"{_plural(evidence, 'referral needs', 'referrals need').lower()} document evidence confirmed")
+        if "setup" in kinds:
+            parts.insert(0, "your agent’s setup isn’t finished")
+        unrequested = kinds.count("request_missing")
+        if unrequested:
+            parts.append(f"{_plural(unrequested, 'referral is', 'referrals are').lower()} missing information nobody has asked for yet")
         replies = kinds.count("verify_sender_information")
         if replies:
             parts.append(f"{_plural(replies, 'referral has', 'referrals have').lower()} a reply from the referring office to verify")
