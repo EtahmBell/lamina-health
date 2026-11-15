@@ -16,3 +16,12 @@ data/pilot_documents/
 data/*.log
 # Local UI review screenshots (never committed).
 ui-review/
+
+# Playwright e2e (dev only): saved sessions, account ids, the dev-project declaration, seeded
+# ids/links, the e2e database, and run artefacts never leave this machine.
+frontend/e2e/.auth/
+frontend/e2e/.state/
+frontend/e2e/.env.e2e
+frontend/test-results/
+frontend/playwright-report/
+data/e2e/

@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "node --test test/*.test.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e": "node e2e/support/run.ts e2e",
+    "e2e:capture": "node e2e/support/run.ts capture",
+    "e2e:screens": "node e2e/support/run.ts screens",
+    "e2e:typecheck": "tsc -p e2e"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
@@ -18,6 +22,7 @@
     "vite": "^7.1.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9"
   }
