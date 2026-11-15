@@ -16,6 +16,7 @@ from tests.test_pilot_foundation import (  # noqa: F401
     Pilot,
     pilot,
 )
+from tests.test_pilot_onboarding import _h
 
 
 @pytest.fixture(autouse=True)
@@ -119,3 +120,17 @@ def test_staff_teaching_is_a_pending_suggestion_the_physician_sees(pilot: Pilot)
     assert pilot.post(f"/api/me/practice/teach/{suggestion['id']}/confirm", "user-c", {}).status_code == 403
     confirmed = pilot.post(f"/api/me/practice/teach/{suggestion['id']}/confirm", "user-a", {})
     assert confirmed.status_code == 200, confirmed.text
+
+
+def test_editing_a_rule_keeps_requirement_keys_so_received_values_still_count(pilot: Pilot) -> None:
+    """Found in the walkthrough: re-saving a rule rebuilt "Recent TSH" as key recent_tsh (was tsh),
+    orphaning a value the referring office had already sent. Keys now follow the label lineage."""
+    from tests.test_pilot_foundation import DIABETES_RULE
+
+    _ready(pilot)
+    rule = pilot.get("/api/me/practice/rules", "user-a").json()[0]
+    original = {item["label"]: item["key"] for item in rule["content"]["required"]}
+    drifted = {**DIABETES_RULE, "required": [
+        {**item, "key": item["label"].lower().replace(" ", "_") + "_v2"} for item in DIABETES_RULE["required"]]}
+    revised = pilot.client.put(f"/api/me/practice/rules/{rule['id']}", headers=_h("user-a"), json=drifted).json()
+    assert {item["label"]: item["key"] for item in revised["content"]["required"]} == original

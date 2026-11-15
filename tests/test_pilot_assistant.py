@@ -170,7 +170,7 @@ def test_staff_cannot_teach_but_can_chat_and_prepare(agent: Pilot) -> None:
     before = _rule_count(agent)
     suggested = say(agent, "I always need a recent lipid panel before review.", user="user-c")
     # Staff teaching becomes a pending suggestion for the physician, never a confirmed rule.
-    assert suggested["intent"] == "teach" and "passed this to the physician" in suggested["reply"]["paragraphs"][0]
+    assert suggested["intent"] == "teach" and "as a suggestion. It doesn’t change triage" in suggested["reply"]["paragraphs"][0]
     assert _rule_count(agent) == before + 1
     with sqlite3.connect(agent.store.path) as db:
         statuses = [row[0] for row in db.execute(
@@ -511,7 +511,7 @@ def test_staff_on_a_patient_page(agent: Pilot) -> None:
     flag = say(agent, "Flag this for physician review", user="user-c", referral_id=alex)
     assert flag["reply"]["cards"][0]["execute"] == {"type": "escalate", "referral_id": alex}
     suggested = say(agent, "I always need a lipid panel before review.", user="user-c", referral_id=alex)
-    assert "passed this to the physician" in suggested["reply"]["paragraphs"][0]
+    assert "as a suggestion. It doesn’t change triage" in suggested["reply"]["paragraphs"][0]
 
 
 def test_model_failure_on_a_patient_page_falls_back_with_the_same_context(agent: Pilot) -> None:

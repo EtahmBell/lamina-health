@@ -60,6 +60,24 @@ def _normalize_requirements(items: list[ReferralRequirement], required: bool) ->
     return normalized
 
 
+def _keep_requirement_keys(content: PracticeRuleContent, lineage: list[PracticeRuleContent]) -> PracticeRuleContent:
+    """A new version keeps each requirement's key when its label is unchanged. Editors rebuild
+    keys from labels ("Recent TSH" -> "recent_tsh"), and a renamed key would orphan values already
+    received or requested under the old one ("tsh"), so the item would look missing again. The
+    OLDEST key for a label wins, so a version that already drifted is repaired by the next one."""
+    known: dict[str, str] = {}
+    for previous in lineage:
+        for item in [*previous.required, *previous.helpful]:
+            known.setdefault(item.label.casefold(), item.key)
+
+    def keep(items: list) -> list:
+        return [item.model_copy(update={"key": known[item.label.casefold()]})
+                if item.label.casefold() in known and item.key != known[item.label.casefold()] else item
+                for item in items]
+
+    return content.model_copy(update={"required": keep(content.required), "helpful": keep(content.helpful)})
+
+
 def content_from_input(update: PracticeRuleInput) -> PracticeRuleContent:
     return PracticeRuleContent(
         good_fit=[value.strip() for value in update.good_fit if value.strip()],
@@ -254,6 +272,9 @@ class PracticeRules:
         owner_scope_id: str | None = None,
     ) -> PracticeRule:
         content = content or content_from_input(update)
+        if supersedes is not None:
+            content = _keep_requirement_keys(
+                content, [rule.content for rule in self.history(practice_id, supersedes.id) if rule.version <= supersedes.version])
         layer = supersedes.layer if supersedes is not None else update.layer
         layer_owner = (supersedes.owner_scope_id if supersedes is not None else owner_scope_id) if layer == "physician" else None
         if layer == "physician" and not layer_owner:

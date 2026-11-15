@@ -901,7 +901,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
                 <p className="practice-subheading">{physician ? 'Relied on your confirmed representation' : `Relied on ${doctor}’s confirmed representation`}</p>
                 <ul className="pilot-statement-list">{(recommendation.statements_used ?? []).filter((item) => item.drives).map((item, index) => <li key={`${item.rule_id}-${item.item}-${index}`}>
                   <span className={`pilot-kind-tag kind-${item.kind}`}>{STATEMENT_KIND_LABELS[item.kind]}</span>
-                  <span>{item.label ?? statementText(item.item)}</span>
+                  <span>{physician ? item.label ?? statementText(item.item) : thirdPerson(item.label ?? statementText(item.item), doctor)}</span>
                   <small className="muted-note">{item.referral_type} v{item.version}{item.layer === 'physician' ? ' · your own' : ' · practice'}</small>
                 </li>)}</ul>
               </div>}

@@ -604,7 +604,7 @@ class AssistantService:
             return reply, None
         if intent == "teach":
             result = run("propose_preference", {"text": plan.teach_text or text})
-            return self._teach_reply(result), None
+            return self._teach_reply(result, self.intake.physician_name(context.practice_id)), None
         if intent == "prepare_information_request":
             result = run("prepare_information_request", {"referral_id": first["id"], "items": plan.requested_items})
             return {**self._prepared_reply(result), "_focus": first["id"]}, None
@@ -835,14 +835,15 @@ class AssistantService:
         what = {"explain_recommendation": "explain", "prepare_information_request": "prepare a request for", "prepare_physician_review": "flag"}.get(intent, "look at")
         return {"paragraphs": [f"Which patient’s referral should I {what}? Tell me the patient’s name."], "cards": []}
 
-    def _teach_reply(self, result: dict) -> dict:
+    def _teach_reply(self, result: dict, physician: str | None = None) -> dict:
         if result.get("denied"):
             return {"paragraphs": ["Only a physician can confirm how I handle referrals. Your instruction wasn’t saved."], "cards": []}
         proposal = result["proposal"]
         if proposal.get("suggested_by_role") == "staff":
             # Staff never set clinical preferences: this is a suggestion the physician sees.
-            return {"paragraphs": ["I passed this to the physician as a suggestion. It doesn’t change triage unless they confirm it."],
-                    "cards": [{"kind": "proposal", "label": "Suggestion for the physician", "detail": "Waiting for the physician to confirm",
+            who = physician or "the physician"
+            return {"paragraphs": [f"I passed this to {who} as a suggestion. It doesn’t change triage unless they confirm it."],
+                    "cards": [{"kind": "proposal", "label": f"Suggestion for {who}", "detail": f"Waiting for {who} to confirm",
                                "action": "View", "path": "/me/agent?tab=teach", "proposal_id": proposal["id"]}]}
         rtype = proposal["referral_type"]
         card = {"kind": "proposal", "label": f"{'New' if rtype == 'Unassigned' else rtype} — draft preference", "detail": "Not active until you confirm",

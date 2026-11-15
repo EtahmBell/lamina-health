@@ -488,7 +488,13 @@ export const displayTemplate = (message: string) => message.replace(/\{status_li
 
 /** Who did it, by name: the physician, the staff member, the referring office, or Lamina.
  * Never a generic "your team". */
-export function actorText(event: Pick<ReferralDetail['history'][number], 'actor_name' | 'autonomy'>): string {
+export function actorText(event: Pick<ReferralDetail['history'][number], 'actor_name' | 'autonomy'> & { event_type?: string; metadata?: Record<string, unknown> }): string {
+  // A changed recommendation is Lamina's, but credit the cause (a rule update), not the re-check.
+  const cause = event.event_type === 'recommendation_changed' ? event.metadata?.cause as { text?: string; trigger_differs?: boolean } | undefined : undefined
+  if (cause?.text) {
+    const trigger = cause.trigger_differs && typeof event.metadata?.requested_by_name === 'string' ? ` · re-checked by ${event.metadata.requested_by_name}` : ''
+    return `Lamina, because ${cause.text}${trigger}`
+  }
   if (event.actor_name) return event.actor_name
   return event.autonomy === 'automatic' ? 'Lamina' : 'A practice member'
 }
@@ -500,28 +506,36 @@ export function eventLabel(event: Pick<ReferralDetail['history'][number], 'event
 }
 
 const CHANGE_FIELD_LABELS: Record<string, string> = {
-  fit: 'fit', suggested_priority: 'priority', suggested_modality: 'visit type', requires_physician: 'physician judgment', rule_type: 'referral type rule',
+  fit: 'Fit', suggested_priority: 'Priority', suggested_modality: 'Visit type', requires_physician: 'Physician judgment', rule_type: 'Referral type rule',
 }
+const CHANGE_MODALITY: Record<string, string> = { in_person: 'in-person', econsult: 'eConsult', either: 'either', unspecified: 'unspecified' }
 function changeValue(field: string, value: unknown): string {
   if (field === 'fit' && typeof value === 'string' && value in FIT_LABELS) return FIT_LABELS[value as Fit].toLowerCase()
   if (field === 'suggested_priority' && typeof value === 'string' && value in PRIORITY_LABELS) return PRIORITY_LABELS[value as Priority].toLowerCase()
-  if (field === 'suggested_modality' && typeof value === 'string' && value in MODALITY_LABELS) return value === 'unspecified' ? 'unspecified' : MODALITY_LABELS[value as Modality]
+  if (field === 'suggested_modality' && typeof value === 'string' && value in CHANGE_MODALITY) return CHANGE_MODALITY[value]
   if (field === 'requires_physician') return value ? 'needed' : 'not needed'
   return value == null || value === '' ? 'none' : String(value)
 }
-/** "visit type unspecified → eConsult (by Dr. Saru)"; an agent change says what prompted it. */
+/** Cause, not trigger: "Visit type: eConsult → in-person, because Dr. Avery Testwell updated the
+ * Thyroid nodule rule (v4) · re-checked by Front desk". A direct correction: "(by Dr. Saru)". */
 export function changeText(change: TriageChange): string {
-  const who = change.by === 'Lamina' && change.after ? `by Lamina, after ${change.after}’s update` : `by ${change.by}`
-  return `${CHANGE_FIELD_LABELS[change.field] ?? change.field.replace(/_/g, ' ')} ${changeValue(change.field, change.from)} → ${changeValue(change.field, change.to)} (${who})`
+  const what = `${CHANGE_FIELD_LABELS[change.field] ?? change.field.replace(/_/g, ' ')}: ${changeValue(change.field, change.from)} → ${changeValue(change.field, change.to)}`
+  if (!change.because) return `${what} (by ${change.by})`
+  return `${what}, because ${change.because}${change.triggered_by ? ` · re-checked by ${change.triggered_by}` : ''}`
 }
 export function correctionText(correction: Pick<TriageCorrection, 'field' | 'from' | 'to' | 'actor_name'>): string {
-  return `${CHANGE_FIELD_LABELS[correction.field]} ${changeValue(correction.field, correction.from)} → ${changeValue(correction.field, correction.to)} (by ${correction.actor_name})`
+  return `${CHANGE_FIELD_LABELS[correction.field]}: ${changeValue(correction.field, correction.from)} → ${changeValue(correction.field, correction.to)} (by ${correction.actor_name})`
 }
 /** Recommendation text is written to the physician ("Your rule…", "You see…"); staff read it
  * about the physician instead. Display only. */
 export function thirdPerson(text: string, doctor: string): string {
-  return text.replace(/\bYour rule\b/g, `${doctor}’s rule`).replace(/\byour rule\b/g, `${doctor}’s rule`)
+  return text.replace(/your agent recommends; you and your staff decide/gi, `the agent recommends; ${doctor} and staff decide`)
+    .replace(/\b[Yy]our agent\b/g, (match) => (match[0] === 'Y' ? 'The agent' : 'the agent'))
+    .replace(/\bYour rule\b/g, `${doctor}’s rule`).replace(/\byour rule\b/g, `${doctor}’s rule`)
+    .replace(/\bYour judgment\b/g, `${doctor}’s judgment`).replace(/\byour judgment\b/g, `${doctor}’s judgment`)
     .replace(/\bYou see\b/g, `${doctor} sees`).replace(/\byou see\b/g, `${doctor} sees`)
+    .replace(/\bYou decide\b/g, `${doctor} decides`).replace(/\byou decide\b/g, `${doctor} decides`)
+    .replace(/\bcomes to you\b/g, `comes to ${doctor}`)
     .replace(/\bYour practice\b/g, 'The practice').replace(/\byour practice\b/g, 'the practice')
 }
 /** The physician staff hand work to, by name when Lamina knows it. */

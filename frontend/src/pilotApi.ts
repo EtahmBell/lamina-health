@@ -156,7 +156,8 @@ export type ReferralAction = 'upload_document' | 'record_item' | 'retriage' | 'c
 export type ActorRole = 'physician' | 'staff' | 'referring_office' | 'lamina' | 'system'
 export type CorrectableField = 'fit' | 'suggested_priority' | 'suggested_modality'
 export type TriageCorrection = { id: string; field: CorrectableField; from: string; to: string; agent_value: string; reason: string | null; actor_name: string; actor_role: PracticeRole; created_at: string }
-export type TriageChange = { field: string; from: unknown; to: unknown; by: string; after: string | null; at: string }
+/** `by` caused it; `because` says how (e.g. a rule update); `triggered_by` only re-ran the check. */
+export type TriageChange = { field: string; from: unknown; to: unknown; by: string; because: string | null; triggered_by: string | null; at: string }
 export type ReferralDetail = {
   referral: IntakeReferral
   recommendation: TriageRecommendation | null

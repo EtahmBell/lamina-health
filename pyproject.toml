@@ -37,3 +37,4 @@ line-length = 100
 "tests/test_pilot_agent.py" = ["F811"]
 "tests/test_pilot_step16.py" = ["F811"]
 "tests/test_pilot_step17.py" = ["F811"]
+"tests/test_pilot_signoff.py" = ["F811"]

@@ -445,8 +445,13 @@ def test_material_change_is_recorded_with_who_prompted_it(pilot: Pilot) -> None:
     assert changed[-1]["metadata"]["requested_by_name"] == "Front desk"
     detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
     notes = {item["field"]: item for item in detail["changes_since_seen"]}
-    assert notes["fit"] == {"field": "fit", "from": "possible", "to": "strong", "by": "Lamina",
-                            "after": "Front desk", "at": changed[-1]["created_at"]}
+    physician = pilot.get("/api/me/practice/status", "user-a").json()["physician_name"]
+    # Cause vs trigger: the physician's rule update caused it; Front desk only re-ran the check.
+    assert notes["fit"] == {"field": "fit", "from": "possible", "to": "strong", "by": physician,
+                            "because": f"{physician} updated the Diabetes management rule (v2)",
+                            "triggered_by": "Front desk", "at": changed[-1]["created_at"]}
+    cause = changed[-1]["metadata"]["cause"]
+    assert cause["kind"] == "rules" and cause["rules"][0]["by"] == "user:user-a" and cause["trigger_differs"]
     assert set(notes) <= {"fit", "requires_physician"}, "only clinical fields are reported"
     assert "approve" not in detail["allowed_actions"], "a change is a note, not a new approval"
     pilot.post(f"/api/me/practice/referrals/{rid}/seen", "user-a")

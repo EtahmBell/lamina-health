@@ -10,7 +10,7 @@ import {
   getLearningSummary, getRepresentation, type LearningSummary, type Representation,
 } from './pilotApi.ts'
 import {
-  AGENT_TABS, emptyRuleForm, isClosed, MODALITY_LABELS, physicianLabel, pilotErrorCopy, pilotPaths, proposalLines,
+  AGENT_TABS, emptyRuleForm, isClosed, MODALITY_LABELS, physicianLabel, pilotErrorCopy, thirdPerson, pilotPaths, proposalLines,
   representationGroups, representationPortrait, ruleFormFrom, ruleInput, setupProgressLine,
   itemKindEffect, itemKindLabel, TOPIC_LABELS, type AgentTab, type RuleForm,
 } from './pilotState.ts'
@@ -192,7 +192,7 @@ function AgentOverview({ status, navigate, rules, summary, representation, refer
     <section className="agent-portrait-card">
       <p className="eyebrow">{physician ? 'Your agent currently represents your practice as' : `${doctor}’s agent currently represents the practice as`}</p>
       <p className="agent-portrait-text">{representationPortrait(status.practice, representation)}</p>
-      {lifecycle.label && <p className="pilot-lifecycle-line"><span className={`pilot-lifecycle-dot state-${lifecycle.state ?? 'none'}`} aria-hidden="true" />{lifecycle.label}</p>}
+      {lifecycle.label && <p className="pilot-lifecycle-line"><span className={`pilot-lifecycle-dot state-${lifecycle.state ?? 'none'}`} aria-hidden="true" />{physician ? lifecycle.label : thirdPerson(lifecycle.label, doctor)}</p>}
     </section>
     <hr className="agent-overview-divider" />
     <section className="agent-network-activity">
@@ -237,13 +237,15 @@ function AgentOverview({ status, navigate, rules, summary, representation, refer
         ? 'Built only from what you confirmed. Requirements and scope drive triage; preferences and your judgment shape suggestions and explanations. Every recommendation cites the version it used.'
         : `Built only from what ${doctor} confirmed. Requirements and scope drive triage; preferences and ${doctor}’s judgment shape suggestions and explanations. Every recommendation cites the version it used.`}</p>
     </div>
-    <PracticeRepresentation representation={representation} navigate={navigate} physician={physician} />
+    <PracticeRepresentation representation={representation} navigate={navigate} physician={physician} doctor={doctor} />
   </div>
 }
 
 /** The demo's practice-representation sections, fed by the confirmed representation only:
  * statements grouped by referral type, each labelled with its kind, plus honest unknowns. */
-function PracticeRepresentation({ representation, navigate, physician }: { representation: Representation; navigate: Navigate; physician: boolean }) {
+function PracticeRepresentation({ representation, navigate, physician, doctor }: { representation: Representation; navigate: Navigate; physician: boolean; doctor: string }) {
+  // Staff read the physician's statements in the third person.
+  const say = (text: string) => (physician ? text : thirdPerson(text, doctor))
   const types = representation.types.filter((type) => representationGroups(type).confirmed.length > 0)
   if (!types.length) return <p className="agent-empty-note">Nothing confirmed yet, so your agent can record referrals but can’t judge fit or completeness.{physician && <> <button type="button" className="text-button" onClick={() => navigate(pilotPaths.setup())}>Start setup →</button></>}</p>
   return <div className="practice-tab">
@@ -254,9 +256,9 @@ function PracticeRepresentation({ representation, navigate, physician }: { repre
     {types.map((type) => { const { confirmed } = representationGroups(type); return <section key={type.referral_type} className="practice-section pilot-representation-type">
       <h3 className="practice-section-heading">{type.referral_type}{type.aliases.length > 0 && <small className="muted-note"> · also {type.aliases.join(', ')}</small>}</h3>
       <ul className="pilot-statement-list">{confirmed.map((item, index) => <li key={`${item.rule_id}-${index}`}>
-        <span className={`pilot-kind-tag kind-${item.kind}`}>{itemKindLabel(item)}</span>
-        <span>{item.text}</span>
-        <small className="muted-note">{itemKindEffect(item)} · v{item.version}{item.layer === 'physician' ? ' · just you' : ''}</small>
+        <span className={`pilot-kind-tag kind-${item.kind}`}>{say(itemKindLabel(item))}</span>
+        <span>{say(item.text)}</span>
+        <small className="muted-note">{say(itemKindEffect(item))} · v{item.version}{item.layer === 'physician' ? ' · just you' : ''}</small>
       </li>)}</ul>
       {physician && type.unknown_topics.length > 0 && <p className="pilot-unknown-line">Not answered yet: {type.unknown_topics.map((topic) => TOPIC_LABELS[topic].toLowerCase()).join(', ')}. Your agent says it doesn’t know these.</p>}
     </section> })}

@@ -345,10 +345,16 @@ class IntakeService:
             fields = metadata.get("changes") or metadata.get("changed_fields") or {}
             if not isinstance(fields, dict):
                 continue
-            after = metadata.get("requested_by_name") if event["actor_role"] == "lamina" else None
+            cause = metadata.get("cause") or {}
+            agent = event["actor_role"] == "lamina"
+            trigger = metadata.get("requested_by_name") if agent else None
             for field, change in fields.items():
-                changes.append({"field": field, "from": change.get("from"), "to": change.get("to"),
-                                "by": event["actor_name"], "after": after, "at": event["created_at"]})
+                changes.append({
+                    "field": field, "from": change.get("from"), "to": change.get("to"),
+                    # Who caused it (a rule's author), not merely who re-ran the check.
+                    "by": cause.get("by_name") or event["actor_name"], "because": cause.get("text") if agent else None,
+                    "triggered_by": trigger if (not cause or cause.get("trigger_differs")) else None,
+                    "at": event["created_at"]})
         return changes
 
     def mark_seen(self, context: PracticeContext, referral_id: str) -> dict:
@@ -561,18 +567,22 @@ class IntakeService:
             })
         # No approval to carry or re-request: a clinical change is simply recorded (with what
         # prompted the re-triage) and shown to the physician as "changed since you last looked".
+        # The CAUSE (e.g. a physician's rule update) is recorded separately from the TRIGGER
+        # (whoever's action re-ran triage), so the note never credits the wrong person.
         prior_rows = self.store.recommendation_rows(context.practice_id, referral_id)
         if prior_rows:
             previous = TriageRecommendation.model_validate_json(prior_rows[-1]["recommendation_json"])
             changed = material_changes(previous, recommendation)
             if changed:
-                trigger = ActorDirectory(self.store, context.practice_id).describe(
-                    context.actor, referral.sender.model_dump(mode="json"))
+                directory = ActorDirectory(self.store, context.practice_id)
+                sender = referral.sender.model_dump(mode="json")
+                trigger = directory.describe(context.actor, sender)
+                cause = self._change_cause(context, prior_rows[-1], snapshot, changed, trigger, directory)
                 events.append({"event_type": "recommendation_changed", "actor": "agent:triage",
                                "autonomy": "automatic", "metadata": {
                                    "recommendation_id": recommendation.id, "from_recommendation_id": previous.id,
                                    "changed_fields": changed, "requested_by": context.actor,
-                                   "requested_by_name": trigger["name"]}})
+                                   "requested_by_name": trigger["name"], "cause": cause}})
         self._transition(
             context, row, target, events=events,
             recommendation={
@@ -586,6 +596,52 @@ class IntakeService:
         for hook in self.after_triage:
             hook(context, referral_id, recommendation)
         return self.detail(context, referral_id)
+
+    def _rule_author(self, practice_id: str, rule_id: str) -> str | None:
+        row = self.store.fetch_one(
+            "SELECT actor FROM pilot_events WHERE practice_id = ? AND json_extract(metadata_json, '$.rule_id') = ? "
+            "ORDER BY id DESC LIMIT 1", (practice_id, rule_id))
+        return row["actor"] if row else None
+
+    def _change_cause(
+        self, context: PracticeContext, previous_row: dict, snapshot: dict, changed: dict,
+        trigger: dict, directory: ActorDirectory,
+    ) -> dict:
+        """Why the clinical recommendation changed: a rule version (and who made it), a changed
+        referral type, or new information on the referral (and who supplied it)."""
+        before = {(r["rule_id"], r["version"]): r for r in
+                  (json.loads(previous_row.get("rules_snapshot_json") or "{}") or {}).get("rules", [])}
+        after = {(r["rule_id"], r["version"]): r for r in (snapshot or {}).get("rules", [])}
+        rules = []
+        for key, rule in after.items():
+            if key in before:
+                continue
+            author = self._rule_author(context.practice_id, rule["rule_id"])
+            updated = any(old["referral_type"] == rule["referral_type"] for old in before.values())
+            rules.append({"kind": "rule_updated" if updated else "rule_added", "referral_type": rule["referral_type"],
+                          "version": rule["version"], "rule_id": rule["rule_id"], "by": author,
+                          "by_name": directory.describe(author)["name"] if author else "A practice member"})
+        for key, rule in before.items():
+            if key not in after and not any(new["referral_type"] == rule["referral_type"] for new in after.values()):
+                author = self._rule_author(context.practice_id, rule["rule_id"])
+                rules.append({"kind": "rule_removed", "referral_type": rule["referral_type"], "version": rule["version"],
+                              "rule_id": rule["rule_id"], "by": author,
+                              "by_name": directory.describe(author)["name"] if author else "A practice member"})
+        if rules:
+            verbs = {"rule_updated": "updated", "rule_added": "added", "rule_removed": "retired"}
+            text = "; ".join(
+                f"{item['by_name']} {verbs[item['kind']]} the {item['referral_type']} rule"
+                + (f" (v{item['version']})" if item["kind"] != "rule_removed" else "") for item in rules)
+            by_names = {item["by_name"] for item in rules}
+            return {"kind": "rules", "rules": rules, "text": text,
+                    "by_name": rules[0]["by_name"], "trigger_differs": trigger["name"] not in by_names}
+        if "rule_type" in changed:
+            return {"kind": "referral_type", "text": f"{trigger['name']} changed the referral type",
+                    "by_name": trigger["name"], "trigger_differs": False}
+        text = ("the referring office sent new information" if trigger["role"] == "referring_office"
+                else f"{trigger['name']} updated the referral’s information" if trigger["role"] in {"staff", "physician"}
+                else "Lamina re-checked the referral")
+        return {"kind": "new_information", "text": text, "by_name": trigger["name"], "trigger_differs": False}
 
     # ------------------------------------------------------------- transitions
 

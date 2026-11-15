@@ -21,12 +21,19 @@ test('attribution names the actor, never "your team"', () => {
 })
 
 test('a change note says who changed what, and what prompted an agent change', () => {
-  assert.equal(changeText({ field: 'suggested_modality', from: 'unspecified', to: 'econsult', by: 'Dr. Saru', after: null, at: '' }),
-    'visit type unspecified → eConsult (by Dr. Saru)')
-  assert.equal(changeText({ field: 'fit', from: 'possible', to: 'strong', by: 'Lamina', after: 'Front desk', at: '' }),
-    'fit possible fit → strong practice fit (by Lamina, after Front desk’s update)')
+  assert.equal(changeText({ field: 'suggested_modality', from: 'unspecified', to: 'econsult', by: 'Dr. Saru', because: null, triggered_by: null, at: '' }),
+    'Visit type: unspecified → eConsult (by Dr. Saru)')
+  // Cause vs trigger: the rule's author caused it; Front desk only re-ran the check.
+  assert.equal(changeText({ field: 'suggested_modality', from: 'econsult', to: 'in_person', by: 'Dr. Avery Testwell',
+    because: 'Dr. Avery Testwell updated the Thyroid nodule rule (v4)', triggered_by: 'Front desk', at: '' }),
+  'Visit type: eConsult → in-person, because Dr. Avery Testwell updated the Thyroid nodule rule (v4) · re-checked by Front desk')
+  assert.equal(changeText({ field: 'fit', from: 'possible', to: 'strong', by: 'Rivera FM', because: 'the referring office sent new information', triggered_by: null, at: '' }),
+    'Fit: possible fit → strong practice fit, because the referring office sent new information')
+  assert.equal(actorText({ event_type: 'recommendation_changed', autonomy: 'automatic', actor_name: 'Lamina',
+    metadata: { cause: { text: 'Dr. A updated the X rule (v2)', trigger_differs: true }, requested_by_name: 'Front desk' } }),
+  'Lamina, because Dr. A updated the X rule (v2) · re-checked by Front desk')
   assert.equal(correctionText({ field: 'suggested_priority', from: 'routine', to: 'soon', actor_name: 'Dr. Avery Testwell' }),
-    'priority routine → soon (by Dr. Avery Testwell)')
+    'Priority: routine → soon (by Dr. Avery Testwell)')
 })
 
 test('retired approvals are labelled honestly; a staff review is not a physician sign-off', () => {
