@@ -148,6 +148,9 @@ def _row_to_rule(row: dict[str, Any]) -> PracticeRule:
         confirmed_at=row["confirmed_at"],
         layer=row.get("layer") or "practice",
         owner_scope_id=row.get("owner_scope_id"),
+        created_by=row.get("created_by"),
+        confirmed_by=row.get("confirmed_by"),
+        author_source=row.get("author_source"),
     )
 
 
@@ -301,8 +304,9 @@ class PracticeRules:
                 "case_family, source_text, structured_rules_json, status, source, supersedes_id, "
                 "representation_snapshot_id_at_confirmation, created_at, updated_at, confirmed_at, "
                 "referral_type, scope, practice_id, confidence, operational_status, "
-                "physician_confirmed, provenance_json, publishable, version, layer, owner_scope_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'practice', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "physician_confirmed, provenance_json, publishable, version, layer, owner_scope_id, "
+                "created_by, confirmed_by, author_source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'practice', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recorded')",
                 (
                     rule_id, practice_workspace_key(practice_id), physician_id,
                     update.referral_type.strip(), source_text or _source_text(update),
@@ -314,6 +318,7 @@ class PracticeRules:
                     json.dumps({**(provenance or {}), "actor": actor}, sort_keys=True),
                     # Physician-level statements are private to that physician: never publishable.
                     1 if (update.publishable and layer == "practice") else 0, version, layer, layer_owner,
+                    actor, actor if confirmed else None,
                 ),
             )
             self.store.append_event(
@@ -392,9 +397,11 @@ class PracticeRules:
             changed = db.execute(
                 "UPDATE physician_referral_preferences SET operational_status = ?, status = ?, "
                 "physician_confirmed = CASE WHEN ? THEN 1 ELSE physician_confirmed END, "
-                "confirmed_at = CASE WHEN ? THEN ? ELSE confirmed_at END, updated_at = ? "
+                "confirmed_at = CASE WHEN ? THEN ? ELSE confirmed_at END, "
+                "confirmed_by = CASE WHEN ? THEN ? ELSE confirmed_by END, updated_at = ? "
                 f"WHERE id = ? AND practice_id = ? AND scope = 'practice' AND operational_status IN ({placeholders})",
-                (operational_status, legacy, confirmed, confirmed, now, now, rule_id, practice_id, *from_statuses),
+                (operational_status, legacy, confirmed, confirmed, now, confirmed, actor, now, rule_id, practice_id,
+                 *from_statuses),
             ).rowcount
             if not changed:
                 raise RuleConflictError("This proposal is no longer pending")

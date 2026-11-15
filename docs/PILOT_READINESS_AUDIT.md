@@ -312,6 +312,29 @@ Not connected: fax, email in/out (real), EHR/FHIR/Medplum, scheduling, SMS, noti
 | Monitoring | stdout logs | Error tracking without payloads, uptime + 5xx alerts, queue/age alerts (e.g. referrals untriaged > 1 day), on-call. |
 | Testing | 651 backend + 1096 frontend tests; manual browser runs | Staff UI browser pass, sign-up/email-confirm round trip, multi-user concurrency, load on public routes, security review/pen test, a clinician-run usability session on realistic (synthetic) faxes. |
 
+### Pre-deployment data check: rule requirement keys
+
+Each requirement in a practice rule has a key (for example `tsh` for "Recent TSH"). Values the
+referring office sends, and items in information requests, are stored under that key. Before the
+Step 17 cleanup, saving a rule in the editor rebuilt keys from labels, so a later version could call
+the same requirement `recent_tsh`. Values already received under `tsh` then stopped counting and the
+item looked missing again. New versions now keep the oldest key for each label (all writers go through
+`PracticeRules.create`: the rule editor, chat teaching merged into a rule, and confirmed proposals).
+
+Run this against any database that existed before that fix, and again before go-live:
+
+```
+python -m scripts.check_rule_keys path/to/workflow.sqlite        # or set LAMINA_WORKFLOW_DATABASE
+python -m scripts.check_rule_keys path/to/workflow.sqlite --json # full report
+```
+
+It is read-only and reads only rule rows and key names, never values. Exit code 0: no drift in an
+active rule version and no referral evidence stranded under a key its current recommendation
+doesn't use (drift left only in superseded versions is listed but is not a failure). 1: review the
+listed rules and referrals; re-saving the affected rule restores the original key, and re-running
+triage on the listed referrals picks the evidence up again. 2: the database couldn't be read.
+Covered by `tests/test_pilot_rule_authors.py`.
+
 Supabase authentication is one piece. Without BAAs, encrypted durable storage, backups and audit,
 the deployment is **not** production-ready for PHI, as `docs/PILOT_PHI_READINESS.md` also states.
 

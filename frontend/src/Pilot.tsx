@@ -13,7 +13,7 @@ import { useOnPilotDataChange, usePilotDataVersion } from './pilotSync.ts'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
   acceptInvitation, correctTriage, createPractice, createReferral, decideReferral,
-  escalateReferral, getPilotStatus, getPracticeMembers, getPracticeRules, getReferral, markReferralReady, markReferralSeen,
+  escalateReferral, getPilotStatus, getPracticeMembers, getPracticeRules, getReferral, markReferralReady, markReferralSeen, resolveCorrectionConflict,
   inviteStaff, listReferrals, openReferralDocument, previewInvitation, recordReferralItem,
   removeStaffMember, requestInformation, setMemberAdmin, retriageReferral, revokeInvitation, updatePractice, uploadReferralDocument,
   type EffectiveTriage, type Fit, type Modality, type NextStep, type PilotStatus, type PracticeFields,
@@ -24,7 +24,7 @@ import {
   getAssistant, sendAssistantMessage, type AgentCardExecute, type AgentReplyBody,
 } from './pilotApi.ts'
 import {
-  accountIdentity, actorText, canUse, thirdPerson, changeText, correctionText, countWord, emptyReferralForm, eventLabel, itemLabel, FIT_LABELS, isClosed, physicianLabel,
+  accountIdentity, actorText, canUse, conflictText, referralStanding, thirdPerson, changeText, correctionText, countWord, emptyReferralForm, eventLabel, itemLabel, FIT_LABELS, isClosed, physicianLabel,
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
   resolvePilotRoute, resolveSetupStage, STATEMENT_KIND_LABELS, statementText, STATUS_LABELS,
@@ -739,10 +739,13 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   // either reviews the draft or waits on the referring office. (Display only; triage is unchanged.)
   const openRequests = (detail.information_requests ?? []).filter((request) => ['draft', 'approved', 'sent', 'partially_resolved'].includes(request.status))
   const hasDraft = openRequests.some((request) => request.status === 'draft')
-  const nextStepHeading = toVerify.length ? 'Verify what the referring office sent'
-    : triage && triage.next_step === 'request_information' && openRequests.length
-    ? (hasDraft ? 'Review and send the information request' : 'Waiting on the referring office')
-    : triage ? NEXT_STEP_LABELS[triage.next_step] : 'Waiting for triage'
+  // One statement of where the referral stands; anything still outstanding is said once, below it.
+  const standing = referralStanding({
+    status: referral.status, physician, doctor, toVerify: toVerify.length, hasDraft,
+    waitingOnOffice: openRequests.some((request) => request.status === 'sent' || request.status === 'partially_resolved'),
+    missing: recommendation?.missing_items ?? [], nextStep: triage?.next_step ?? null,
+  })
+  const nextStepHeading = standing.heading
   const careContext = [
     { label: 'Referring clinician', value: `${referral.sender.name}${referral.sender.practice ? ` · ${referral.sender.practice}` : ''}` },
     referral.sender.contact && { label: 'Contact', value: referral.sender.contact },
@@ -780,7 +783,16 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           {!triage && !closed && <p>Lamina hasn’t triaged this referral yet{recommendation ? '' : ' — add a referral rule for this type, then re-run triage'}.</p>}
           {referral.disposition && <p>{referral.disposition.decision === 'accept' ? 'Accepted' : referral.disposition.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : 'Declined'}{detail.signoff ? ` by ${detail.signoff.actor_name}` : ''} · {formatDateTime(referral.disposition.at)}{referral.disposition.reason ? ` — “${referral.disposition.reason}”` : ''}</p>}
           {/* Not a re-approval: just what changed, who changed it, since you last opened this referral. */}
+          {!closed && standing.stillOpen && <p className="pilot-still-open">{standing.stillOpen}</p>}
           {!closed && changes.length > 0 && <p className="pilot-decision pilot-change-note" role="status">Changed since you last looked: {changes.map(changeText).join('; ')}</p>}
+          {/* An earlier correction that a newer rule disagrees with: kept until the physician chooses. */}
+          {!closed && (detail.correction_conflicts ?? []).map((conflict) => <div className="pilot-conflict" role="status" key={`${conflict.field}-${conflict.rule_version}`}>
+            <p>{conflictText(conflict)}. The correction still applies.</p>
+            {physician && <div className="pilot-actions">
+              <button className="button-secondary" disabled={busy} onClick={() => void act(() => resolveCorrectionConflict(referral.id, conflict.field, 'keep_correction'))}>Keep my correction</button>
+              <button className="text-button" disabled={busy} onClick={() => void act(() => resolveCorrectionConflict(referral.id, conflict.field, 'apply_rule'))}>Apply the rule</button>
+            </div>}
+          </div>)}
           {corrections.length > 0 && <p className="pilot-decision">Corrected: {corrections.map(correctionText).join('; ')}</p>}
           {referral.handoff ? <p className="pilot-decision">{referral.handoff.kind === 'ready' ? `Marked ready for ${doctor}` : `Flagged for ${doctor}`} by {handoffEvent ? actorText(handoffEvent) : 'a practice member'} · {formatDateTime(referral.handoff.at)}{referral.handoff.note ? ` — “${referral.handoff.note}”` : ''}</p>
             : referral.escalated_at && <p className="pilot-decision">Flagged for {doctor}{referral.escalation_note ? ` — “${referral.escalation_note}”` : ''}</p>}

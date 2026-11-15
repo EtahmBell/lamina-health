@@ -241,6 +241,12 @@ class IntakeService:
                             self.store.corrections(context.practice_id, referral_id)],
             "signoff": self._signoff_view(context.practice_id, referral_id, directory),
             "changes_since_seen": self._changes_since_seen(context, referral_id, history),
+            # A physician's earlier correction that a NEWER rule version now disagrees with.
+            "correction_conflicts": [
+                {**item, "corrected_by_name": directory.describe(item["corrected_by"])["name"] if item["corrected_by"] else None,
+                 "rule_by_name": directory.describe(item["rule_by"])["name"] if item["rule_by"] else None,
+                 "corrected_by_you": item["corrected_by"] == context.actor, "rule_by_you": item["rule_by"] == context.actor}
+                for item in self._correction_conflicts(referral, recommendation)],
             "effective_triage": self._effective(recommendation, referral),
             "history": history,
             "allowed_actions": self.allowed_actions(context, referral, recommendation),
@@ -284,10 +290,13 @@ class IntakeService:
         effective = {field: getattr(recommendation, field) for field in EDITABLE_TRIAGE_FIELDS}
         review = referral.review or {}
         legacy = review.get("fields") or {}
+        # Fields the physician handed back to the rule ("apply the rule") drop the old edit.
+        cleared = set(review.get("cleared") or [])
         if legacy:
             if review.get("role") == "physician":
                 # A physician's earlier edit of a clinical field is a correction: it persists.
-                effective.update({key: value for key, value in legacy.items() if key in CORRECTABLE_FIELDS})
+                effective.update({key: value for key, value in legacy.items()
+                                  if key in CORRECTABLE_FIELDS and key not in cleared})
             if review.get("recommendation_id") == recommendation.id:
                 allowed = EDITABLE_TRIAGE_FIELDS if review.get("role") == "physician" else ("requires_physician",)
                 effective.update({key: value for key, value in legacy.items()
@@ -356,6 +365,107 @@ class IntakeService:
                     "triggered_by": trigger if (not cause or cause.get("trigger_differs")) else None,
                     "at": event["created_at"]})
         return changes
+
+    # ------------------------------------------------- corrections vs newer rules
+
+    def _correction_sources(self, referral: IntakeReferral) -> dict[str, dict]:
+        """Clinical fields the physician has overridden, with the recommendation each override
+        was made against: a correction, or a physician edit from the retired approval step."""
+        review = referral.review or {}
+        cleared = set(review.get("cleared") or [])
+        sources: dict[str, dict] = {}
+        legacy = review.get("fields") or {}
+        if review.get("role") == "physician":
+            for field in CORRECTABLE_FIELDS:
+                if field in legacy and field not in cleared:
+                    sources[field] = {"value": legacy[field], "recommendation_id": review.get("recommendation_id"),
+                                      "by": review.get("by")}
+        rows = self.store.corrections(referral.practice_id, referral.id)
+        for field, value in (review.get("corrections") or {}).items():
+            last = next((row for row in reversed(rows) if row["field"] == field), None)
+            if last:
+                sources[field] = {"value": value, "recommendation_id": last["recommendation_id"], "by": last["actor"]}
+        return sources
+
+    def _correction_conflicts(
+        self, referral: IntakeReferral, recommendation: TriageRecommendation | None,
+    ) -> list[dict]:
+        """An override conflicts with the rule when a NEWER version of the rule now gives a value
+        that differs both from what the agent said when the override was made and from the
+        override itself. Closed referrals and choices already recorded for that version don't."""
+        if recommendation is None or referral.status in TERMINAL_STATUSES:
+            return []
+        row = self.store.recommendation_row(referral.practice_id, recommendation.id)
+        now_rules = (json.loads((row or {}).get("rules_snapshot_json") or "{}") or {}).get("rules", [])
+        conflicts = []
+        for field, source in self._correction_sources(referral).items():
+            then_row = self.store.recommendation_row(referral.practice_id, source["recommendation_id"] or "")
+            if not then_row:
+                continue
+            agent_then = json.loads(then_row["recommendation_json"]).get(field)
+            agent_now = getattr(recommendation, field)
+            if agent_now in {agent_then, source["value"]}:
+                continue
+            then_versions = {rule["referral_type"]: rule["version"]
+                             for rule in (json.loads(then_row["rules_snapshot_json"] or "{}") or {}).get("rules", [])}
+            newer = next((rule for rule in now_rules
+                          if rule["version"] > then_versions.get(rule["referral_type"], 0)), None)
+            if newer is None:
+                continue  # the agent's value moved for another reason (new information), not a rule update
+            done = self.store.fetch_one(
+                "SELECT choice FROM correction_conflict_resolutions WHERE referral_id = ? AND field = ? "
+                "AND rule_id = ? AND rule_version = ?", (referral.id, field, newer["rule_id"], newer["version"]))
+            if done:
+                continue
+            conflicts.append({
+                "field": field, "corrected_value": source["value"], "rule_value": agent_now,
+                "referral_type": newer["referral_type"], "rule_id": newer["rule_id"], "rule_version": newer["version"],
+                "corrected_by": source["by"], "rule_by": self._rule_author(referral.practice_id, newer["rule_id"]),
+            })
+        return conflicts
+
+    def resolve_conflict(self, context: PracticeContext, referral_id: str, field: str, choice: str) -> dict:
+        """The physician keeps their earlier correction or applies the updated rule. Both choices
+        are recorded; applying the rule is also recorded as a correction back to the rule's value."""
+        context.require_physician("decide between your correction and your rule")
+        if choice not in {"keep_correction", "apply_rule"}:
+            raise PilotError("invalid_choice", "Choose keep_correction or apply_rule", 422)
+        row = self._row(context, referral_id)
+        referral = self._referral(row)
+        recommendation = self.recommendation(context.practice_id, referral.current_recommendation_id)
+        conflict = next((item for item in self._correction_conflicts(referral, recommendation) if item["field"] == field), None)
+        if conflict is None:
+            raise PilotError("no_conflict", "There is no open conflict for that field", 409)
+        now = now_iso()
+        inserts = [(
+            ("INSERT INTO correction_conflict_resolutions (id, practice_id, referral_id, field, corrected_value, "
+             "rule_value, rule_id, rule_version, choice, actor, actor_role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+            (new_id("ccr"), context.practice_id, referral_id, field, json.dumps(conflict["corrected_value"]),
+             json.dumps(conflict["rule_value"]), conflict["rule_id"], conflict["rule_version"], choice,
+             context.actor, context.role, now),
+        )]
+        changes: dict[str, Any] = {}
+        if choice == "apply_rule":
+            inserts.append((
+                ("INSERT INTO triage_corrections (id, practice_id, referral_id, recommendation_id, field, from_value, "
+                 "to_value, agent_value, reason, actor, actor_role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+                (new_id("cor"), context.practice_id, referral_id, recommendation.id, field,
+                 json.dumps(conflict["corrected_value"]), json.dumps(conflict["rule_value"]),
+                 json.dumps(conflict["rule_value"]),
+                 f"Applied the updated {conflict['referral_type']} rule (v{conflict['rule_version']}) instead of the earlier correction",
+                 context.actor, context.role, now),
+            ))
+            review = dict(referral.review or {})
+            review["corrections"] = {k: v for k, v in (review.get("corrections") or {}).items() if k != field}
+            review["cleared"] = sorted(set(review.get("cleared") or []) | {field})
+            changes["review_json"] = json.dumps(review)
+        self._transition(
+            context, row, IntakeStatus(row["status"]), changes=changes, inserts=inserts,
+            events=[{"event_type": "correction_conflict_resolved", "actor": context.actor, "metadata": {
+                "field": field, "choice": choice, "rule_id": conflict["rule_id"], "rule_version": conflict["rule_version"],
+                "corrected_value": conflict["corrected_value"], "rule_value": conflict["rule_value"], "role": context.role}}],
+        )
+        return self.detail(context, referral_id)
 
     def mark_seen(self, context: PracticeContext, referral_id: str) -> dict:
         self._row(context, referral_id)
@@ -598,10 +708,12 @@ class IntakeService:
         return self.detail(context, referral_id)
 
     def _rule_author(self, practice_id: str, rule_id: str) -> str | None:
+        """Who made this rule version active: its confirmer, else its author, as stored on the
+        version itself. None when the record doesn't say (author_source = 'unknown')."""
         row = self.store.fetch_one(
-            "SELECT actor FROM pilot_events WHERE practice_id = ? AND json_extract(metadata_json, '$.rule_id') = ? "
-            "ORDER BY id DESC LIMIT 1", (practice_id, rule_id))
-        return row["actor"] if row else None
+            "SELECT created_by, confirmed_by FROM physician_referral_preferences WHERE practice_id = ? AND id = ?",
+            (practice_id, rule_id))
+        return (row or {}).get("confirmed_by") or (row or {}).get("created_by")
 
     def _change_cause(
         self, context: PracticeContext, previous_row: dict, snapshot: dict, changed: dict,
@@ -620,21 +732,29 @@ class IntakeService:
             updated = any(old["referral_type"] == rule["referral_type"] for old in before.values())
             rules.append({"kind": "rule_updated" if updated else "rule_added", "referral_type": rule["referral_type"],
                           "version": rule["version"], "rule_id": rule["rule_id"], "by": author,
-                          "by_name": directory.describe(author)["name"] if author else "A practice member"})
+                          "by_name": directory.describe(author)["name"] if author else None})
         for key, rule in before.items():
             if key not in after and not any(new["referral_type"] == rule["referral_type"] for new in after.values()):
                 author = self._rule_author(context.practice_id, rule["rule_id"])
                 rules.append({"kind": "rule_removed", "referral_type": rule["referral_type"], "version": rule["version"],
                               "rule_id": rule["rule_id"], "by": author,
-                              "by_name": directory.describe(author)["name"] if author else "A practice member"})
+                              "by_name": directory.describe(author)["name"] if author else None})
         if rules:
             verbs = {"rule_updated": "updated", "rule_added": "added", "rule_removed": "retired"}
-            text = "; ".join(
-                f"{item['by_name']} {verbs[item['kind']]} the {item['referral_type']} rule"
-                + (f" (v{item['version']})" if item["kind"] != "rule_removed" else "") for item in rules)
-            by_names = {item["by_name"] for item in rules}
+
+            def describe(item: dict) -> str:
+                version = f" (v{item['version']})" if item["kind"] != "rule_removed" else ""
+                if item["by_name"]:
+                    return f"{item['by_name']} {verbs[item['kind']]} the {item['referral_type']} rule{version}"
+                # Honest when the record doesn't say who: never credit the person who re-ran it.
+                return (f"the {item['referral_type']} rule was {verbs[item['kind']]}"
+                        + (f" (v{item['version']}; author not recorded)" if version else " (author not recorded)"))
+
+            text = "; ".join(describe(item) for item in rules)
+            by_names = {item["by_name"] for item in rules if item["by_name"]}
             return {"kind": "rules", "rules": rules, "text": text,
-                    "by_name": rules[0]["by_name"], "trigger_differs": trigger["name"] not in by_names}
+                    "by_name": rules[0]["by_name"] or "Author not recorded",
+                    "trigger_differs": trigger["name"] not in by_names}
         if "rule_type" in changed:
             return {"kind": "referral_type", "text": f"{trigger['name']} changed the referral type",
                     "by_name": trigger["name"], "trigger_differs": False}

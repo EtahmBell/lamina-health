@@ -1,4 +1,4 @@
-import type { Lifecycle, RepresentationItem, RepresentationType, ScopeChoice, SetupStageId, SetupStageStatus, StatementKind, Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, PilotStatus, PracticeRule, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement, TriageChange, TriageCorrection } from './pilotApi.ts'
+import type { Lifecycle, RepresentationItem, RepresentationType, ScopeChoice, SetupStageId, SetupStageStatus, StatementKind, Fit, IntakeStatus, Modality, NewReferral, NextStep, PilotNextStep, PilotStatus, PracticeRule, Priority, PracticeRuleInput, ReferralAction, ReferralDetail, ReferralSummary, RequirementState, RuleRequirement, TriageChange, TriageCorrection, CorrectionConflict } from './pilotApi.ts'
 
 /** Pure presentation + routing helpers for the real practice pilot. Everything here is
  * a projection of backend state; nothing is persisted client-side. */
@@ -509,7 +509,7 @@ const CHANGE_FIELD_LABELS: Record<string, string> = {
   fit: 'Fit', suggested_priority: 'Priority', suggested_modality: 'Visit type', requires_physician: 'Physician judgment', rule_type: 'Referral type rule',
 }
 const CHANGE_MODALITY: Record<string, string> = { in_person: 'in-person', econsult: 'eConsult', either: 'either', unspecified: 'unspecified' }
-function changeValue(field: string, value: unknown): string {
+export function changeValue(field: string, value: unknown): string {
   if (field === 'fit' && typeof value === 'string' && value in FIT_LABELS) return FIT_LABELS[value as Fit].toLowerCase()
   if (field === 'suggested_priority' && typeof value === 'string' && value in PRIORITY_LABELS) return PRIORITY_LABELS[value as Priority].toLowerCase()
   if (field === 'suggested_modality' && typeof value === 'string' && value in CHANGE_MODALITY) return CHANGE_MODALITY[value]
@@ -537,6 +537,32 @@ export function thirdPerson(text: string, doctor: string): string {
     .replace(/\bYou decide\b/g, `${doctor} decides`).replace(/\byou decide\b/g, `${doctor} decides`)
     .replace(/\bcomes to you\b/g, `comes to ${doctor}`)
     .replace(/\bYour practice\b/g, 'The practice').replace(/\byour practice\b/g, 'the practice')
+}
+/** "Visit type: your earlier correction (eConsult) differs from your updated rule (in-person,
+ * Thyroid nodule v5)" — in the third person for anyone who isn't the author. */
+export function conflictText(conflict: CorrectionConflict): string {
+  const field = CHANGE_FIELD_LABELS[conflict.field] ?? conflict.field
+  const correction = conflict.corrected_by_you ? 'your earlier correction' : `${conflict.corrected_by_name ?? 'the physician'}’s earlier correction`
+  const rule = conflict.rule_by_you ? 'your updated rule' : conflict.rule_by_name ? `${conflict.rule_by_name}’s updated rule` : 'the updated rule (author not recorded)'
+  return `${field}: ${correction} (${changeValue(conflict.field, conflict.corrected_value)}) differs from ${rule} (${changeValue(conflict.field, conflict.rule_value)}, ${conflict.referral_type} v${conflict.rule_version})`
+}
+/** One consistent statement of where a referral stands and what is still open. */
+export function referralStanding(input: {
+  status: IntakeStatus; physician: boolean; doctor: string; toVerify: number; hasDraft: boolean
+  waitingOnOffice: boolean; missing: string[]; nextStep: NextStep | null
+}): { heading: string; stillOpen: string | null } {
+  const missing = input.missing.join(', ')
+  const open = !missing ? null
+    : input.waitingOnOffice ? `Still open: ${missing} — requested from the referring office, not received yet`
+    : input.hasDraft ? `Still open: ${missing} — request drafted, not sent`
+    : `Still open: ${missing} — not requested yet`
+  if (input.toVerify) return { heading: 'Verify what the referring office sent', stillOpen: open }
+  if (input.status === 'ready_for_review') {
+    return { heading: input.physician ? 'Ready for your decision' : `Ready for ${input.doctor}’s decision`, stillOpen: open }
+  }
+  if (input.hasDraft) return { heading: 'Review and send the information request', stillOpen: null }
+  if (input.waitingOnOffice) return { heading: 'Waiting on the referring office', stillOpen: open }
+  return { heading: input.nextStep ? NEXT_STEP_LABELS[input.nextStep] : 'Waiting for triage', stillOpen: null }
 }
 /** The physician staff hand work to, by name when Lamina knows it. */
 export const physicianLabel = (name: string | null | undefined) => name || 'the physician'

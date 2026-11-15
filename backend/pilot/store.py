@@ -377,6 +377,29 @@ CREATE TABLE IF NOT EXISTS referral_views (
 );
 """
 
+# Step 17 cleanup (additive). Which option a physician chose when their earlier correction
+# conflicts with a newer rule version on a referral. Append-only.
+_SCHEMA_V6 = """
+CREATE TABLE IF NOT EXISTS correction_conflict_resolutions (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  referral_id TEXT NOT NULL REFERENCES intake_referrals(id),
+  field TEXT NOT NULL CHECK(field IN ('fit', 'suggested_priority', 'suggested_modality')),
+  corrected_value TEXT NOT NULL,
+  rule_value TEXT NOT NULL,
+  rule_id TEXT NOT NULL,
+  rule_version INTEGER NOT NULL,
+  choice TEXT NOT NULL CHECK(choice IN ('keep_correction', 'apply_rule')),
+  actor TEXT NOT NULL,
+  actor_role TEXT NOT NULL CHECK(actor_role = 'physician'),
+  created_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS correction_conflict_resolutions_no_update BEFORE UPDATE ON correction_conflict_resolutions
+BEGIN SELECT RAISE(ABORT, 'conflict resolutions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS correction_conflict_resolutions_no_delete BEFORE DELETE ON correction_conflict_resolutions
+BEGIN SELECT RAISE(ABORT, 'conflict resolutions are append-only'); END;
+"""
+
 # A raw sender access link path (`/r/<token>`). Tokens are urlsafe base64, >= 20 chars.
 SENDER_LINK_PATTERN = re.compile(r"/r/[A-Za-z0-9_-]{20,200}")
 # The same link including any scheme/host prefix, for restoring templates.
@@ -435,12 +458,47 @@ class PilotStore:
             db.executescript(_SCHEMA_V5)
             # Staff paperwork hand-off to the physician: {"kind": "ready" | "flag", note, by, role, at}.
             self._add_column(db, "intake_referrals", "handoff_json", "TEXT")
+            db.executescript(_SCHEMA_V6)
+            # Who wrote and who confirmed each rule version. `author_source` says how we know:
+            # 'recorded' (written with the version), 'backfilled' (from older records), 'unknown'.
+            self._add_column(db, "physician_referral_preferences", "created_by", "TEXT")
+            self._add_column(db, "physician_referral_preferences", "confirmed_by", "TEXT")
+            self._add_column(db, "physician_referral_preferences", "author_source", "TEXT")
+            self._backfill_rule_authors(db)
 
     @staticmethod
     def _add_column(db: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
         columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
         if column not in columns:
             db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+    @staticmethod
+    def _backfill_rule_authors(db: sqlite3.Connection) -> None:
+        """One-time, idempotent: fill rule-version authors written before they were stored.
+        The author is the actor saved with the version (provenance) or, failing that, the
+        version's creation event. The confirmer is the actor of the event that confirmed it.
+        When neither record exists the version is marked 'unknown': nothing is guessed."""
+        rows = db.execute(
+            "SELECT id, provenance_json, confirmed_at FROM physician_referral_preferences "
+            "WHERE scope = 'practice' AND author_source IS NULL").fetchall()
+        for row in rows:
+            provenance = _loads(row["provenance_json"], {}) or {}
+            author = provenance.get("actor")
+            if not author:
+                event = db.execute(
+                    "SELECT actor FROM pilot_events WHERE json_extract(metadata_json, '$.rule_id') = ? "
+                    "AND json_extract(metadata_json, '$.version') IS NOT NULL ORDER BY id LIMIT 1", (row["id"],)).fetchone()
+                author = event["actor"] if event else None
+            confirmer = None
+            if row["confirmed_at"]:
+                event = db.execute(
+                    "SELECT actor FROM pilot_events WHERE json_extract(metadata_json, '$.rule_id') = ? "
+                    "AND json_extract(metadata_json, '$.operational_status') = 'confirmed' ORDER BY id DESC LIMIT 1",
+                    (row["id"],)).fetchone()
+                confirmer = event["actor"] if event else None
+            db.execute(
+                "UPDATE physician_referral_preferences SET created_by = ?, confirmed_by = ?, author_source = ? WHERE id = ?",
+                (author, confirmer, "backfilled" if author else "unknown", row["id"]))
 
     def _scrub_stored_sender_tokens(self, db: sqlite3.Connection) -> None:
         """One-time, idempotent repair of rows written before Step 16, when an approved

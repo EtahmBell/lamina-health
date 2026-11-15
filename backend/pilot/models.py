@@ -387,3 +387,7 @@ class PracticeRule(_Strict):
     # "practice" (scope='practice') or "physician" (scope='physician', owner_scope_id set).
     layer: Literal["practice", "physician"] = "practice"
     owner_scope_id: str | None = None
+    # Who wrote this version and who made it active; author_source: recorded | backfilled | unknown.
+    created_by: str | None = None
+    confirmed_by: str | None = None
+    author_source: str | None = None

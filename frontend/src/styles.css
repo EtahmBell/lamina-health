@@ -3349,3 +3349,6 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .public-sender-notice { margin: 18px 0 22px; padding: 12px 14px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
 .pilot-setup-staff-actions { margin-top: 24px; }
 .pilot-change-note { padding: 8px 10px; border-left: 3px solid var(--mineral-deep); background: var(--surface); }
+.pilot-still-open { margin: 8px 0 0; font-size: .7rem; color: var(--text-secondary); }
+.pilot-conflict { margin: 10px 0 0; padding: 8px 10px; border-left: 3px solid var(--copper, #b0643c); background: var(--surface); font-size: .7rem; }
+.pilot-conflict p { margin: 0 0 6px; }

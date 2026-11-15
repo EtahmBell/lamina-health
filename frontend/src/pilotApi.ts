@@ -157,6 +157,10 @@ export type ActorRole = 'physician' | 'staff' | 'referring_office' | 'lamina' | 
 export type CorrectableField = 'fit' | 'suggested_priority' | 'suggested_modality'
 export type TriageCorrection = { id: string; field: CorrectableField; from: string; to: string; agent_value: string; reason: string | null; actor_name: string; actor_role: PracticeRole; created_at: string }
 /** `by` caused it; `because` says how (e.g. a rule update); `triggered_by` only re-ran the check. */
+export type CorrectionConflict = {
+  field: CorrectableField; corrected_value: string; rule_value: string; referral_type: string; rule_id: string; rule_version: number
+  corrected_by_name: string | null; rule_by_name: string | null; corrected_by_you: boolean; rule_by_you: boolean
+}
 export type TriageChange = { field: string; from: unknown; to: unknown; by: string; because: string | null; triggered_by: string | null; at: string }
 export type ReferralDetail = {
   referral: IntakeReferral
@@ -170,6 +174,8 @@ export type ReferralDetail = {
   signoff?: { id: string; decision: 'accept' | 'redirect' | 'decline'; actor_name: string; actor_role: PracticeRole; created_at: string } | null
   /** Clinical changes by someone else (or Lamina) since you last opened this referral. */
   changes_since_seen?: TriageChange[]
+  /** A physician's earlier correction that a newer rule version disagrees with. */
+  correction_conflicts?: CorrectionConflict[]
   effective_triage: EffectiveTriage | null
   history: Array<{ event_type: string; actor: string; actor_name?: string; actor_role?: ActorRole; autonomy: 'automatic' | 'human'; metadata: Record<string, unknown>; created_at: string }>
   allowed_actions: ReferralAction[]
@@ -199,6 +205,9 @@ export const retriageReferral = (id: string) => apiRequest<ReferralDetail>(refer
 export const correctTriage = (id: string, changes: Partial<Pick<EffectiveTriage, CorrectableField>> & { reason?: string | null }) => apiRequest<ReferralDetail>(referralPath(id, 'correct'), json(changes))
 /** Staff: the paperwork is done; ready for the physician's decision. */
 export const markReferralReady = (id: string, note: string) => apiRequest<ReferralDetail>(referralPath(id, 'mark-ready'), json({ note: note || null }))
+/** Physician: keep the earlier correction, or apply the newer rule. The choice is recorded. */
+export const resolveCorrectionConflict = (id: string, field: CorrectableField, choice: 'keep_correction' | 'apply_rule') =>
+  apiRequest<ReferralDetail>(referralPath(id, 'correction-conflicts'), json({ field, choice }))
 export const markReferralSeen = (id: string) => apiRequest<{ seen_at: string }>(referralPath(id, 'seen'), { method: 'POST' })
 export const requestInformation = (id: string, items: string[], note: string) => apiRequest<ReferralDetail>(referralPath(id, 'request-information'), json({ items, note: note || null }))
 export const escalateReferral = (id: string, note: string) => apiRequest<ReferralDetail>(referralPath(id, 'escalate'), json({ note: note || null }))

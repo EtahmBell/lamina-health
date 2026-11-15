@@ -57,7 +57,8 @@ test('staff read the physician’s agent in the third person', () => {
 
 test('a referral with received values lands on Verify as the primary action', () => {
   const detail = slice(pilot, 'function ReferralDetailPage', 'function ProfilePage')
-  assert.match(detail, /toVerify\.length \? 'Verify what the referring office sent'/)
+  assert.match(detail, /referralStanding\(\{[\s\S]*?toVerify: toVerify\.length/)
+  assert.match(source('pilotState.ts'), /if \(input\.toVerify\) return \{ heading: 'Verify what the referring office sent'/)
   assert.match(detail, /className="button-primary" disabled=\{busy\} onClick=\{\(\) => void act\(\(\) => verifyReferralItem\(referral\.id, item\.key\)\)\}>Verify \{item\.label\}/)
 })
 
@@ -69,4 +70,31 @@ test('layout fixes: join header, sender notice spacing, setup button spacing', (
   const css = source('styles.css')
   assert.match(css, /\.public-sender-notice \{ margin: 18px 0 22px;/)
   assert.match(css, /\.pilot-setup-staff-actions \{ margin-top: 24px; \}/)
+})
+
+test('one consistent statement of where a referral stands and what is still open', async () => {
+  const { referralStanding } = await import('../src/pilotState.ts')
+  const base = { physician: false, doctor: 'Dr. A', toVerify: 0, hasDraft: false, waitingOnOffice: true, missing: ['Thyroid ultrasound'], nextStep: 'request_information' }
+  // The Eta case: marked ready while a request is still out. No "Waiting on the referring office" heading.
+  assert.deepEqual(referralStanding({ ...base, status: 'ready_for_review' }),
+    { heading: 'Ready for Dr. A’s decision', stillOpen: 'Still open: Thyroid ultrasound — requested from the referring office, not received yet' })
+  assert.equal(referralStanding({ ...base, status: 'ready_for_review', physician: true }).heading, 'Ready for your decision')
+  assert.deepEqual(referralStanding({ ...base, status: 'needs_information' }),
+    { heading: 'Waiting on the referring office', stillOpen: 'Still open: Thyroid ultrasound — requested from the referring office, not received yet' })
+  assert.equal(referralStanding({ ...base, status: 'needs_information', toVerify: 1 }).heading, 'Verify what the referring office sent')
+  assert.equal(referralStanding({ ...base, status: 'triaged', waitingOnOffice: false, missing: [] }).stillOpen, null)
+  assert.match(pilot, /const nextStepHeading = standing\.heading/)
+})
+
+test('a correction that a newer rule disagrees with is shown with keep / apply choices', async () => {
+  const { conflictText } = await import('../src/pilotState.ts')
+  const conflict = { field: 'suggested_modality', corrected_value: 'econsult', rule_value: 'in_person', referral_type: 'Thyroid nodule', rule_id: 'r', rule_version: 5,
+    corrected_by_name: 'Dr. Avery Testwell', rule_by_name: 'Dr. Avery Testwell', corrected_by_you: true, rule_by_you: true }
+  assert.equal(conflictText(conflict), 'Visit type: your earlier correction (eConsult) differs from your updated rule (in-person, Thyroid nodule v5)')
+  assert.equal(conflictText({ ...conflict, corrected_by_you: false, rule_by_you: false }),
+    'Visit type: Dr. Avery Testwell’s earlier correction (eConsult) differs from Dr. Avery Testwell’s updated rule (in-person, Thyroid nodule v5)')
+  assert.match(conflictText({ ...conflict, rule_by_you: false, rule_by_name: null }), /the updated rule \(author not recorded\)/)
+  assert.match(pilot, /resolveCorrectionConflict\(referral\.id, conflict\.field, 'keep_correction'\)\)\}>Keep my correction/)
+  assert.match(pilot, /resolveCorrectionConflict\(referral\.id, conflict\.field, 'apply_rule'\)\)\}>Apply the rule/)
+  assert.match(pilot, /\{physician && <div className="pilot-actions">\s*<button className="button-secondary" disabled=\{busy\} onClick=\{\(\) => void act\(\(\) => resolveCorrectionConflict/, 'only physicians choose')
 })

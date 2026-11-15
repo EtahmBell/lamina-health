@@ -8,7 +8,7 @@ user id, practice id, owner-scope id, or role from the client.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
@@ -366,6 +366,17 @@ def correct(referral_id: str, update: TriageEditInput, context: Practice, servic
 def edit(referral_id: str, update: TriageEditInput, context: Practice, services: Services) -> dict:
     """Older name for /correct."""
     return _run(lambda: services.intake.correct(context, referral_id, update))
+
+
+class ConflictChoiceInput(_Strict):
+    field: Literal["fit", "suggested_priority", "suggested_modality"]
+    choice: Literal["keep_correction", "apply_rule"]
+
+
+@router.post("/referrals/{referral_id}/correction-conflicts")
+def resolve_correction_conflict(referral_id: str, update: ConflictChoiceInput, context: Practice, services: Services) -> dict:
+    """Physician: keep an earlier correction, or apply the newer rule it conflicts with."""
+    return _run(lambda: services.intake.resolve_conflict(context, referral_id, update.field, update.choice))
 
 
 @router.post("/referrals/{referral_id}/mark-ready")
