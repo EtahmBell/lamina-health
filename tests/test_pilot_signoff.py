@@ -134,3 +134,18 @@ def test_editing_a_rule_keeps_requirement_keys_so_received_values_still_count(pi
         {**item, "key": item["label"].lower().replace(" ", "_") + "_v2"} for item in DIABETES_RULE["required"]]}
     revised = pilot.client.put(f"/api/me/practice/rules/{rule['id']}", headers=_h("user-a"), json=drifted).json()
     assert {item["label"]: item["key"] for item in revised["content"]["required"]} == original
+
+
+def test_chat_teaching_that_extends_a_rule_keeps_its_requirement_keys(pilot: Pilot) -> None:
+    """The key fix sits in rules.create, which every new version goes through: the rule editor
+    (revise), chat teaching merged into the existing rule, and confirmed proposals."""
+    _ready(pilot)
+    current = pilot.get("/api/me/practice/rules", "user-a").json()[0]
+    original = {item["label"]: item["key"] for item in current["content"]["required"]}
+    taught = pilot.post("/api/me/practice/teach", "user-a",
+                        {"text": "For Diabetes management referrals I need a lipid panel."}).json()
+    confirmed = pilot.post(f"/api/me/practice/teach/{taught['id']}/confirm", "user-a", {}).json()["rule"]
+    keys = {item["label"]: item["key"] for item in confirmed["content"]["required"]}
+    assert confirmed["version"] == current["version"] + 1 and confirmed["supersedes_id"] == current["id"]
+    assert {label: keys[label] for label in original} == original, "existing requirements keep their keys"
+    assert len(keys) == len(original) + 1, "the taught requirement is added"

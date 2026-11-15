@@ -61,6 +61,8 @@ test('no re-approval: a change since you last looked is a note naming who change
   assert.doesNotMatch(detail, /carried_forward|detail\.approval/)
   assert.match(detail, /Changed since you last looked: \{changes\.map\(changeText\)/)
   assert.match(detail, /markReferralSeen\(id\)/, 'the visit is recorded after the note is computed')
+  assert.match(detail, /setVisitChanges\(next\.changes_since_seen \?\? \[\]\)/, 'the note survives reloads during the visit')
+  assert.match(detail, /const changes = visitChanges/)
 })
 
 test('accepted referrals await scheduling; nothing is shown as scheduled or completed', () => {

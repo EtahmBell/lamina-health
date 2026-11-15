@@ -17,7 +17,7 @@ import {
   inviteStaff, listReferrals, openReferralDocument, previewInvitation, recordReferralItem,
   removeStaffMember, requestInformation, setMemberAdmin, retriageReferral, revokeInvitation, updatePractice, uploadReferralDocument,
   type EffectiveTriage, type Fit, type Modality, type NextStep, type PilotStatus, type PracticeFields,
-  type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type ReferralDetail,
+  type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type ReferralDetail, type TriageChange,
   type ReferralSummary, type RequirementAssessment, getHome, teachAgent, editInformationRequest,
   sendInformationRequest, cancelInformationRequest, resolveInformationRequest, reissueRequestLink, setReferralType, verifyReferralItem,
   type HomeItem, type HomeProjection, type InformationRequest,
@@ -694,10 +694,17 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const [chosenType, setChosenType] = useState('')
   useEffect(() => { getPracticeRules().then((rules) => setPracticeTypes([...new Set(rules.map((rule) => rule.referral_type))].sort())).catch(() => setPracticeTypes([])) }, [])
   const seen = useRef('')
+  // "Changed since you last looked" is taken from the FIRST load of this visit, then the visit is
+  // recorded. Later reloads (after an action, a data-change event, or React's dev double-mount)
+  // come back after the mark with an empty list and must not hide the note mid-visit.
+  const [visitChanges, setVisitChanges] = useState<TriageChange[]>([])
   const load = useCallback(() => getReferral(id).then((next) => {
     setDetail(next); setError('')
-    // "Changed since you last looked" is computed before this visit is recorded.
-    if (seen.current !== id) { seen.current = id; void markReferralSeen(id).catch(() => undefined) }
+    if (seen.current !== id) {
+      seen.current = id
+      setVisitChanges(next.changes_since_seen ?? [])
+      void markReferralSeen(id).catch(() => undefined)
+    }
   }).catch((err) => setError(errorText(err, 'Could not load this referral'))), [id])
   useEffect(() => { void load() }, [load])
   useOnPilotDataChange(() => void load())
@@ -723,7 +730,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const toVerify = !closed && canUse(actions, 'verify_item') ? (recommendation?.requirements ?? []).filter((item) => item.state === 'sender_reported') : []
   const handoffEvent = [...detail.history].reverse().find((event) => event.event_type === 'referral_marked_ready' || event.event_type === 'referral_escalated')
   const corrections = detail.corrections ?? []
-  const changes = detail.changes_since_seen ?? []
+  const changes = visitChanges
   const readiness = !recommendation ? null : recommendation.readiness === 'ready' ? 'Complete per your rule' : recommendation.readiness === 'unknown' ? 'Unknown — no rule for this type' : `Missing ${recommendation.missing_items.join(', ')}`
   const timeline = [...detail.history].reverse()
   // "Not specified" alone in a summary line doesn't say WHAT is unspecified.
