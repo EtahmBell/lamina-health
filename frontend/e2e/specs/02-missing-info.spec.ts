@@ -23,11 +23,14 @@ test('request → sender reply → staff Verify from Home', async ({ as, seed })
   await office.getByRole('button', { name: 'Send response' }).click()
   await expect(office.getByRole('status')).toHaveText('Thank you — the practice has your response.')
 
-  // Home → Verify lands on the referral with Verify as THE next step and primary action.
+  // Home counts the reply; the Verify item (Home shows the top three, the rest are in For you)
+  // lands on the referral with Verify as THE next step and primary action.
   await staff.goto('/me/home')
-  await staff.getByRole('button', { name: /^Verify Verify what the referring office sent for Vega Verify-E2E/ }).click()
+  await expect(staff.locator('main')).toContainText('a reply from the referring office to verify')
+  await staff.goto('/me/for-you')
+  await staff.getByRole('button', { name: 'Verify Verify what the referring office sent for Vega Verify-E2E', exact: true }).click()
   await expect(staff).toHaveURL(new RegExp(`/me/referrals/${seed.referrals.verify}`))
-  await expect(nextStep(staff).getByRole('heading', { level: 3 })).toHaveText('Verify what the referring office sent')
+  await expect(nextStep(staff).getByRole('heading', { level: 3 }).first()).toHaveText('Verify what the referring office sent')
   const verify = nextStep(staff).getByRole('button', { name: 'Verify Recent TSH' })
   await expect(verify).toHaveClass(/button-primary/)
   await verify.click()

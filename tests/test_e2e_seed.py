@@ -79,3 +79,15 @@ def test_seeds_two_isolated_fictional_practices(e2e_paths: Path) -> None:
     assert joined.practice_id == a and not joined.is_admin
     e2e_seed.step("return-second-physician")
     assert services.practice.context("e2e-second_physician").is_admin
+    # Shadow step: practice B gets a rule and a confirmed representation, so Home has nothing to ask.
+    e2e_seed.shadow_second()
+    home = e2e_seed.Seeder(e2e_seed._accounts()).call("GET", "/api/me/practice/home", "second_physician")
+    assert home["needs_you"] == []
+    # The screenshot run alternates initializing → shadow once per viewport; both repeat cleanly.
+    for _ in range(2):
+        e2e_seed.step("initializing-second-physician")
+        lifecycle = services.representation.lifecycle(services.practice.context("e2e-second_physician"))
+        assert lifecycle["state"] == "initializing"
+        e2e_seed.shadow_second()
+    rules_b = e2e_seed.Seeder(e2e_seed._accounts()).call("GET", "/api/me/practice/rules", "second_physician")
+    assert [rule["referral_type"] for rule in rules_b] == ["Kidney stones"]

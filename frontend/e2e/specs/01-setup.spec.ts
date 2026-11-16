@@ -25,7 +25,7 @@ test('setup A–E, confirm the representation, enter shadow mode', async ({ as }
   await card.getByLabel(/Required before review/).fill('Recent creatinine | 90')
   await card.getByLabel('Preferred visit type').selectOption('econsult')
   await card.getByRole('button', { name: 'Save for Kidney stones' }).click()
-  await expect(card.getByText('What I understood')).toBeVisible()
+  await expect(card.getByText('What I understood', { exact: true })).toBeVisible()
   await expect(card.getByText(/Recent creatinine — within 90 days/)).toBeVisible()
   await doctor.getByRole('button', { name: /Done — continue/ }).click()
 
@@ -36,9 +36,14 @@ test('setup A–E, confirm the representation, enter shadow mode', async ({ as }
   // E: confirm each waiting item, then the representation.
   await expect(doctor.getByText('This is how your agent will represent you')).toBeVisible()
   const waiting = doctor.locator('.pilot-review-section', { hasText: 'Waiting for your confirmation' })
-  for (let guard = 0; guard < 10 && await waiting.getByRole('button', { name: 'Confirm', exact: true }).count(); guard += 1) {
-    await waiting.getByRole('button', { name: 'Confirm', exact: true }).first().click()
-    await doctor.waitForTimeout(300)
+  const confirmButtons = waiting.getByRole('button', { name: 'Confirm', exact: true })
+  await expect(confirmButtons.first()).toBeVisible()
+  for (let remaining = await confirmButtons.count(), guard = 0; remaining > 0 && guard < 10; guard += 1) {
+    await confirmButtons.first().click()
+    // Wait for this confirmation to land before the next click (the list re-renders; the
+    // section disappears with the last one).
+    await expect(confirmButtons).toHaveCount(remaining - 1)
+    remaining -= 1
   }
   await expect(doctor.locator('.pilot-representation-type', { hasText: 'Kidney stones' })).toContainText('Recent creatinine')
   await doctor.getByRole('button', { name: /Confirm representation/ }).click()

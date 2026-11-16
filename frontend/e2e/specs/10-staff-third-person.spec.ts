@@ -14,5 +14,5 @@ test('staff see Your Agent in the third person', async ({ as, seed }) => {
     await expect(main).not.toContainText(phrase)
   }
   await staff.goto('/me/home')
-  await expect(staff.getByRole('complementary')).toContainText(`${doctor}’s agent`)
+  await expect(staff.getByRole('complementary', { name: `${doctor}’s agent` })).toBeVisible()
 })

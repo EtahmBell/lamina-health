@@ -58,6 +58,7 @@ DIABETES = {
 ADRENAL = {"referral_type": "Adrenal nodule", "good_fit": ["incidental adrenal nodule"], "modality": "econsult"}
 OSTEOPOROSIS = {"referral_type": "Osteoporosis", "good_fit": ["low bone density"], "modality": "econsult"}
 HYPERPARA = {"referral_type": "Hyperparathyroidism", "good_fit": ["raised calcium"], "modality": "unspecified"}
+KIDNEY_STONES = {"referral_type": "Kidney stones", "good_fit": ["recurrent kidney stones"], "modality": "either"}
 DIABETES_ITEMS = [{"key": "recent_a1c", "value": "HbA1c 8.4% (E2E)", "observed_date": RECENT},
                   {"key": "renal_function", "value": "eGFR 82 (E2E)", "observed_date": RECENT}]
 
@@ -248,9 +249,10 @@ def step(name: str) -> None:
             db.execute("UPDATE practice_members SET practice_id = ?, is_admin = 1 WHERE user_id = ?",
                        (state["practice_b"]["id"], second))
         elif name == "initializing-second-physician":
-            # Forget the second physician's lifecycle; with no confirmed statements it reads as
-            # initializing again (used by the screenshot run, which captures both states).
-            db.execute("DELETE FROM agent_lifecycle WHERE practice_id = ?", (state["practice_b"]["id"],))
+            # Put the second physician's agent back to "initializing" with no stages done (used by
+            # the screenshot run, which captures both states, once per viewport).
+            db.execute("UPDATE agent_lifecycle SET state = 'initializing', setup_json = ?, shadow_at = NULL "
+                       "WHERE practice_id = ?", (json.dumps({"stages": {}}), state["practice_b"]["id"]))
         else:
             sys.exit(f"Unknown step: {name}")
     print(f"step {name}: done")
@@ -259,6 +261,10 @@ def step(name: str) -> None:
 def shadow_second() -> None:
     guard()
     s = Seeder(_accounts())
+    # A practice in shadow has at least one rule; without one Home (rightly) asks for criteria.
+    if not any(rule["referral_type"] == KIDNEY_STONES["referral_type"]
+               for rule in s.call("GET", "/api/me/practice/rules", "second_physician")):
+        s.call("POST", "/api/me/practice/rules", "second_physician", KIDNEY_STONES)
     s.call("POST", "/api/me/practice/representation/confirm", "second_physician")
     print("step shadow-second-physician: done")
 
