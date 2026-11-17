@@ -46,7 +46,7 @@ const SHOTS: Shot[] = [
   { name: 'staff-home', actor: 'staff', to: () => '/me/home', ready: main },
   { name: 'staff-referral-ready-flag-controls', actor: 'staff', to: (s) => referralPath(s.referrals.flag), ready: card },
   { name: 'staff-conflict-read-only', actor: 'staff', to: (s) => referralPath(s.referrals.conflict_keep), ready: (p) => expect(p.locator('.pilot-conflict')).toBeVisible() },
-  { name: 'staff-your-agent-third-person', actor: 'staff', to: () => '/me/agent', ready: text(/’s agent/) },
+  { name: 'staff-your-agent-third-person', actor: 'staff', to: () => '/me/agent', ready: (p) => expect(p.locator('main').getByText(/’s agent/).first()).toBeVisible() },
   { name: 'staff-train-suggest', actor: 'staff', to: () => '/me/agent?tab=teach', ready: text(/Suggest how/) },
   // Public and sender (no account)
   { name: 'public-page', actor: 'office', to: (s) => `/p/${s.public_slug}`, ready: text('Northfield Endocrinology (E2E)') },
@@ -77,6 +77,8 @@ test('capture the UI-review screens', async ({ as, seed }, testInfo) => {
     await page.evaluate(() => document.fonts?.ready)
     const file = path.join(dir, `${String(index + 1).padStart(2, '0')}-${shot.name}.png`)
     await page.screenshot({ path: file, fullPage: true, animations: 'disabled' })
+    // On the phone, also the first screen exactly as the viewport shows it (fixed elements in place).
+    if (size.width < 600) await page.screenshot({ path: file.replace(/\.png$/, '.fold.png'), animations: 'disabled' })
     if (shot.mock) await page.unrouteAll({ behavior: 'ignoreErrors' })
   }
 })

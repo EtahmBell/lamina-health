@@ -10,12 +10,12 @@ import {
   getLearningSummary, getRepresentation, type LearningSummary, type Representation,
 } from './pilotApi.ts'
 import {
-  AGENT_TABS, emptyRuleForm, isClosed, MODALITY_LABELS, physicianLabel, pilotErrorCopy, thirdPerson, pilotPaths, proposalLines,
+  AGENT_TABS, emptyRuleForm, isClosed, MODALITY_LABELS, physicianLabel, pilotErrorCopy, layerNote, lifecycleLine, representationItemText, pilotPaths, proposalLines,
   representationGroups, representationPortrait, ruleFormFrom, ruleInput, setupProgressLine,
-  itemKindEffect, itemKindLabel, TOPIC_LABELS, type AgentTab, type RuleForm,
+  itemKindEffect, itemKindLabel, TOPIC_LABELS, type AgentTab, type RuleForm, type Voice,
 } from './pilotState.ts'
 import { useOnPilotDataChange } from './pilotSync.ts'
-import { TrainingReminderBand } from './pilotUi.tsx'
+import { PageLoading, TrainingReminderBand } from './pilotUi.tsx'
 import { PublicProfileView } from './PublicPages.tsx'
 
 type Navigate = (path: string) => void
@@ -26,21 +26,32 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 /* ------------------------------------------------------------------ teach */
 
-function ProposalSummary({ proposal }: { proposal: Proposal }) {
+function ProposalSummary({ proposal, voice = { physician: true, doctor: 'the physician' } }: { proposal: Proposal; voice?: Voice }) {
   const lines = proposalLines(proposal.content)
+  // Whose words these are, and who confirms — in the reader's voice.
+  const fromStaff = proposal.suggested_by_role === 'staff'
+  const whose = voice.physician ? 'your' : `${voice.doctor}’s`
+  const origin = proposal.source === 'onboarding' ? `From ${whose} setup answer`
+    : proposal.source === 'correction_pattern' ? `Learned from ${whose} repeated corrections`
+    : fromStaff ? `From ${proposal.suggested_by_name ?? 'a staff member'}’s suggestion` : `From ${whose} instruction`
+  const pending = voice.physician ? 'not active until you confirm' : `not active until ${voice.doctor} confirms`
   return <div className="pilot-proposal-body">
-    <p className="pilot-quote">“{proposal.source_text}”</p>
+    {/* A person's words are quoted; text Lamina drafted from a correction pattern is not, and
+        its values are shown in plain language. */}
+    {proposal.source === 'correction_pattern'
+      ? <p className="pilot-proposal-basis">{proposal.source_text.replace(/in_person/g, 'in-person').replace(/econsult/g, 'eConsult')}</p>
+      : <p className="pilot-quote">“{proposal.source_text}”</p>}
     {proposal.structured
-      ? <><p><strong>I understood:</strong> for <em>{proposal.referral_type === 'Unassigned' ? 'which referral type?' : proposal.referral_type}</em> referrals —</p><ul>{lines.map((line) => <li key={line}>{line}</li>)}</ul></>
-      : <p className="muted-note">I couldn’t turn this into a structured rule, so I kept it as a note. Edit it into a rule if you want me to act on it.</p>}
+      ? <><p><strong>Drafted as a rule:</strong> for <em>{proposal.referral_type === 'Unassigned' ? 'which referral type?' : proposal.referral_type}</em> referrals —</p><ul>{lines.map((line) => <li key={line}>{line}</li>)}</ul></>
+      : <p className="muted-note">I couldn’t turn this into a structured rule, so I kept it as a note. {voice.physician ? 'Edit it into a rule if you want me to act on it.' : `Only ${voice.doctor} can turn it into a rule.`}</p>}
     {/* What was NOT turned into a rule (negations, exceptions, vague recency) — check before confirming. */}
     {(proposal.review_notes ?? []).length > 0 && <div className="pilot-panel"><p><strong>Check before confirming</strong></p><ul>{(proposal.review_notes ?? []).map((note) => <li key={note}>{note}</li>)}</ul></div>}
     {proposal.content.modality_notes && <p className="muted-note">Kept as a note (not applied by triage): {proposal.content.modality_notes}</p>}
     {/* A setup answer is the physician's own answer: no "confidence" number for it. */}
     {proposal.suggested && <p><span className="pilot-suggested-tag">Suggested</span> <span className="muted-note">A common {proposal.referral_type} referral type for your specialty — confirm it only if it fits you.</span></p>}
     {proposal.suggested_by_role === 'staff' && <p><span className="pilot-suggested-tag">Staff suggestion</span> <span className="muted-note">Suggested by {proposal.suggested_by_name ?? 'a staff member'}. It changes nothing unless a physician confirms it.</span></p>}
-    <p className="muted-note">{proposal.source === 'onboarding' ? 'From your setup answer · not active until you confirm'
-      : `${proposal.source === 'correction_pattern' ? 'Learned from your repeated corrections' : 'From your instruction'} · confidence ${proposal.confidence != null ? `${Math.round(proposal.confidence * 100)}%` : '—'} · not active until you confirm`}</p>
+    <p className="muted-note">{proposal.source === 'onboarding' ? `${origin} · ${pending}`
+      : `${origin} · confidence ${proposal.confidence != null ? `${Math.round(proposal.confidence * 100)}%` : '—'} · ${pending}`}</p>
   </div>
 }
 
@@ -154,7 +165,7 @@ export function AgentPage({ status, navigate, tab }: { status: PilotStatus; navi
       <h1>{practice?.name ?? 'Your practice'}</h1>
       <p>{practice?.specialty ? `${practice.specialty} · ` : ''}{physician
         ? <>Represents how you and your practice work. {lifecycle?.label ?? 'Shadow mode — your agent recommends; you decide.'}</>
-        : <>Represents how {doctor} and the practice work. It recommends; {doctor} decides. You can see what it knows and suggest changes for {doctor} to confirm.</>}</p>
+        : <>Represents how {doctor} and the practice work. It recommends; {doctor} decides. You can see what it represents and suggest changes for {doctor} to confirm.</>}</p>
     </div></section>
     <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => navigate(pilotPaths.agentTab(item))}>{TAB_LABELS[item]}{item === 'teach' && trainBadge > 0 ? ` · ${trainBadge}` : ''}</button>)}</nav>
     {error && <div className="error-banner" role="alert">{error}</div>}
@@ -172,10 +183,12 @@ function AgentOverview({ status, navigate, rules, summary, representation, refer
   const doctor = physicianLabel(status.physician_name)
   // Staff read the physician's agent in the third person.
   const whose = physician ? 'your' : `${doctor}’s`
-  if (!rules || !summary || !representation) return <div className="page-state embedded"><div className="loading-line" /><p>Opening your agent…</p></div>
+  if (!rules || !summary || !representation) return <PageLoading label="Opening your agent…" />
   const lifecycle = summary.lifecycle
   const open = (referrals ?? []).filter((item) => !isClosed(item.status))
   const triaged = (referrals ?? []).filter((item) => item.fit !== null)
+  // Only claim "triaged against the confirmed representation" when something is confirmed.
+  const hasConfirmed = representation.types.some((type) => representationGroups(type).confirmed.length > 0)
   const { counts } = summary
   return <div className="agent-overview-v2">
     {/* Resume entry: the one "your move" while the agent doesn't represent the physician yet. */}
@@ -192,7 +205,7 @@ function AgentOverview({ status, navigate, rules, summary, representation, refer
     <section className="agent-portrait-card">
       <p className="eyebrow">{physician ? 'Your agent currently represents your practice as' : `${doctor}’s agent currently represents the practice as`}</p>
       <p className="agent-portrait-text">{representationPortrait(status.practice, representation)}</p>
-      {lifecycle.label && <p className="pilot-lifecycle-line"><span className={`pilot-lifecycle-dot state-${lifecycle.state ?? 'none'}`} aria-hidden="true" />{physician ? lifecycle.label : thirdPerson(lifecycle.label, doctor)}</p>}
+      {lifecycle.label && <p className="pilot-lifecycle-line"><span className={`pilot-lifecycle-dot state-${lifecycle.state ?? 'none'}`} aria-hidden="true" />{lifecycleLine(lifecycle, { physician, doctor })}</p>}
     </section>
     <hr className="agent-overview-divider" />
     <section className="agent-network-activity">
@@ -204,8 +217,11 @@ function AgentOverview({ status, navigate, rules, summary, representation, refer
           {weekly && <li className="network-activity-item"><div><strong>This week</strong><span className="network-activity-detail">{weekly}</span></div>
             <button type="button" className="text-button" onClick={() => navigate(pilotPaths.metrics)}>View metrics →</button></li>}
           {referrals && <li className="network-activity-item"><div>
-            <strong>{plural(triaged.length, 'referral triaged', 'referrals triaged')} against {whose} confirmed representation</strong>
-            <span className="network-activity-detail">Fit, readiness, priority, and visit type checked; missing information flagged</span>
+            {hasConfirmed
+              ? <><strong>{plural(triaged.length, 'referral triaged', 'referrals triaged')} against {whose} confirmed representation</strong>
+                <span className="network-activity-detail">Fit, readiness, priority, and visit type checked; missing information flagged</span></>
+              : <><strong>{plural(referrals.length, 'referral recorded', 'referrals recorded')}, not judged against a representation</strong>
+                <span className="network-activity-detail">Nothing is confirmed yet, so fit and completeness weren’t checked against {whose} rules.{physician ? ' Confirm setup to start.' : ''}</span></>}
             {open.length > 0 && <span className="network-activity-outcome">✓ {plural(open.length, 'referral', 'referrals')} open now</span>}
             {open.filter((item) => item.status === 'needs_information').length > 0 && <span className="network-activity-outcome">✓ {plural(open.filter((item) => item.status === 'needs_information').length, 'referral', 'referrals')} waiting on the referring office</span>}
           </div><button type="button" className="text-button" onClick={() => navigate(pilotPaths.patients)}>View patients →</button></li>}
@@ -218,16 +234,18 @@ function AgentOverview({ status, navigate, rules, summary, representation, refer
       <ul className="pilot-learned-counts" aria-label="This week">
         <li><strong>{counts.confirmed_this_week}</strong> newly confirmed</li>
         <li><strong>{counts.pending_learnings}</strong> pending {counts.pending_learnings === 1 ? 'learning' : 'learnings'}</li>
-        <li><strong>{counts.open_questions}</strong> {counts.open_questions === 1 ? 'question' : 'questions'} for today</li>
+        <li><strong>{counts.open_questions}</strong> {counts.open_questions === 1 ? 'question' : 'questions'} for {physician ? 'today' : `${doctor} today`}</li>
         {counts.queued_questions > 0 && <li><strong>{counts.queued_questions}</strong> queued</li>}
       </ul>
       {counts.queued_questions > 0 && <p className="agent-empty-note">{physician ? 'Your agent asks' : `The agent asks ${doctor}`} one question a day; {plural(counts.queued_questions, 'more question waits', 'more questions wait')} for the coming days.</p>}
       {summary.confirmed_this_week.length > 0 && <ul className="learned-this-week-list">{summary.confirmed_this_week.slice(0, 5).map((item) => <li key={item.rule_id}>
         <span>{item.referral_type} — version {item.version} confirmed {formatDate(item.confirmed_at)}{item.layer === 'physician' ? ' · just you' : ''}</span>
-        <button type="button" className="text-button" onClick={() => navigate(pilotPaths.agentTab('rules'))}>Review →</button>
+        <button type="button" className="text-button" onClick={() => navigate(pilotPaths.agentTab('rules'))}>{physician ? 'Review →' : 'View →'}</button>
       </li>)}</ul>}
       {counts.pending_learnings + counts.open_questions > 0
-        ? <button className="button-primary" onClick={() => navigate(pilotPaths.agentTab('teach'))}>Review {physician ? '' : 'pending '}learnings <span>→</span></button>
+        ? (physician
+          ? <button className="button-primary" onClick={() => navigate(pilotPaths.agentTab('teach'))}>Review learnings <span>→</span></button>
+          : <button className="button-secondary" onClick={() => navigate(pilotPaths.agentTab('teach'))}>See what’s waiting for {doctor} <span>→</span></button>)
         : counts.confirmed_this_week === 0 && <p className="agent-empty-note">{physician ? 'Nothing new this week, and nothing needs your input right now.' : `Nothing new this week, and nothing is waiting for ${doctor}.`}</p>}
     </section>
     <hr className="agent-overview-divider" />
@@ -244,8 +262,8 @@ function AgentOverview({ status, navigate, rules, summary, representation, refer
 /** The demo's practice-representation sections, fed by the confirmed representation only:
  * statements grouped by referral type, each labelled with its kind, plus honest unknowns. */
 function PracticeRepresentation({ representation, navigate, physician, doctor }: { representation: Representation; navigate: Navigate; physician: boolean; doctor: string }) {
-  // Staff read the physician's statements in the third person.
-  const say = (text: string) => (physician ? text : thirdPerson(text, doctor))
+  // Role-aware: staff read the physician's statements about the physician.
+  const voice = { physician, doctor }
   const types = representation.types.filter((type) => representationGroups(type).confirmed.length > 0)
   if (!types.length) return <p className="agent-empty-note">Nothing confirmed yet, so your agent can record referrals but can’t judge fit or completeness.{physician && <> <button type="button" className="text-button" onClick={() => navigate(pilotPaths.setup())}>Start setup →</button></>}</p>
   return <div className="practice-tab">
@@ -256,11 +274,11 @@ function PracticeRepresentation({ representation, navigate, physician, doctor }:
     {types.map((type) => { const { confirmed } = representationGroups(type); return <section key={type.referral_type} className="practice-section pilot-representation-type">
       <h3 className="practice-section-heading">{type.referral_type}{type.aliases.length > 0 && <small className="muted-note"> · also {type.aliases.join(', ')}</small>}</h3>
       <ul className="pilot-statement-list">{confirmed.map((item, index) => <li key={`${item.rule_id}-${index}`}>
-        <span className={`pilot-kind-tag kind-${item.kind}`}>{say(itemKindLabel(item))}</span>
-        <span>{say(item.text)}</span>
-        <small className="muted-note">{say(itemKindEffect(item))} · v{item.version}{item.layer === 'physician' ? ' · just you' : ''}</small>
+        <span className={`pilot-kind-tag kind-${item.kind}`}>{itemKindLabel(item, voice)}</span>
+        <span>{representationItemText(item.text, voice)}</span>
+        <small className="muted-note">{itemKindEffect(item, voice)} · v{item.version}{layerNote(item.layer, voice) ? ` · ${layerNote(item.layer, voice)}` : ''}</small>
       </li>)}</ul>
-      {physician && type.unknown_topics.length > 0 && <p className="pilot-unknown-line">Not answered yet: {type.unknown_topics.map((topic) => TOPIC_LABELS[topic].toLowerCase()).join(', ')}. Your agent says it doesn’t know these.</p>}
+      {physician && type.unknown_topics.length > 0 && <p className="pilot-unknown-line">Not answered yet: {type.unknown_topics.map((topic) => TOPIC_LABELS[topic].toLowerCase()).join(', ')}. Your agent says these aren’t confirmed yet.</p>}
     </section> })}
     {physician && representation.conflicts.length > 0 && <section className="practice-section"><h3 className="practice-section-heading">Conflicts to review</h3>
       <ul className="pilot-statement-list">{representation.conflicts.map((conflict, index) => <li key={index}><span className="pilot-kind-tag">Conflict</span><span>{conflict.referral_type}: practice and your own statements disagree ({conflict.kind === 'scope_policy' ? 'scope' : 'a requirement'}). Your agent won’t choose between them.</span></li>)}</ul></section>}
@@ -300,7 +318,7 @@ function TeachTab({ physician, doctor, data, summary, navigate, onChange }: { ph
     </form>
     <h2 className="pilot-subhead">Pending learnings</h2>
     {data && learnings.length === 0 && <p className="agent-empty-note">Nothing pending.</p>}
-    {learnings.map((proposal) => <div id={`proposal-${proposal.id}`} key={proposal.id}>{physician ? <ProposalCard proposal={proposal} referralTypes={data?.referral_types ?? []} onChange={onChange} /> : <section className="pilot-card"><ProposalSummary proposal={proposal} /></section>}</div>)}
+    {learnings.map((proposal) => <div id={`proposal-${proposal.id}`} key={proposal.id}>{physician ? <ProposalCard proposal={proposal} referralTypes={data?.referral_types ?? []} onChange={onChange} /> : <section className="pilot-card"><ProposalSummary proposal={proposal} voice={{ physician, doctor }} /></section>}</div>)}
   </div>
 }
 
@@ -348,7 +366,7 @@ function RulesTab({ physician, rules, onChange }: { physician: boolean; rules: P
       {physician && editing === null && <button className="button-primary" onClick={() => setEditing('new')}>Add rule <span>+</span></button>}</div>
     {error && <div className="error-banner" role="alert">{error}</div>}
     {editing === 'new' && <RuleEditor initial={emptyRuleForm()} onCancel={() => setEditing(null)} onSave={async (form) => { await createPracticeRule(ruleInput(form)); setEditing(null); onChange() }} />}
-    {!rules && <div className="page-state embedded"><div className="loading-line" /><p>Opening rules…</p></div>}
+    {!rules && <PageLoading label="Opening rules…" />}
     {rules && rules.length === 0 && editing === null && <p className="agent-empty-note">{physician ? 'No rules yet. Add one rule per referral type you receive.' : 'The physician hasn’t added referral rules yet.'}</p>}
     {(rules ?? []).map((rule) => editing === rule.id
       ? <RuleEditor key={rule.id} initial={ruleFormFrom(rule)} onCancel={() => setEditing(null)} onSave={async (form) => { await revisePracticeRule(rule.id, ruleInput(form)); setEditing(null); onChange() }} />
@@ -389,7 +407,7 @@ export function PublicSettingsPage({ status, navigate }: { status: PilotStatus; 
     catch (err) { setError(errorText(err, 'That didn’t work.')) } finally { setBusy(false) }
   }
   const back = <button className="text-button back-link" onClick={() => navigate(pilotPaths.practice)}>← Profile &amp; practice</button>
-  if (!preview || !draft) return <main className="page-shell selector-page">{back}{error ? <div className="error-banner" role="alert">{error}</div> : <div className="page-state embedded"><div className="loading-line" /><p>Opening your public page…</p></div>}</main>
+  if (!preview || !draft) return <main className="page-shell selector-page">{back}{error ? <div className="error-banner" role="alert">{error}</div> : <PageLoading label="Opening your public page…" />}</main>
   const publicUrl = `${window.location.origin}${pilotPaths.publicPage(preview.slug)}`
   const set = (key: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft({ ...draft, [key]: event.target.value })
   const saved = draftFrom(preview)

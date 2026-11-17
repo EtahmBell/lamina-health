@@ -15,11 +15,15 @@ for (const role of ROLES) {
     const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, storageState: file })
     const page = await context.newPage()
     await page.goto('/me/home')
-    // Signed in: the workspace shell appears. Expired: the app sends the user to sign-in.
-    const outcome = await Promise.race([
+    // Signed in: the workspace shell appears. Expired: the app sends the user to sign-in. A stale
+    // access token the API rejects before the client refreshes it: reload once, then decide.
+    const settle = () => Promise.race([
       page.getByRole('navigation').getByRole('button', { name: 'Home' }).waitFor({ timeout: 30_000 }).then(() => 'signed-in'),
       page.waitForURL(/\/claim\/sign-in/, { timeout: 30_000 }).then(() => 'expired'),
+      page.getByText('Invalid access token').waitFor({ timeout: 30_000 }).then(() => 'stale-token'),
     ])
+    let outcome = await settle()
+    if (outcome === 'stale-token') { await page.reload(); outcome = await settle() }
     if (outcome !== 'signed-in') throw new Error(`The ${ROLE_LABELS[role]} session has expired. Sign in again: npm run e2e:capture -- ${role}`)
     const secondsLeft = await page.evaluate(() => {
       const key = Object.keys(localStorage).find((name) => /^sb-.*-auth-token$/.test(name))

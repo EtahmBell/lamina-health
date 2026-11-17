@@ -7,6 +7,8 @@ test('"Changed since you last looked" names the cause and the trigger', async ({
   const staffLabel = seed.practice_a.staff_label
   const staff = await as('staff')
   await openReferral(staff, seed.referrals.change)
+  // Staff intake fixes sit in a collapsed "Fix intake details" disclosure.
+  await nextStep(staff).getByText('Fix intake details', { exact: true }).click()
   await nextStep(staff).getByRole('button', { name: 'Re-run triage' }).click()
   const cause = `because ${doctor} updated the Adrenal nodule rule (v2) · re-checked by ${staffLabel}`
   await expect(staff.locator('.timeline-event', { hasText: 'Lamina’s recommendation changed' }).first()).toContainText(`By Lamina, ${cause}`)

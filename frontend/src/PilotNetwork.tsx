@@ -3,7 +3,7 @@ import { LaminaMark } from './LaminaMark.tsx'
 import { listReferrals, type PilotStatus } from './pilotApi.ts'
 import { pilotPaths, referringClinicians, type ReferringClinician } from './pilotState.ts'
 import { useOnPilotDataChange } from './pilotSync.ts'
-import { NetworkGlobeArt } from './pilotUi.tsx'
+import { NetworkGlobeArt, PageLoading } from './pilotUi.tsx'
 
 type Navigate = (path: string) => void
 
@@ -25,7 +25,7 @@ export function NetworkPage({ status, navigate }: { status: PilotStatus; navigat
   useOnPilotDataChange(load)
 
   return <main className="page-shell physician-directory-page pilot-network-page">
-    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The physicians and practices you work with, and how their agents and yours will coordinate care.</p></div></header>
+    <header className="directory-hero"><div><p className="eyebrow">Physician-agent network</p><h1>Network</h1><p>The clinicians and practices who refer to you. Connecting with colleagues on Lamina comes later.</p></div></header>
 
     <div className="my-network-tab">
       <section className="network-hero">
@@ -56,7 +56,7 @@ export function NetworkPage({ status, navigate }: { status: PilotStatus; navigat
           <section className="network-primary-section">
             <h2 className="network-section-title">Clinicians who have referred to you</h2>
             {error && <div className="error-banner" role="alert">{error}</div>}
-            {!referrers && !error && <div className="page-state embedded"><div className="loading-line" /><p>Loading referring clinicians…</p></div>}
+            {!referrers && !error && <PageLoading label="Loading referring clinicians…" />}
             {referrers && referrers.length === 0 && <p className="agent-empty-note">Clinicians appear here once your practice receives referrals from them in Lamina.</p>}
             {referrers && referrers.length > 0 && <>
               <div className="lam-list">{referrers.map((referrer) => <div key={referrer.key} className="lam-row connection-row pilot-referrer-row">

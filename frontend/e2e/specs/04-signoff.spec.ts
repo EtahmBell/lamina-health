@@ -10,6 +10,8 @@ test('correction then accept is the sign-off', async ({ as, seed }) => {
   const physician = await as('physician')
   await openReferral(physician, seed.referrals.signoff)
   await expect(physician.getByText('Approve triage')).toHaveCount(0)
+  // Adjusting triage sits in a collapsed "Adjust triage" disclosure below the decision.
+  await nextStep(physician).getByText('Adjust triage', { exact: true }).click()
   await nextStep(physician).getByRole('button', { name: 'Correct fit, priority or visit type' }).click()
   const panel = physician.locator('.pilot-panel', { hasText: 'Correct the triage' })
   await panel.getByLabel('Priority').selectOption('soon')

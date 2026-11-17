@@ -21,6 +21,11 @@ export const API_PORT = 8011
 export const APP_PORT = 5183
 export const API_URL = `http://127.0.0.1:${API_PORT}`
 export const APP_URL = `http://127.0.0.1:${APP_PORT}`
+// Demo comparator (synthetic demo mode, no accounts): its own ports.
+export const DEMO_API_PORT = 8012
+export const DEMO_APP_PORT = 5184
+export const DEMO_API_URL = `http://127.0.0.1:${DEMO_API_PORT}`
+export const DEMO_APP_URL = `http://127.0.0.1:${DEMO_APP_PORT}`
 
 export const ROLES = ['physician', 'second_physician', 'staff'] as const
 export type Role = typeof ROLES[number]

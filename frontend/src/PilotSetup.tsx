@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { PageError, PageLoading } from './pilotUi.tsx'
 import { AgentAvatar } from './AgentAvatar.tsx'
 import { ApiError } from './api.ts'
 import {
@@ -38,8 +39,8 @@ export function SetupPage({ status, navigate, stage }: { status: PilotStatus; na
       <p>You can see the practice-level requirements that apply to your work under Your Agent.</p></div></header>
       <div className="pilot-setup-staff-actions"><button className="button-primary" onClick={() => navigate(pilotPaths.agent)}>Open Your Agent <span>→</span></button></div></main>
   }
-  if (error && !setup) return <main className="page-shell pilot-setup-page"><div className="error-banner" role="alert">{error}</div><button className="text-button" onClick={() => void load()}>Try again</button></main>
-  if (!setup) return <main className="page-shell pilot-setup-page"><div className="page-state embedded"><div className="loading-line" /><p>Opening setup…</p></div></main>
+  if (error && !setup) return <main className="page-shell pilot-setup-page"><PageError title="Couldn’t open setup" detail={error} onRetry={() => void load()} /></main>
+  if (!setup) return <main className="page-shell pilot-setup-page"><PageLoading label="Opening setup…" /></main>
 
   const current: SetupStageId = stage ?? setup.lifecycle.next_stage ?? 'review'
   const go = (next: SetupStageId) => navigate(pilotPaths.setup(next))
@@ -188,7 +189,7 @@ function RequirementsStage({ onDone, onSkip, onChanged }: { onDone: (next: Setup
   const [busy, setBusy] = useState(false)
   useEffect(() => { getRepresentation().then(setRepresentation).catch((err) => setError(errorText(err, 'Could not load your referral types'))) }, [])
   if (error && !representation) return <div className="error-banner" role="alert">{error}</div>
-  if (!representation) return <div className="page-state embedded"><div className="loading-line" /><p>Loading your referral types…</p></div>
+  if (!representation) return <PageLoading label="Loading your referral types…" />
   // Types you see (confirmed or answered in Stage B). Out-of-scope and case-by-case types need no workup.
   const accepted = representation.types.filter((type) => type.scope_policy === 'accept'
     || type.items.some((item) => item.status === 'proposed' && item.value === 'accept'))
@@ -197,7 +198,7 @@ function RequirementsStage({ onDone, onSkip, onChanged }: { onDone: (next: Setup
     try { onDone(await finishSetupStage('requirements')) } catch (err) { setError(errorText(err, 'Could not save')) } finally { setBusy(false) }
   }
   return <div className="pilot-setup-requirements">
-    <p className="page-intro">For each type you see: what must be present before review, what’s helpful, what makes one urgent, and your preferred visit type. Answer in your own words or item by item — I’ll show you exactly what I understood.</p>
+    <p className="page-intro">For each type you see: what must be present before review, what’s helpful, what makes one urgent, and your preferred visit type. Answer in your own words or item by item — I’ll show you exactly what I recorded before anything is used.</p>
     {accepted.length === 0 && <p className="agent-empty-note">No types marked “I see these” yet. Go back to Case scope, or skip this for now.</p>}
     {accepted.map((type) => <RequirementsCard key={type.referral_type} referralType={type.referral_type} onSaved={onChanged} />)}
     {error && <p className="error-banner" role="alert">{error}</p>}
@@ -256,11 +257,11 @@ function RequirementsCard({ referralType, onSaved }: { referralType: string; onS
       <label className="pilot-check"><input type="checkbox" checked={nothingRequired} onChange={(event) => setNothingRequired(event.target.checked)} disabled={busy} /> Nothing is required before I review these</label>
       <label className="pilot-check"><input type="checkbox" checked={noUrgency} onChange={(event) => setNoUrgency(event.target.checked)} disabled={busy} /> No urgency signals for this type</label>
       {error && <p className="error-banner" role="alert">{error}</p>}
-      <div className="onboarding-actions"><button className="button-secondary" type="submit" disabled={busy}>{busy ? 'Reading…' : proposal ? 'Update what I understood' : `Save for ${referralType}`}</button></div>
+      <div className="onboarding-actions"><button className="button-secondary" type="submit" disabled={busy}>{busy ? 'Reading…' : proposal ? 'Update what I recorded' : `Save for ${referralType}`}</button></div>
     </form>
     {result && <div className="pilot-panel pilot-understood" aria-live="polite">
       {proposal ? <>
-        <p><strong>What I understood</strong> — shown for confirmation at the end, not used yet:</p>
+        <p><strong>What I recorded</strong> — shown for confirmation at the end, not used yet:</p>
         <ul>
           {proposal.content.required.map((item) => <li key={`r-${item.key}`}><span className="pilot-kind-tag">{STATEMENT_KIND_LABELS.hard_requirement}</span> {item.label}{item.freshness_days ? ` — within ${item.freshness_days} days` : ' — no time window'}</li>)}
           {proposal.content.helpful.map((item) => <li key={`h-${item.key}`}><span className="pilot-kind-tag">{STATEMENT_KIND_LABELS.soft_preference}</span> Helpful: {item.label}</li>)}
@@ -325,7 +326,7 @@ function ReviewStage({ navigate, onConfirmed }: { navigate: Navigate; onConfirme
   }, [])
   useEffect(load, [load])
   if (error && !representation) return <div className="error-banner" role="alert">{error}</div>
-  if (!representation) return <div className="page-state embedded"><div className="loading-line" /><p>Gathering what you told me…</p></div>
+  if (!representation) return <PageLoading label="Gathering what you told me…" />
   const confirm = async () => {
     setBusy(true); setError('')
     try { const result = await confirmRepresentation(); setDone({ version: result.version.version }); notifyPilotDataChanged(); onConfirmed() }
@@ -364,7 +365,7 @@ function ReviewStage({ navigate, onConfirmed }: { navigate: Navigate; onConfirme
     <section className="pilot-review-section"><h3>Still unknown</h3>
       {representation.unknowns.length === 0 ? <p className="muted-note">Nothing open.</p>
         : <ul className="pilot-unknown-list">{representation.unknowns.map((item) => <li key={item}>{item}</li>)}</ul>}
-      <p className="muted-note">Your agent will say it doesn’t know these, and may ask you later.</p>
+      <p className="muted-note">Your agent will say these aren’t confirmed yet, and may ask you later.</p>
     </section>
     {error && <p className="error-banner" role="alert">{error}</p>}
     {done ? <div className="pilot-panel pilot-setup-done" role="status">

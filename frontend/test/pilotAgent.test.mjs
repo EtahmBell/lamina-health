@@ -53,9 +53,13 @@ test('Home shows the four agent-first sections from the server projection only',
 })
 
 test('teaching shows the interpretation and offers confirm, edit, reject, and clarification', () => {
-  for (const label of ['Confirm', 'Edit', 'Reject', 'I understood:', 'not active until you confirm', 'Or name a new referral type']) {
+  for (const label of ['Confirm', 'Edit', 'Reject', 'Drafted as a rule:', 'not active until you confirm', 'Or name a new referral type']) {
     assert.ok(agent.includes(label), label)
   }
+  // Product language: the agent drafts and represents; it never claims to "understand".
+  assert.doesNotMatch(agent, /I understood/)
+  // Staff read a pending learning about the physician: who confirms it is named, never "you".
+  assert.match(agent, /not active until \$\{voice\.doctor\} confirms/)
   const question = slice(agent, 'export function QuestionCard', 'export function AgentPage')
   for (const label of ['Yes', 'Edit', 'Not always / Depends', 'Ignore', 'at most one question like this a day']) assert.ok(question.includes(label), label)
 })

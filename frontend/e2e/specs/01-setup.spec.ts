@@ -20,12 +20,12 @@ test('setup A–E, confirm the representation, enter shadow mode', async ({ as }
   await doctor.getByRole('radiogroup', { name: 'What to do with Adrenal mass' }).getByText('Out of scope').click()
   await doctor.getByRole('button', { name: /Save and continue/ }).click()
 
-  // C: requirements for the type we see; "what I understood" is shown before anything is used.
+  // C: requirements for the type we see; "what I recorded" is shown before anything is used.
   const card = doctor.locator('.pilot-requirements-card', { hasText: 'Kidney stones' })
   await card.getByLabel(/Required before review/).fill('Recent creatinine | 90')
   await card.getByLabel('Preferred visit type').selectOption('econsult')
   await card.getByRole('button', { name: 'Save for Kidney stones' }).click()
-  await expect(card.getByText('What I understood', { exact: true })).toBeVisible()
+  await expect(card.getByText('What I recorded', { exact: true })).toBeVisible()
   await expect(card.getByText(/Recent creatinine — within 90 days/)).toBeVisible()
   await doctor.getByRole('button', { name: /Done — continue/ }).click()
 

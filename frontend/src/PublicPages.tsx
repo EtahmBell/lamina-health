@@ -222,6 +222,7 @@ export function SenderStatusPage({ token }: { token: string }) {
       {error && <p className="error-banner" role="alert">{error}</p>}
       {view.requested_items.length > 0 && <>
         <h2>Information requested</h2>
+        <p className="public-sender-ask">{view.practice.name} asked for the information below to finish reviewing this referral.</p>
         <form className="auth-form pilot-form" onSubmit={submitResponse}>
           {view.requested_items.map((item) => <div key={item.label} className="pilot-form-row">
             <label><span>{item.label}{item.state === 'verified' ? ' — received and checked ✓' : item.received ? ' — received, the practice will review it' : ''}</span>{item.key && !item.received
@@ -229,12 +230,14 @@ export function SenderStatusPage({ token }: { token: string }) {
               : <input value={item.state === 'verified' ? 'Received and checked by the practice' : item.received ? 'Received — awaiting the practice’s review' : 'Upload a document or describe below'} disabled />}</label>
             {item.key && !item.received && <label><span>Date of result</span><input type="date" value={values[item.key]?.date ?? ''} onChange={(event) => setValues((current) => ({ ...current, [item.key as string]: { value: current[item.key as string]?.value ?? '', date: event.target.value } }))} disabled={busy || !view.can_respond} /></label>}
           </div>)}
+          {/* Attachments come before the send button, so nobody sends first and misses them. */}
+          {view.can_respond && <label className="pilot-upload"><span>Add a document (PDF, image, or text · 15 MB) — it goes to the practice as soon as you choose it</span><input type="file" accept="application/pdf,image/png,image/jpeg,image/tiff,text/plain" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void act(() => uploadAsSender(token, file), `Uploaded ${file.name}.`); event.target.value = '' }} /></label>}
           <label><span>Message to the practice (optional)</span><textarea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} maxLength={4000} disabled={busy || !view.can_respond} /></label>
           <button className="button-primary" type="submit" disabled={busy || !view.can_respond}>{busy ? 'Sending…' : 'Send response'}</button>
         </form>
       </>}
       {view.requested_items.length === 0 && !view.referral.closed && <p className="muted-note">Nothing has been requested right now. You can still add documents below.</p>}
-      {view.can_respond && <label className="pilot-upload"><span>Add a document (PDF, image, or text · 15 MB)</span><input type="file" accept="application/pdf,image/png,image/jpeg,image/tiff,text/plain" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void act(() => uploadAsSender(token, file), `Uploaded ${file.name}.`); event.target.value = '' }} /></label>}
+      {view.requested_items.length === 0 && view.can_respond && <label className="pilot-upload"><span>Add a document (PDF, image, or text · 15 MB) — it goes to the practice as soon as you choose it</span><input type="file" accept="application/pdf,image/png,image/jpeg,image/tiff,text/plain" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void act(() => uploadAsSender(token, file), `Uploaded ${file.name}.`); event.target.value = '' }} /></label>}
       {view.your_uploads.length > 0 && <><h3>Your uploads</h3><ul className="pilot-documents">{view.your_uploads.map((upload, index) => <li key={index}>{upload.filename}<span className="muted-note"> · {new Date(upload.uploaded_at).toLocaleString()}</span></li>)}</ul></>}
       <p className="muted-note">Questions? {[view.practice.phone, view.practice.contact_email].filter(Boolean).join(' · ') || 'Contact the practice directly.'}</p>
     </section>}

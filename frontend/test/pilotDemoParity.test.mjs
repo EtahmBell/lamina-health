@@ -30,8 +30,10 @@ test('pilot shell is the demo physician shell: same classes, nav glyphs, account
 })
 
 test('pilot nav is the demo general physician nav: Home, For you, Patients, Network, Your Agent', () => {
-  const nav = slice(pilot, 'const NAV: NavEntry[]', ']\n')
-  assert.deepEqual([...nav.matchAll(/title: '([^']+)'/g)].map((match) => match[1]), ['Home', 'For you', 'Patients', 'Network', 'Your Agent'])
+  const nav = slice(pilot, 'const navFor = ', ']\n')
+  assert.deepEqual([...nav.matchAll(/title: (?:physician \? )?'([^']+)'/g)].map((match) => match[1]), ['Home', 'For you', 'Patients', 'Network', 'Your Agent'])
+  // Staff see the physician's agent in the third person, in the nav too.
+  assert.match(nav, /title: physician \? 'Your Agent' : `\$\{doctor\}’s agent`/)
   assert.doesNotMatch(nav, /'Referrals'/)
   // The Network glyph is the demo's exact people mark.
   for (const path of ['M2 19c0-3.3 2.7-6 6-6s6 2.7 6 6', 'M14.3 13.1c.7-.26 1.5-.4 2.2-.4 2.8 0 5 2.1 5 5.3']) {
@@ -150,9 +152,11 @@ test('referral groups place each referral once and put urgent work first', () =>
   assert.equal(referralNextStep(summary('1', 'declined')), 'View referral')
   assert.equal(referralNextStep(summary('1', 'triaged', { next_step: 'confirm_document_evidence' })), 'Confirm what the documents show')
   assert.equal(statusTone('accepted'), 'success')
-  assert.equal(statusTone('needs_information'), 'slate')
+  assert.equal(statusTone('needs_information'), 'amber')
+  // Copper is reserved for the physician's move.
+  assert.equal(statusTone('ready_for_review'), 'copper')
+  assert.equal(statusTone('triaged'), 'slate')
   assert.equal(statusTone('declined'), 'quiet')
-  assert.equal(statusTone('triaged'), 'copper')
   assert.ok(matchesReferral(summary('1', 'triaged'), 'clinic'))
   assert.ok(!matchesReferral(summary('1', 'triaged'), 'nephrology'))
 })
@@ -179,7 +183,7 @@ test('patient work items keep each referral episode distinct and carry its real 
   assert.equal(items[0].kind, 'received_referral')
   assert.equal(items[0].path, '/me/referrals/1', 'episode keeps its referral URL')
   assert.equal(items[1].nextStep, 'Waiting on the referring office')
-  assert.equal(items[1].status.tone, 'slate')
+  assert.equal(items[1].status.tone, 'amber')
   assert.equal(items[3].flag, 'Urgent')
   const { active, awaitingScheduling, closed } = patientWorkSections(items)
   assert.deepEqual(active.map((item) => item.key), ['received_referral:4', 'received_referral:1', 'received_referral:2'], 'needs-review (urgent first) before waiting')

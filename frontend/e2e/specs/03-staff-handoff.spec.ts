@@ -27,7 +27,7 @@ test('staff mark ready and flag for the physician, without fit/priority/visit-ty
   // The physician sees who handed it over.
   const physician = await as('physician')
   await openReferral(physician, seed.referrals.ready)
-  await expect(nextStep(physician).getByRole('heading', { level: 3 }).first()).toHaveText('Ready for your decision')
+  await expect(nextStep(physician).getByRole('heading', { level: 3 })).toHaveText('Ready for your decision')
   await expect(nextStep(physician)).toContainText(`Marked ready for ${doctor} by ${staffLabel}`)
   await expect(physician.locator('.timeline-event', { hasText: 'Marked ready for the physician' })).toContainText(`By ${staffLabel}`)
 })

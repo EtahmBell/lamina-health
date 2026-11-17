@@ -71,7 +71,23 @@ export function AgentOrb({ still = false }: { still?: boolean }) {
   return <span className={`agent-orb ${still ? 'still' : ''}`} aria-hidden="true" />
 }
 
-export type NavEntry = { id: string; title: string; icon: ReactNode; path: string; count?: number }
+export type NavEntry = { id: string; title: string; icon: ReactNode; path: string; count?: number; shortTitle?: string }
+
+/** A page (or panel) that is still loading: announced politely to assistive tech. */
+export function PageLoading({ label }: { label: string }) {
+  return <div className="page-state embedded" role="status" aria-live="polite"><div className="loading-line" aria-hidden="true" /><p>{label}</p></div>
+}
+
+/** A page that couldn't load: what happened, that a failed load changed nothing, and the real
+ * next actions (try again / go back). The server's message stays visible as the detail. */
+export function PageError({ title, detail, onRetry, children }: { title: string; detail: string; onRetry?: () => void; children?: ReactNode }) {
+  return <section className="pilot-page-error" role="alert" aria-labelledby="pilot-page-error-title">
+    <h2 id="pilot-page-error-title">{title}</h2>
+    <p>Nothing was changed. You can try again, or come back to it in a moment.</p>
+    <p className="pilot-page-error-detail">What went wrong: {detail}</p>
+    {(onRetry || children) && <div className="pilot-actions">{onRetry && <button className="button-primary" onClick={onRetry}>Try again</button>}{children}</div>}
+  </section>
+}
 
 /** The demo's agent-first physician shell: brand, primary nav, the account pill pinned
  * bottom-left, a quiet status pill top-right, and (on Home / For you) the docked agent. */
@@ -85,6 +101,7 @@ export function LaminaShell({ items, section, navigate, homePath, account, statu
         <nav aria-label="Primary navigation">
           {items.map((item) => <button key={item.id} className={`nav-item ${section === item.id ? 'active' : ''}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => navigate(item.path)}>
             <span className="nav-icon">{item.icon}</span><span className="nav-item-label">{item.title}</span>
+            {item.shortTitle && <span className="nav-item-short" aria-hidden="true">{item.shortTitle}</span>}
             {!!item.count && <span className="nav-count" aria-label={`${item.count} need you`}>{item.count}</span>}
           </button>)}
         </nav>

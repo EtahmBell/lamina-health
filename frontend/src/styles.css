@@ -3211,7 +3211,10 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .pilot-referral-page .next-step-card .pilot-actions { margin-top: 18px; }
 .pilot-referral-page .next-step-card .pilot-actions .text-button { margin-top: 0; }
 .pilot-referral-page .next-step-card .pilot-panel { background: var(--surface); }
-.pilot-referral-page .next-step-card .pilot-disposition h3 { margin: 16px 0 0; font-size: 1rem; }
+/* Sub-sections of the next step (decision, inline panels) are h4 under the card's one h3 status heading. */
+.pilot-referral-page .next-step-card h4 { margin: 10px 0 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 500; }
+.pilot-referral-page .next-step-card .pilot-panel h4 { margin: 0; }
+.pilot-referral-page .next-step-card .pilot-disposition h4 { margin: 16px 0 0; font-size: 1rem; }
 .pilot-referral-page .patient-next-step > .pilot-panel { margin-top: 14px; }
 .pilot-referral-page .source-record .record-rows li { font-size: var(--type-body); }
 
@@ -3352,3 +3355,149 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .pilot-still-open { margin: 8px 0 0; font-size: .7rem; color: var(--text-secondary); }
 .pilot-conflict { margin: 10px 0 0; padding: 8px 10px; border-left: 3px solid var(--copper, #b0643c); background: var(--surface); font-size: .7rem; }
 .pilot-conflict p { margin: 0 0 6px; }
+
+/* ======================================================================
+   Pilot UI review, round 1. Everything here is scoped to the pilot shell
+   (or the pilot's public pages) so the synthetic demo is unchanged.
+   ====================================================================== */
+
+/* Secondary text at WCAG AA on the warm neutrals (was #777a74 ≈ 4.0:1; now ≈ 5.7:1). */
+.pilot-shell, .public-shell { --text-secondary: #5f625c; }
+.pilot-shell .status-label { font-size: .64rem; }
+.nav-item-short { display: none; }
+
+/* A page that couldn't load: heading, plain explanation, the real next actions. */
+.pilot-page-error { max-width: 560px; margin-top: 24px; border: 1px solid var(--border); border-left: 3px solid var(--danger); border-radius: 8px; background: var(--surface); padding: 22px 24px; }
+.pilot-page-error h2 { margin: 0; font-size: 1.35rem; }
+.pilot-page-error p { margin: 10px 0 0; color: var(--text-primary); font-size: .8rem; line-height: 1.5; }
+.pilot-page-error .pilot-page-error-detail { color: var(--text-secondary); font-size: .72rem; }
+.pilot-page-error .pilot-actions { margin-top: 18px; }
+
+@media (max-width: 760px) {
+  /* One compact header: brand + account on one row, all five destinations visible below
+     (no horizontal scroll), and the Pilot · role label kept. */
+  .pilot-shell .sidebar { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 10px 14px 6px; }
+  .pilot-shell .sidebar > div:first-child { display: contents; }
+  .pilot-shell .sidebar .brand-subtitle { display: none; }
+  .pilot-shell .sidebar .brand-button { grid-column: 1; grid-row: 1; justify-self: start; }
+  .pilot-shell .sidebar .wordmark { font-size: 1.2rem; }
+  .pilot-shell .sidebar-account { grid-column: 2; grid-row: 1; border-top: 0; padding-top: 0; }
+  .pilot-shell .sidebar-account .profile-control { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .pilot-shell .sidebar nav { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; margin: 8px 0 0; overflow: visible; }
+  .pilot-shell .sidebar .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: auto; min-height: 52px; padding: 6px 2px; font-size: 11px; line-height: 1.15; text-align: center; }
+  .pilot-shell .sidebar .nav-icon { display: inline-flex; }
+  .pilot-shell .sidebar .nav-item:has(.nav-item-short) .nav-item-label { display: none; }
+  .pilot-shell .sidebar .nav-item-short { display: inline; }
+  .pilot-shell .sidebar .nav-count { position: absolute; top: 2px; right: 6px; margin: 0; min-width: 18px; height: 18px; font-size: 10px; }
+  .pilot-shell .workspace-bar { height: auto; min-height: 30px; padding: 4px 16px; justify-content: flex-start; }
+  .pilot-shell .workspace-bar-actions .synthetic-status { display: inline-flex; }
+
+  /* Round 2: the collapsed agent sits in the header row beside the account (it scrolls away
+     with the header), so nothing is fixed over the page's content or controls. */
+  .pilot-shell { position: relative; }
+  .pilot-shell .agent-dock.collapsed { position: absolute; top: 10px; right: 66px; bottom: auto; left: auto; z-index: 5; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); box-shadow: none; }
+  .pilot-shell .agent-dock.collapsed:hover { box-shadow: none; border-color: #cbc6bb; }
+  .pilot-shell .agent-dock.collapsed .agent-dock-rail { min-height: 44px; padding: 0 14px 0 10px; }
+  .pilot-shell .agent-dock.collapsed .agent-dock-rail > span:last-child { display: none; }
+  .pilot-shell .agent-dock.collapsed .agent-dock-rail::after { content: "Ask"; }
+}
+
+/* Requirement status is a labelled pill (text first; color only reinforces it), and the row's
+   action is a real button, so "Record received…" can't be read as a status. */
+.pilot-referral-page .pilot-requirement-state { display: inline-flex; width: fit-content; margin-top: 4px; border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; background: var(--surface); color: var(--text-primary); font-size: .66rem; letter-spacing: .01em; }
+.pilot-referral-page .pilot-requirement.state-missing .pilot-requirement-state { border-color: rgb(167 107 40 / 30%); background: #f8eddf; color: #7a4a17; }
+.pilot-referral-page .pilot-requirement.state-satisfied .pilot-requirement-state { border-color: rgb(63 107 85 / 30%); background: #edf3ee; color: #2f5442; }
+.pilot-referral-page .pilot-requirement.state-sender_reported .pilot-requirement-state,
+.pilot-referral-page .pilot-requirement.state-proposed_from_document .pilot-requirement-state { border-color: var(--mineral-subtle); background: var(--mineral-surface); color: var(--mineral-deep); }
+.pilot-referral-page .pilot-requirement-action { flex: 0 0 auto; min-height: 36px; padding: 6px 12px; font-size: .7rem; white-space: nowrap; }
+.pilot-referral-page .pilot-requirement-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+
+/* The decision row: three equal, aligned buttons; a plain caution when something is missing. */
+.pilot-referral-page .pilot-decision-actions { align-items: stretch; }
+.pilot-referral-page .pilot-decision-actions > button { margin: 0; }
+.pilot-referral-page .next-step-card .pilot-decision-caution { margin: 10px 0 0; border-left: 3px solid var(--warning); padding: 4px 0 4px 10px; color: var(--text-primary); font-size: .74rem; }
+.pilot-referral-page .pilot-conflict .pilot-actions > button { margin: 0; }
+
+/* Text-only actions on the phone get a full touch target. */
+@media (max-width: 760px) {
+  .pilot-shell .pilot-actions { gap: 8px; }
+  .pilot-shell .pilot-actions .text-button { min-height: 44px; padding: 0 6px; }
+}
+
+/* ---- Pilot UI review, round 2 ---- */
+.pilot-shell .worklist-status.amber { border: 1px solid rgb(167 107 40 / 45%); background: transparent; color: #7a4a17; }
+.pilot-shell .worklist-status.slate { color: #4f5966; }
+.pilot-shell .worklist-status.copper { color: #8a4a2c; font-weight: 600; }
+
+/* Adjusting Lamina's triage: one quiet, labelled group of real buttons (not run-on links). */
+.pilot-referral-page .pilot-adjust { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.pilot-referral-page .pilot-adjust-label { flex: 1 0 100%; color: var(--text-secondary); font-size: .66rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.button-quiet { min-height: 34px; border: 1px solid var(--border); border-radius: 7px; background: transparent; padding: 6px 11px; color: var(--mineral-deep); font-size: .7rem; font-weight: 600; cursor: pointer; }
+.button-quiet:hover { background: var(--surface); border-color: #cbc6bb; }
+.button-quiet:disabled { opacity: .5; cursor: default; }
+.pilot-overridden { color: var(--text-secondary); font-size: .72rem; }
+
+/* Readable provenance and metadata: nothing in the pilot below ~12px. */
+.pilot-shell .muted-note, .pilot-shell .timeline-event time, .pilot-shell .timeline-event p,
+.pilot-referral-page .pilot-requirement .muted-note, .pilot-shell .lam-row-main small { font-size: max(.75rem, 12px); }
+.pilot-shell .status-label, .pilot-shell .worklist-status { font-size: max(.7rem, 11.5px); }
+.pilot-shell .synthetic-status { font-size: max(.72rem, 12px); color: var(--text-secondary); }
+.public-shell .public-footer, .public-shell .muted-note { font-size: max(.78rem, 12.5px); }
+
+/* Styled file inputs (the native control is the only one in the pilot). */
+.pilot-shell input[type="file"], .public-shell input[type="file"] { font-size: .74rem; color: var(--text-secondary); }
+.pilot-shell input[type="file"]::file-selector-button, .public-shell input[type="file"]::file-selector-button { min-height: 40px; margin-right: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); padding: 8px 14px; color: var(--mineral-deep); font: 600 .74rem var(--font-ui); cursor: pointer; }
+
+/* The question card's Edit is a real button like its neighbours; Ignore gets a full target. */
+.pilot-question .pilot-actions > * { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; text-decoration: none; }
+
+@media (max-width: 760px) {
+  .button-quiet { min-height: 44px; }
+  .pilot-question .pilot-actions > * { min-height: 44px; }
+  /* The decorative globe never sits behind the network's honesty copy on a phone. */
+  .pilot-shell .network-hero-globe-art { display: none; }
+}
+
+/* ---- Pilot UI review, round 3 ---- */
+/* Provenance at AA: kind chips, rule tags and the snapshot line are readable, never wrapped. */
+.pilot-shell .pilot-kind-tag { font-size: max(.7rem, 11.5px); color: #3f4a57; }
+.pilot-shell .pilot-kind-tag.kind-hard_requirement, .pilot-shell .pilot-kind-tag.kind-scope_policy,
+.pilot-shell .pilot-kind-tag.kind-physician_judgment { color: #263f4c; }
+.pilot-shell .pilot-kind-tag.kind-exception { color: #5c4e3a; }
+.pilot-shell .pilot-why small, .pilot-referral-page details.pilot-why .clinical-list small { white-space: nowrap; color: var(--text-secondary); font-size: max(.72rem, 12px); }
+.pilot-referral-page details.pilot-why > .muted-note { color: var(--text-primary); }
+/* Status chips: darker copper ink (≈ 5.7:1 on the peach fill); closed states get a neutral chip. */
+.pilot-shell .status-label.warning { color: #7a4a17; }
+.pilot-shell .status-label.closed { border: 1px solid var(--border); background: #f2f0eb; color: #4b4e49; }
+.pilot-shell .pilot-status-pill { font-size: max(.68rem, 11.5px); color: #3f4a57; }
+
+/* The conflict is a titled region; its choices are equal; deciding states the consequence. */
+.pilot-referral-page .pilot-conflict .pilot-conflict-title { margin: 0 0 4px; color: var(--text-primary); font-size: .78rem; font-weight: 600; }
+.pilot-referral-page .pilot-conflict .pilot-conflict-title span { display: inline-grid; width: 18px; height: 18px; margin-right: 6px; place-items: center; border-radius: 50%; background: var(--warning); color: #fff; font-size: .66rem; }
+
+/* Adjust triage: a collapsed disclosure after the decision, compact when open. */
+.pilot-referral-page details.pilot-adjust { display: block; margin-top: 16px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.pilot-referral-page details.pilot-adjust > summary { flex: none; cursor: pointer; list-style: revert; min-height: 32px; display: list-item; padding: 6px 0; }
+.pilot-referral-page .pilot-adjust-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+/* Cancelling a request is set apart and confirmed. */
+.pilot-request-cancel { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); align-items: center; }
+.pilot-danger-link { color: var(--danger); }
+.button-secondary.pilot-danger { border-color: rgb(155 58 53 / 40%); color: var(--danger); }
+
+/* A learning Lamina drafted from corrections: the basis, not a quote. */
+.pilot-proposal-basis { margin: 0 0 8px; color: var(--text-primary); font-size: .82rem; }
+
+@media (max-width: 760px) {
+  /* Setup stages on a phone: a compact list that keeps every stage's name and status. */
+  .pilot-shell .pilot-setup-stages ol { display: grid; grid-template-columns: 1fr; gap: 4px; }
+  .pilot-shell .pilot-setup-stages li, .pilot-shell .pilot-setup-stages li.current { flex: none; }
+  .pilot-shell .pilot-setup-stages button { align-items: center; min-height: 44px; padding: 6px 10px; border-radius: 10px; }
+  .pilot-shell .pilot-setup-stages li:not(.current) .pilot-setup-stage-text { display: flex; }
+  .pilot-shell .pilot-setup-stage-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+  .pilot-shell .pilot-setup-stage-text small { font-size: 12px; }
+  /* Every action is a full touch target on the phone. */
+  .pilot-shell .agent-btn, .pilot-shell .button-primary, .pilot-shell .button-secondary { min-height: 44px; }
+  .pilot-shell .text-button { min-height: 44px; }
+  .pilot-shell .pilot-actions { gap: 10px; }
+}

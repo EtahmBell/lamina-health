@@ -309,11 +309,14 @@ export function accountIdentity(status: Pick<PilotStatus, 'role' | 'physician_on
 export const patientInitials = (name: string) => name.trim().split(/\s+/).map((part) => part[0] ?? '').join('').slice(0, 2).toUpperCase() || '·'
 
 /** The demo worklist's status-chip tones, applied to real intake status. */
-export function statusTone(status: IntakeStatus): 'copper' | 'slate' | 'quiet' | 'success' {
+/** Copper means "the physician's move" (ready for the decision); triaged work still being
+ * checked is slate; waiting on the referring office is an amber outline; closed is quiet. */
+export function statusTone(status: IntakeStatus): 'copper' | 'slate' | 'amber' | 'quiet' | 'success' {
   if (status === 'accepted') return 'success'
   if (status === 'redirected' || status === 'declined') return 'quiet'
-  if (status === 'needs_information') return 'slate'
-  return 'copper'
+  if (status === 'needs_information') return 'amber'
+  if (status === 'ready_for_review') return 'copper'
+  return 'slate'
 }
 
 /** The demo Patients page groups by care state ("Active patients" / "Previous care"); the
@@ -433,7 +436,7 @@ export type PatientWorkItem = {
   /** As recorded on this episode only. */
   patient: { name: string; initials: string }
   episode: { title: string; summary: string; source: string; at: string }
-  status: { label: string; tone: 'copper' | 'slate' | 'quiet' | 'success' }
+  status: { label: string; tone: 'copper' | 'slate' | 'amber' | 'quiet' | 'success' }
   nextStep: string; flag: string
   /** Which Patients section: open work, accepted and awaiting scheduling, or closed. */
   section: PatientWorkSection
@@ -502,6 +505,12 @@ export function actorText(event: Pick<ReferralDetail['history'][number], 'actor_
 /** History label that is honest about the retired approval step: a staff review is a staff review. */
 export function eventLabel(event: Pick<ReferralDetail['history'][number], 'event_type' | 'metadata'>): string {
   if (event.metadata?.role === 'staff' && ['recommendation_accepted', 'recommendation_edited'].includes(event.event_type)) return 'Staff reviewed triage (earlier approval step; not a physician sign-off)'
+  // Name the transition (the event records it) rather than a bare "Status changed".
+  if (event.event_type === 'referral_status_changed') {
+    const from = event.metadata?.from as IntakeStatus | undefined
+    const to = event.metadata?.to as IntakeStatus | undefined
+    if (from && to && from in STATUS_LABELS && to in STATUS_LABELS) return `Status: ${STATUS_LABELS[from]} → ${STATUS_LABELS[to]}`
+  }
   return historyLabel(event.event_type)
 }
 
@@ -526,8 +535,10 @@ export function changeText(change: TriageChange): string {
 export function correctionText(correction: Pick<TriageCorrection, 'field' | 'from' | 'to' | 'actor_name'>): string {
   return `${CHANGE_FIELD_LABELS[correction.field]}: ${changeValue(correction.field, correction.from)} → ${changeValue(correction.field, correction.to)} (by ${correction.actor_name})`
 }
-/** Recommendation text is written to the physician ("Your rule…", "You see…"); staff read it
- * about the physician instead. Display only. */
+/** ONLY for stored recommendation rationale sentences: the server writes them to the physician
+ * ("Your rule…") and they're append-only, so staff get them re-voiced at display time. All other
+ * staff copy is role-aware (Voice, above). Retire this once the server returns structured
+ * rationale (listed as a backend follow-up). */
 export function thirdPerson(text: string, doctor: string): string {
   return text.replace(/your agent recommends; you and your staff decide/gi, `the agent recommends; ${doctor} and staff decide`)
     .replace(/\b[Yy]our agent\b/g, (match) => (match[0] === 'Y' ? 'The agent' : 'the agent'))
@@ -537,6 +548,7 @@ export function thirdPerson(text: string, doctor: string): string {
     .replace(/\bYou decide\b/g, `${doctor} decides`).replace(/\byou decide\b/g, `${doctor} decides`)
     .replace(/\bcomes to you\b/g, `comes to ${doctor}`)
     .replace(/\bYour practice\b/g, 'The practice').replace(/\byour practice\b/g, 'the practice')
+    .replace(/\b[Yy]our (fit criterion|rules)\b/g, (_match, what: string) => `${doctor}’s ${what}`)
 }
 /** "Visit type: your earlier correction (eConsult) differs from your updated rule (in-person,
  * Thyroid nodule v5)" — in the third person for anyone who isn't the author. */
@@ -562,6 +574,8 @@ export function referralStanding(input: {
   }
   if (input.hasDraft) return { heading: 'Review and send the information request', stillOpen: null }
   if (input.waitingOnOffice) return { heading: 'Waiting on the referring office', stillOpen: open }
+  // Staff don't do the physician's review: their step is the check before it.
+  if (!input.physician && input.nextStep === 'physician_review') return { heading: `Check, then mark ready for ${input.doctor}`, stillOpen: null }
   return { heading: input.nextStep ? NEXT_STEP_LABELS[input.nextStep] : 'Waiting for triage', stillOpen: null }
 }
 /** The physician staff hand work to, by name when Lamina knows it. */
@@ -650,11 +664,44 @@ export const STATEMENT_KIND_EFFECT: Record<StatementKind, string> = {
   physician_judgment: 'Always comes to you',
   unknown: 'Not answered yet',
 }
+/** Who the copy is addressed to. A physician reads about their own agent ("your judgment");
+ * staff read the same thing about the physician ("Dr. X’s judgment"). Copy is chosen per role
+ * from structured values — not rewritten from second-person text. */
+export type Voice = { physician: boolean; doctor: string }
+export const voiceFor = (role: string, physicianName: string | null | undefined): Voice =>
+  ({ physician: role === 'physician', doctor: physicianLabel(physicianName) })
+const PHYSICIAN_VOICE: Voice = { physician: true, doctor: 'the physician' }
+
 /** The label for one representation item (urgency signals get their own). */
-export const itemKindLabel = (item: { kind: StatementKind; subkind?: string }) =>
-  item.subkind === 'urgency' ? 'Urgency' : STATEMENT_KIND_LABELS[item.kind]
-export const itemKindEffect = (item: { kind: StatementKind; subkind?: string }) =>
-  item.subkind === 'urgency' ? 'Raises priority' : STATEMENT_KIND_EFFECT[item.kind]
+export const itemKindLabel = (item: { kind: StatementKind; subkind?: string }, voice: Voice = PHYSICIAN_VOICE) =>
+  item.subkind === 'urgency' ? 'Urgency'
+    : item.kind === 'physician_judgment' && !voice.physician ? `${voice.doctor}’s judgment` : STATEMENT_KIND_LABELS[item.kind]
+export const itemKindEffect = (item: { kind: StatementKind; subkind?: string }, voice: Voice = PHYSICIAN_VOICE) =>
+  item.subkind === 'urgency' ? 'Raises priority'
+    : item.kind === 'physician_judgment' && !voice.physician ? `Always comes to ${voice.doctor}` : STATEMENT_KIND_EFFECT[item.kind]
+/** Which layer a statement belongs to, in the reader's voice ("just you" / "Dr. X only"). */
+export const layerNote = (layer: string | null | undefined, voice: Voice, ownWord: 'just you' | 'your own' = 'just you') =>
+  layer === 'physician' ? (voice.physician ? ownWord : `${voice.doctor} only`) : null
+/** The representation's fixed scope statements (the server sends these exact values), in the
+ * reader's voice. Everything else it sends is already neutral ("Good fit: …", requirement
+ * labels) or the physician's own words (judgment notes), which are shown as written. */
+export function representationItemText(text: string, voice: Voice): string {
+  if (voice.physician) return text
+  const d = voice.doctor
+  const fixed: Record<string, string> = {
+    'You see these referrals': `${d} sees these referrals`,
+    'You see these referrals (from your rule)': `${d} sees these referrals (from ${d}’s rule)`,
+    'You decide these case by case': `${d} decides these case by case`,
+  }
+  return fixed[text] ?? text
+}
+/** The agent's lifecycle line, by state, in the reader's voice. */
+export function lifecycleLine(lifecycle: { state: string | null; label: string | null }, voice: Voice): string | null {
+  if (!lifecycle.label || voice.physician) return lifecycle.label
+  if (lifecycle.state === 'shadow') return `Shadow mode — ${voice.doctor}’s agent recommends; ${voice.doctor} decides. Staff handle intake and paperwork.`
+  if (lifecycle.state === 'initializing') return `Setting up — ${voice.doctor}’s agent doesn’t represent the practice yet.`
+  return lifecycle.label
+}
 export const SCOPE_CHOICE_LABELS: Record<ScopeChoice, string> = {
   accept: 'I see these', out_of_scope: 'Out of scope', case_by_case: 'I decide case by case', unknown: 'Unknown',
 }
@@ -705,10 +752,10 @@ export function representationPortrait(practice: { name: string; specialty: stri
 }
 
 /** A statements_used `item` as a readable phrase ("accept" → "You see these referrals"). */
-export function statementText(item: string): string {
-  const fixed: Record<string, string> = {
-    accept: 'You see these referrals', out_of_scope: 'Out of scope', case_by_case: 'You decide these case by case',
-  }
+export function statementText(item: string, voice: Voice = PHYSICIAN_VOICE): string {
+  const fixed: Record<string, string> = voice.physician
+    ? { accept: 'You see these referrals', out_of_scope: 'Out of scope', case_by_case: 'You decide these case by case' }
+    : { accept: `${voice.doctor} sees these referrals`, out_of_scope: 'Out of scope', case_by_case: `${voice.doctor} decides these case by case` }
   if (fixed[item]) return fixed[item]
   if (item.startsWith('fit: ')) return `Good fit: ${item.slice(5)}`
   if (item.startsWith('outside: ')) return `Not seen: ${item.slice(9)}`
