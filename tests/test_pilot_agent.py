@@ -187,13 +187,20 @@ def test_home_shows_needs_waiting_prepared_and_done_from_real_state_only(pilot: 
     ready = pilot.referral(submitted_items=[
         {"key": "recent_a1c", "value": "8%", "observed_date": RECENT},
         {"key": "renal_function", "value": "ok", "observed_date": RECENT}])["referral"]["id"]
+    # No staff yet: the physician does the paperwork, so the unsure referral needs them.
+    solo = pilot.get("/api/me/practice/home", "user-a").json()
+    assert unsure in {item["referral_id"] for item in solo["needs_you"] if item["kind"] == "triage_uncertain"}
     pilot.add_staff()  # no approval step: staff mark the complete referral ready for the physician
     pilot.post(f"/api/me/practice/referrals/{ready}/mark-ready", "user-c", {})
     home = pilot.get("/api/me/practice/home", "user-a").json()
     kinds = {item["kind"]: item for item in home["needs_you"]}
     assert kinds["ready_for_review"]["path"] == f"/me/referrals/{ready}"
-    assert kinds["triage_uncertain"]["referral_id"] == unsure
-    assert [item["referral_id"] for item in home["waiting"]] == [waiting_id]
+    # With staff, checking a triaged referral is staff work: the physician sees it as waiting.
+    assert "triage_uncertain" not in kinds
+    with_staff = {item["referral_id"]: item for item in home["waiting"] if item["kind"] == "waiting_staff"}
+    assert unsure in with_staff and "fit question for you" in with_staff[unsure]["detail"]
+    assert [item["referral_id"] for item in home["waiting"] if item["kind"] == "waiting_sender"] == [waiting_id]
+    assert "with staff for checking" in home["briefing"]["tail"]
     assert [item["referral_id"] for item in home["prepared"]] == [drafted]
     assert home["briefing"]["lead"].endswith("you today.")
     assert "ready for review" in home["briefing"]["detail"]
@@ -202,6 +209,8 @@ def test_home_shows_needs_waiting_prepared_and_done_from_real_state_only(pilot: 
     staff = pilot.get("/api/me/practice/home", "user-c").json()
     assert "ready_for_review" not in {item["kind"] for item in staff["needs_you"]}
     assert any(item["kind"] == "waiting_physician" for item in staff["waiting"])
+    staff_check = next(item for item in staff["needs_you"] if item.get("referral_id") == unsure)
+    assert staff_check["kind"] == "triage_review" and "fit needs" in staff_check["detail"]
 
 
 # ----------------------------------------------------------------- step 7

@@ -13,18 +13,18 @@ import { useOnPilotDataChange, usePilotDataVersion } from './pilotSync.ts'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
   acceptInvitation, correctTriage, createPractice, createReferral, decideReferral,
-  escalateReferral, getPilotStatus, getPracticeMembers, getPracticeRules, getReferral, markReferralReady, markReferralSeen, resolveCorrectionConflict,
+  escalateReferral, getPilotStatus, markOfficeNotified, getPracticeMembers, getPracticeRules, getReferral, markReferralReady, markReferralSeen, resolveCorrectionConflict,
   inviteStaff, listReferrals, openReferralDocument, previewInvitation, recordReferralItem,
   removeStaffMember, requestInformation, setMemberAdmin, retriageReferral, revokeInvitation, updatePractice, uploadReferralDocument,
   type EffectiveTriage, type Fit, type Modality, type NextStep, type PilotStatus, type PracticeFields,
-  type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type ReferralDetail, type TriageChange,
+  type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type OfficeNotification, type ReferralDetail, type TriageChange,
   type ReferralSummary, type RequirementAssessment, getHome, teachAgent, editInformationRequest,
   sendInformationRequest, cancelInformationRequest, resolveInformationRequest, reissueRequestLink, setReferralType, verifyReferralItem,
   type HomeItem, type HomeProjection, type InformationRequest,
   getAssistant, sendAssistantMessage, type AgentCardExecute, type AgentReplyBody,
 } from './pilotApi.ts'
 import {
-  accountIdentity, actorText, canUse, conflictText, referralStanding, thirdPerson, changeText, correctionText, countWord, emptyReferralForm, eventLabel, itemLabel, FIT_LABELS, isClosed, physicianLabel,
+  accountIdentity, actorText, canUse, conflictText, historyHighlights, changeText, correctionText, countWord, emptyReferralForm, eventLabel, itemLabel, FIT_LABELS, isClosed, physicianLabel,
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
   resolvePilotRoute, resolveSetupStage, itemKindLabel, layerNote, representationItemText, statementText, STATUS_LABELS,
@@ -692,6 +692,22 @@ type Panel = null | 'correct' | 'ready' | 'request' | 'escalate' | 'accept' | 'r
 const statusLabelTone = (status: ReferralDetail['referral']['status']) =>
   status === 'accepted' ? 'resolved' : status === 'redirected' || status === 'declined' ? 'closed' : 'warning'
 
+/** Decline / redirect: an honest notification state. Lamina never sends this: a person sends the
+ * draft outside Lamina (fax, phone, email) and marks it sent, which records who and when. */
+function OfficeNotice({ notice, busy, onMarked }: { notice: OfficeNotification; busy: boolean; onMarked: () => void }) {
+  const [copied, setCopied] = useState(false)
+  if (notice.state === 'sent') return <p className="pilot-office-notice sent">Referring office told (sent outside Lamina) — marked by {notice.by_name ?? 'a practice member'} · {formatDateTime(notice.at ?? '')}</p>
+  return <div className="pilot-office-notice" role="region" aria-label="Referring office notice">
+    <p className="pilot-office-notice-title"><strong>Not sent — notify the referring office</strong></p>
+    <p className="muted-note">Lamina doesn’t send this. Copy the draft, send it the usual way (fax, phone or email), then mark it sent.</p>
+    {notice.draft && <pre className="pilot-message">{notice.draft}</pre>}
+    <div className="pilot-actions">
+      {notice.draft && <button className="button-secondary" onClick={() => { void navigator.clipboard?.writeText(notice.draft ?? ''); setCopied(true) }}>{copied ? 'Copied' : 'Copy draft'}</button>}
+      <button className="button-primary" disabled={busy} onClick={onMarked}>I sent it — mark as sent</button>
+    </div>
+  </div>
+}
+
 /** Referral detail in the demo's Patient Detail structure: identity header, a prominent
  * next-step box (right), and the referral history + triage evidence (left). */
 function ReferralDetailPage({ id, status, navigate }: { id: string; status: PilotStatus; navigate: Navigate }) {
@@ -750,20 +766,17 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
     return <small className="pilot-overridden"> · corrected{by ? ` by ${by}` : ''} (Lamina suggested {laminaValue})</small>
   }
   const changes = visitChanges
-  const readiness = !recommendation ? null : recommendation.readiness === 'ready' ? (physician ? 'Complete per your rule' : `Complete per ${doctor}’s rule`) : recommendation.readiness === 'unknown' ? 'Unknown — no rule for this type' : `Missing ${recommendation.missing_items.join(', ')}`
-  const timeline = [...detail.history].reverse()
+  // Where the referral stands comes from the server (the same statement Home and Patients use),
+  // so no surface can say "complete" while anything is open.
+  const standing = detail.standing ?? { heading: 'Waiting for triage', still_open: null, readiness_text: 'Not triaged yet' }
+  const readiness = recommendation ? standing.readiness_text : null
+  const timeline = historyHighlights(detail.history)
   // "Not specified" alone in a summary line doesn't say WHAT is unspecified.
   const modalityText = (value: Modality) => value === 'unspecified' ? 'Modality not specified' : MODALITY_LABELS[value]
   // Once a request exists, "Request missing information" is no longer the next step: the team
   // either reviews the draft or waits on the referring office. (Display only; triage is unchanged.)
   const openRequests = (detail.information_requests ?? []).filter((request) => ['draft', 'approved', 'sent', 'partially_resolved'].includes(request.status))
   const hasDraft = openRequests.some((request) => request.status === 'draft')
-  // One statement of where the referral stands; anything still outstanding is said once, below it.
-  const standing = referralStanding({
-    status: referral.status, physician, doctor, toVerify: toVerify.length, hasDraft,
-    waitingOnOffice: openRequests.some((request) => request.status === 'sent' || request.status === 'partially_resolved'),
-    missing: recommendation?.missing_items ?? [], nextStep: triage?.next_step ?? null,
-  })
   const nextStepHeading = standing.heading
   // ONE filled button per card, and it follows the recommendation: while required information
   // is missing (and no request is out yet) "Request information" leads; the decision buttons
@@ -810,8 +823,9 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           {triage && <p>{FIT_LABELS[triage.fit]}{readiness ? ` · ${readiness}` : ''} · {PRIORITY_LABELS[triage.suggested_priority].toLowerCase()} priority · {modalityText(triage.suggested_modality)}{triage.requires_physician ? ' · needs physician judgment' : ''}</p>}
           {!triage && !closed && <p>Lamina hasn’t triaged this referral yet{recommendation ? '' : ' — add a referral rule for this type, then re-run triage'}.</p>}
           {referral.disposition && <p>{referral.disposition.decision === 'accept' ? 'Accepted' : referral.disposition.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : 'Declined'}{detail.signoff ? ` by ${detail.signoff.actor_name}` : ''} · {formatDateTime(referral.disposition.at)}{referral.disposition.reason ? ` — “${referral.disposition.reason}”` : ''}</p>}
+          {detail.office_notification && <OfficeNotice notice={detail.office_notification} busy={busy} onMarked={() => void act(() => markOfficeNotified(referral.id))} />}
           {/* Not a re-approval: just what changed, who changed it, since you last opened this referral. */}
-          {!closed && standing.stillOpen && <p className="pilot-still-open">{standing.stillOpen}</p>}
+          {!closed && standing.still_open && <p className="pilot-still-open">{standing.still_open}</p>}
           {!closed && changes.length > 0 && <p className="pilot-decision pilot-change-note" role="status">Changed since you last looked: {changes.map(changeText).join('; ')}</p>}
           {/* An earlier correction that a newer rule disagrees with: kept until the physician chooses. */}
           {!closed && (detail.correction_conflicts ?? []).map((conflict) => <div className="pilot-conflict" role="region" aria-label="Correction differs from a newer rule" key={`${conflict.field}-${conflict.rule_version}`}>
@@ -916,9 +930,10 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
         <section className="patient-history-section patient-top-card" aria-labelledby="referral-history-heading">
           <h2 id="referral-history-heading">Referral history</h2>
           <div className="clinical-timeline">
-            {timeline.slice(0, 6).map((event, index) => <div className="timeline-event" key={`${event.event_type}-${index}`}>
+            {timeline.map((event, index) => <div className="timeline-event" key={`${event.event_type}-${index}`}>
               <time>{formatDateTime(event.created_at)}</time>
               <h4>{eventLabel(event)}</h4>
+              {event.summary && <p className="timeline-summary">{event.summary}</p>}
               <p>By {actorText(event)}</p>
             </div>)}
             {timeline.length === 0 && <div className="timeline-event"><h4>Referral received</h4><p>From {referral.sender.name} · {formatDateTime(referral.received_at)}</p></div>}
@@ -948,7 +963,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
             </section>
             <details className="clinical-block pilot-why" open>
               <summary>Why</summary>
-              <ul className="clinical-list">{recommendation.rationale.map((item, index) => <li key={index}>{physician ? item.statement : thirdPerson(item.statement, doctor)} <small className="muted-note">{
+              <ul className="clinical-list">{recommendation.rationale.map((item, index) => <li key={index}>{item.text ?? item.statement}{item.worded_for_physician && <small className="muted-note"> (recorded before role-specific wording; written for {doctor})</small>} <small className="muted-note">{
                 item.source.kind === 'practice_rule' || item.source.kind === 'requirement_logic' ? `Rule v${item.source.rule_version ?? '?'}`
                   : item.source.kind === 'document' ? `Document, page ${item.source.page ?? '?'}`
                   : item.source.kind === 'submitted_item' ? 'Submitted with referral'

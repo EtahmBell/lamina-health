@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { LaminaMark } from './LaminaMark.tsx'
-import { listReferrals, type PilotStatus } from './pilotApi.ts'
+import { getPublicProfile, getPublicProfilePreview, listReferrals, type PilotStatus } from './pilotApi.ts'
 import { pilotPaths, referringClinicians, type ReferringClinician } from './pilotState.ts'
 import { useOnPilotDataChange } from './pilotSync.ts'
 import { NetworkGlobeArt, PageLoading } from './pilotUi.tsx'
@@ -18,6 +18,18 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, 
  */
 export function NetworkPage({ status, navigate }: { status: PilotStatus; navigate: Navigate }) {
   const physician = status.role === 'physician'
+  // What referring offices can actually see: the PUBLISHED page (not the draft), and whether it
+  // lists referral criteria. Unknown until both reads return; then the card says only what's true.
+  const [publicPage, setPublicPage] = useState<'unknown' | 'none' | 'contact_only' | 'with_criteria'>('unknown')
+  useEffect(() => {
+    let live = true
+    getPublicProfilePreview().then(async (preview) => {
+      if (preview.status !== 'published' || !preview.published_version) { if (live) setPublicPage('none'); return }
+      const published = await getPublicProfile(preview.slug)
+      if (live) setPublicPage(published.profile.referral_types.length > 0 ? 'with_criteria' : 'contact_only')
+    }).catch(() => { if (live) setPublicPage('unknown') })
+    return () => { live = false }
+  }, [])
   const [referrers, setReferrers] = useState<ReferringClinician[] | null>(null)
   const [error, setError] = useState('')
   const load = () => { listReferrals().then((items) => setReferrers(referringClinicians(items))).catch(() => setError('Could not load referring clinicians')) }
@@ -36,9 +48,15 @@ export function NetworkPage({ status, navigate }: { status: PilotStatus; navigat
         </div>
         <NetworkGlobeArt />
         <div className="network-hero-action">
-          <h3>Referring offices can reach you today.</h3>
-          <p>Your public physician profile shows what you need before a referral and lets offices send one securely.</p>
-          {physician && <button className="button-primary" onClick={() => navigate(pilotPaths.publicProfile)}>Public physician profile <span>→</span></button>}
+          {publicPage === 'with_criteria' && <><h3>Referring offices can reach you today.</h3>
+            <p>Your published public page shows what you need before a referral and lets offices send one securely.</p></>}
+          {publicPage === 'contact_only' && <><h3>Your public page is published.</h3>
+            <p>It doesn’t list referral criteria yet, so offices see your contact and how-to-refer details only.</p></>}
+          {publicPage === 'none' && <><h3>Referring offices reach you the usual way.</h3>
+            <p>You haven’t published a public page, so offices refer by fax, phone or email as they do today.</p></>}
+          {publicPage === 'unknown' && <><h3>Referring offices reach you the usual way.</h3>
+            <p>By fax, phone or email, as they do today.</p></>}
+          {physician && <button className="button-primary" onClick={() => navigate(pilotPaths.publicProfile)}>{publicPage === 'none' ? 'Set up a public page' : 'Public physician profile'} <span>→</span></button>}
         </div>
       </section>
 

@@ -58,7 +58,7 @@ def test_seeds_two_isolated_fictional_practices(e2e_paths: Path) -> None:
     a, b = state["practice_a"]["id"], state["practice_b"]["id"]
     names_a = {json.loads(row["patient_json"])["name"] for row in store.referral_rows(a)}
     names_b = {json.loads(row["patient_json"])["name"] for row in store.referral_rows(b)}
-    assert len(names_a) == 10 and names_b == {"Ito Isolated-E2E", "Ives Isolated-E2E"}
+    assert len(names_a) == 11 and names_b == {"Ito Isolated-E2E", "Ives Isolated-E2E"}
     assert all(name.endswith("-E2E") for name in names_a | names_b), "fictional, marked E2E"
     refs = state["referrals"]
     still_open = store.referral_row(a, refs["still_open"])
@@ -70,6 +70,8 @@ def test_seeds_two_isolated_fictional_practices(e2e_paths: Path) -> None:
     physician = services.practice.context("e2e-physician")
     for key in ("conflict_keep", "conflict_apply"):
         assert len(services.intake.detail(physician, refs[key])["correction_conflicts"]) == 1
+    declined = services.intake.detail(physician, refs["declined_notify"])
+    assert declined["office_notification"]["state"] == "not_sent", "a decline the office hasn't been told about"
     change = services.intake.detail(physician, refs["change"])
     assert change["changes_since_seen"] == [], "the change happens in the spec, not the seed"
     assert services.practice.context("e2e-second_physician").practice_id == b

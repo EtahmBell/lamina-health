@@ -32,6 +32,7 @@ from .models import (
     TriageRecommendation,
     item_verified,
 )
+from .rationale import render as render_rationale
 from .rules import rules_snapshot
 from .store import new_id, now_iso
 from .vocabulary import canonical_word, canonical_words, type_key_words
@@ -69,7 +70,6 @@ class EvidenceExtractor(Protocol):
 
 
 _CANONICAL_STOPWORDS = {canonical_word(word) for word in _STOPWORDS}
-_POLICY_TEXT = {"accept": "a type you see", "out_of_scope": "out of scope", "case_by_case": "case by case"}
 
 
 def _tokens(text: str) -> set[str]:
@@ -182,24 +182,22 @@ def triage_referral(
     reference_day = today or datetime.now(UTC).date()
     snapshot_id, snapshot = rules_snapshot(rules)
     rationale: list[RationaleItem] = []
+
+    def why(code: str, source: RationaleSource, **params: Any) -> RationaleItem:
+        # Structured parts are the record; `statement` is the physician wording of the same parts.
+        return RationaleItem(statement=render_rationale(code, params), source=source, code=code, params=params)
     type_match = type_match or {"kind": "exact" if rules else "none", "submitted": referral.referral_type,
                                 "rule_type": rules[0].referral_type if rules else None, "suggestions": []}
     needs_type_confirmation = not rules and (type_match.get("kind") == "ambiguous" or bool(type_match.get("suggestions")))
     if type_match.get("kind") in {"normalized", "alias"}:
-        rationale.append(RationaleItem(
-            statement=(f"Submitted as “{type_match['submitted']}”; matched your “{type_match['rule_type']}” rule"
-                       + (f" through its alias “{type_match['matched_alias']}”." if type_match["kind"] == "alias"
-                          else " (same words after normalizing plurals and punctuation).")),
-            source=RationaleSource(kind="referral_type", rule_id=rules[0].id, rule_version=rules[0].version),
+        rationale.append(why(
+            "type_matched", RationaleSource(kind="referral_type", rule_id=rules[0].id, rule_version=rules[0].version),
+            submitted=type_match["submitted"], rule_type=type_match["rule_type"],
+            alias=type_match.get("matched_alias") if type_match["kind"] == "alias" else None,
         ))
     elif needs_type_confirmation:
-        options = ", ".join(f"“{name}”" for name in type_match.get("suggestions", []))
-        rationale.append(RationaleItem(
-            statement=(f"“{type_match['submitted']}” doesn’t exactly match one of your referral types"
-                       + (f" (possible: {options})" if options else "")
-                       + ". I didn’t apply a rule — confirm the referral type so the right criteria are used."),
-            source=RationaleSource(kind="referral_type"),
-        ))
+        rationale.append(why("type_unconfirmed", RationaleSource(kind="referral_type"),
+                             submitted=type_match["submitted"], options=list(type_match.get("suggestions", []))))
     # Criteria are matched against the clinical text only; the referral-type label
     # selects which rules apply and must not inflate fit or urgency matches.
     text_tokens = _tokens(" ".join(filter(None, [referral.reason, referral.clinical_context])))
@@ -235,13 +233,7 @@ def triage_referral(
     if not rules:
         fit = "unknown"
         if not needs_type_confirmation:
-            rationale.append(RationaleItem(
-                statement=(
-                    f"No confirmed practice rule covers “{referral.referral_type}”, so fit and "
-                    "required information cannot be assessed automatically."
-                ),
-                source=RationaleSource(kind="no_rule"),
-            ))
+            rationale.append(why("no_rule", RationaleSource(kind="no_rule"), referral_type=referral.referral_type))
     else:
         type_words = type_key_words(rules[0].referral_type)
         outside = [
@@ -261,74 +253,44 @@ def triage_referral(
                     if partial:
                         hits, missing = partial
                         escalations.append(phrase)
-                        rationale.append(RationaleItem(
-                            statement=(f"Partly matches your outside-scope criterion “{phrase}” "
-                                       f"(found: {', '.join(hits)}; not found: {', '.join(missing)}). "
-                                       "A physician should check whether it applies."),
-                            source=rule_source(rule),
-                        ))
+                        rationale.append(why("outside_partial", rule_source(rule), phrase=phrase,
+                                             matched=list(hits), missing=list(missing)))
         policy = policy_entry[0] if policy_entry else None
         if layer_conflict:
             fit = "unknown"
-            rationale.append(RationaleItem(
-                statement=(f"Your practice marks “{rules[0].referral_type}” as {_POLICY_TEXT[policies['practice'][0]]}, "
-                           f"but your own statement says {_POLICY_TEXT[policies['physician'][0]]}. "
-                           "I didn’t choose between them — review the conflict in your representation."),
-                source=rule_source(policies["physician"][1]),
-            ))
+            rationale.append(why("scope_layer_conflict", rule_source(policies["physician"][1]),
+                                 referral_type=rules[0].referral_type, practice_policy=policies["practice"][0],
+                                 physician_policy=policies["physician"][0]))
             for layer in ("practice", "physician"):
                 cite("scope_policy", policies[layer][1], policies[layer][0])
         elif policy == "out_of_scope":
             fit = "outside_scope"
-            rationale.append(RationaleItem(
-                statement=f"You marked “{rules[0].referral_type}” referrals as out of scope.",
-                source=rule_source(policy_entry[1]),
-            ))
+            rationale.append(why("out_of_scope", rule_source(policy_entry[1]), referral_type=rules[0].referral_type))
             cite("scope_policy", policy_entry[1], "out_of_scope")
         elif outside:
             fit = "outside_scope"
             for rule, phrase, hits in outside:
                 cite("scope_policy", rule, f"outside: {phrase}")
-                rationale.append(RationaleItem(
-                    statement=f"Referral text matches your outside-scope criterion “{phrase}” "
-                              f"(matched: {', '.join(hits)}).",
-                    source=rule_source(rule),
-                ))
+                rationale.append(why("outside_match", rule_source(rule), phrase=phrase, matched=list(hits)))
         elif policy == "case_by_case":
             # The physician keeps this decision: never a "strong" fit by inference.
             fit = "possible"
             escalations.append("case_by_case")
-            rationale.append(RationaleItem(
-                statement=f"You decide “{rules[0].referral_type}” referrals case by case, so this one is for you.",
-                source=rule_source(policy_entry[1]),
-            ))
+            rationale.append(why("case_by_case", rule_source(policy_entry[1]), referral_type=rules[0].referral_type))
             cite("physician_judgment", policy_entry[1], "case_by_case")
         elif good:
             fit = "strong"
             for rule, phrase, hits in good:
                 cite("scope_policy", rule, f"fit: {phrase}")
-                rationale.append(RationaleItem(
-                    statement=f"Referral text matches your fit criterion “{phrase}” "
-                              f"(matched: {', '.join(hits)}).",
-                    source=rule_source(rule),
-                ))
+                rationale.append(why("fit_match", rule_source(rule), phrase=phrase, matched=list(hits)))
         elif policy == "accept" and not any(rule.content.good_fit for rule in rules):
             # An explicit "I see these" with no narrower fit criteria: the type itself fits.
             fit = "strong"
-            rationale.append(RationaleItem(
-                statement=f"You see “{rules[0].referral_type}” referrals, and nothing in it matches an outside-scope criterion.",
-                source=rule_source(policy_entry[1]),
-            ))
+            rationale.append(why("type_accepted", rule_source(policy_entry[1]), referral_type=rules[0].referral_type))
             cite("scope_policy", policy_entry[1], "accept")
         else:
             fit = "possible"
-            rationale.append(RationaleItem(
-                statement=(
-                    f"Your rule for “{rules[0].referral_type}” applies, but the referral text "
-                    "does not clearly match any stated fit or outside-scope criterion."
-                ),
-                source=rule_source(rules[0]),
-            ))
+            rationale.append(why("no_fit_match", rule_source(rules[0]), referral_type=rules[0].referral_type))
 
     # -------------------------------------------------------- requirements
     # make_optional: a confirmed statement that a required item is only helpful. A practice-layer
@@ -341,11 +303,9 @@ def triage_referral(
             if rule.layer == "physician" and key in practice_required and not allow_loosening:
                 conflicts.append({"kind": "requirement_loosening", "referral_type": rule.referral_type, "item_key": key,
                                   "physician": {"rule_id": rule.id, "version": rule.version}})
-                rationale.append(RationaleItem(
-                    statement=(f"You marked “{key.replace('_', ' ')}” as optional for yourself, but it is a practice "
-                               "requirement and the practice doesn’t allow loosening it, so it is still required."),
-                    source=RationaleSource(kind="practice_rule", rule_id=rule.id, rule_version=rule.version),
-                ))
+                rationale.append(why("loosening_conflict",
+                                     RationaleSource(kind="practice_rule", rule_id=rule.id, rule_version=rule.version),
+                                     item=key.replace("_", " "), item_key=key))
             else:
                 optional_keys.add(key)
     requirements: list[RequirementAssessment] = []
@@ -453,15 +413,16 @@ def triage_referral(
     for requirement in requirements:
         if requirement.state == "satisfied":
             continue
-        rationale.append(RationaleItem(
-            statement=f"{requirement.label}: {requirement.detail}."
-                      + ("" if requirement.required else " (helpful, not required)"),
-            source=requirement.evidence
+        rationale.append(why(
+            "requirement_open",
+            requirement.evidence
             if requirement.state == "proposed_from_document"
             else RationaleSource(
                 kind="requirement_logic", rule_id=requirement.rule_id,
                 rule_version=requirement.rule_version, item_key=requirement.key,
             ),
+            label=requirement.label, detail=requirement.detail, required=requirement.required,
+            item_key=requirement.key, state=requirement.state,
         ))
 
     required_open = [item for item in requirements if item.required and item.state != "satisfied"]
@@ -474,12 +435,12 @@ def triage_referral(
     else:
         readiness = "ready"
     if rules and not required_open:
-        rationale.append(RationaleItem(
-            statement="Every required item in your rule is present and recent enough.",
-            source=RationaleSource(
-                kind="requirement_logic", rule_id=rules[0].id, rule_version=rules[0].version
-            ),
-        ))
+        source = RationaleSource(kind="requirement_logic", rule_id=rules[0].id, rule_version=rules[0].version)
+        if any(item.required for item in requirements):
+            rationale.append(why("requirements_complete", source, referral_type=rules[0].referral_type))
+        else:
+            # Nothing is required for this type: say so, never "complete per your rule".
+            rationale.append(why("requirements_none", source, referral_type=rules[0].referral_type))
 
     # ------------------------------------------------------------ priority
     urgent_hits = [
@@ -489,15 +450,11 @@ def triage_referral(
     if urgent_hits:
         priority = "urgent"
         for rule, phrase in urgent_hits:
-            rationale.append(RationaleItem(
-                statement=f"Matches your urgency signal “{phrase}”.", source=rule_source(rule)
-            ))
+            rationale.append(why("urgency_match", rule_source(rule), phrase=phrase))
     elif referral.sender_priority:
         priority = referral.sender_priority
-        rationale.append(RationaleItem(
-            statement=f"The referring clinician marked this {referral.sender_priority}.",
-            source=RationaleSource(kind="submitted_item", item_key="sender_priority"),
-        ))
+        rationale.append(why("sender_priority", RationaleSource(kind="submitted_item", item_key="sender_priority"),
+                             priority=referral.sender_priority))
     else:
         priority = "routine"
     if referral.sender_priority == "urgent":
@@ -509,10 +466,7 @@ def triage_referral(
     if modality != "unspecified":
         source_rule = next(rule for rule in rules if rule.content.modality == modality)
         cite("soft_preference", source_rule, f"modality:{modality}")
-        rationale.append(RationaleItem(
-            statement=f"Your rule sets the default modality to {modality.replace('_', '-')}.",
-            source=rule_source(source_rule),
-        ))
+        rationale.append(why("default_modality", rule_source(source_rule), modality=modality))
 
     # ---------------------------------------------------- next step / flags
     # Context statements (never drive the outcome): judgment items, exceptions, preferences.

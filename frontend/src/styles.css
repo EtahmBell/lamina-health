@@ -3501,3 +3501,17 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
   .pilot-shell .text-button { min-height: 44px; }
   .pilot-shell .pilot-actions { gap: 10px; }
 }
+
+/* ---- UI-loop follow-up ---- */
+/* Decline / redirect: the honest "not sent" notice with a draft to copy. */
+.pilot-referral-page .pilot-office-notice { margin-top: 14px; border-left: 3px solid var(--warning); border-radius: 6px; background: var(--surface); padding: 12px 14px; }
+.pilot-referral-page .pilot-office-notice.sent { border-left-color: var(--success); color: var(--text-primary); font-size: .74rem; }
+.pilot-referral-page .pilot-office-notice-title { margin: 0; color: var(--text-primary); font-size: .8rem; }
+.pilot-referral-page .pilot-office-notice .pilot-message { max-height: none; white-space: pre-wrap; }
+/* History rows say what was asked for or sent. */
+.pilot-shell .timeline-event .timeline-summary { margin: 2px 0 0; color: var(--text-primary); }
+/* Sender page: received items as status lines; the chosen date read back in words. */
+.public-shell .public-sender-item-status { margin: 10px 0; font-size: .82rem; }
+.public-shell .public-sender-date-echo { display: block; margin-top: 4px; color: var(--text-secondary); font-size: max(.74rem, 12px); }
+/* A question's drafted rule, shown once inside the question. */
+.pilot-question .pilot-question-draft { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }

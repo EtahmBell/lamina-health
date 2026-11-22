@@ -24,6 +24,14 @@ function PublicShell({ children }: { children: ReactNode }) {
   </div>
 }
 
+/** A date with the month in words ("Oct 18, 2026"), never an ambiguous 10/18 vs 18/10. A bare
+ * YYYY-MM-DD is a calendar date, so it is formatted without any time-zone shift. */
+function plainDate(value: string): string {
+  const bare = /^\d{4}-\d{2}-\d{2}$/.test(value)
+  const date = bare ? new Date(`${value}T00:00:00Z`) : new Date(value)
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(bare ? { timeZone: 'UTC' } : {}) })
+}
+
 export function PublicProfileView({ profile, slug, navigate, preview = false }: { profile: PublicSnapshot; slug: string; navigate?: Navigate; preview?: boolean }) {
   const startReferral = () => { if (preview || !navigate) return; void markReferralStarted(slug).catch(() => undefined); navigate(pilotPaths.publicRefer(slug)) }
   return <article className="public-profile">
@@ -217,19 +225,23 @@ export function SenderStatusPage({ token }: { token: string }) {
     {view && <section className="pilot-card public-sender">
       <p className="eyebrow">{view.practice.name}</p>
       <h1>Referral for {view.referral.patient_initials} · {view.referral.referral_type}</h1>
-      <p>Status: <strong>{view.referral.status}</strong> · received {new Date(view.referral.received_at).toLocaleDateString()}</p>
+      <p>Status: <strong>{view.referral.status}</strong> · received {plainDate(view.referral.received_at)}</p>
       {notice && <p className="pilot-decision public-sender-notice" role="status">{notice}</p>}
       {error && <p className="error-banner" role="alert">{error}</p>}
       {view.requested_items.length > 0 && <>
         <h2>Information requested</h2>
         <p className="public-sender-ask">{view.practice.name} asked for the information below to finish reviewing this referral.</p>
         <form className="auth-form pilot-form" onSubmit={submitResponse}>
-          {view.requested_items.map((item) => <div key={item.label} className="pilot-form-row">
-            <label><span>{item.label}{item.state === 'verified' ? ' — received and checked ✓' : item.received ? ' — received, the practice will review it' : ''}</span>{item.key && !item.received
-              ? <input value={values[item.key]?.value ?? ''} onChange={(event) => setValues((current) => ({ ...current, [item.key as string]: { value: event.target.value, date: current[item.key as string]?.date ?? '' } }))} placeholder="Value or summary" disabled={busy || !view.can_respond} />
-              : <input value={item.state === 'verified' ? 'Received and checked by the practice' : item.received ? 'Received — awaiting the practice’s review' : 'Upload a document or describe below'} disabled />}</label>
-            {item.key && !item.received && <label><span>Date of result</span><input type="date" value={values[item.key]?.date ?? ''} onChange={(event) => setValues((current) => ({ ...current, [item.key as string]: { value: current[item.key as string]?.value ?? '', date: event.target.value } }))} disabled={busy || !view.can_respond} /></label>}
-          </div>)}
+          {view.requested_items.map((item) => item.received || !item.key
+            // Already received (or not answerable by value): a status line, not an input.
+            ? <p key={item.label} className="public-sender-item-status"><strong>{item.label}</strong> — {item.state === 'verified' ? 'received and checked ✓' : item.received ? 'received, the practice will review it' : 'upload a document or describe it in the message below'}</p>
+            : <div key={item.label} className="pilot-form-row">
+              <label><span>{item.label}</span><input value={values[item.key]?.value ?? ''} onChange={(event) => setValues((current) => ({ ...current, [item.key as string]: { value: event.target.value, date: current[item.key as string]?.date ?? '' } }))} placeholder="Value or summary" disabled={busy || !view.can_respond} /></label>
+              <label><span>Date of result</span><input type="date" value={values[item.key]?.date ?? ''} onChange={(event) => setValues((current) => ({ ...current, [item.key as string]: { value: current[item.key as string]?.value ?? '', date: event.target.value } }))} disabled={busy || !view.can_respond} aria-describedby={`date-${item.key}`} />
+                {/* The browser's date field follows the device's language (day/month or month/day);
+                    the chosen date is read back with the month in words so it can't be misread. */}
+                <small id={`date-${item.key}`} className="public-sender-date-echo">{values[item.key]?.date ? `Result date: ${plainDate(values[item.key].date)}` : 'Pick the date the result was taken.'}</small></label>
+            </div>)}
           {/* Attachments come before the send button, so nobody sends first and misses them. */}
           {view.can_respond && <label className="pilot-upload"><span>Add a document (PDF, image, or text · 15 MB) — it goes to the practice as soon as you choose it</span><input type="file" accept="application/pdf,image/png,image/jpeg,image/tiff,text/plain" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void act(() => uploadAsSender(token, file), `Uploaded ${file.name}.`); event.target.value = '' }} /></label>}
           <label><span>Message to the practice (optional)</span><textarea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} maxLength={4000} disabled={busy || !view.can_respond} /></label>
@@ -238,7 +250,7 @@ export function SenderStatusPage({ token }: { token: string }) {
       </>}
       {view.requested_items.length === 0 && !view.referral.closed && <p className="muted-note">Nothing has been requested right now. You can still add documents below.</p>}
       {view.requested_items.length === 0 && view.can_respond && <label className="pilot-upload"><span>Add a document (PDF, image, or text · 15 MB) — it goes to the practice as soon as you choose it</span><input type="file" accept="application/pdf,image/png,image/jpeg,image/tiff,text/plain" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void act(() => uploadAsSender(token, file), `Uploaded ${file.name}.`); event.target.value = '' }} /></label>}
-      {view.your_uploads.length > 0 && <><h3>Your uploads</h3><ul className="pilot-documents">{view.your_uploads.map((upload, index) => <li key={index}>{upload.filename}<span className="muted-note"> · {new Date(upload.uploaded_at).toLocaleString()}</span></li>)}</ul></>}
+      {view.your_uploads.length > 0 && <><h3>Your uploads</h3><ul className="pilot-documents">{view.your_uploads.map((upload, index) => <li key={index}>{upload.filename}<span className="muted-note"> · {plainDate(upload.uploaded_at)}</span></li>)}</ul></>}
       <p className="muted-note">Questions? {[view.practice.phone, view.practice.contact_email].filter(Boolean).join(' · ') || 'Contact the practice directly.'}</p>
     </section>}
   </PublicShell>

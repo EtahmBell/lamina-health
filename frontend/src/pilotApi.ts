@@ -119,7 +119,7 @@ export type TriageRecommendation = {
   id: string; fit: Fit; readiness: 'ready' | 'missing_information' | 'unknown'
   requirements: RequirementAssessment[]; missing_items: string[]
   suggested_priority: Priority; suggested_modality: Modality; requires_physician: boolean
-  next_step: NextStep; rationale: Array<{ statement: string; source: RationaleSource }>
+  next_step: NextStep; rationale: RationaleItem[]
   generator: 'deterministic' | 'deterministic+llm_extraction'; model_id: string | null
   rules_snapshot_id: string; created_at: string
   type_match?: TypeMatch | null
@@ -162,6 +162,20 @@ export type CorrectionConflict = {
   corrected_by_name: string | null; rule_by_name: string | null; corrected_by_you: boolean; rule_by_you: boolean
 }
 export type TriageChange = { field: string; from: unknown; to: unknown; by: string; because: string | null; triggered_by: string | null; at: string }
+/** One line of triage rationale. `text` is rendered by the server for this reader from the
+ * structured `code` + `params`; `statement` is the stored physician wording. A recommendation
+ * stored before structured rationale has no code: its text is shown as written. */
+export type RationaleItem = {
+  statement: string; source: RationaleSource; code?: string | null; params?: Record<string, unknown>
+  text?: string; worded_for_physician?: boolean
+}
+/** Where a referral stands -- ONE statement shared by the referral page, Home and Patients. */
+export type ReferralStanding = {
+  heading: string; still_open: string | null; readiness_text: string; complete: boolean; no_requirements: boolean
+  open_items: string[]; unverified_items: string[]; waiting_on_office: boolean; has_draft: boolean
+}
+/** Decline / redirect: has a person told the referring office (outside Lamina)? */
+export type OfficeNotification = { state: 'not_sent' | 'sent'; by_name: string | null; at: string | null; draft: string | null }
 export type ReferralDetail = {
   referral: IntakeReferral
   recommendation: TriageRecommendation | null
@@ -177,8 +191,10 @@ export type ReferralDetail = {
   /** A physician's earlier correction that a newer rule version disagrees with. */
   correction_conflicts?: CorrectionConflict[]
   effective_triage: EffectiveTriage | null
-  history: Array<{ event_type: string; actor: string; actor_name?: string; actor_role?: ActorRole; autonomy: 'automatic' | 'human'; metadata: Record<string, unknown>; created_at: string }>
+  history: Array<{ event_type: string; actor: string; actor_name?: string; actor_role?: ActorRole; autonomy: 'automatic' | 'human'; metadata: Record<string, unknown>; created_at: string; summary?: string }>
   allowed_actions: ReferralAction[]
+  standing?: ReferralStanding
+  office_notification?: OfficeNotification | null
   information_requests?: InformationRequest[]
   sender_responses?: SenderResponse[]
 }
@@ -187,6 +203,7 @@ export type ReferralSummary = {
   sender_name: string; sender_practice: string | null; received_at: string
   fit: Fit | null; priority: Priority | null; next_step: NextStep | null; requires_physician: boolean | null
   missing_items: string[]; escalated: boolean; decided: boolean; handoff?: 'ready' | 'flag' | null
+  standing?: ReferralStanding; has_conflict?: boolean; handoff_by_name?: string | null; office_notified?: boolean
 }
 export type NewReferral = {
   source: 'manual' | 'upload'
@@ -211,6 +228,7 @@ export const resolveCorrectionConflict = (id: string, field: CorrectableField, c
 export const markReferralSeen = (id: string) => apiRequest<{ seen_at: string }>(referralPath(id, 'seen'), { method: 'POST' })
 export const requestInformation = (id: string, items: string[], note: string) => apiRequest<ReferralDetail>(referralPath(id, 'request-information'), json({ items, note: note || null }))
 export const escalateReferral = (id: string, note: string) => apiRequest<ReferralDetail>(referralPath(id, 'escalate'), json({ note: note || null }))
+export const markOfficeNotified = (id: string) => apiRequest<ReferralDetail>(referralPath(id, 'office-notified'), json({}))
 export const verifyReferralItem = (id: string, key: string) => apiRequest<ReferralDetail>(referralPath(id, `items/${encodeURIComponent(key)}/verify`), json({}))
 export const setReferralType = (id: string, referralType: string) => apiRequest<ReferralDetail>(referralPath(id, 'referral-type'), json({ referral_type: referralType }))
 export const recordReferralItem = (id: string, item: { key: string; value: string; observed_date?: string | null; document_id?: string | null; page?: number | null }) => apiRequest<ReferralDetail>(referralPath(id, 'items'), json(item))
@@ -299,6 +317,8 @@ export type Proposal = {
   id: string; referral_type: string; source_text: string
   content: PracticeRule['content'] & { interpretation_note?: string | null }
   confidence: number | null; operational_status: PracticeRule['operational_status']; physician_confirmed: boolean
+  /** What the proposal is based on, in words ("Seen in 3 of the last 4 … decisions") -- shown, not the number. */
+  basis?: string
   source: string; structured: boolean
   clarification: { question: string; options: string[] } | null; interpreter: string | null
   question_id: string | null; created_at: string

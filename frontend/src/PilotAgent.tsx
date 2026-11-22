@@ -39,7 +39,7 @@ function ProposalSummary({ proposal, voice = { physician: true, doctor: 'the phy
     {/* A person's words are quoted; text Lamina drafted from a correction pattern is not, and
         its values are shown in plain language. */}
     {proposal.source === 'correction_pattern'
-      ? <p className="pilot-proposal-basis">{proposal.source_text.replace(/in_person/g, 'in-person').replace(/econsult/g, 'eConsult')}</p>
+      ? <p className="pilot-proposal-basis">{proposal.source_text.replace(/\bin_person\b/g, 'in-person').replace(/\beconsult\b/g, 'eConsult')}</p>
       : <p className="pilot-quote">“{proposal.source_text}”</p>}
     {proposal.structured
       ? <><p><strong>Drafted as a rule:</strong> for <em>{proposal.referral_type === 'Unassigned' ? 'which referral type?' : proposal.referral_type}</em> referrals —</p><ul>{lines.map((line) => <li key={line}>{line}</li>)}</ul></>
@@ -47,11 +47,11 @@ function ProposalSummary({ proposal, voice = { physician: true, doctor: 'the phy
     {/* What was NOT turned into a rule (negations, exceptions, vague recency) — check before confirming. */}
     {(proposal.review_notes ?? []).length > 0 && <div className="pilot-panel"><p><strong>Check before confirming</strong></p><ul>{(proposal.review_notes ?? []).map((note) => <li key={note}>{note}</li>)}</ul></div>}
     {proposal.content.modality_notes && <p className="muted-note">Kept as a note (not applied by triage): {proposal.content.modality_notes}</p>}
-    {/* A setup answer is the physician's own answer: no "confidence" number for it. */}
+    {/* What it's based on, in words -- never a bare percentage. */}
     {proposal.suggested && <p><span className="pilot-suggested-tag">Suggested</span> <span className="muted-note">A common {proposal.referral_type} referral type for your specialty — confirm it only if it fits you.</span></p>}
     {proposal.suggested_by_role === 'staff' && <p><span className="pilot-suggested-tag">Staff suggestion</span> <span className="muted-note">Suggested by {proposal.suggested_by_name ?? 'a staff member'}. It changes nothing unless a physician confirms it.</span></p>}
     <p className="muted-note">{proposal.source === 'onboarding' ? `${origin} · ${pending}`
-      : `${origin} · confidence ${proposal.confidence != null ? `${Math.round(proposal.confidence * 100)}%` : '—'} · ${pending}`}</p>
+      : `${origin}${proposal.source === 'correction_pattern' && proposal.basis ? ` · ${proposal.basis}` : ''} · ${pending}`}</p>
   </div>
 }
 
@@ -101,7 +101,12 @@ export function ProposalCard({ proposal, referralTypes, onChange, extraActions }
   </section>
 }
 
-export function QuestionCard({ question, onChange }: { question: LearningQuestion; onChange: () => void }) {
+export function QuestionCard({ question, onChange, proposal, referralTypes = [] }: {
+  question: LearningQuestion; onChange: () => void
+  /** The drafted rule the question is about: shown HERE, once (not again as a pending card). */
+  proposal?: Proposal; referralTypes?: string[]
+}) {
+  const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
   const [depends, setDepends] = useState(false)
@@ -114,15 +119,17 @@ export function QuestionCard({ question, onChange }: { question: LearningQuestio
     <p className="eyebrow">A question from your agent</p>
     <h3 className="pilot-question-text">{question.question}</h3>
     <p className="muted-note">I’ll ask at most one question like this a day. Nothing changes unless you say yes.</p>
+    {proposal && <div className="pilot-question-draft"><ProposalSummary proposal={proposal} /></div>}
     {depends && <label className="pilot-inline-label"><span>When does it apply? (optional)</span><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></label>}
     {error && <p className="error-banner" role="alert">{error}</p>}
     <div className="pilot-actions">
       <button className="button-primary" disabled={busy} onClick={() => void answer('yes')}>Yes</button>
-      <a className="button-secondary" href={`#proposal-${question.proposal_id}`}>Edit</a>
+      {proposal && <button className="button-secondary" disabled={busy} onClick={() => setEditing((value) => !value)} aria-expanded={editing}>{editing ? 'Close' : 'Edit'}</button>}
       {!depends ? <button className="button-secondary" disabled={busy} onClick={() => setDepends(true)}>Not always / Depends</button>
         : <button className="button-secondary" disabled={busy} onClick={() => void answer('depends')}>Save “depends”</button>}
       <button className="text-button" disabled={busy} onClick={() => void answer('ignore')}>Ignore</button>
     </div>
+    {editing && proposal && <ProposalCard proposal={proposal} referralTypes={referralTypes} onChange={onChange} />}
   </section>
 }
 
@@ -299,10 +306,11 @@ function TeachTab({ physician, doctor, data, summary, navigate, onChange }: { ph
   // Pending learnings = the summary's list (teaching + corrections). Unreviewed setup answers
   // are reviewed in setup, not here.
   const pendingIds = new Set((summary?.pending_learnings ?? []).map((item) => item.id))
-  // The learning the agent is asking about today stays reviewable here too, so the question's
-  // "Edit" link always has its proposal to jump to (it is counted once, as the question).
+  // The learning the agent is asking about today is shown ONCE: inside its question (with Edit
+  // there), never again as a pending card. It is counted once too, as the question.
   const asked = data?.question?.proposal_id
-  const learnings = (data?.proposals ?? []).filter((proposal) => pendingIds.has(proposal.id) || proposal.id === asked)
+  const askedProposal = (data?.proposals ?? []).find((proposal) => proposal.id === asked)
+  const learnings = (data?.proposals ?? []).filter((proposal) => pendingIds.has(proposal.id) && proposal.id !== asked)
   const setupPending = summary?.counts.setup_pending ?? 0
   return <div className="pilot-teach-tab">
     <p className="page-intro">{physician
@@ -310,7 +318,14 @@ function TeachTab({ physician, doctor, data, summary, navigate, onChange }: { ph
       : `Suggest how ${doctor}’s agent should handle referrals. A suggestion goes to ${doctor} as a pending learning; nothing changes triage unless ${doctor} confirms it.`}</p>
     {physician && summary?.lifecycle.state === 'initializing' && <p className="agent-empty-note">Setup isn’t finished. <button type="button" className="text-button" onClick={() => navigate(pilotPaths.setup(summary.lifecycle.next_stage ?? 'review'))}>Continue setup →</button></p>}
     {physician && setupPending > 0 && <p className="muted-note">{plural(setupPending, 'setup answer is', 'setup answers are')} waiting in setup review. <button type="button" className="text-button" onClick={() => navigate(pilotPaths.setup('review'))}>Review them →</button></p>}
-    {physician && data?.question && <QuestionCard question={data.question} onChange={onChange} />}
+    {physician && data?.question && <QuestionCard question={data.question} proposal={askedProposal} referralTypes={data?.referral_types ?? []} onChange={onChange} />}
+    {!physician && data?.question && <section className="agent-learned-this-week-card pilot-question">
+      <p className="eyebrow">Waiting for {doctor}’s answer</p>
+      {/* The agent's question was written TO the physician: shown as a quote, attributed. */}
+      <p className="muted-note">{doctor}’s agent asked {doctor}:</p>
+      <blockquote className="pilot-question-text pilot-quote">“{data.question.question}”</blockquote>
+      {askedProposal && <ProposalSummary proposal={askedProposal} voice={{ physician, doctor }} />}
+    </section>}
     <form className="pilot-teach-composer" onSubmit={(event) => void teach(event)}>
       <label><span className="practice-subheading">{physician ? 'Teach your agent' : `Suggest something to ${doctor}`}</span><textarea rows={2} value={text} onChange={(event) => setText(event.target.value)} placeholder={physician ? 'e.g. I usually want a recent A1c before reviewing diabetes referrals.' : 'e.g. The office usually sends the A1c separately; could we ask for it up front?'} maxLength={2000} disabled={busy} /></label>
       {error && <p className="error-banner" role="alert">{error}</p>}

@@ -9,7 +9,7 @@ never seen, so the patient here is only what the sender submitted.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -206,8 +206,12 @@ class RationaleSource(_Strict):
 
 
 class RationaleItem(_Strict):
-    statement: str
+    statement: str  # worded for the physician; kept for readers of older recommendations
     source: RationaleSource
+    # Structured parts (rule/version are in `source`): display text is rendered from these for
+    # whoever reads it (backend/pilot/rationale.py). Absent on recommendations stored earlier.
+    code: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class RequirementAssessment(_Strict):

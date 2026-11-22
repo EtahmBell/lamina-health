@@ -189,7 +189,11 @@ def reset() -> None:
         "conflict_keep": s.referral("staff", "Cole Conflict-E2E", "Osteoporosis", "Low bone density on DXA."),
         "conflict_apply": s.referral("staff", "Cruz Conflict-E2E", "Osteoporosis", "Low bone density on DXA."),
         "still_open": s.referral("staff", "Stone StillOpen-E2E", "Thyroid nodule", "1.1 cm thyroid nodule; please evaluate."),
+        "declined_notify": s.referral("staff", "Dahl Declined-E2E", "Diabetes management", "Type 2 diabetes not at goal.", DIABETES_ITEMS),
     }
+    # Declined by the physician; nobody has told the referring office yet (staff's follow-up).
+    s.call("POST", f"/api/me/practice/referrals/{r['declined_notify']}/disposition", "physician",
+           {"decision": "decline", "reason": "Better served by the diabetes education program (E2E)."})
     # "Changed since you last looked": the physician looks, then updates the Adrenal rule.
     # The spec has staff re-run triage, so cause (rule update) and trigger (staff) differ.
     s.call("GET", f"/api/me/practice/referrals/{r['change']}", "physician")
@@ -216,6 +220,8 @@ def reset() -> None:
     s.call("POST", f"/api/me/practice/referrals/{b['accepted']}/disposition", "second_physician", {"decision": "accept"})
     s.call("POST", f"/api/me/practice/referrals/{b['declined']}/disposition", "second_physician",
            {"decision": "decline", "reason": "Outside our service (E2E)."})
+    # Practice B already told its referring office (outside Lamina), so its Home is truly empty.
+    s.call("POST", f"/api/me/practice/referrals/{b['declined']}/office-notified", "second_physician")
     status = s.call("GET", "/api/me/practice/status", "physician")
     state = {
         "seeded": True, "sender_token": token, "public_slug": slug,

@@ -406,6 +406,13 @@ def escalate(referral_id: str, update: NoteInput, context: Practice, services: S
     return _run(lambda: services.intake.escalate(context, referral_id, update.note))
 
 
+@router.post("/referrals/{referral_id}/office-notified")
+def office_notified(referral_id: str, context: Practice, services: Services) -> dict:
+    """A person told the referring office about the decline / redirect outside Lamina. Records
+    who and when; Lamina sends nothing."""
+    return _run(lambda: services.intake.mark_office_notified(context, referral_id))
+
+
 @router.post("/referrals/{referral_id}/items")
 def record_item(referral_id: str, update: RecordItemInput, context: Practice, services: Services) -> dict:
     return _run(lambda: services.intake.record_item(context, referral_id, update))
@@ -558,9 +565,9 @@ class AnswerInput(_Strict):
 
 @router.get("/teach")
 def list_proposals(context: Practice, services: Services) -> dict:
-    question = None
-    if context.role == "physician":
-        question = services.learning.question_for_today(context.practice_id, mark_shown=False)
+    # Today's question is shown to staff too, read-only ("waiting for Dr. X's answer"), so the
+    # Train count matches what each reader can see. Only a physician can answer it.
+    question = services.learning.question_for_today(context.practice_id, mark_shown=False)
     return {
         "proposals": [services.teaching.view(rule) for rule in services.rules.proposals(context.practice_id)],
         "question": question,

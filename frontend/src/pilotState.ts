@@ -535,21 +535,6 @@ export function changeText(change: TriageChange): string {
 export function correctionText(correction: Pick<TriageCorrection, 'field' | 'from' | 'to' | 'actor_name'>): string {
   return `${CHANGE_FIELD_LABELS[correction.field]}: ${changeValue(correction.field, correction.from)} → ${changeValue(correction.field, correction.to)} (by ${correction.actor_name})`
 }
-/** ONLY for stored recommendation rationale sentences: the server writes them to the physician
- * ("Your rule…") and they're append-only, so staff get them re-voiced at display time. All other
- * staff copy is role-aware (Voice, above). Retire this once the server returns structured
- * rationale (listed as a backend follow-up). */
-export function thirdPerson(text: string, doctor: string): string {
-  return text.replace(/your agent recommends; you and your staff decide/gi, `the agent recommends; ${doctor} and staff decide`)
-    .replace(/\b[Yy]our agent\b/g, (match) => (match[0] === 'Y' ? 'The agent' : 'the agent'))
-    .replace(/\bYour rule\b/g, `${doctor}’s rule`).replace(/\byour rule\b/g, `${doctor}’s rule`)
-    .replace(/\bYour judgment\b/g, `${doctor}’s judgment`).replace(/\byour judgment\b/g, `${doctor}’s judgment`)
-    .replace(/\bYou see\b/g, `${doctor} sees`).replace(/\byou see\b/g, `${doctor} sees`)
-    .replace(/\bYou decide\b/g, `${doctor} decides`).replace(/\byou decide\b/g, `${doctor} decides`)
-    .replace(/\bcomes to you\b/g, `comes to ${doctor}`)
-    .replace(/\bYour practice\b/g, 'The practice').replace(/\byour practice\b/g, 'the practice')
-    .replace(/\b[Yy]our (fit criterion|rules)\b/g, (_match, what: string) => `${doctor}’s ${what}`)
-}
 /** "Visit type: your earlier correction (eConsult) differs from your updated rule (in-person,
  * Thyroid nodule v5)" — in the third person for anyone who isn't the author. */
 export function conflictText(conflict: CorrectionConflict): string {
@@ -558,25 +543,27 @@ export function conflictText(conflict: CorrectionConflict): string {
   const rule = conflict.rule_by_you ? 'your updated rule' : conflict.rule_by_name ? `${conflict.rule_by_name}’s updated rule` : 'the updated rule (author not recorded)'
   return `${field}: ${correction} (${changeValue(conflict.field, conflict.corrected_value)}) differs from ${rule} (${changeValue(conflict.field, conflict.rule_value)}, ${conflict.referral_type} v${conflict.rule_version})`
 }
-/** One consistent statement of where a referral stands and what is still open. */
-export function referralStanding(input: {
-  status: IntakeStatus; physician: boolean; doctor: string; toVerify: number; hasDraft: boolean
-  waitingOnOffice: boolean; missing: string[]; nextStep: NextStep | null
-}): { heading: string; stillOpen: string | null } {
-  const missing = input.missing.join(', ')
-  const open = !missing ? null
-    : input.waitingOnOffice ? `Still open: ${missing} — requested from the referring office, not received yet`
-    : input.hasDraft ? `Still open: ${missing} — request drafted, not sent`
-    : `Still open: ${missing} — not requested yet`
-  if (input.toVerify) return { heading: 'Verify what the referring office sent', stillOpen: open }
-  if (input.status === 'ready_for_review') {
-    return { heading: input.physician ? 'Ready for your decision' : `Ready for ${input.doctor}’s decision`, stillOpen: open }
+/** The referral history to show: newest first, every information-request, reply, hand-off,
+ * correction, decision and office-notice event kept (they carry named actors), and Lamina's
+ * back-to-back bookkeeping ("prepared a recommendation" right after "triaged") folded away. */
+const KEY_HISTORY = new Set([
+  'missing_information_request_created', 'missing_information_request_sent', 'missing_information_request_cancelled',
+  'missing_information_resolved', 'sender_response_received', 'sender_document_received', 'referral_marked_ready',
+  'referral_escalated', 'triage_corrected', 'correction_conflict_resolved', 'referral_accepted', 'referral_redirected',
+  'referral_declined', 'referring_office_notified', 'referral_item_verified', 'recommendation_changed',
+])
+export function historyHighlights<T extends { event_type: string; created_at: string }>(history: T[], limit = 8): T[] {
+  const newest = [...history].reverse().filter((event, index, all) =>
+    !(event.event_type === 'recommendation_generated' && all[index + 1]?.event_type === 'referral_triaged'
+      && all[index + 1]?.created_at === event.created_at)
+    && !(event.event_type === 'recommendation_generated' && all[index - 1]?.event_type === 'referral_triaged'
+      && all[index - 1]?.created_at === event.created_at))
+  const keep = new Set(newest.filter((event) => KEY_HISTORY.has(event.event_type)))
+  for (const event of newest) {
+    if (keep.size >= limit) break
+    keep.add(event)
   }
-  if (input.hasDraft) return { heading: 'Review and send the information request', stillOpen: null }
-  if (input.waitingOnOffice) return { heading: 'Waiting on the referring office', stillOpen: open }
-  // Staff don't do the physician's review: their step is the check before it.
-  if (!input.physician && input.nextStep === 'physician_review') return { heading: `Check, then mark ready for ${input.doctor}`, stillOpen: null }
-  return { heading: input.nextStep ? NEXT_STEP_LABELS[input.nextStep] : 'Waiting for triage', stillOpen: null }
+  return newest.filter((event) => keep.has(event))
 }
 /** The physician staff hand work to, by name when Lamina knows it. */
 export const physicianLabel = (name: string | null | undefined) => name || 'the physician'

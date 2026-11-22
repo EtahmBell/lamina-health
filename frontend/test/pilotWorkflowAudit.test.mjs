@@ -35,12 +35,12 @@ test('an empty practice is told plainly that rules come first', () => {
 
 test('an open request changes the next-step heading and hides a second "Request information"', () => {
   const detail = slice(pilot, 'function ReferralDetailPage', 'function ProfilePage')
-  // The headings now come from one helper (referralStanding) so heading and status can't disagree.
-  const state = readFileSync(new URL('../src/pilotState.ts', import.meta.url), 'utf8')
-  const standing = slice(state, 'export function referralStanding', '/** The physician staff hand work to')
-  assert.match(standing, /'Review and send the information request'/)
-  assert.match(standing, /'Waiting on the referring office'/)
-  assert.match(detail, /referralStanding\(\{[\s\S]*?hasDraft,/)
+  // The headings come from ONE server-side standing (backend/pilot/standing.py) shared with Home
+  // and Patients, so heading, status and queue text can't disagree.
+  const standing = readFileSync(new URL('../../backend/pilot/standing.py', import.meta.url), 'utf8')
+  assert.match(standing, /"Review and send the information request"/)
+  assert.match(standing, /"Waiting on the referring office"/)
+  assert.match(detail, /const standing = detail\.standing/)
   assert.match(detail, /canUse\(actions, 'request_information'\) && !hasDraft/)
   assert.match(detail, /'Modality not specified'/)
 })

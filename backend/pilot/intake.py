@@ -43,9 +43,12 @@ from .models import (
     item_verified,
 )
 from .practice import PilotError, PracticeContext
+from .rationale import rationale_view
 from .rules import PracticeRules
+from .standing import referral_standing
 from .store import PilotStore, hash_token, new_id, now_iso
 from .triage import DocumentText, EvidenceExtractor, default_extractor, triage_referral
+from .voice import Voice
 
 S = IntakeStatus
 ALLOWED_TRANSITIONS: dict[IntakeStatus, frozenset[IntakeStatus]] = {
@@ -254,7 +257,83 @@ class IntakeService:
         for extend in self.detail_extensions:
             result.update(extend(context, referral_id))
         self._name_actors(result, referral, directory, sender)
+        voice = Voice.for_context(context, result["physician_name"])
+        if result["recommendation"]:
+            # Display text rendered from structured rationale for THIS reader (never a rewrite).
+            result["recommendation"]["rationale"] = [rationale_view(item, voice) for item in result["recommendation"]["rationale"]]
+        requests = result.get("information_requests") or []
+        result["standing"] = referral_standing(
+            status=referral.status, recommendation=result["recommendation"],
+            next_step=(result["effective_triage"] or {}).get("next_step"), requests=requests, voice=voice)
+        self._summarize_history(result, requests)
+        result["office_notification"] = self._office_notification(context, referral, result, directory, voice)
         return result
+
+    @staticmethod
+    def _summarize_history(result: dict, requests: list[dict]) -> None:
+        """Information-request and reply events say what was asked or sent, so the history
+        names the items next to the named actor."""
+        by_request = {request["id"]: request for request in requests}
+        labels = {item["key"]: item["label"] for item in (result.get("recommendation") or {}).get("requirements", [])}
+        for event in result["history"]:
+            metadata = event.get("metadata") or {}
+            if event["event_type"] in {"missing_information_request_created", "missing_information_request_sent"}:
+                request = by_request.get(metadata.get("request_id") or "")
+                if request:
+                    asked = ", ".join(item["label"] for item in request.get("items", []))
+                    sent_via = metadata.get("sent_via") or ""
+                    via = ("sent outside Lamina by fax/email" if sent_via == "manual"
+                           else f"emailed through {sent_via}" if sent_via else "")
+                    event["summary"] = f"Asked for {asked}" + (f" · {via}" if via and event["event_type"].endswith("_sent") else "")
+            elif event["event_type"] == "sender_response_received":
+                keys = metadata.get("item_keys") or []
+                sent = ", ".join(labels.get(key, key.replace("_", " ")) for key in keys)
+                event["summary"] = (f"Sent {sent}" if sent else "Sent a message") + (" with a message" if sent and metadata.get("has_message") else "")
+            elif event["event_type"] == "referring_office_notified":
+                event["summary"] = "Marked as sent to the referring office (outside Lamina)"
+
+    def _office_notification(self, context: PracticeContext, referral: IntakeReferral, result: dict,
+                             directory: ActorDirectory, voice: Voice) -> dict | None:
+        """Decline / redirect: has anyone told the referring office? Lamina never sends this; a
+        person sends it outside Lamina and marks it sent. A draft is offered to copy."""
+        disposition = referral.disposition or {}
+        if referral.status not in {IntakeStatus.DECLINED.value, IntakeStatus.REDIRECTED.value} or not disposition:
+            return None
+        sent = [event for event in result["history"] if event["event_type"] == "referring_office_notified"]
+        if sent:
+            last = sent[-1]
+            return {"state": "sent", "by_name": last["actor_name"], "at": last["created_at"], "draft": None}
+        doctor = result["physician_name"] or "The physician"
+        patient = referral.patient.name
+        try:
+            received = datetime.fromisoformat(referral.received_at).strftime("%b %d, %Y").replace(" 0", " ")
+        except (TypeError, ValueError):
+            received = (referral.received_at or "")[:10]
+        reason = (disposition.get("reason") or "").strip().rstrip(".")
+        if referral.status == IntakeStatus.REDIRECTED.value:
+            body = (f"{doctor} has reviewed the {referral.referral_type} referral for {patient} (received {received}) "
+                    f"and recommends redirecting it to {disposition.get('redirect_to') or 'another service'}."
+                    + (f" Reason: {reason}." if reason else ""))
+        else:
+            body = (f"{doctor} has reviewed the {referral.referral_type} referral for {patient} (received {received}) "
+                    "and is unable to accept it." + (f" Reason: {reason}." if reason else ""))
+        practice = context.practice.get("name") or "the practice"
+        draft = (f"To: {referral.sender.name}{', ' + referral.sender.practice if referral.sender.practice else ''}\n"
+                 f"Re: Referral for {patient}\n\n{body}\n\nPlease contact {practice} with any questions.")
+        return {"state": "not_sent", "by_name": None, "at": None, "draft": draft}
+
+    def mark_office_notified(self, context: PracticeContext, referral_id: str) -> dict:
+        """Records that a person told the referring office about the decline / redirect outside
+        Lamina. Nothing is sent from here."""
+        row = self._row(context, referral_id)
+        if row["status"] not in {IntakeStatus.DECLINED.value, IntakeStatus.REDIRECTED.value}:
+            raise PilotError("not_closed", "Only a declined or redirected referral has a notice to send", 409)
+        if self.store.events(practice_id=context.practice_id, referral_id=referral_id, event_type="referring_office_notified"):
+            raise PilotError("already_notified", "The referring office was already marked as notified", 409)
+        self.store.append_event("referring_office_notified", actor=context.actor, practice_id=context.practice_id,
+                                referral_id=referral_id, metadata={"role": context.role, "decision": row["status"],
+                                                                   "sent_via": "outside_lamina"})
+        return self.detail(context, referral_id)
 
     @staticmethod
     def _name_actors(result: dict, referral: IntakeReferral, directory: ActorDirectory, sender: dict) -> None:
@@ -473,6 +552,14 @@ class IntakeService:
 
     def list(self, context: PracticeContext) -> list[dict]:
         items = []
+        directory = ActorDirectory(self.store, context.practice_id)
+        voice = Voice.for_context(context, self.physician_name(context.practice_id, directory))
+        request_rows: dict[str, list[dict]] = {}
+        for request in self.store.fetch_all(
+                "SELECT referral_id, status FROM missing_information_requests WHERE practice_id = ?", (context.practice_id,)):
+            request_rows.setdefault(request["referral_id"], []).append({"status": request["status"]})
+        notified = {event["referral_id"] for event in self.store.events(
+            practice_id=context.practice_id, event_type="referring_office_notified")}
         for row in self.store.referral_rows(context.practice_id):
             referral = self._referral(row)
             recommendation = self.recommendation(context.practice_id, referral.current_recommendation_id)
@@ -492,8 +579,15 @@ class IntakeService:
                 "missing_items": recommendation.missing_items if recommendation else [],
                 "escalated": bool(referral.escalated_at),
                 "handoff": (referral.handoff or {}).get("kind"),
+                "handoff_by_name": directory.describe(referral.handoff["by"])["name"] if (referral.handoff or {}).get("by") else None,
                 # Decided = the physician signed it off (accept / redirect / decline).
                 "decided": bool(referral.disposition),
+                # The same standing the referral page shows (never "complete" while anything is open).
+                "standing": referral_standing(
+                    status=referral.status, recommendation=recommendation.model_dump(mode="json") if recommendation else None,
+                    next_step=effective.get("next_step"), requests=request_rows.get(referral.id, []), voice=voice),
+                "has_conflict": bool(self._correction_conflicts(referral, recommendation)),
+                "office_notified": referral.id in notified,
             })
         return items
 

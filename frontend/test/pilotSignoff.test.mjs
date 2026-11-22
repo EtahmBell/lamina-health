@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { actorText, changeText, correctionText, displayTemplate, eventLabel, physicianLabel, thirdPerson } from '../src/pilotState.ts'
+import { actorText, changeText, correctionText, displayTemplate, eventLabel, historyHighlights, physicianLabel } from '../src/pilotState.ts'
 
 /* Sign-off model and staff walkthrough fixes: the physician's decision is the sign-off, staff do
  * the paperwork, and every action names who did it. */
@@ -49,7 +49,10 @@ test('the secure link placeholder says it is included when sent and not stored',
 test('staff read the physician’s agent in the third person', () => {
   assert.equal(physicianLabel('Dr. Avery Testwell'), 'Dr. Avery Testwell')
   assert.equal(physicianLabel(null), 'the physician')
-  assert.equal(thirdPerson('Your rule sets the default modality to econsult.', 'Dr. A'), 'Dr. A’s rule sets the default modality to econsult.')
+  // Rationale is rendered for each reader by the server from structured parts (no display-time
+  // rewriting of stored sentences): the page shows `text`, flagging older physician wording.
+  assert.doesNotMatch(source('pilotState.ts'), /export function thirdPerson/)
+  assert.match(pilot, /\{item\.text \?\? item\.statement\}\{item\.worded_for_physician &&/)
   assert.match(pilot, /placeholder: physician \? 'Ask or teach your agent…' : `Ask about a referral, or suggest something for \$\{doctor\} to confirm…`/)
   assert.match(agent, /`Suggest how \$\{doctor\}’s agent should handle referrals\./)
   assert.doesNotMatch(agent, /Only the physician can teach the agent or confirm what it learned/, 'no contradictory Train intro')
@@ -57,8 +60,9 @@ test('staff read the physician’s agent in the third person', () => {
 
 test('a referral with received values lands on Verify as the primary action', () => {
   const detail = slice(pilot, 'function ReferralDetailPage', 'function ProfilePage')
-  assert.match(detail, /referralStanding\(\{[\s\S]*?toVerify: toVerify\.length/)
-  assert.match(source('pilotState.ts'), /if \(input\.toVerify\) return \{ heading: 'Verify what the referring office sent'/)
+  // The standing (heading, still open, readiness) comes from the server: one source of truth
+  // shared with Home and Patients (backend/pilot/standing.py; tests/test_pilot_followup.py).
+  assert.match(detail, /const standing = detail\.standing \?\?/)
   assert.match(detail, /className="button-primary" disabled=\{busy\} onClick=\{\(\) => void act\(\(\) => verifyReferralItem\(referral\.id, item\.key\)\)\}>Verify \{item\.label\}/)
 })
 
@@ -72,18 +76,27 @@ test('layout fixes: join header, sender notice spacing, setup button spacing', (
   assert.match(css, /\.pilot-setup-staff-actions \{ margin-top: 24px; \}/)
 })
 
-test('one consistent statement of where a referral stands and what is still open', async () => {
-  const { referralStanding } = await import('../src/pilotState.ts')
-  const base = { physician: false, doctor: 'Dr. A', toVerify: 0, hasDraft: false, waitingOnOffice: true, missing: ['Thyroid ultrasound'], nextStep: 'request_information' }
-  // The Eta case: marked ready while a request is still out. No "Waiting on the referring office" heading.
-  assert.deepEqual(referralStanding({ ...base, status: 'ready_for_review' }),
-    { heading: 'Ready for Dr. A’s decision', stillOpen: 'Still open: Thyroid ultrasound — requested from the referring office, not received yet' })
-  assert.equal(referralStanding({ ...base, status: 'ready_for_review', physician: true }).heading, 'Ready for your decision')
-  assert.deepEqual(referralStanding({ ...base, status: 'needs_information' }),
-    { heading: 'Waiting on the referring office', stillOpen: 'Still open: Thyroid ultrasound — requested from the referring office, not received yet' })
-  assert.equal(referralStanding({ ...base, status: 'needs_information', toVerify: 1 }).heading, 'Verify what the referring office sent')
-  assert.equal(referralStanding({ ...base, status: 'triaged', waitingOnOffice: false, missing: [] }).stillOpen, null)
+test('one statement of where a referral stands, from the server', () => {
+  // Heading, "Still open" and readiness wording are computed once on the server and shared by
+  // the referral page, Home and Patients (backend/pilot/standing.py, tested in
+  // tests/test_pilot_followup.py); the page renders them and never recomputes them.
   assert.match(pilot, /const nextStepHeading = standing\.heading/)
+  assert.match(pilot, /\{!closed && standing\.still_open && <p className="pilot-still-open">\{standing\.still_open\}<\/p>\}/)
+  assert.match(pilot, /const readiness = recommendation \? standing\.readiness_text : null/)
+  assert.doesNotMatch(source('pilotState.ts'), /export function referralStanding/)
+})
+
+test('history keeps request, reply and decision events with what they were about', () => {
+  const at = '2026-01-01T00:00:00Z'
+  const history = [
+    { event_type: 'referral_received', created_at: at }, { event_type: 'missing_information_request_sent', created_at: at },
+    ...Array.from({ length: 12 }, () => ({ event_type: 'referral_triaged', created_at: at })),
+    { event_type: 'sender_response_received', created_at: at },
+  ]
+  const shown = historyHighlights(history).map((event) => event.event_type)
+  assert.ok(shown.includes('missing_information_request_sent') && shown.includes('sender_response_received'))
+  assert.equal(shown.length, 8)
+  assert.match(pilot, /\{event\.summary && <p className="timeline-summary">\{event\.summary\}<\/p>\}/)
 })
 
 test('a correction that a newer rule disagrees with is shown with keep / apply choices', async () => {

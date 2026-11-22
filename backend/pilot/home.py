@@ -12,7 +12,9 @@ from .missing_info import MissingInformationService
 from .models import TERMINAL_STATUSES
 from .practice import PracticeContext
 from .rules import PracticeRules
+from .standing import queue_detail
 from .store import PilotStore
+from .voice import Voice
 
 AWAY_DEFAULT = timedelta(hours=24)
 AWAY_MAX = timedelta(days=7)
@@ -23,7 +25,8 @@ DONE_EVENTS = {
     "sender_document_received": "Referring office uploaded a document",
     "sender_response_received": "Referring office replied",
     "referral_became_ready": "Became ready for review",
-    "learning_confirmed": "Learned", "learning_edited": "Learned",
+    # A physician confirming a rule is not something the agent "learned" on its own: say what happened.
+    "learning_confirmed": "Rule confirmed", "learning_edited": "Rule confirmed (edited)",
     "missing_information_request_sent": "Information request sent",
 }
 
@@ -66,31 +69,64 @@ class HomeService:
         summaries = {item["id"]: item for item in self.intake.list(context)}
         names = {rid: item["patient_name"] for rid, item in summaries.items()}
 
+        voice = Voice.for_context(context, self.intake.physician_name(context.practice_id))
+        doctor = voice.doctor
+        # Who does the paperwork: staff when the practice has any; otherwise the physician does it all.
+        staff_paperwork = any(member["role"] == "staff" for member in self.store.members(context.practice_id))
+        paperwork_is_mine = not physician or not staff_paperwork
+        closed = {status.value for status in TERMINAL_STATUSES}
+
         for item in summaries.values():
-            if item["status"] in {status.value for status in TERMINAL_STATUSES}:
-                continue
             path = f"/me/referrals/{item['id']}"
             base = {"referral_id": item["id"], "patient_name": item["patient_name"], "referral_type": item["referral_type"], "path": path}
+            name = item["patient_name"]
+            if item["status"] in closed:
+                # Declined / redirected: someone tells the referring office (outside Lamina).
+                if item["status"] in {"declined", "redirected"} and not item.get("office_notified") and paperwork_is_mine:
+                    needs.append({**base, "kind": "notify_office", "rank": 4,
+                                  "title": f"Tell the referring office about {name}’s {'decline' if item['status'] == 'declined' else 'redirect'}",
+                                  "detail": f"{item['referral_type']} · not sent — Lamina doesn’t send this; a draft is ready to copy",
+                                  "action": "Open"})
+                continue
+            standing = item.get("standing") or {}
+            if item.get("has_conflict") and physician:
+                # A correction a newer rule disagrees with: the physician's decision, ranked first.
+                # Ranked just ahead of other decisions: it changes what deciding means.
+                needs.append({**base, "kind": "correction_conflict", "rank": 0 if item["priority"] == "urgent" else 0.5,
+                              "title": f"{name}: your correction differs from your newer {item['referral_type']} rule",
+                              "detail": f"{item['referral_type']} · choose which applies before you decide",
+                              "action": "Resolve"})
+                continue
             if item["status"] == "ready_for_review":
+                detail = queue_detail(item["referral_type"], standing, voice, flagged=item["escalated"],
+                                      marked_ready_by=item.get("handoff_by_name") if item.get("handoff") == "ready" else None)
                 if physician:
                     needs.append({**base, "kind": "ready_for_review", "rank": 0 if item["priority"] == "urgent" else 1,
-                                  "title": f"{item['patient_name']} is ready for your decision",
-                                  "detail": f"{item['referral_type']} · " + ("flagged for your review" if item["escalated"] else "complete per your rules"),
-                                  "action": "Review"})
+                                  "title": f"{name} is ready for your decision", "detail": detail, "action": "Review"})
                 else:
-                    waiting.append({**base, "kind": "waiting_physician", "title": f"{item['patient_name']} — waiting on the physician",
-                                    "detail": f"{item['referral_type']} · ready for review"})
+                    waiting.append({**base, "kind": "waiting_physician", "title": f"{name} — waiting on {doctor}", "detail": detail})
             elif item["status"] in {"received", "triaged"} and not item["decided"]:
                 uncertain = item["fit"] in {"unknown", "possible", "outside_scope"} or item["requires_physician"]
                 # No separate triage approval: physicians decide (accept / redirect / decline);
                 # staff check the paperwork and mark it ready or flag it for the physician.
-                needs.append({**base, "kind": "triage_uncertain" if uncertain else "triage_review",
-                              "rank": 0 if item["priority"] == "urgent" else (2 if uncertain else 3),
-                              "title": (f"{item['patient_name']} has a routing question" if item["fit"] == "outside_scope" else
-                                        f"I’m not sure about {item['patient_name']}’s referral" if uncertain else
-                                        f"{item['patient_name']}’s referral is triaged and waiting for your decision" if physician else
-                                        f"Check {item['patient_name']}’s referral and mark it ready for the physician"),
-                              "detail": f"{item['referral_type']} · from {item['sender_name']}", "action": "Review"})
+                if not paperwork_is_mine:
+                    waiting.append({**base, "kind": "waiting_staff",
+                                    "title": f"{name} — with staff for checking",
+                                    "detail": f"{item['referral_type']} · triaged, not checked by staff yet"
+                                              + (" · has a fit question for you" if uncertain else "") + " · you can still open and decide"})
+                    continue
+                if physician:
+                    title = (f"{name} has a routing question" if item["fit"] == "outside_scope" else
+                             f"I’m not sure about {name}’s referral" if uncertain else
+                             f"{name}’s referral is triaged and waiting for your decision")
+                else:
+                    title = (f"Check {name}’s referral, then mark it ready or flag it for {doctor}"
+                             if uncertain else f"Check {name}’s referral and mark it ready for {doctor}")
+                needs.append({**base, "kind": "triage_uncertain" if uncertain and physician else "triage_review",
+                              "rank": 0 if item["priority"] == "urgent" else (2 if uncertain else 3), "title": title,
+                              "detail": f"{item['referral_type']} · from {item['sender_name']}"
+                                        + (f" · fit needs {doctor}’s judgment" if uncertain and not physician else ""),
+                              "action": "Review"})
         for request in self.missing.open_requests(context.practice_id):
             name = names.get(request["referral_id"], "A referral")
             path = f"/me/referrals/{request['referral_id']}"
@@ -105,12 +141,15 @@ class HomeService:
                                 "title": f"{name} — waiting on the referring office",
                                 "detail": f"Asked for {labels} {('today' if days == 0 else f'{days} day' + ('' if days == 1 else 's') + ' ago')}"
                                           + (" · partial response received" if request["status"] == "partially_resolved" else "")})
-        needs.extend(self._document_confirmations(context, summaries))
+        if paperwork_is_mine:
+            needs.extend(self._document_confirmations(context, summaries))
         # A referral waiting on information that nobody has asked for yet must not vanish
         # between "needs you" and "waiting on others".
         requested = {request["referral_id"] for request in self.missing.open_requests(context.practice_id)}
         flagged = {item["referral_id"] for item in needs if item.get("referral_id")}
         for item in summaries.values():
+            if not paperwork_is_mine:
+                break
             if item["status"] == "needs_information" and item["id"] not in requested and item["id"] not in flagged:
                 missing = ", ".join(item["missing_items"]) or "the missing information"
                 needs.append({"kind": "request_missing", "rank": 3, "referral_id": item["id"], "patient_name": item["patient_name"],
@@ -150,6 +189,8 @@ class HomeService:
             label = DONE_EVENTS[event["event_type"]]
             title = f"{label}: {names.get(referral_id, 'a referral')}" if referral_id else (
                 f"{label}: {event['metadata'].get('referral_type', 'a referral rule')}")
+            if event["event_type"] in {"learning_confirmed", "learning_edited"} and event.get("actor"):
+                title += f" · by {self._actor_name(context, event['actor'])}"
             done.append({"kind": event["event_type"], "title": title, "at": event["created_at"],
                          "by_agent": event["autonomy"] == "automatic",
                          "path": f"/me/referrals/{referral_id}" if referral_id else "/me/rules"})
@@ -165,6 +206,11 @@ class HomeService:
         return {"briefing": self._briefing(needs, waiting, prepared, done, physician), "needs_you": needs,
                 "waiting": waiting, "prepared": prepared, "done": done[:12], "since": since, "learned": learned,
                 "role": context.role}
+
+    def _actor_name(self, context: PracticeContext, actor: str) -> str:
+        from .attribution import ActorDirectory
+
+        return ActorDirectory(self.store, context.practice_id).describe(actor)["name"]
 
     def _document_confirmations(self, context: PracticeContext, summaries: dict) -> list[dict]:
         items = []
@@ -203,7 +249,13 @@ class HomeService:
         if review:
             parts.append(f"{_plural(review, 'triaged referral is', 'triaged referrals are').lower()} waiting for your decision"
                          if physician else
-                         f"{_plural(review, 'triaged referral needs', 'triaged referrals need').lower()} checking before the physician sees it")
+                         f"{_plural(review, 'triaged referral needs', 'triaged referrals need').lower()} checking before the physician sees {'it' if review == 1 else 'them'}")
+        conflicts = kinds.count("correction_conflict")
+        if conflicts:
+            parts.insert(0, f"{_plural(conflicts, 'referral has', 'referrals have').lower()} a correction that differs from your newer rule")
+        notify = kinds.count("notify_office")
+        if notify:
+            parts.append(f"{_plural(notify, 'referring office needs', 'referring offices need').lower()} telling about a decision")
         evidence = kinds.count("confirm_evidence")
         if evidence:
             parts.append(f"{_plural(evidence, 'referral needs', 'referrals need').lower()} document evidence confirmed")
@@ -229,6 +281,9 @@ class HomeService:
             office = sum(1 for item in waiting if item["kind"] == "waiting_sender")
             if office:
                 tail.append(f"I’m waiting on missing records for {_plural(office, 'referral', 'referrals').lower()}.")
+            with_staff = sum(1 for item in waiting if item["kind"] == "waiting_staff")
+            if with_staff:
+                tail.append(f"{_plural(with_staff, 'triaged referral is', 'triaged referrals are')} with staff for checking.")
         away = len(done)
         return {"lead": lead, "detail": detail, "tail": " ".join(tail),
                 "away": f"{_plural(away, 'update', 'updates')} since you were last here." if away else ""}

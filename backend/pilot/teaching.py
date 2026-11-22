@@ -452,10 +452,39 @@ class TeachingService:
                 logger.warning("teach interpretation model call failed; using deterministic fallback")
         return deterministic_interpret(text, known_types)
 
-    @staticmethod
-    def view(rule: PracticeRule) -> dict:
+    def basis(self, rule: PracticeRule) -> str:
+        """What a proposal is based on, in words -- shown instead of a numeric confidence.
+        A pattern learned from the team's work says how often it was seen among the decisions
+        made on that referral type ("Seen in 3 of the last 4 Osteoporosis decisions")."""
+        provenance = rule.provenance or {}
+        if rule.source == "correction_pattern":
+            evidence = {item.get("referral_id") for item in provenance.get("evidence", []) if item.get("referral_id")}
+            store = self.rules.store
+            practice_id = rule.practice_id
+            wanted = normalize_referral_type(rule.referral_type)
+            of_type = {row["id"] for row in store.fetch_all(
+                "SELECT id, referral_type FROM intake_referrals WHERE practice_id = ?", (practice_id,))
+                if normalize_referral_type(row["referral_type"]) == wanted}
+            decided = {row["id"] for row in store.fetch_all(
+                "SELECT id FROM intake_referrals WHERE practice_id = ? AND disposition_json IS NOT NULL", (practice_id,))}
+            decided |= {row["referral_id"] for row in store.fetch_all(
+                "SELECT referral_id FROM triage_corrections WHERE practice_id = ?", (practice_id,))}
+            decided |= {row["referral_id"] for row in store.fetch_all(
+                "SELECT referral_id FROM recommendation_decisions WHERE practice_id = ? AND actor_role = 'physician'",
+                (practice_id,))}
+            total = max(len(decided & of_type), len(evidence))
+            return f"Seen in {len(evidence)} of the last {total} {rule.referral_type} decisions"
+        if provenance.get("suggested_by_role") == "staff":
+            return f"Suggested by {provenance.get('suggested_by_name') or 'a staff member'}"
+        if rule.source == "onboarding" or provenance.get("setup_stage"):
+            return "From a setup answer"
+        return "From an instruction"
+
+    def view(self, rule: PracticeRule) -> dict:
         provenance = rule.provenance or {}
         return {
+            # Shown instead of the numeric confidence (kept below for older readers).
+            "basis": self.basis(rule),
             "id": rule.id, "referral_type": rule.referral_type, "source_text": provenance.get("raw_text", rule.source_text),
             "content": rule.content.model_dump(mode="json"), "confidence": rule.confidence,
             "operational_status": rule.operational_status, "physician_confirmed": rule.physician_confirmed,

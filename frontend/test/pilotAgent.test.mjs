@@ -60,6 +60,11 @@ test('teaching shows the interpretation and offers confirm, edit, reject, and cl
   assert.doesNotMatch(agent, /I understood/)
   // Staff read a pending learning about the physician: who confirms it is named, never "you".
   assert.match(agent, /not active until \$\{voice\.doctor\} confirms/)
+  // Values in a learning Lamina drafted are shown in plain words (a real word-boundary regex).
+  assert.ok(agent.includes(String.raw`.replace(/\bin_person\b/g, 'in-person')`), 'in_person is humanized')
+  assert.ok(!/[\u0000-\u0008]/.test(agent), 'no control characters in the source')
+  // Staff see the physician's question as an attributed quote, not addressed to them.
+  assert.match(agent, /’s agent asked \{doctor\}:/)
   const question = slice(agent, 'export function QuestionCard', 'export function AgentPage')
   for (const label of ['Yes', 'Edit', 'Not always / Depends', 'Ignore', 'at most one question like this a day']) assert.ok(question.includes(label), label)
 })

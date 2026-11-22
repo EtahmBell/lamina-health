@@ -54,7 +54,13 @@ const SHOTS: Shot[] = [
   // Loading and error states (the API is held / failed for this one page only)
   { name: 'state-loading-referral', actor: 'physician', mock: 'loading', to: (s) => referralPath(s.referrals.ready), ready: text('Opening referral…') },
   { name: 'state-error-referral', actor: 'physician', mock: 'error', to: (s) => referralPath(s.referrals.ready), ready: (p) => expect(p.getByRole('alert')).toBeVisible() },
+  // Added in the follow-up round (appended so earlier numbering is unchanged).
+  { name: 'staff-referral-declined-notify', actor: 'staff', to: (s) => referralPath(s.referrals.declined_notify), ready: text('Not sent — notify the referring office') },
 ]
+
+// E2E_ONLY=name,name captures just those screens (e.g. a follow-up round on affected screens);
+// numbering stays the same as the full list so rounds compare file-for-file.
+const only = new Set((process.env.E2E_ONLY ?? '').split(',').map((name) => name.trim()).filter(Boolean))
 
 test('capture the UI-review screens', async ({ as, seed }, testInfo) => {
   test.setTimeout(10 * 60_000)
@@ -62,6 +68,11 @@ test('capture the UI-review screens', async ({ as, seed }, testInfo) => {
   const dir = path.join(ROOT_DIR, 'ui-review', runName, `${size.width}x${size.height}`)
   mkdirSync(dir, { recursive: true })
   for (const [index, shot] of SHOTS.entries()) {
+    if (only.size && !only.has(shot.name)) {
+      // Steps that set up later shots still run, so a filtered run sees the same states.
+      shot.before?.()
+      continue
+    }
     shot.before?.()
     const page = await as(shot.actor)
     await page.unrouteAll({ behavior: 'ignoreErrors' })

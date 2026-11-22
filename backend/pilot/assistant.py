@@ -37,6 +37,7 @@ from .practice import PilotError, PracticeContext
 from .rules import PracticeRules, RuleNotFoundError
 from .store import PilotStore, new_id, now_iso
 from .teaching import TeachingService
+from .voice import PHYSICIAN, Voice
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +63,20 @@ INTENTS = (
 CLOSED = {"accepted", "redirected", "declined"}
 # How the assistant names each kind of statement it relies on. It never calls a proposed or
 # unknown item "confirmed".
-KIND_TEXT = {
-    "hard_requirement": "your confirmed requirement", "scope_policy": "your confirmed scope",
-    "soft_preference": "your stated preference", "exception": "an exception you noted (not applied automatically)",
-    "physician_judgment": "you decide this case by case", "unknown": "I don’t know yet",
-}
+def kind_text(kind: str, voice: Voice = PHYSICIAN) -> str:
+    """How the assistant names each kind of statement, for whoever is reading."""
+    return {
+        "hard_requirement": f"{voice.whose} confirmed requirement", "scope_policy": f"{voice.whose} confirmed scope",
+        "soft_preference": f"{voice.whose} stated preference",
+        "exception": f"an exception {voice.object if voice.physician else voice.doctor} noted (not applied automatically)",
+        "physician_judgment": f"{voice.subject.lower() if voice.physician else voice.subject} "
+                              f"{voice.verb('decide', 'decides')} this case by case",
+        "unknown": "I don’t know yet",
+    }.get(kind, kind)
+
+
+KIND_TEXT = {kind: kind_text(kind) for kind in
+             ("hard_requirement", "scope_policy", "soft_preference", "exception", "physician_judgment", "unknown")}
 _SETUP = re.compile(r"\b(set ?up|setup|initiali[sz]e|onboarding|finish setting up|resume setup|continue setup|"
                     r"set up my agent|get started)\b", re.IGNORECASE)
 STATUS_TEXT = {
@@ -76,7 +86,7 @@ STATUS_TEXT = {
     "accepted": "accepted — awaiting scheduling (scheduling isn’t connected to Lamina)",
     "redirected": "redirected", "declined": "declined",
 }
-FIT_TEXT = {"strong": "a strong fit", "possible": "a possible fit", "outside_scope": "outside your scope", "unknown": "of unknown fit (no rule)"}
+FIT_TEXT = {"strong": "a strong fit", "possible": "a possible fit", "outside_scope": "outside the practice’s scope", "unknown": "of unknown fit (no rule)"}
 MODALITY_TEXT = {"in_person": "in-person", "econsult": "eConsult", "either": "either in-person or eConsult", "unspecified": "no set modality"}
 NEXT_STEP_TEXT = {
     "request_information": "request missing information", "confirm_document_evidence": "confirm what the documents show",
@@ -565,6 +575,7 @@ class AssistantService:
         return reply, tools
 
     def _execute_intent(self, context: PracticeContext, plan: Plan, intent: str, first: dict | None, text: str, run: Callable) -> tuple[dict, None]:
+        voice = Voice.for_context(context, self.intake.physician_name(context.practice_id))
         if intent == "summarize_history":
             facts = run("referral_timeline", {"referral_id": first["id"]})
             deterministic = self._timeline_answer(facts)
@@ -576,14 +587,14 @@ class AssistantService:
 
         if intent == "practice_question":
             facts = {"practice": run("practice_context"), "rules": run("practice_rules"), "representation": run("representation")}
-            return self._compose(text, facts, self._practice_answer(facts)), None
+            return self._compose(text, facts, self._practice_answer(facts, voice)), None
         if intent == "setup":
             return self._setup_reply(context, run("representation")), None
         if intent == "referral_query":
             if first:
                 facts = {"referral": run("referral_detail", {"referral_id": first["id"]})}
                 asks_missing = bool(_MISSING.search(text.casefold()))
-                deterministic = self._missing_answer(facts["referral"]) if asks_missing else self._referral_answer(facts["referral"])
+                deterministic = self._missing_answer(facts["referral"], voice) if asks_missing else self._referral_answer(facts["referral"])
                 reply = self._compose(text, facts, deterministic)
                 if asks_missing:  # the outstanding items always come verbatim from the triage record
                     reply["bullets"] = deterministic.get("bullets", [])
@@ -594,7 +605,7 @@ class AssistantService:
             return self._compose(text, facts, self._list_answer(facts, plan.query_filter)), None
         if intent == "explain_recommendation":
             facts = run("triage_explanation", {"referral_id": first["id"]})
-            deterministic = self._explain_answer(facts)
+            deterministic = self._explain_answer(facts, voice)
             reply = self._compose(text, {"triage": facts}, deterministic)
             # The sourced rationale (rule versions, document pages) always comes from the
             # backend record, whatever the model's phrasing included.
@@ -607,13 +618,13 @@ class AssistantService:
             return self._teach_reply(result, self.intake.physician_name(context.practice_id)), None
         if intent == "prepare_information_request":
             result = run("prepare_information_request", {"referral_id": first["id"], "items": plan.requested_items})
-            return {**self._prepared_reply(result), "_focus": first["id"]}, None
+            return {**self._prepared_reply(result, voice), "_focus": first["id"]}, None
         if intent == "prepare_physician_review":
             result = run("prepare_physician_review", {"referral_id": first["id"], "note": None})
-            return {**self._prepared_reply(result), "_focus": first["id"]}, None
+            return {**self._prepared_reply(result, voice), "_focus": first["id"]}, None
         if intent == "prepare_referral":
             result = run("prepare_referral_draft", {"draft": plan.draft, "referral_id": first["id"] if first else None})
-            return self._prepared_reply(result), None
+            return self._prepared_reply(result, voice), None
         return self._chat_reply(context, plan, "conversation"), None
 
     # -------------------------------------------------------------- read tools
@@ -689,7 +700,7 @@ class AssistantService:
             where = (f"rule v{source['rule_version']}" if source["kind"] == "practice_rule" and source.get("rule_version")
                      else f"document p.{source['page']}" if source["kind"] == "document" and source.get("page")
                      else source["kind"].replace("_", " "))
-            rationale.append({"statement": item["statement"], "source": where})
+            rationale.append({"statement": item.get("text") or item["statement"], "source": where})
             if source.get("quote"):
                 quotes.append(source["quote"][:300])
         snapshot = detail.get("rules_snapshot") or {}
@@ -778,7 +789,8 @@ class AssistantService:
         items = requested or missing
         if not items:
             return {"kind": "information_request", "available": False, "patient_name": name, "referral_id": referral["id"],
-                    "reason": "Nothing is missing per your rules. Tell me which items to ask for."}
+                    "reason": f"Nothing is missing per {Voice.for_context(context, self.intake.physician_name(context.practice_id)).whose} rules. "
+                              "Tell me which items to ask for."}
         return {"kind": "information_request", "available": True, "patient_name": name, "referral_id": referral["id"],
                 "items": items, "recipient": referral["sender"]["name"], "contact": referral["sender"]["contact"]}
 
@@ -869,7 +881,7 @@ class AssistantService:
         about = "this" if rtype == "Unassigned" else rtype
         return {"paragraphs": [f"Here’s the preference I drafted for {about} referrals. It isn’t active until you confirm it."], "bullets": bullets, "cards": [card]}
 
-    def _prepared_reply(self, result: dict) -> dict:
+    def _prepared_reply(self, result: dict, voice: Voice = PHYSICIAN) -> dict:
         kind = result["kind"]
         name = result.get("patient_name", "")
         path = f"/me/referrals/{result.get('referral_id')}" if result.get("referral_id") else None
@@ -895,7 +907,7 @@ class AssistantService:
         paragraphs = ["I prefilled a referral intake from what you told me. It records a referral your practice received; sending referrals to other physicians isn’t available yet. Nothing is saved until you submit the form."]
         bullets = [f"Still needed: {', '.join(missing)}"] if missing else []
         if required:
-            bullets.append(f"Your rules require before review: {', '.join(required)}")
+            bullets.append(f"{voice.whose_cap} rules require before review: {', '.join(required)}")
         elif draft.get("referral_type") and not result["type_has_rule"]:
             bullets.append("No confirmed rule matches this referral type, so I can’t judge fit or completeness yet.")
         label = draft.get("patient_name") or "New patient"
@@ -926,7 +938,7 @@ class AssistantService:
                 "inferred_active": {"state": "confirmed", "state_label": "Confirmed — now active", "action": "View rules", "path": "/me/rules"},
                 "rejected": {"state": "rejected", "state_label": "Rejected — not used", "action": "Open"},
                 # A proposal is only superseded when confirmation merged it into the active rule.
-                "superseded": {"state": "confirmed", "state_label": "Confirmed — merged into your rule", "action": "View rules", "path": "/me/rules"},
+                "superseded": {"state": "confirmed", "state_label": "Confirmed — merged into the existing rule", "action": "View rules", "path": "/me/rules"},
             }.get(rule.operational_status, {"state": "pending"})
         referral_id = (card.get("execute") or {}).get("referral_id")
         path = card.get("path") or ""
@@ -963,24 +975,28 @@ class AssistantService:
         return {"kind": "link", "label": f"{referral['patient_name']} — referral", "detail": f"{referral['referral_type']} · {referral['status']}",
                 "action": "Open", "path": f"/me/referrals/{referral['referral_id']}"}
 
-    def _practice_answer(self, facts: dict) -> dict:
+    def _practice_answer(self, facts: dict, voice: Voice = PHYSICIAN) -> dict:
         practice, rules = facts["practice"], facts["rules"]["confirmed_rules"]
         who = f"{practice['practice_name']}{' · ' + practice['specialty'] if practice['specialty'] else ''}"
         role = "the physician" if practice["signed_in_role"] == "physician" else "practice staff"
         verb = "is" if practice["open_referrals"] == 1 else "are"
         paragraphs = [f"You’re signed in to {who} as {role}. There {verb} {_plural(practice['open_referrals'], 'open referral')}."]
         if rules:
-            paragraphs.append("Your confirmed preferences cover " + ", ".join(f"{r['referral_type']} (v{r['version']})" for r in rules) + ".")
+            paragraphs.append(f"{voice.whose_cap} confirmed preferences cover " + ", ".join(f"{r['referral_type']} (v{r['version']})" for r in rules) + ".")
         else:
-            paragraphs.append("You haven’t confirmed any referral preferences yet, so I can record referrals but can’t judge fit or completeness.")
+            paragraphs.append(f"{voice.subject} {voice.verb('haven’t', 'hasn’t')} confirmed any referral preferences yet, "
+                              "so I can record referrals but can’t judge fit or completeness.")
         bullets = []
         for group in (facts.get("representation") or {}).get("types", [])[:6]:
-            bullets += [_statement_line(group["referral_type"], item) for item in group["statements"][:6]]
-            bullets += [f"{group['referral_type']}: I don’t know yet {_TOPIC_ASK[topic]} — want to tell me?"
+            bullets += [_statement_line(group["referral_type"], item, voice) for item in group["statements"][:6]]
+            bullets += [(f"{group['referral_type']}: I don’t know yet {_topic_ask(topic, voice)} — want to tell me?" if voice.physician
+                         else f"{group['referral_type']}: not confirmed yet — {_topic_ask(topic, voice)}")
                         for topic in group["unknown_topics"]]
         lifecycle = (facts.get("representation") or {}).get("lifecycle") or {}
         if lifecycle.get("label"):
-            paragraphs.append(lifecycle["label"])
+            paragraphs.append(lifecycle["label"] if voice.physician else (
+                f"Shadow mode — {voice.doctor}’s agent recommends; {voice.doctor} decides." if lifecycle.get("state") == "shadow"
+                else f"Setting up — {voice.doctor}’s agent doesn’t represent the practice yet."))
         return {"paragraphs": paragraphs, "bullets": bullets[:16] + [f"I can {item}" for item in practice["can_do"]], "cards": []}
 
     def _setup_reply(self, context: PracticeContext, facts: dict) -> dict:
@@ -1025,17 +1041,17 @@ class AssistantService:
             bullets.append(f"Documents: {', '.join(referral['documents'])}")
         return {"paragraphs": lines, "bullets": bullets, "cards": []}
 
-    def _missing_answer(self, referral: dict) -> dict:
+    def _missing_answer(self, referral: dict, voice: Voice = PHYSICIAN) -> dict:
         name = referral["patient_name"]
         if referral["missing"]:
-            paragraphs = [f"Still missing for {name}’s {referral['referral_type']} referral, per your rules:"]
+            paragraphs = [f"Still missing for {name}’s {referral['referral_type']} referral, per {voice.whose} rules:"]
             unverified = set(referral.get("unverified") or [])
             bullets = [f"{item} — received from the referring office, needs your team to verify" if item in unverified else item
                        for item in referral["missing"]]
             if referral["information_requests"]:
                 bullets.append("Requests so far: " + "; ".join(f"{r['status']} ({', '.join(r['items'])})" for r in referral["information_requests"]))
             return {"paragraphs": paragraphs, "bullets": bullets, "cards": []}
-        return {"paragraphs": [f"Nothing required is missing for {name}’s referral per your confirmed rules. Status: {referral['status']}."], "cards": []}
+        return {"paragraphs": [f"Nothing required is missing for {name}’s referral per {voice.whose} confirmed rules. Status: {referral['status']}."], "cards": []}
 
     def _timeline_answer(self, facts: dict) -> dict:
         events = facts["events"]
@@ -1044,7 +1060,7 @@ class AssistantService:
         return {"paragraphs": [f"{facts['patient_name']}’s {facts['referral_type']} referral: {_plural(facts['event_count'], 'recorded event')}; it’s now {facts['status']}."],
                 "bullets": [f"{e['at']} — {e['what']} ({e['by']})" for e in events[-8:]], "cards": []}
 
-    def _explain_answer(self, facts: dict) -> dict:
+    def _explain_answer(self, facts: dict, voice: Voice = PHYSICIAN) -> dict:
         if not facts.get("has_recommendation"):
             return {"paragraphs": [f"I haven’t triaged {facts['patient_name']}’s referral yet, so there’s no recommendation to explain."], "cards": []}
         rec = facts["recommended"]
@@ -1058,11 +1074,13 @@ class AssistantService:
             verb = {"accept": "accepted", "redirect": "redirected", "decline": "declined"}.get(decided["decision"], decided["decision"])
             paragraphs.append(f"{decided['by']} {verb} the referral; that decision is the sign-off on this triage.")
         bullets = [f"Rules used: {rules}", *(f"{r['statement']} ({r['source']})" for r in facts["rationale"][:8])]
-        relied = [f"Relied on {KIND_TEXT.get(item['kind'], item['kind'])}: {item['item'].replace('_', ' ')} "
-                  f"({item['referral_type']} v{item['version']}{', your own' if item['layer'] == 'physician' else ''})"
+        own = ", your own" if voice.physician else f", {voice.doctor}’s own"
+        relied = [f"Relied on {kind_text(item['kind'], voice)}: {item['item'].replace('_', ' ')} "
+                  f"({item['referral_type']} v{item['version']}{own if item['layer'] == 'physician' else ''})"
                   for item in facts.get("statements", [])[:6]]
         if facts.get("conflicts"):
-            relied.append("There is a conflict between your practice’s and your own statements; I didn’t resolve it.")
+            relied.append("There is a conflict between the practice’s and "
+                          + ("your own" if voice.physician else f"{voice.doctor}’s own") + " statements; I didn’t resolve it.")
         return {"paragraphs": paragraphs, "bullets": bullets + relied, "cards": []}
 
     def _compose(self, question: str, facts: dict, deterministic: dict) -> dict:
@@ -1115,11 +1133,18 @@ _TOPIC_ASK = {"scope": "whether you see these", "requirements": "what you need b
              "urgency": "what makes one urgent", "modality": "your preferred visit type"}
 
 
-def _statement_line(referral_type: str, item: dict) -> str:
+def _topic_ask(topic: str, voice: Voice) -> str:
+    if voice.physician:
+        return _TOPIC_ASK[topic]
+    return {"scope": f"whether {voice.doctor} sees these", "requirements": f"what {voice.doctor} needs before review",
+            "urgency": "what makes one urgent", "modality": f"{voice.doctor}’s preferred visit type"}[topic]
+
+
+def _statement_line(referral_type: str, item: dict, voice: Voice = PHYSICIAN) -> str:
     """One statement, labelled by kind -- and never presented as confirmed unless it is."""
     if item["status"] != "confirmed":
         return f"{referral_type}: proposed, not confirmed yet — {item['text']}"
-    return f"{referral_type}: {KIND_TEXT.get(item['kind'], item['kind'])} — {item['text']} (v{item['version']})"
+    return f"{referral_type}: {kind_text(item['kind'], voice)} — {item['text']} (v{item['version']})"
 
 
 def _event_label(event_type: str) -> str:

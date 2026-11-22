@@ -75,7 +75,7 @@ export type SeedState = {
   public_slug: string
   practice_a: { id: string; name: string; physician_name: string; staff_label: string }
   practice_b: { id: string; name: string }
-  referrals: Record<'verify' | 'ready' | 'flag' | 'signoff' | 'redirect' | 'decline' | 'change' | 'conflict_keep' | 'conflict_apply' | 'still_open', string>
+  referrals: Record<'verify' | 'ready' | 'flag' | 'signoff' | 'redirect' | 'decline' | 'change' | 'conflict_keep' | 'conflict_apply' | 'still_open' | 'declined_notify', string>
   practice_b_referrals: { accepted: string; declined: string }
   practice_proposal_id: string
   private_markers: string[]
