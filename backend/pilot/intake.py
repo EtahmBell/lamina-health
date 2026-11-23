@@ -221,12 +221,16 @@ class IntakeService:
         directory = ActorDirectory(self.store, context.practice_id)
         sender = referral.sender.model_dump(mode="json")
         history = []
+        drafted = {event["metadata"].get("request_id") for event in self.store.events(
+            practice_id=context.practice_id, referral_id=referral_id, event_type="information_requested")}
         for event in self.store.events(practice_id=context.practice_id, referral_id=referral_id):
             # Chat audit rows are never part of a referral's clinical history.
             # Chat turns and the agent's own bookkeeping (what a capability prepared) are not part
             # of a referral's history; the draft it creates appears as the draft itself.
             if event["event_type"] in {"agent_conversation_turn", "agent_prepared_shadow", "agent_prepared_active"}:
                 continue
+            if event["event_type"] == "missing_information_request_created" and event["metadata"].get("request_id") in drafted:
+                continue  # the same draft as its "information requested" event: one history row
             who = directory.describe(event["actor"], sender)
             history.append({
                 "id": event["id"], "event_type": event["event_type"], "actor": event["actor"],
@@ -279,7 +283,7 @@ class IntakeService:
         labels = {item["key"]: item["label"] for item in (result.get("recommendation") or {}).get("requirements", [])}
         for event in result["history"]:
             metadata = event.get("metadata") or {}
-            if event["event_type"] in {"missing_information_request_created", "missing_information_request_sent"}:
+            if event["event_type"] in {"missing_information_request_created", "missing_information_request_sent", "information_requested"}:
                 request = by_request.get(metadata.get("request_id") or "")
                 if request:
                     asked = ", ".join(item["label"] for item in request.get("items", []))
@@ -291,6 +295,8 @@ class IntakeService:
                 keys = metadata.get("item_keys") or []
                 sent = ", ".join(labels.get(key, key.replace("_", " ")) for key in keys)
                 event["summary"] = (f"Sent {sent}" if sent else "Sent a message") + (" with a message" if sent and metadata.get("has_message") else "")
+            elif event["event_type"] == "referral_marked_ready" and metadata.get("missing_items"):
+                event["summary"] = "Marked ready while still missing " + ", ".join(metadata["missing_items"])
             elif event["event_type"] == "referring_office_notified":
                 event["summary"] = "Marked as sent to the referring office (outside Lamina)"
 
@@ -961,8 +967,17 @@ class IntakeService:
         self._row(context, referral_id)
         raise PilotError("triage_approval_removed", APPROVAL_REMOVED, 410)
 
-    def mark_ready(self, context: PracticeContext, referral_id: str, note: str | None) -> dict:
-        """Staff: the paperwork is done; the referral is ready for the physician's decision."""
+    def missing_required(self, practice_id: str, row: dict) -> list[str]:
+        """Required items the current recommendation doesn't have as satisfied."""
+        recommendation = self.recommendation(practice_id, row["current_recommendation_id"])
+        return [item.label for item in (recommendation.requirements if recommendation else [])
+                if item.required and item.state != "satisfied"]
+
+    def mark_ready(self, context: PracticeContext, referral_id: str, note: str | None,
+                   confirm_missing: list[str] | None = None) -> dict:
+        """Staff: the paperwork is done; the referral is ready for the physician's decision.
+        With required items still missing, only after a confirmation naming them; the missing
+        items go into the history and the hand-off note the physician sees."""
         if context.role != "staff":
             raise PilotError("staff_only", "Marking a referral ready for the physician is a staff step", 403)
         row = self._row(context, referral_id)
@@ -972,12 +987,16 @@ class IntakeService:
         if current == S.RECEIVED:
             raise PilotError("invalid_transition", "Wait for triage before marking this referral ready")
         text = (note or "").strip() or None
+        missing = self.missing_required(context.practice_id, row)
+        if missing and {item.casefold() for item in missing} - {item.casefold() for item in confirm_missing or []}:
+            raise PilotError("missing_items_unconfirmed",
+                             "Still missing: " + ", ".join(missing) + ". Confirm you want to mark it ready anyway", 409)
         self._transition(
             context, row, S.READY_FOR_REVIEW,
             changes={"handoff_json": json.dumps({"kind": "ready", "note": text, "by": context.actor,
-                                                 "role": context.role, "at": now_iso()})},
+                                                 "role": context.role, "at": now_iso(), "missing_items": missing})},
             events=[{"event_type": "referral_marked_ready", "actor": context.actor,
-                     "metadata": {"role": context.role, "has_note": bool(text)}}],
+                     "metadata": {"role": context.role, "has_note": bool(text), "missing_items": missing}}],
         )
         return self.detail(context, referral_id)
 
@@ -999,12 +1018,15 @@ class IntakeService:
         extra_items = [item for item in items if item.casefold() not in flagged]
         draft = self.request_projection.create_draft(context, referral_id, items, update.note)
         row = self._row(context, referral_id)
+        # An agent-drafted request leaves the status alone ("Triaged · draft request ready for
+        # staff"); the referral moves to needs_information only when staff send it.
+        by_agent = context.role == "agent"
         self._transition(
-            context, row, target,
+            context, row, IntakeStatus(row["status"]) if by_agent else target,
             events=[{
                 "event_type": "information_requested", "actor": context.actor,
                 "metadata": {"items": [item["label"] for item in draft["items"]], "request_id": draft["id"],
-                             "sent": False, "extra_items": extra_items},
+                             "sent": False, "extra_items": extra_items, "by_agent": by_agent},
             }],
         )
         for hook in self.after_decision:

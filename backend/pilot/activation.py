@@ -17,6 +17,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .attribution import ActorDirectory
 from .models import RequestInformationInput
 from .practice import PilotError, PracticeContext
 from .rules import normalize_referral_type
@@ -90,6 +91,10 @@ ALWAYS_YOURS = [
 COMING_LATER = ["Daily briefings", "Email and fax", "Waitlist and scheduling"]
 
 AGENT_ACTOR_PREFIX = "agent:auto_draft:"
+# Repeated non-serious "this was wrong" flags on one capability return it to shadow.
+REPEATED_FLAGS = 3
+REPEATED_FLAG_DAYS = 7
+STATE_WORDS = {"off": "Off", "shadow": "Shadow", "active": "On"}
 
 
 # ------------------------------------------------------------------------- metrics
@@ -99,6 +104,9 @@ def _fit_verdict(agent_fit: str, judgment: bool, decision: str) -> str:
     """The explicit fit mapping (docs/PILOT_ACTIVATION.md)."""
     if judgment or agent_fit == "unknown":
         return "deferred"
+    if agent_fit == "possible" and decision != "accept":
+        # Not agreement, and not a hard disagreement: "possible" left room for a decline.
+        return "possible_not_accepted"
     if agent_fit in {"strong", "possible"}:
         return "agree" if decision == "accept" else "disagree"
     if agent_fit == "outside_scope":
@@ -110,8 +118,9 @@ def _tally(rows: list[dict], min_for_percent: int) -> dict:
     agreed = sum(1 for row in rows if row == "agree")
     disagreed = sum(1 for row in rows if row == "disagree")
     deferred = sum(1 for row in rows if row == "deferred")
+    possible = sum(1 for row in rows if row == "possible_not_accepted")
     total = agreed + disagreed
-    return {"agreed": agreed, "disagreed": disagreed, "deferred": deferred, "of": total,
+    return {"agreed": agreed, "disagreed": disagreed, "deferred": deferred, "possible_not_accepted": possible, "of": total,
             "text": f"agreed on {agreed} of {total}" if total else "nothing to compare yet",
             # A percentage only once the denominator is big enough to mean something.
             "percent": round(100 * agreed / total) if total >= min_for_percent and total else None}
@@ -136,7 +145,7 @@ def compute_metrics(store: PilotStore, practice_id: str, owner_scope_id: str, ph
     for event in store.events(practice_id=practice_id, event_type="information_requested"):
         asked_more[event["referral_id"] or ""] += event["metadata"].get("extra_items") or []
     learnings = _learning_links(store, practice_id)
-    cases, disagreements = [], []
+    cases, disagreements, possible_not_accepted = [], [], []
     for signoff in signoffs:
         rid = signoff["referral_id"]
         referral = referrals.get(rid) or {}
@@ -177,10 +186,10 @@ def compute_metrics(store: PilotStore, practice_id: str, owner_scope_id: str, ph
                 "decided_at": signoff["created_at"], "verdicts": verdicts}
         cases.append(case)
         for dimension, verdict in verdicts.items():
-            if verdict != "disagree":
+            if verdict not in {"disagree", "possible_not_accepted"}:
                 continue
             patient = json.loads(referral.get("patient_json") or "{}").get("name") if referral else None
-            disagreements.append({
+            (disagreements if verdict == "disagree" else possible_not_accepted).append({
                 "referral_id": rid, "patient_name": patient, "referral_type": rtype, "dimension": dimension,
                 "agent_said": agent_said[dimension], "physician_did": physician_did[dimension],
                 "rule": {"rule_id": rule["rule_id"], "referral_type": rule["referral_type"], "version": rule["version"]} if rule else None,
@@ -209,6 +218,8 @@ def compute_metrics(store: PilotStore, practice_id: str, owner_scope_id: str, ph
         "conflict_choices": {"keep_correction": sum(1 for row in conflicts if row["choice"] == "keep_correction"),
                              "apply_rule": sum(1 for row in conflicts if row["choice"] == "apply_rule")},
         "disagreements": sorted(disagreements, key=lambda item: item["decided_at"], reverse=True),
+        # "possible fit" -> declined / redirected: shown on its own, never mixed with disagreements.
+        "possible_not_accepted": sorted(possible_not_accepted, key=lambda item: item["decided_at"], reverse=True),
     }
 
 
@@ -272,8 +283,9 @@ class ActivationService:
                 "updated_at": row["updated_at"] if row else None, "updated_by": row["updated_by"] if row else None}
 
     def _write_state(self, context: PracticeContext, owner_scope_id: str, capability: str, state: str, config: dict,
-                     event_type: str, reason: str | None = None, metadata: dict | None = None) -> None:
-        before = self.state(context.practice_id, owner_scope_id, capability)["state"]
+                     event_type: str, reason: str | None = None, metadata: dict | None = None,
+                     before: str | None = None) -> None:
+        before = before or self.state(context.practice_id, owner_scope_id, capability)["state"]
         version = self._version_id(context.practice_id, owner_scope_id)
         now = now_iso()
         self.store.execute([
@@ -361,6 +373,8 @@ class ActivationService:
         if capability not in CAPABILITIES or max_state not in STATE_ORDER:
             raise PilotError("invalid_limit", "Unknown capability or state", 422)
         now = now_iso()
+        physicians = self.representation.practice_physicians(context.practice_id)
+        before = {owner: self.state(context.practice_id, owner, capability) for owner in physicians}
         self.store.execute([
             (("INSERT INTO practice_capability_limits (practice_id, capability, max_state, updated_by, updated_at) "
               "VALUES (?, ?, ?, ?, ?) ON CONFLICT(practice_id, capability) DO UPDATE SET max_state = excluded.max_state, "
@@ -368,14 +382,14 @@ class ActivationService:
              (context.practice_id, capability, max_state, context.actor, now)),
             self._event_statement(context, None, capability, "practice_limit_set", None, max_state, None, {}, None, now),
         ])
-        for owner in self.representation.practice_physicians(context.practice_id):
-            row = self.store.fetch_one("SELECT state, config_json FROM capability_states WHERE practice_id = ? AND "
-                                       "owner_scope_id = ? AND capability = ?", (context.practice_id, owner, capability))
-            if row and STATE_ORDER[row["state"]] > STATE_ORDER[max_state]:
+        # Every physician whose agent was above the new maximum is lowered, recorded, and told on Home.
+        for owner, previous in before.items():
+            if STATE_ORDER[previous["state"]] > STATE_ORDER[max_state]:
                 lowered = max((s for s in CAPABILITIES[capability]["states"] if STATE_ORDER[s] <= STATE_ORDER[max_state]),
                               key=STATE_ORDER.get)
-                self._write_state(context, owner, capability, lowered, json.loads(row["config_json"]), "lowered_by_practice_limit",
-                                  reason=f"Practice maximum set to {max_state}")
+                self._write_state(context, owner, capability, lowered, previous["config"], "lowered_by_practice_limit",
+                                  reason=f"Practice maximum set to {max_state}", before=previous["state"],
+                                  metadata={"max_state": max_state})
         return self.limits(context)
 
     def limits(self, context: PracticeContext) -> dict:
@@ -463,6 +477,7 @@ class ActivationService:
             "eligibility": eligibility, "shadow_examples": examples,
             "flags": [{**flag, "serious": bool(flag["serious"])} for flag in flags],
             "updated_at": state["updated_at"],
+            "updated_by_name": ActorDirectory(self.store, practice_id).describe(state["updated_by"])["name"] if state["updated_by"] else None,
         }
 
     def review(self, context: PracticeContext) -> dict:
@@ -480,7 +495,7 @@ class ActivationService:
         base = {
             "available": True, "physician_view": context.role == "physician",
             "capabilities": capabilities if context.role == "physician" else [
-                {**{key: cap[key] for key in ("key", "name", "state", "will", "never", "updated_at")},
+                {**{key: cap[key] for key in ("key", "name", "state", "will", "never", "updated_at", "updated_by_name")},
                  "description": CAPABILITIES[cap["key"]].get("description_staff", cap["description"]).format(doctor=doctor)}
                 for cap in capabilities],
             "always_yours": ALWAYS_YOURS if context.role == "physician" else [
@@ -494,9 +509,39 @@ class ActivationService:
         if context.role != "physician":
             return base
         summary = self.representation.learning_summary(context)
-        return {**base, "metrics": metrics, "settings": settings(),
+        notices = self.notices(context.practice_id, owner)
+        return {**base, "metrics": metrics, "settings": settings(), "notices": notices,
+                "summary": self._summary(capabilities, notices, base["status"]["line"]),
                 "open": {"questions": summary["counts"]["open_questions"] + summary["counts"]["queued_questions"],
                          "pending_learnings": summary["counts"]["pending_learnings"]}}
+
+    @staticmethod
+    def _summary(capabilities: list[dict], notices: list[dict], line: str) -> dict:
+        """The top of the readiness page: status, what's eligible, and ONE recommended action."""
+        delegated = [cap for cap in capabilities if CAPABILITIES[cap["key"]]["needs_readiness"]]
+        eligible = [cap["name"] for cap in delegated if cap["state"] != "active" and cap["eligibility"]["eligible"]
+                    and cap["practice_limit"] == "active"]
+        not_eligible = [{"name": cap["name"], "reasons": cap["eligibility"]["reasons"]}
+                        for cap in delegated if cap["state"] != "active" and cap["eligibility"]["reasons"]]
+        active = [cap["name"] for cap in delegated if cap["state"] == "active"]
+        serious = next((cap for cap in delegated if any(f["serious"] and not f["resolved_at"] for f in cap["flags"])), None)
+        if serious:
+            action = {"text": f"Review the serious flag on {serious['name'].lower()} — it stays in shadow until you resolve it.",
+                      "label": "Review the flag", "target": f"cap-{serious['key']}"}
+        elif notices:
+            action = {"text": notices[0]["title"] + ". " + notices[0]["detail"], "label": "See what changed",
+                      "target": "readiness-notices"}
+        elif eligible:
+            action = {"text": f"Look over where you disagreed, then decide whether to turn on {eligible[0].lower()}. "
+                              "Eligible only allows it; nothing changes until you choose.",
+                      "label": "Review where you disagreed", "target": "readiness-disagreed"}
+        elif active:
+            action = {"text": "Nothing needs you here. Flag any draft that’s wrong; you can pause at any time.",
+                      "label": None, "target": None}
+        else:
+            reasons = "; ".join(r[0].lower() + r[1:] for r in (not_eligible[0]["reasons"] if not_eligible else []))
+            action = {"text": "Keep deciding referrals as usual" + (f" — {reasons}." if reasons else "."), "label": None, "target": None}
+        return {"status": line, "eligible": eligible, "not_eligible": not_eligible, "active": active, "recommended": action}
 
     def lifecycle_line(self, practice_id: str, owner_scope_id: str | None) -> str | None:
         if not owner_scope_id:
@@ -596,10 +641,71 @@ class ActivationService:
             self._event_statement(context, owner, capability, "flagged", None, None, (note or "").strip()[:500] or None,
                                   {"item_id": item_id, "serious": serious}, version, now),
         ])
-        if serious and self.state(context.practice_id, owner, capability)["state"] == "active":
-            self._write_state(context, owner, capability, "shadow", self.state(context.practice_id, owner, capability)["config"],
+        current = self.state(context.practice_id, owner, capability)
+        if serious and current["state"] == "active":
+            self._write_state(context, owner, capability, "shadow", current["config"],
                               "auto_returned", reason="A serious “this was wrong” flag", metadata={"flag_id": flag_id})
+        elif not serious and current["state"] == "active":
+            recent = self._recent_flags(context.practice_id, owner, capability)
+            if len(recent) >= REPEATED_FLAGS:
+                self._write_state(context, owner, capability, "shadow", current["config"], "auto_returned_repeated_flags",
+                                  reason=f"{len(recent)} “this was wrong” flags in {REPEATED_FLAG_DAYS} days",
+                                  metadata={"flag_ids": [row["id"] for row in recent]})
         return {"flag_id": flag_id, "state": self.state(context.practice_id, owner, capability)["state"]}
+
+    def _recent_flags(self, practice_id: str, owner_scope_id: str, capability: str) -> list[dict]:
+        """Non-serious flags in the last 7 days, counted since the capability was last turned on
+        (flags from before are already behind a return to shadow)."""
+        since = (datetime.now(UTC) - timedelta(days=REPEATED_FLAG_DAYS)).isoformat()
+        activated = self.store.fetch_one(
+            "SELECT MAX(created_at) AS at FROM capability_events WHERE practice_id = ? AND owner_scope_id = ? "
+            "AND capability = ? AND event_type = 'activated'", (practice_id, owner_scope_id, capability))
+        since = max(since, (activated or {}).get("at") or "")
+        return self.store.fetch_all(
+            "SELECT id FROM agent_item_flags WHERE practice_id = ? AND owner_scope_id = ? AND capability = ? "
+            "AND serious = 0 AND created_at >= ? ORDER BY created_at", (practice_id, owner_scope_id, capability, since))
+
+    # --------------------------------------------------------------- notices
+
+    def notices(self, practice_id: str, owner_scope_id: str) -> list[dict]:
+        """Changes the physician didn't make themselves (a return to shadow after repeated flags,
+        a lowered practice limit), shown until they acknowledge them."""
+        acknowledged = {json.loads(row["metadata_json"] or "{}").get("event_id") for row in self.store.fetch_all(
+            "SELECT metadata_json FROM capability_events WHERE practice_id = ? AND owner_scope_id = ? "
+            "AND event_type = 'notice_acknowledged'", (practice_id, owner_scope_id))}
+        directory = ActorDirectory(self.store, practice_id)
+        own_actor = f"user:{self._physician_user(practice_id, owner_scope_id)}"
+        result = []
+        for row in self.store.fetch_all(
+                "SELECT * FROM capability_events WHERE practice_id = ? AND owner_scope_id = ? AND event_type IN "
+                "('auto_returned_repeated_flags', 'lowered_by_practice_limit') ORDER BY created_at", (practice_id, owner_scope_id)):
+            if row["id"] in acknowledged or row["capability"] not in CAPABILITIES:
+                continue
+            if row["event_type"] == "lowered_by_practice_limit" and row["actor"] == own_actor:
+                continue  # an admin physician lowering their own agent already knows
+            name = CAPABILITIES[row["capability"]]["name"]
+            to = STATE_WORDS.get(row["to_state"], row["to_state"])
+            if row["event_type"] == "auto_returned_repeated_flags":
+                title = f"{name} went back to shadow"
+                detail = (f"{row['reason']} returned it to shadow automatically. Look at the flagged drafts, then decide "
+                          "whether to turn it back on.")
+            else:
+                by = directory.describe(row["actor"])["name"]
+                title = f"{name} was lowered to {to.lower()}"
+                detail = (f"{by} set the practice maximum to {to.lower()}, so your agent’s setting changed from "
+                          f"{STATE_WORDS.get(row['from_state'], row['from_state']).lower()} to {to.lower()}.")
+            result.append({"id": row["id"], "kind": row["event_type"], "capability": row["capability"], "title": title,
+                           "detail": detail, "created_at": row["created_at"]})
+        return result
+
+    def acknowledge_notice(self, context: PracticeContext, event_id: str) -> dict:
+        context.require_physician("acknowledge a change to your agent")
+        owner = context.owner_scope_id or ""
+        if not any(notice["id"] == event_id for notice in self.notices(context.practice_id, owner)):
+            raise PilotError("notice_not_found", "Nothing to acknowledge", 404)
+        self.store.execute([self._event_statement(context, owner, None, "notice_acknowledged", None, None, None,
+                                                  {"event_id": event_id}, self._version_id(context.practice_id, owner), now_iso())])
+        return self.review(context)
 
     def resolve_flag(self, context: PracticeContext, flag_id: str) -> dict:
         context.require_physician("resolve a flag on your agent's work")
@@ -644,6 +750,9 @@ class ActivationService:
                               "title": f"{spec['name']} went back to shadow",
                               "detail": "A serious “this was wrong” flag returned it to shadow. Review the flag, then decide.",
                               "action": "Review", "flag_id": flag["id"]})
+        for notice in self.notices(context.practice_id, owner):
+            items.append({"kind": "capability_notice", "rank": 0, "path": "/me/agent?tab=readiness",
+                          "title": notice["title"], "detail": notice["detail"], "action": "Review", "notice_id": notice["id"]})
         if not items:
             metrics = self._metrics(context.practice_id, owner)
             eligible = [key for key, spec in CAPABILITIES.items() if spec["needs_readiness"]

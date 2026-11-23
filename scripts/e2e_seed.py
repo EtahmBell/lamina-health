@@ -217,7 +217,7 @@ def reset() -> None:
     s.call("POST", f"/api/public/r/{token}/response", None,
            {"items": [{"key": "tsh", "value": "TSH 1.9 mIU/L (E2E)", "observed_date": RECENT}]})
     s.call("POST", f"/api/me/practice/referrals/{r['still_open']}/items/tsh/verify", "staff", {})
-    s.call("POST", f"/api/me/practice/referrals/{r['still_open']}/mark-ready", "staff", {"note": "TSH verified (E2E)."})
+    s.call("POST", f"/api/me/practice/referrals/{r['still_open']}/mark-ready", "staff", {"note": "TSH verified (E2E).", "confirm_missing": ["Thyroid ultrasound"]})
     # ---- Step 18: shadow history for the readiness review. Physician A has decided enough
     # referrals over enough days to be eligible; physician B (below) has not. Includes real
     # disagreements: a strong-fit decline, priority corrections and a visit-type correction.

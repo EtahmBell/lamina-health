@@ -64,6 +64,9 @@ const SHOTS: Shot[] = [
   { name: 'staff-capabilities-readonly', actor: 'staff', before: () => seedStep('activate-auto-draft'), to: () => '/me/agent?tab=readiness', ready: text(/can change this\./) },
   { name: 'staff-auto-drafted-request', actor: 'staff', before: () => seedStep('new-missing-referral'), to: () => referralPath(seedState().referrals.auto_draft!), ready: text(/drafted by .*’s agent/) },
   { name: 'physician-agent-partly-active', actor: 'physician', to: () => '/me/agent', ready: text(/Partly active · drafting requests on/) },
+  // Step 18 decisions (appended): "Ready" while a required item is missing needs a named confirmation.
+  { name: 'staff-ready-missing-confirm', actor: 'staff', to: () => referralPath(seedState().referrals.auto_draft!), ready: text(/drafted by .*’s agent/),
+    act: async (p) => { await p.locator('.next-step-card').getByRole('button', { name: /^Ready for / }).click(); await expect(p.getByText('Still missing:')).toBeVisible() } },
 ]
 
 // E2E_ONLY=name,name captures just those screens (e.g. a follow-up round on affected screens);

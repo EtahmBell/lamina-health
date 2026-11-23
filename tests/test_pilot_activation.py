@@ -231,7 +231,9 @@ def test_off_never_runs_shadow_records_only_active_drafts(pilot: Pilot) -> None:
     detail = pilot.get(f"/api/me/practice/referrals/{active_rid}", "user-c").json()
     [request] = detail["information_requests"]
     assert request["status"] == "draft" and request["created_by_name"].endswith("’s agent")
-    assert detail["referral"]["status"] == "needs_information"
+    # Decision 1: the agent's draft doesn't change the status until staff send it.
+    assert detail["referral"]["status"] == "triaged"
+    assert detail["standing"]["status_label"] == "Triaged · draft request ready for staff"
     assert detail["agent_items"][request["id"]]["capability"] == CAP
     [record] = _prepared(pilot, active_rid)
     assert record["mode"] == "active" and record["object_id"] == request["id"] and record["never_sent"] == 0
@@ -395,3 +397,171 @@ def test_recompute_script_matches_the_review_read_only(pilot: Pilot, capsys: pyt
     assert code == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["all_time"]["dimensions"] == _review(pilot)["metrics"]["all_time"]["dimensions"]
+
+
+# ------------------------------------------------------------ Step 18 decisions
+
+
+def _active_with_draft(pilot: Pilot) -> tuple[str, str, str]:
+    """Drafting on, then one agent-drafted request. Returns (referral, request, agent item)."""
+    _ready(pilot)
+    for _ in range(3):
+        _decide(pilot)
+    assert _activate(pilot).status_code == 200
+    rid = _missing_referral(pilot)
+    detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-c").json()
+    request_id = detail["information_requests"][0]["id"]
+    return rid, request_id, detail["agent_items"][request_id]["item_id"]
+
+
+def test_agent_draft_keeps_status_until_staff_send_and_history_says_so(pilot: Pilot) -> None:
+    rid, request_id, _item = _active_with_draft(pilot)
+    detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-c").json()
+    drafted = [event for event in detail["history"] if event["event_type"] == "information_requested"]
+    assert len(drafted) == 1 and drafted[0]["metadata"]["by_agent"] is True
+    assert drafted[0]["actor_name"].endswith("’s agent")
+    created = [event for event in detail["history"] if event["event_type"] == "missing_information_request_created"]
+    assert not created, "one history row per draft"
+    assert not [event for event in detail["history"] if event["event_type"] == "referral_status_changed"
+                and event["metadata"]["to"] == "needs_information"]
+    listed = next(item for item in pilot.get("/api/me/practice/referrals", "user-c").json() if item["id"] == rid)
+    assert listed["status"] == "triaged"
+    assert listed["standing"]["status_label"] == "Triaged · draft request ready for staff"
+    # Staff Home lists the draft once (prepared), not also as "check and mark ready".
+    home = pilot.get("/api/me/practice/home", "user-c").json()
+    assert not [item for item in home["needs_you"] if item.get("referral_id") == rid]
+    assert [item["kind"] for item in home["prepared"] if item["referral_id"] == rid] == ["draft_request"]
+    # Staff send it: now it needs information.
+    sent = pilot.post(f"/api/me/practice/information-requests/{request_id}/send", "user-c", {"mode": "mark_sent"})
+    assert sent.status_code == 200, sent.text
+    detail = pilot.get(f"/api/me/practice/referrals/{rid}", "user-c").json()
+    assert detail["referral"]["status"] == "needs_information" and detail["standing"]["status_label"] is None
+
+
+def test_staff_request_still_moves_status_at_draft(pilot: Pilot) -> None:
+    _ready(pilot)
+    rid = _missing_referral(pilot)  # drafting is in shadow: no agent draft
+    pilot.post(f"/api/me/practice/referrals/{rid}/request-information", "user-c", {"items": ["Renal function"]})
+    assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-c").json()["referral"]["status"] == "needs_information"
+
+
+def test_ready_with_missing_items_needs_a_confirmation_naming_them(pilot: Pilot) -> None:
+    _ready(pilot)
+    rid = _missing_referral(pilot)
+    refused = pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-c", {"note": "Checked"})
+    assert refused.status_code == 409 and refused.json()["detail"]["code"] == "missing_items_unconfirmed"
+    assert "Renal function" in refused.json()["detail"]["message"]
+    wrong = pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-c", {"confirm_missing": ["Recent HbA1c"]})
+    assert wrong.status_code == 409, "the confirmation must name what is actually missing"
+    ok = pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-c",
+                    {"note": "Office is faxing it (synthetic)", "confirm_missing": ["Renal function"]})
+    assert ok.status_code == 200, ok.text
+    detail = ok.json()
+    assert detail["referral"]["status"] == "ready_for_review"
+    assert detail["referral"]["handoff"]["missing_items"] == ["Renal function"]
+    event = next(event for event in detail["history"] if event["event_type"] == "referral_marked_ready")
+    assert event["metadata"]["missing_items"] == ["Renal function"]
+    assert event["summary"] == "Marked ready while still missing Renal function"
+    # Nothing missing: no confirmation needed (unchanged behaviour).
+    complete = pilot.referral("user-c", submitted_items=COMPLETE)["referral"]["id"]
+    assert pilot.post(f"/api/me/practice/referrals/{complete}/mark-ready", "user-c", {}).status_code == 200
+
+
+def test_possible_fit_declined_is_its_own_row(pilot: Pilot) -> None:
+    _ready(pilot)
+    possible = _decide(pilot, "decline", reason="Prediabetes question (synthetic)")
+    redirected = _decide(pilot, "redirect", reason="Prediabetes follow-up (synthetic)")
+    accepted = _decide(pilot, "accept", reason="Prediabetes, wants advice (synthetic)")
+    hard = _decide(pilot, "decline")  # strong fit + decline: a real disagreement
+    metrics = _review(pilot)["metrics"]
+    fit = metrics["all_time"]["dimensions"]["fit"]
+    assert (fit["agreed"], fit["disagreed"], fit["possible_not_accepted"]) == (1, 1, 2)
+    assert fit["text"] == "agreed on 1 of 2", "possible → declined is neither agreement nor disagreement"
+    assert {item["referral_id"] for item in metrics["possible_not_accepted"]} == {possible, redirected}
+    fit_rows = {item["referral_id"] for item in metrics["disagreements"] if item["dimension"] == "fit"}
+    assert fit_rows == {hard}
+    assert accepted not in {item["referral_id"] for item in metrics["possible_not_accepted"]}
+
+
+def test_three_flags_in_seven_days_return_to_shadow_with_a_home_item(pilot: Pilot) -> None:
+    _rid, _request, item = _active_with_draft(pilot)
+    for n in range(2):
+        flagged = pilot.post(f"/api/me/practice/activation/items/{item}/flag", "user-c", {"note": f"Off {n}"})
+        assert flagged.json()["state"] == "active"
+    # Older flags (outside 7 days) don't count.
+    services = _services(pilot)
+    old = (datetime.now(UTC) - timedelta(days=8)).isoformat()
+    services.store.execute([("UPDATE agent_item_flags SET created_at = ? WHERE note = 'Off 0'", (old,))])
+    assert pilot.post(f"/api/me/practice/activation/items/{item}/flag", "user-c", {"note": "Off 2"}).json()["state"] == "active"
+    third = pilot.post(f"/api/me/practice/activation/items/{item}/flag", "user-a", {"note": "Off 3"}).json()
+    assert third["state"] == "shadow", "three non-serious flags within 7 days"
+    home = pilot.get("/api/me/practice/home", "user-a").json()
+    notice = next(entry for entry in home["needs_you"] if entry["kind"] == "capability_notice")
+    assert notice["title"] == "Draft missing-information requests went back to shadow"
+    assert "3 “this was wrong” flags in 7 days" in notice["detail"]
+    assert "change was made to what your agent may do" in home["briefing"]["detail"]
+    review = _review(pilot)
+    assert review["notices"][0]["id"] == notice["notice_id"]
+    assert review["summary"]["recommended"]["target"] == "readiness-notices"
+    # Acknowledged by the physician (not staff): gone from Home; recorded (append-only).
+    path = f"/api/me/practice/activation/notices/{notice['notice_id']}/acknowledge"
+    assert pilot.post(path, "user-c").status_code == 403
+    assert pilot.post(path, "user-a").status_code == 200
+    assert not [e for e in pilot.get("/api/me/practice/home", "user-a").json()["needs_you"] if e["kind"] == "capability_notice"]
+    events = [row["event_type"] for row in services.store.fetch_all("SELECT event_type FROM capability_events ORDER BY created_at")]
+    assert "auto_returned_repeated_flags" in events and events[-1] == "notice_acknowledged"
+    # Turned back on: earlier flags no longer count.
+    assert _activate(pilot).status_code == 200
+    assert pilot.post(f"/api/me/practice/activation/items/{item}/flag", "user-c", {"note": "Again"}).json()["state"] == "active"
+
+
+def test_lowered_practice_limit_tells_the_affected_physician(pilot: Pilot) -> None:
+    _ready(pilot)
+    services = _services(pilot)
+    pilot.ready_physician("user-b", NPI_B)
+    a_practice = services.store.membership_for_user("user-a")["practice_id"]
+    services.store.execute([("UPDATE practice_members SET practice_id = ?, is_admin = 0 WHERE user_id = 'user-b'", (a_practice,))])
+    b_owner = services.store.membership_for_user("user-b")["physician_owner_scope_id"]
+    # user-b's drafting is in shadow (the default); the admin turns it off for everyone.
+    limit = pilot.client.put(f"/api/me/practice/activation/limits/{CAP}", headers=_h("user-a"), json={"max_state": "off"})
+    assert limit.status_code == 200
+    assert services.activation.state(a_practice, b_owner, CAP)["state"] == "off"
+    b_home = pilot.get("/api/me/practice/home", "user-b").json()["needs_you"]
+    notice = next(item for item in b_home if item["kind"] == "capability_notice")
+    assert notice["title"] == "Draft missing-information requests was lowered to off"
+    assert "set the practice maximum to off" in notice["detail"] and "from shadow to off" in notice["detail"]
+    # The admin who set it isn't told about their own change.
+    a_home = pilot.get("/api/me/practice/home", "user-a").json()["needs_you"]
+    assert not [item for item in a_home if item["kind"] == "capability_notice"]
+    row = services.store.fetch_one("SELECT from_state, to_state FROM capability_events WHERE owner_scope_id = ? "
+                                   "AND event_type = 'lowered_by_practice_limit'", (b_owner,))
+    assert (row["from_state"], row["to_state"]) == ("shadow", "off")
+
+
+def test_readiness_summary_has_status_eligibility_and_one_action(pilot: Pilot) -> None:
+    _ready(pilot)
+    summary = _review(pilot)["summary"]
+    assert summary["eligible"] == [] and summary["not_eligible"][0]["reasons"] == ["Needs 3 more decided referrals"]
+    assert summary["recommended"]["text"].startswith("Keep deciding referrals as usual — needs 3 more")
+    assert summary["recommended"]["label"] is None
+    for _ in range(3):
+        _decide(pilot)
+    summary = _review(pilot)["summary"]
+    assert summary["eligible"] == ["Draft missing-information requests"] and summary["status"] == "Shadow mode"
+    assert summary["recommended"]["target"] == "readiness-disagreed"
+    assert "nothing changes until you choose" in summary["recommended"]["text"]
+    _activate(pilot)
+    summary = _review(pilot)["summary"]
+    assert summary["active"] == ["Draft missing-information requests"] and summary["recommended"]["label"] is None
+    assert "summary" not in _review(pilot, "user-c"), "staff get the read-only view"
+
+
+def test_staff_view_names_who_made_the_last_change(pilot: Pilot) -> None:
+    _ready(pilot)
+    for _ in range(3):
+        _decide(pilot)
+    _activate(pilot)
+    staff_cap = _cap(_review(pilot, "user-c"))
+    assert staff_cap["updated_by_name"]
+    assert _cap(_review(pilot))["updated_by_name"] == staff_cap["updated_by_name"]
+    assert staff_cap["updated_by_name"] == pilot.get("/api/me/practice/activation", "user-a").json()["capabilities"][0]["updated_by_name"]

@@ -61,3 +61,42 @@ test('lifecycle line says when the agent is partly active, for staff too', () =>
   assert.equal(lifecycleLine({ state: 'shadow', label: 'Shadow mode — your agent recommends; you and your staff decide.', capabilities_line: null }, staff),
     'Shadow mode — Dr. A’s agent recommends; Dr. A decides. Staff handle intake and paperwork.')
 })
+
+/* Step 18 decisions */
+
+test('the readiness page opens with a short summary and one recommended action', () => {
+  const top = slice(readiness, 'const summary = review.summary', 'className="pilot-readiness-head"')
+  assert.match(top, /pilot-readiness-summary/)
+  assert.match(top, /<dt>Status<\/dt>/)
+  assert.match(top, /<dt>Eligible<\/dt>/)
+  assert.match(top, /Recommended:<\/strong> \{summary\.recommended\.text\}/)
+  // The summary comes before the metrics on the page.
+  assert.ok(readiness.indexOf('pilot-readiness-summary') < readiness.indexOf('What your agent observed'))
+})
+
+test('"possible fit" → declined or redirected is its own list, not a disagreement', () => {
+  assert.match(readiness, /“Possible fit” → declined or redirected/)
+  assert.match(readiness, /metrics\.possible_not_accepted/)
+  assert.match(readiness, /They aren’t counted as agreement or as disagreement\./)
+})
+
+test('notices the physician did not cause are acknowledged explicitly', () => {
+  assert.match(readiness, /acknowledgeCapabilityNotice\(notice\.id\)/)
+  assert.match(readiness, />Got it</)
+})
+
+test('staff see who made the last change', () => {
+  const staff = slice(readiness, 'if (!physician) {', 'const metrics = review.metrics!')
+  assert.match(staff, /Last changed by \{cap\.updated_by_name \?\? 'a practice member'\}/)
+})
+
+test('"Ready" with required items missing needs a confirmation naming them', () => {
+  assert.match(pilot, /Still missing:<\/strong> \{missingRequired\.join\(', '\)\}/)
+  assert.match(pilot, /disabled=\{busy \|\| \(missingRequired\.length > 0 && !readyAnyway\)\}/)
+  assert.match(pilot, /markReferralReady\(referral\.id, note, missingRequired\.length \? missingRequired : undefined\)/)
+})
+
+test('an agent draft keeps the status and says who drafted it', () => {
+  assert.match(pilot, /\{standing\.status_label \?\? STATUS_LABELS\[referral\.status\]\}/)
+  assert.match(source('pilotState.ts'), /Information request drafted by \$\{event\.actor_name \?\? 'the agent'\} \(not sent\)/)
+})

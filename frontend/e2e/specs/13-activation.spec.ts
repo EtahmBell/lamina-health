@@ -2,7 +2,7 @@
  * Physician A has enough shadow history (seeded); the second physician does not. Runs last: it
  * turns drafting on, and ends by pausing everything. */
 import { seedState } from '../support/env.ts'
-import { expect, openReferral, seedStep, test } from '../support/fixtures.ts'
+import { expect, nextStep, openReferral, seedStep, test } from '../support/fixtures.ts'
 
 const READINESS = '/me/agent?tab=readiness'
 
@@ -13,6 +13,10 @@ test('a physician without enough shadow history sees why, and no way to turn it 
   await expect(drafting).toContainText('Not eligible yet')
   await expect(drafting).toContainText(/Needs \d+ more decided referrals?/)
   await expect(drafting.getByRole('button', { name: 'Turn on' })).toHaveCount(0)
+  // The summary at the top says the same, with one recommended action.
+  const summary = second.locator('.pilot-readiness-summary')
+  await expect(summary).toContainText('Nothing yet')
+  await expect(summary).toContainText(/Recommended: Keep deciding referrals as usual — .*needs \d+ more decided referrals?/)
   await expect(second.locator('.pilot-always-yours')).toContainText('Accepting, redirecting or declining a referral')
 })
 
@@ -22,6 +26,10 @@ test('the review compares recommendations with the physician’s decisions, with
   await physician.goto('/me/for-you')
   await expect(physician.getByText('Your agent’s readiness review is available')).toBeVisible()
   await physician.goto(READINESS)
+  const summary = physician.locator('.pilot-readiness-summary')
+  await expect(summary).toContainText('Draft missing-information requests — you can turn it on; nothing changes until you do')
+  await summary.getByRole('button', { name: 'Review where you disagreed' }).click()
+  await expect(physician.getByRole('heading', { name: 'Where you disagreed' })).toBeFocused()
   await expect(physician.locator('.pilot-readiness-status')).toContainText(/Shadow mode since .* referrals you’ve decided/)
   const observed = physician.locator('section', { has: physician.getByRole('heading', { name: 'What your agent observed' }) })
   await expect(observed).toContainText('Diabetes management')
@@ -33,9 +41,14 @@ test('the review compares recommendations with the physician’s decisions, with
   await expect(compared.getByRole('button', { name: 'All time' })).toHaveAttribute('aria-pressed', 'true')
   const disagreements = physician.locator('.pilot-disagreements li')
   await expect(disagreements.first()).toBeVisible()
-  await expect(physician.locator('.pilot-disagreements')).toContainText('Priority: it recommended routine; you kept soon')  // values in plain words
-  // Each disagreement links to its referral.
-  await disagreements.filter({ hasText: 'Hart History3-E2E' }).getByRole('button').click()
+  await expect(physician.locator('.pilot-disagreements').first()).toContainText('Priority: it recommended routine; you kept soon')  // values in plain words
+  // "Possible fit" → declined is its own list, not mixed with the disagreements.
+  const possible = physician.locator('.pilot-possible-list')
+  await expect(possible).toContainText('Hart History3-E2E · Thyroid nodule')
+  await expect(possible).toContainText('It said possible fit; you declined')
+  await expect(physician.locator('.pilot-disagreements').first()).not.toContainText('Hart History3-E2E')
+  // Each entry links to its referral.
+  await possible.locator('li', { hasText: 'Hart History3-E2E' }).getByRole('button').click()
   await expect(physician).toHaveURL(/\/me\/referrals\//)
   expect(seed.history.length).toBeGreaterThanOrEqual(10)
 })
@@ -63,9 +76,21 @@ test('turning drafting on: confirmation, agent draft in the staff queue, staff r
   const request = staff.locator('.pilot-request')
   await expect(request).toContainText(`drafted by ${doctor}’s agent`)
   await expect(request).toContainText('Draft — needs your approval')
+  // The draft doesn't change the status until staff send it, and the history says who drafted it.
+  await expect(nextStep(staff).locator('.status-label')).toHaveText('Triaged · draft request ready for staff')
+  await expect(staff.locator('.timeline-event h4', { hasText: `Information request drafted by ${doctor}’s agent (not sent)` })).toHaveCount(1)
+  // "Ready" while a required item is missing: only after confirming it by name.
+  await nextStep(staff).getByRole('button', { name: `Ready for ${doctor}` }).click()
+  const missing = staff.getByRole('group', { name: 'Required items still missing' })
+  await expect(missing).toContainText('Still missing: Thyroid ultrasound.')
+  await expect(staff.getByRole('button', { name: 'Mark ready' })).toBeDisabled()
+  await missing.getByRole('checkbox').check()
+  await expect(staff.getByRole('button', { name: 'Mark ready' })).toBeEnabled()
+  await nextStep(staff).getByRole('button', { name: 'Cancel' }).click()
   // Staff see what is on, read-only.
   await staff.goto(READINESS)
-  await expect(staff.getByText(`Only ${doctor} can change this.`)).toBeVisible()
+  await expect(staff.getByText(`Only ${doctor} can change this.`).first()).toBeVisible()
+  await expect(staff.locator('.pilot-capability', { hasText: 'Draft missing-information requests' })).toContainText(`Last changed by ${doctor}`)
   await expect(staff.locator('.pilot-capability', { hasText: 'Draft missing-information requests' }).locator('.pilot-capability-state')).toHaveText('On')
   await expect(staff.locator('.pilot-readiness').getByRole('button')).toHaveCount(0)
 

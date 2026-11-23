@@ -9,7 +9,7 @@ import {
 /* Step 14: the authenticated pilot renders the polished demo's design system and page
  * structures over real pilot data. These guard the parity contract and the role rules. */
 
-const source = (name) => readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8')
+const source = (name) => readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')  // line-ending independent
 const pilot = source('Pilot.tsx')
 const agent = source('PilotAgent.tsx')
 const ui = source('pilotUi.tsx')

@@ -89,8 +89,11 @@ def referral_standing(*, status: str, recommendation: dict | None, next_step: st
         next_step_now = "Physician decision" if not voice.physician else "Your decision"
     else:
         next_step_now = NEXT_STEP_LABELS.get(next_step or "")
+    # A drafted request doesn't change the status until staff send it; say what's waiting.
+    status_label = "Triaged · draft request ready for staff" if status in {"triaged", "received"} and has_draft else None
     return {
         "heading": heading, "still_open": still_open, "readiness_text": readiness_text, "next_step_now": next_step_now,
+        "status_label": status_label,
         "complete": complete, "no_requirements": no_requirements, "open_items": open_items,
         "unverified_items": unverified, "waiting_on_office": waiting_on_office, "has_draft": has_draft,
     }

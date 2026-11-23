@@ -745,6 +745,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const [detail, setDetail] = useState<ReferralDetail | null>(null)
   const [error, setError] = useState('')
   const [panel, setPanel] = useState<Panel>(null)
+  const [readyAnyway, setReadyAnyway] = useState(false)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
   const [redirectTo, setRedirectTo] = useState('')
@@ -783,12 +784,13 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   if (!detail) return <main className="page-shell patient-page">{back}<PageLoading label="Opening referral…" /></main>
 
   const { referral, recommendation, effective_triage: triage, allowed_actions: actions } = detail
-  const openPanel = (next: Panel) => { setPanel(next); setNote(''); setEdit({}); if (next === 'request') setRequestItems(recommendation?.missing_items ?? []) }
+  const openPanel = (next: Panel) => { setPanel(next); setNote(''); setEdit({}); setReadyAnyway(false); if (next === 'request') setRequestItems(recommendation?.missing_items ?? []) }
   const physician = status.role === 'physician'
   const doctor = physicianLabel(detail.physician_name ?? status.physician_name)
   const closed = isClosed(referral.status)
   // Received values to verify: in that state Verify is THE next step (and the primary action).
   const toVerify = !closed && canUse(actions, 'verify_item') ? (recommendation?.requirements ?? []).filter((item) => item.state === 'sender_reported') : []
+  const missingRequired = (recommendation?.requirements ?? []).filter((item) => item.required && item.state !== 'satisfied').map((item) => item.label)
   const handoffEvent = [...detail.history].reverse().find((event) => event.event_type === 'referral_marked_ready' || event.event_type === 'referral_escalated')
   const corrections = detail.corrections ?? []
   const overridden = (field: string, differs: boolean, laminaValue: string) => {
@@ -799,7 +801,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const changes = visitChanges
   // Where the referral stands comes from the server (the same statement Home and Patients use),
   // so no surface can say "complete" while anything is open.
-  const standing = detail.standing ?? { heading: 'Waiting for triage', still_open: null, readiness_text: 'Not triaged yet', next_step_now: null }
+  const standing = detail.standing ?? { heading: 'Waiting for triage', still_open: null, readiness_text: 'Not triaged yet', next_step_now: null, status_label: null }
   const readiness = recommendation ? standing.readiness_text : null
   const timeline = historyHighlights(detail.history)
   // "Not specified" alone in a summary line doesn't say WHAT is unspecified.
@@ -849,7 +851,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           ? 'Accepted. Book the visit in your scheduling system — scheduling isn’t connected to Lamina yet, so Lamina won’t show it as scheduled.'
           : closed ? 'This referral is closed.' : physician ? 'Lamina prepared this. Your accept, redirect or decline signs it off.' : `Lamina prepared this. ${doctor} decides; you handle the paperwork.`}</p>
         <div className={`next-step-card ${closed ? 'idle' : 'ready'}`}>
-          <span className={`status-label ${statusLabelTone(referral.status)}`}>{STATUS_LABELS[referral.status]}</span>
+          <span className={`status-label ${statusLabelTone(referral.status)}`}>{standing.status_label ?? STATUS_LABELS[referral.status]}</span>
           <h3>{closed ? (referral.disposition?.decision === 'redirect' ? `Redirected to ${referral.disposition.redirect_to}` : STATUS_LABELS[referral.status]) : nextStepHeading}</h3>
           {triage && <p>{FIT_LABELS[triage.fit]}{readiness ? ` · ${readiness}` : ''} · {PRIORITY_LABELS[triage.suggested_priority].toLowerCase()} priority · {modalityText(triage.suggested_modality)}{triage.requires_physician ? ' · needs physician judgment' : ''}</p>}
           {!triage && !closed && <p>Lamina hasn’t triaged this referral yet{recommendation ? '' : ' — add a referral rule for this type, then re-run triage'}.</p>}
@@ -868,7 +870,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
             </div>}
           </div>)}
           {corrections.length > 0 && <p className="pilot-decision">Corrected: {corrections.map(correctionText).join('; ')}</p>}
-          {referral.handoff ? <p className="pilot-decision">{referral.handoff.kind === 'ready' ? `Marked ready for ${doctor}` : `Flagged for ${doctor}`} by {handoffEvent ? actorText(handoffEvent) : 'a practice member'} · {formatDateTime(referral.handoff.at)}{referral.handoff.note ? ` — “${referral.handoff.note}”` : ''}</p>
+          {referral.handoff ? <p className="pilot-decision">{referral.handoff.kind === 'ready' ? `Marked ready for ${doctor}` : `Flagged for ${doctor}`} by {handoffEvent ? actorText(handoffEvent) : 'a practice member'} · {formatDateTime(referral.handoff.at)}{referral.handoff.note ? ` — “${referral.handoff.note}”` : ''}{referral.handoff.missing_items?.length ? ` · still missing ${referral.handoff.missing_items.join(', ')}` : ''}</p>
             : referral.escalated_at && <p className="pilot-decision">Flagged for {doctor}{referral.escalation_note ? ` — “${referral.escalation_note}”` : ''}</p>}
           {detail.legacy_review && <p className="muted-note">{detail.legacy_review.kind === 'staff_review' ? 'Staff review' : 'Physician review'} by {detail.legacy_review.actor_name} · {formatDateTime(detail.legacy_review.created_at)} — from the retired approval step{detail.legacy_review.kind === 'staff_review' ? '; not a physician sign-off' : ''}.</p>}
 
@@ -899,8 +901,13 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           {panel === 'ready' && <div className="pilot-panel">
             <h4>Ready for {doctor}</h4>
             <p className="muted-note">Says the paperwork is done. {doctor} still decides fit, priority and visit type.</p>
-            <textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder={`Optional note for ${doctor}`} />
-            <div className="onboarding-actions"><button className="button-primary" disabled={busy} onClick={() => void act(() => markReferralReady(referral.id, note))}>Mark ready</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
+            {/* Required items still missing: allowed, but only once staff confirm by name; recorded in the history and the hand-off note. */}
+            {missingRequired.length > 0 && <div className="pilot-ready-missing" role="group" aria-label="Required items still missing">
+              <p><strong>Still missing:</strong> {missingRequired.join(', ')}.{hasDraft ? ` A request for ${missingRequired.length === 1 ? 'it' : 'them'} is drafted but not sent.` : ''}</p>
+              <label className="pilot-check"><input type="checkbox" checked={readyAnyway} onChange={(event) => setReadyAnyway(event.target.checked)} /> Mark ready anyway — {doctor} will see that {missingRequired.length === 1 ? 'it is' : 'they are'} still missing</label>
+            </div>}
+            <textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder={`Optional note for ${doctor}`} aria-label={`Note for ${doctor}`} />
+            <div className="onboarding-actions"><button className="button-primary" disabled={busy || (missingRequired.length > 0 && !readyAnyway)} onClick={() => void act(() => markReferralReady(referral.id, note, missingRequired.length ? missingRequired : undefined))}>Mark ready</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
           </div>}
           {panel === 'request' && <div className="pilot-panel">
             <h4>Request information</h4>

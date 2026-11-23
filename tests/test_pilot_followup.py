@@ -75,7 +75,9 @@ def test_home_says_what_is_still_open_on_a_referral_marked_ready(pilot: Pilot) -
     _ready(pilot)
     rid = pilot.referral("user-c", submitted_items=[COMPLETE_ITEMS[0]])["referral"]["id"]  # renal function missing
     _send_request(pilot, rid)
-    pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-c", {"note": "A1c is in"})
+    # Step 18 decision: "Ready" with a required item missing needs a confirmation naming it.
+    assert pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-c", {"note": "A1c is in"}).status_code == 409
+    pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-c", {"note": "A1c is in", "confirm_missing": ["Renal function"]})
     home = pilot.get("/api/me/practice/home", "user-a").json()
     [row] = [item for item in home["needs_you"] if item.get("referral_id") == rid]
     assert "complete per your rules" not in row["detail"]

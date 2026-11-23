@@ -147,7 +147,7 @@ export type IntakeReferral = {
   information_request: { items: string[]; draft_message: string; sent: boolean; prepared_at: string } | null
   disposition: { decision: 'accept' | 'redirect' | 'decline'; reason: string | null; redirect_to: string | null; at: string } | null
   /** Staff paperwork hand-off to the physician. */
-  handoff?: { kind: 'ready' | 'flag'; note: string | null; by: string; role: PracticeRole; at: string } | null
+  handoff?: { kind: 'ready' | 'flag'; note: string | null; by: string; role: PracticeRole; at: string; missing_items?: string[] } | null
   documents: ReferralDocument[]
 }
 /** No separate "approve triage": the physician's accept/redirect/decline is the sign-off.
@@ -175,6 +175,8 @@ export type ReferralStanding = {
   /** What is next NOW (null once the referral is closed) -- never a stale original suggestion. */
   next_step_now: string | null
   open_items: string[]; unverified_items: string[]; waiting_on_office: boolean; has_draft: boolean
+  /** Set when the status alone would mislead (e.g. "Triaged · draft request ready for staff"). */
+  status_label?: string | null
 }
 /** Decline / redirect: has a person told the referring office (outside Lamina)? */
 export type OfficeNotification = { state: 'not_sent' | 'sent'; by_name: string | null; at: string | null; draft: string | null }
@@ -225,7 +227,7 @@ export const retriageReferral = (id: string) => apiRequest<ReferralDetail>(refer
 /** Physician only: correct fit, priority or visit type before deciding (recorded, not a sign-off). */
 export const correctTriage = (id: string, changes: Partial<Pick<EffectiveTriage, CorrectableField>> & { reason?: string | null }) => apiRequest<ReferralDetail>(referralPath(id, 'correct'), json(changes))
 /** Staff: the paperwork is done; ready for the physician's decision. */
-export const markReferralReady = (id: string, note: string) => apiRequest<ReferralDetail>(referralPath(id, 'mark-ready'), json({ note: note || null }))
+export const markReferralReady = (id: string, note: string, confirmMissing?: string[]) => apiRequest<ReferralDetail>(referralPath(id, 'mark-ready'), json({ note: note || null, ...(confirmMissing ? { confirm_missing: confirmMissing } : {}) }))
 /** Physician: keep the earlier correction, or apply the newer rule. The choice is recorded. */
 export const resolveCorrectionConflict = (id: string, field: CorrectableField, choice: 'keep_correction' | 'apply_rule') =>
   apiRequest<ReferralDetail>(referralPath(id, 'correction-conflicts'), json({ field, choice }))
@@ -466,7 +468,7 @@ export const leaveProposalUnknown = (id: string) => apiRequest<Representation>(r
 /* ---------------------------------------------- Step 18: readiness review & activation */
 
 export type CapabilityState = 'off' | 'shadow' | 'active'
-export type AgreementTally = { agreed: number; disagreed: number; deferred: number; of: number; text: string; percent: number | null }
+export type AgreementTally = { agreed: number; disagreed: number; deferred: number; possible_not_accepted?: number; of: number; text: string; percent: number | null }
 export type AgreementDimension = 'fit' | 'priority' | 'visit_type' | 'readiness'
 export type AgreementWindow = {
   decided: number; dimensions: Record<AgreementDimension, AgreementTally>
@@ -480,6 +482,7 @@ export type Disagreement = {
 }
 export type CapabilityView = {
   key: string; name: string; description: string; state: CapabilityState; will: string[]; never: string[]; updated_at?: string | null
+  updated_by_name?: string | null
   // Physician view only:
   risk?: string; states?: CapabilityState[]; practice_limit?: CapabilityState; config?: { excluded_types?: string[]; frequency?: 'daily' | 'weekly' }
   confirm_text?: string; depends_on?: string[]
@@ -492,7 +495,13 @@ export type ActivationReview = {
   status?: { shadow_since: string | null; decided: number; active: string[]; line: string }
   limits?: Record<string, CapabilityState>; can_set_limits?: boolean
   metrics?: { all_time: AgreementWindow; current_rules: AgreementWindow; min_for_percent: number; by_version: Record<string, number>
-    conflict_choices: { keep_correction: number; apply_rule: number }; disagreements: Disagreement[] }
+    conflict_choices: { keep_correction: number; apply_rule: number }; disagreements: Disagreement[]
+    /** "possible fit" → declined/redirected: its own list, never mixed with disagreements. */
+    possible_not_accepted?: Disagreement[] }
+  /** Changes the physician didn't make (repeated flags, a lowered practice limit), until acknowledged. */
+  notices?: Array<{ id: string; kind: string; capability: string; title: string; detail: string; created_at: string }>
+  summary?: { status: string; eligible: string[]; not_eligible: Array<{ name: string; reasons: string[] }>; active: string[]
+    recommended: { text: string; label: string | null; target: string | null } }
   settings?: { min_shadow_days: number; min_decided: number; min_per_type: number; min_for_percent: number }
   open?: { questions: number; pending_learnings: number }
 }
@@ -506,6 +515,7 @@ export const setCapabilityLimit = (key: string, maxState: CapabilityState) =>
 export const flagAgentItem = (itemId: string, serious: boolean, note: string) =>
   apiRequest<{ flag_id: string; state: CapabilityState }>(`/api/me/practice/activation/items/${encodeURIComponent(itemId)}/flag`, json({ serious, note: note || null }))
 export const resolveAgentFlag = (flagId: string) => apiRequest<ActivationReview>(`/api/me/practice/activation/flags/${encodeURIComponent(flagId)}/resolve`, json({}))
+export const acknowledgeCapabilityNotice = (eventId: string) => apiRequest<ActivationReview>(`/api/me/practice/activation/notices/${encodeURIComponent(eventId)}/acknowledge`, json({}))
 
 /* ------------------------------------------------- public (no account needed) */
 

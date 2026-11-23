@@ -113,9 +113,13 @@ class HomeService:
                 if not paperwork_is_mine:
                     waiting.append({**base, "kind": "waiting_staff",
                                     "title": f"{name} — with staff for checking",
-                                    "detail": f"{item['referral_type']} · triaged, not checked by staff yet"
+                                    "detail": f"{item['referral_type']} · "
+                                              + ("triaged · draft request ready for staff" if standing.get("has_draft")
+                                                 else "triaged, not checked by staff yet")
                                               + (" · has a fit question for you" if uncertain else "") + " · you can still open and decide"})
                     continue
+                if standing.get("has_draft") and not physician:
+                    continue  # the drafted request is already listed (prepared): one item per referral
                 if physician:
                     title = (f"{name} has a routing question" if item["fit"] == "outside_scope" else
                              f"I’m not sure about {name}’s referral" if uncertain else
@@ -254,6 +258,8 @@ class HomeService:
             parts.append("your agent’s setup isn’t finished")
         if n := take("capability_returned"):
             parts.append(f"{_plural(n, 'capability was', 'capabilities were').lower()} returned to shadow after a serious flag")
+        if n := take("capability_notice"):
+            parts.append(f"{_plural(n, 'change was', 'changes were').lower()} made to what your agent may do")
         if n := take("correction_conflict"):
             parts.append(f"{_plural(n, 'referral has', 'referrals have').lower()} a correction that differs from your newer rule")
         if n := take("ready_for_review"):

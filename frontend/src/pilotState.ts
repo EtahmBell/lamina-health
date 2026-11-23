@@ -461,7 +461,7 @@ export function receivedReferralWorkItem(item: ReferralSummary): PatientWorkItem
       source: `From ${item.sender_name}${item.sender_practice ? `, ${item.sender_practice}` : ''}`,
       at: item.received_at,
     },
-    status: { label: STATUS_LABELS[item.status], tone: statusTone(item.status) },
+    status: { label: item.standing?.status_label ?? STATUS_LABELS[item.status], tone: statusTone(item.status) },
     nextStep: referralNextStep(item),
     flag: item.escalated ? 'Flagged for physician' : item.priority === 'urgent' ? 'Urgent' : '',
     section: !closed ? 'active' : item.status === 'accepted' ? 'awaiting_scheduling' : 'closed',
@@ -503,7 +503,9 @@ export function actorText(event: Pick<ReferralDetail['history'][number], 'actor_
 }
 
 /** History label that is honest about the retired approval step: a staff review is a staff review. */
-export function eventLabel(event: Pick<ReferralDetail['history'][number], 'event_type' | 'metadata'>): string {
+export function eventLabel(event: Pick<ReferralDetail['history'][number], 'event_type' | 'metadata'> & { actor_name?: string | null }): string {
+  // An agent draft names who drafted it in the label itself, and that it wasn't sent.
+  if (event.event_type === 'information_requested' && event.metadata?.by_agent) return `Information request drafted by ${event.actor_name ?? 'the agent'} (not sent)`
   if (event.metadata?.role === 'staff' && ['recommendation_accepted', 'recommendation_edited'].includes(event.event_type)) return 'Staff reviewed triage (earlier approval step; not a physician sign-off)'
   // Name the transition (the event records it) rather than a bare "Status changed".
   if (event.event_type === 'referral_status_changed') {

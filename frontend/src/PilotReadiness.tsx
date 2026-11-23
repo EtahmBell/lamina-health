@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ApiError } from './api.ts'
 import {
-  getActivation, pauseAllCapabilities, resolveAgentFlag, setCapabilityLimit, setCapabilityState,
-  type ActivationReview, type AgreementDimension, type AgreementTally, type AgreementWindow, type CapabilityState, type CapabilityView,
+  acknowledgeCapabilityNotice, getActivation, pauseAllCapabilities, resolveAgentFlag, setCapabilityLimit, setCapabilityState,
+  type ActivationReview, type AgreementDimension, type AgreementTally, type AgreementWindow, type CapabilityState, type CapabilityView, type Disagreement,
 } from './pilotApi.ts'
 import { pilotErrorCopy, pilotPaths } from './pilotState.ts'
 import { useOnPilotDataChange } from './pilotSync.ts'
@@ -35,7 +35,7 @@ const plain = (value: string | null) => (value ? VALUE_WORDS[value] ?? value : '
 
 function Tally({ tally }: { tally: AgreementTally }) {
   // Raw counts always; a percentage only when the denominator is big enough to mean something.
-  return <span>{tally.text}{tally.percent !== null ? ` (${tally.percent}%)` : ''}{tally.deferred ? <span className="muted-note"> · {tally.deferred} left to your judgment</span> : null}</span>
+  return <span>{tally.text}{tally.percent !== null ? ` (${tally.percent}%)` : ''}{tally.deferred ? <span className="muted-note"> · {tally.deferred} left to your judgment</span> : null}{tally.possible_not_accepted ? <span className="muted-note"> · {tally.possible_not_accepted} “possible” you declined or redirected (counted separately)</span> : null}</span>
 }
 
 export function ReadinessTab({ physician, doctor, navigate }: { physician: boolean; doctor: string; navigate: Navigate }) {
@@ -64,7 +64,7 @@ export function ReadinessTab({ physician, doctor, navigate }: { physician: boole
       <div className="pilot-capability-list">{review.capabilities.map((cap) => <section key={cap.key} className="pilot-card pilot-capability">
         <div className="pilot-section-head"><h3>{cap.name}</h3><span className={`pilot-capability-state state-${cap.state}`}>{STATE_LABELS[cap.state]}</span></div>
         <p>{cap.description}</p>
-        {cap.updated_at && <p className="muted-note">Last changed {formatDate(cap.updated_at)} (only {doctor} or a practice limit can change it)</p>}
+        {cap.updated_at && <p className="muted-note">Last changed by {cap.updated_by_name ?? 'a practice member'} · {formatDate(cap.updated_at)}. Only {doctor} or a practice limit can change it.</p>}
         {cap.state === 'active' && cap.key === 'auto_draft_requests' && <p className="muted-note">Drafts it creates appear in your queue as “Drafted by {doctor}’s agent”. You review, edit and send them — it never sends anything.</p>}
         <p className="muted-note"><strong>Never:</strong> {cap.never.join('; ')}.</p>
       </section>)}</div>
@@ -76,7 +76,25 @@ export function ReadinessTab({ physician, doctor, navigate }: { physician: boole
   const view: AgreementWindow = metrics[windowKey]
   const gaps = review.capabilities.find((cap) => cap.key === 'auto_draft_requests')?.eligibility?.coverage.gaps ?? []
   const active = (review.status?.active ?? []).length > 0
+  const summary = review.summary
+  const jump = (target: string) => { const node = document.getElementById(target); node?.scrollIntoView({ behavior: 'smooth', block: 'start' }); node?.focus({ preventScroll: true }) }
   return <div className="pilot-readiness">
+    {summary && <section className="pilot-card pilot-readiness-summary" aria-labelledby="readiness-summary">
+      <h2 id="readiness-summary">In short</h2>
+      <dl>
+        <div><dt>Status</dt><dd>{summary.status}</dd></div>
+        <div><dt>Eligible</dt><dd>{summary.eligible.length ? `${summary.eligible.join(', ')} — you can turn ${summary.eligible.length === 1 ? 'it' : 'them'} on; nothing changes until you do` : summary.active.length ? `On: ${summary.active.join(', ')}` : 'Nothing yet'}</dd></div>
+        {summary.not_eligible.length > 0 && <div><dt>Not yet</dt><dd>{summary.not_eligible.map((item) => `${item.name}: ${item.reasons.map((reason) => reason.charAt(0).toLowerCase() + reason.slice(1)).join('; ')}`).join(' · ')}</dd></div>}
+      </dl>
+      <p className="pilot-readiness-next"><strong>Recommended:</strong> {summary.recommended.text}</p>
+      {summary.recommended.label && summary.recommended.target && <button type="button" className="button-secondary" onClick={() => jump(summary.recommended.target!)}>{summary.recommended.label}</button>}
+    </section>}
+    {(review.notices ?? []).length > 0 && <section className="pilot-readiness-section pilot-readiness-notices" id="readiness-notices" tabIndex={-1} aria-label="Changes you didn’t make">
+      {(review.notices ?? []).map((notice) => <div key={notice.id} className="pilot-panel pilot-notice" role="status">
+        <p><strong>{notice.title}.</strong> {notice.detail} <small className="muted-note">· {formatDate(notice.created_at)}</small></p>
+        <button type="button" className="button-secondary" disabled={busy} onClick={() => void act(() => acknowledgeCapabilityNotice(notice.id))}>Got it</button>
+      </div>)}
+    </section>}
     <section className="pilot-readiness-head" aria-label="Status">
       <p className="pilot-readiness-status">{review.status?.shadow_since ? `Shadow mode since ${formatDate(review.status.shadow_since)}` : 'Not in shadow mode yet'} · {review.status?.decided ?? 0} referral{review.status?.decided === 1 ? '' : 's'} you’ve decided{active ? ` · ${review.status?.line}` : ''}</p>
       {active && <button className="button-secondary" disabled={busy} onClick={() => void act(pauseAllCapabilities)}>Pause everything</button>}
@@ -111,14 +129,23 @@ export function ReadinessTab({ physician, doctor, navigate }: { physician: boole
     </section>
 
     <section className="pilot-readiness-section" aria-labelledby="readiness-disagreed">
-      <h2 id="readiness-disagreed">Where you disagreed</h2>
+      <h2 id="readiness-disagreed" tabIndex={-1}>Where you disagreed</h2>
       {metrics.disagreements.length === 0
         ? <p className="agent-empty-note">No disagreements yet.</p>
         : <ul className="pilot-disagreements">{metrics.disagreements.slice(0, 20).map((item) => <li key={`${item.referral_id}-${item.dimension}`}>
           <button type="button" className="text-button" onClick={() => navigate(pilotPaths.referral(item.referral_id))}>{item.patient_name ?? 'Referral'} · {item.referral_type}</button>
           <span><strong>{DIMENSION_WORDS[item.dimension]}:</strong> it recommended {plain(item.agent_said)}; you {item.dimension === 'fit' ? '' : 'kept '}{plain(item.physician_did)}</span>
-          <small className="muted-note">{item.rule ? `${item.rule.referral_type} rule v${item.rule.version}` : 'No rule'}{item.current ? '' : ' · under earlier rules'}{item.learning ? ` · a learning was ${item.learning.status} from this` : ''}</small>
+          <DisagreementMeta item={item} />
         </li>)}</ul>}
+      {(metrics.possible_not_accepted ?? []).length > 0 && <>
+        <h3 className="pilot-readiness-subhead">“Possible fit” → declined or redirected</h3>
+        <p className="muted-note">It called these a possible fit, which leaves room for a decline. They aren’t counted as agreement or as disagreement.</p>
+        <ul className="pilot-disagreements pilot-possible-list">{(metrics.possible_not_accepted ?? []).slice(0, 20).map((item) => <li key={`${item.referral_id}-possible`}>
+          <button type="button" className="text-button" onClick={() => navigate(pilotPaths.referral(item.referral_id))}>{item.patient_name ?? 'Referral'} · {item.referral_type}</button>
+          <span>It said possible fit; you {plain(item.physician_did)}</span>
+          <DisagreementMeta item={item} />
+        </li>)}</ul>
+      </>}
     </section>
 
     {(review.open?.questions ?? 0) + (review.open?.pending_learnings ?? 0) > 0 && <section className="pilot-readiness-section" aria-labelledby="readiness-open">
@@ -140,6 +167,10 @@ export function ReadinessTab({ physician, doctor, navigate }: { physician: boole
   </div>
 }
 
+function DisagreementMeta({ item }: { item: Disagreement }) {
+  return <small className="muted-note">{item.rule ? `${item.rule.referral_type} rule v${item.rule.version}` : 'No rule'}{item.current ? '' : ' · under earlier rules'}{item.learning ? ` · a learning was ${item.learning.status} from this` : ''}</small>
+}
+
 function CapabilityCard({ cap, busy, confirming, onConfirm, onCancel, onSet, onResolve }: {
   cap: CapabilityView; busy: boolean; confirming: boolean; onConfirm: () => void; onCancel: () => void
   onSet: (state: CapabilityState, extra?: { confirm?: boolean; frequency?: 'daily' | 'weekly' }) => void; onResolve: (flagId: string) => void
@@ -147,8 +178,8 @@ function CapabilityCard({ cap, busy, confirming, onConfirm, onCancel, onSet, onR
   const eligibility = cap.eligibility
   const canActivate = cap.states?.includes('active') && cap.practice_limit === 'active'
   const openFlags = (cap.flags ?? []).filter((flag) => !flag.resolved_at)
-  return <section className="pilot-card pilot-capability" aria-labelledby={`cap-${cap.key}`}>
-    <div className="pilot-section-head"><h3 id={`cap-${cap.key}`}>{cap.name}</h3><span className={`pilot-capability-state state-${cap.state}`}>{STATE_LABELS[cap.state]}</span></div>
+  return <section className="pilot-card pilot-capability" id={`cap-${cap.key}`} tabIndex={-1} aria-labelledby={`cap-${cap.key}-title`}>
+    <div className="pilot-section-head"><h3 id={`cap-${cap.key}-title`}>{cap.name}</h3><span className={`pilot-capability-state state-${cap.state}`}>{STATE_LABELS[cap.state]}</span></div>
     <p>{cap.description}</p>
     {eligibility?.always_available && cap.state === 'active' && !cap.updated_at && <p className="muted-note">On by default — this is how your agent already worked. Turn it off or change how often here.</p>}
     {eligibility && !eligibility.always_available && <div className="pilot-eligibility">
@@ -158,6 +189,7 @@ function CapabilityCard({ cap, busy, confirming, onConfirm, onCancel, onSet, onR
       {eligibility.coverage.gaps.length > 0 && <p className="muted-note">Not enough cases yet (fewer than {eligibility.coverage.min_per_type} decided): {eligibility.coverage.gaps.join(', ')}.{eligibility.eligible ? ' If you turn it on, these types are left out.' : ''}</p>}
     </div>}
     {cap.practice_limit && cap.practice_limit !== 'active' && <p className="muted-note">Your practice allows this up to “{STATE_LABELS[cap.practice_limit]}”.</p>}
+    {cap.updated_at && cap.updated_by_name && <p className="muted-note">Last changed by {cap.updated_by_name} · {formatDate(cap.updated_at)}</p>}
     <div className="pilot-capability-scope">
       <div><p className="practice-subheading">What it will do</p><ul>{cap.will.map((line) => <li key={line}>{line}</li>)}</ul></div>
       <div><p className="practice-subheading">What it will never do</p><ul>{cap.never.map((line) => <li key={line}>{line}</li>)}</ul></div>

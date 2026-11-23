@@ -389,9 +389,15 @@ def resolve_correction_conflict(referral_id: str, update: ConflictChoiceInput, c
     return _run(lambda: services.intake.resolve_conflict(context, referral_id, update.field, update.choice))
 
 
+class MarkReadyInput(_Strict):
+    note: str | None = Field(default=None, max_length=2000)
+    # Required items still missing: staff confirm by naming them back (they're recorded).
+    confirm_missing: list[str] | None = Field(default=None, max_length=50)
+
+
 @router.post("/referrals/{referral_id}/mark-ready")
-def mark_ready(referral_id: str, update: NoteInput, context: Practice, services: Services) -> dict:
-    return _run(lambda: services.intake.mark_ready(context, referral_id, update.note))
+def mark_ready(referral_id: str, update: MarkReadyInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.intake.mark_ready(context, referral_id, update.note, update.confirm_missing))
 
 
 @router.post("/referrals/{referral_id}/seen")
@@ -714,6 +720,12 @@ def activation_flag(item_id: str, update: FlagInput, context: Practice, services
 @router.post("/activation/flags/{flag_id}/resolve")
 def activation_resolve_flag(flag_id: str, context: Practice, services: Services) -> dict:
     return _run(lambda: services.activation.resolve_flag(context, flag_id))
+
+
+@router.post("/activation/notices/{event_id}/acknowledge")
+def activation_acknowledge_notice(event_id: str, context: Practice, services: Services) -> dict:
+    """Physician: "got it" on a change they didn't make (repeated flags, a lowered practice limit)."""
+    return _run(lambda: services.activation.acknowledge_notice(context, event_id))
 
 
 @router.get("/representation")

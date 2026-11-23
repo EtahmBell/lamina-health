@@ -338,7 +338,9 @@ def test_staff_invitation_is_single_use_and_staff_permissions_are_limited(pilot:
     referral_id = detail["referral"]["id"]
     # Staff do the paperwork: they mark a referral ready for the physician. They can't approve
     # (no such step any more) or change the clinical triage.
-    assert pilot.post(f"/api/me/practice/referrals/{referral_id}/mark-ready", "user-c", {"note": "all here"}).status_code == 200
+    # (Nothing was submitted, so "Ready" names the missing items -- Step 18 decision.)
+    assert pilot.post(f"/api/me/practice/referrals/{referral_id}/mark-ready", "user-c",
+                      {"note": "all here", "confirm_missing": ["Recent HbA1c", "Renal function"]}).status_code == 200
     assert pilot.post(f"/api/me/practice/referrals/{referral_id}/approve", "user-c").status_code == 410
     refused = pilot.post(f"/api/me/practice/referrals/{referral_id}/correct", "user-c", {"suggested_priority": "urgent"})
     assert refused.status_code == 403 and refused.json()["detail"]["code"] == "physician_required"

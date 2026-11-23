@@ -39,11 +39,14 @@ counted. **Excluded**: staff reviews and every row of the retired approval step
 | Agent fit | Accept | Redirect | Decline |
 |---|---|---|---|
 | strong | agree | disagree | disagree |
-| possible | agree | disagree | disagree |
+| possible | agree | *possible → redirected* | *possible → declined* |
 | outside_scope | disagree | agree | agree |
 | **needs judgment** (`unknown`, or the physician's own *case by case* policy) | deferred | deferred | deferred |
 
 Deferred items are shown with their own count and are never part of "agreed on N of M".
+*Possible → declined/redirected* (decision of 2026-11-22) is also outside "agreed on N of M": a
+"possible fit" leaves room for a decline, so it is neither agreement nor a hard disagreement. It
+has its own count and its own list under the disagreements, never mixed into them.
 
 **Conflict choices** (`correction_conflict_resolutions`, physician only): "Keep my correction"
 = the physician still disagrees with the newer rule; "Apply the rule" = the rule change resolved
@@ -99,7 +102,9 @@ question source returns nothing when the capability is off.
 
 Who controls what: a physician controls **their own** agent's capabilities (a non-admin
 physician included); staff see a read-only view; a practice admin sets practice-wide maximums
-that no physician can exceed (lowering a maximum lowers anyone above it, recorded).
+that no physician can exceed (lowering a maximum lowers anyone above it, recorded, and each
+affected physician gets a Home item until they acknowledge it; the admin isn't told about their
+own agent).
 
 ## Safety
 
@@ -107,19 +112,33 @@ that no physician can exceed (lowering a maximum lowers anyone above it, recorde
 * **Per capability**: turn off or return to shadow individually.
 * **"This was wrong"**: physicians and staff can flag an agent-prepared item; a physician can
   mark it **serious**, which returns that capability to shadow at once and adds a Home item
-  saying why. Non-serious flags appear in the review. Nothing is silently ignored.
+  saying why. Non-serious flags appear in the review. **Three non-serious flags on one
+  capability within 7 days** (counted since it was last turned on) also return it to shadow,
+  with a Home item explaining why; the physician acknowledges it ("Got it"). Physicians still
+  mark serious flags explicitly. Nothing is silently ignored.
+* **Status**: an agent-drafted request does **not** change the referral's status. It shows
+  "Triaged · draft request ready for staff" until staff send the request, then "Needs
+  information". The history reads "Information request drafted by Dr. X's agent (not sent)".
+  (A request staff draft themselves still moves the referral to "Needs information" as before.)
+* **Staff "Ready" with required items missing**: allowed only after a confirmation that names
+  the missing items (the API refuses unless `confirm_missing` names every one). The missing
+  items are recorded in the history event and in the hand-off note the physician sees.
 * Agreement keeps being measured while capabilities are active.
 
 ## Screens
 
-* **Your Agent → Readiness** (physician): status line · what the agent observed (by type, gaps)
+* **Your Agent → Readiness** (physician): a short summary at the top (status, what's eligible
+  and what isn't yet with every reason, one recommended action that jumps to the right section)
+  · notices about changes the physician didn't make · status line · what the agent observed (by type, gaps)
   · how its recommendations compared with your decisions (per dimension, raw counts, current
   rules / all time) · where you disagreed (links) · open questions and pending learnings ·
   capability cards (state, eligibility and reasons, what it will / will never do, shadow
   examples, Turn on / Keep in shadow / Turn off with a confirmation that restates the change)
   · always yours · coming later.
-* **Your Agent → Capabilities** (staff, read-only): what is active and what it does.
+* **Your Agent → Capabilities** (staff, read-only): what is active, what it does, and who made
+  the last change ("Last changed by …").
 * **Home**: "Your agent's readiness review is available" once something is eligible; a
-  capability returned to shadow by a serious flag.
+  capability returned to shadow by a serious flag or by repeated flags; a capability lowered by
+  a practice limit.
 * **Lifecycle line**: "Shadow mode" / "Partly active · 1 capability on".
 * Auto-drafted requests show "Drafted by Dr. X's agent" and a "This was wrong" control.

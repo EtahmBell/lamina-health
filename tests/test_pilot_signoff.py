@@ -72,7 +72,8 @@ def test_staff_hand_off_ready_or_flag_without_touching_clinical_fields(pilot: Pi
     assert "mark_ready" in staff["allowed_actions"] and "correct" not in staff["allowed_actions"]
     assert "mark_ready" not in pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["allowed_actions"]
     assert pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-a", {}).status_code == 403
-    ready = pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-c", {"note": "All paperwork in"}).json()
+    ready = pilot.post(f"/api/me/practice/referrals/{rid}/mark-ready", "user-c",
+                       {"note": "All paperwork in", "confirm_missing": ["Recent HbA1c", "Renal function"]}).json()
     assert ready["referral"]["status"] == "ready_for_review"
     assert ready["referral"]["handoff"]["kind"] == "ready" and ready["referral"]["handoff"]["note"] == "All paperwork in"
     assert ready["effective_triage"] == staff["effective_triage"], "a hand-off never changes the clinical triage"
