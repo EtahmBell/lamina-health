@@ -941,6 +941,8 @@ def _feed(
     """One synthetic feed fixture. `image_filename` names a file under
     frontend/public/post_images/ -- served as a plain static path, never fetched
     externally or embedded as base64. Text-only posts pass image_filename=None.
+    Every fixture is currently text-only: the earlier post images had unclear
+    licensing (stock photos, generated images, third-party screenshots) and were removed.
 
     `provenance_type` (active-network pass, Part P) is one of:
     "physician_authored", "physician_approved_agent_draft", or
@@ -998,7 +1000,6 @@ SYNTHETIC_FEED_FIXTURES = [
         "clinical and computational reasoning. Still early, but I'm increasingly convinced there's value "
         "in building better interfaces between traditional knowledge systems and modern medicine.",
         "2026-10-09T09:15:00+00:00",
-        "p11_tcmnet_knowledge_graph.jpg.png", "TCMNet knowledge graph concept connecting traditional medicine information.", "contain",
     ),
     _feed(
         "fixture-iain-workup-guidance", "iain", "referral_guidance",
@@ -1013,7 +1014,6 @@ SYNTHETIC_FEED_FIXTURES = [
         "A synthetic-demo update on gastrointestinal source evaluation for persistent iron deficiency, and "
         "where general gastroenterology fits alongside a more occult-bleeding-focused practice.",
         "2026-10-05T16:00:00+00:00",
-        "p04_iron_deficiency_paper.jpg.png", "Research paper and figures about iron-deficiency evaluation.", "contain",
     ),
     _feed(
         "fixture-lianne-consult-value", "lianne", "professional_update",
@@ -1028,7 +1028,6 @@ SYNTHETIC_FEED_FIXTURES = [
         "Good lighting and a ruler for scale beat a high-resolution camera almost every time. A close-up "
         "and a wide shot together save a follow-up visit more often than people expect.",
         "2026-10-01T11:00:00+00:00",
-        "p09_telederm_photo.jpg", "Smartphone camera being used for standardized dermatology photography.", "cover",
     ),
     _feed(
         "fixture-natalie-anemia-workup", "natalie", "teaching",
@@ -1036,7 +1035,6 @@ SYNTHETIC_FEED_FIXTURES = [
         "Anaemia that doesn't resolve with the obvious first-line explanation deserves a structured look -- "
         "iron studies, B12/folate, and a reticulocyte count before it becomes a diagnosis of exclusion.",
         "2026-09-29T15:00:00+00:00",
-        "p08_anemia_timeline.jpg", "Clinical timeline showing longitudinal anemia-related laboratory trends.", "contain",
     ),
     _feed(
         "fixture-nina-aub-escalation", "nina", "teaching",
@@ -1051,7 +1049,6 @@ SYNTHETIC_FEED_FIXTURES = [
         "Having the patient demonstrate technique back to me, rather than just watching mine, catches most "
         "of the real-world errors. It takes two extra minutes and changes a lot of outcomes.",
         "2026-09-23T17:00:00+00:00",
-        "p10_inhaler_counseling.jpg", "A metered-dose inhaler used for pulmonary medication counseling.", "cover",
     ),
     _feed(
         "fixture-tiffany-gi-workup", "tiffany", "practice_focus",
@@ -1066,7 +1063,6 @@ SYNTHETIC_FEED_FIXTURES = [
         "Progressive renal dysfunction should prompt nephrology-first evaluation; hypertension cardiology "
         "can follow or co-manage once the renal trajectory is clearer.",
         "2026-09-16T10:00:00+00:00",
-        "p02_resistant_hypertension.jpg", "Blood pressure being measured during a clinical visit.", "cover",
     ),
     _feed(
         "fixture-maya-diabetes-adherence", "maya", "practice_focus",
@@ -1084,7 +1080,6 @@ SYNTHETIC_FEED_FIXTURES = [
         "culturally familiar foods can fit into sustainable nutrition conversations instead of asking "
         "people to abandon the foods they already enjoy.",
         "2026-09-08T18:30:00+00:00",
-        "p12_oyakodon_health.jpg", "A bowl of Japanese oyakodon with chicken, egg, onions, and rice.", "cover",
     ),
     _feed(
         "fixture-islam-home-spirometry", "islam", "practice_focus",
@@ -1093,7 +1088,6 @@ SYNTHETIC_FEED_FIXTURES = [
         "context alongside a visit -- especially for patients whose symptoms wax and wane between "
         "appointments. The value is in the trend and the clinical context around it, not the isolated number.",
         "2026-09-03T12:00:00+00:00",
-        "p13_home_spirometry.jpg", "Person using a portable home spirometry device.", "cover",
     ),
 ]
 

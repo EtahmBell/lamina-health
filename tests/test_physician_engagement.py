@@ -331,15 +331,10 @@ def test_synthetic_feed_is_richly_populated_with_required_themes(
 
     tcmnet = next(item for item in items if item["id"] == "fixture-lucy-tcmnet")
     assert tcmnet["physician_persona"] == "lucy", "TCMNet is an easter egg authored by the PCP herself"
-    assert tcmnet["image_url"] == "/post_images/p11_tcmnet_knowledge_graph.jpg.png"
-    assert tcmnet["media_style"] == "contain"
+    assert next(item for item in items if item["id"] == "fixture-nakajima-oyakodon")
 
-    oyakodon = next(item for item in items if item["id"] == "fixture-nakajima-oyakodon")
-    assert oyakodon["image_url"] == "/post_images/p12_oyakodon_health.jpg"
-
-    text_only = next(item for item in items if item["id"] == "fixture-lianne-consult-value")
-    assert text_only["image_url"] is None
-    assert text_only["media_style"] is None
+    # Every post is text-only: the earlier post images had unclear licensing and were removed.
+    assert all(item["image_url"] is None and item["media_style"] is None for item in items)
 
 
 def test_full_iain_engagement_loop_is_isolated_between_workspaces(

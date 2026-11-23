@@ -25,3 +25,6 @@ frontend/e2e/.env.e2e
 frontend/test-results/
 frontend/playwright-report/
 data/e2e/
+
+# Provenance audit is kept outside the repo (~/lamina-records); never commit it.
+docs/PROVENANCE_AUDIT.md
