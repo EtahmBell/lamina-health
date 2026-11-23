@@ -218,3 +218,34 @@ def test_dock_text_is_written_for_the_reader(pilot: Pilot) -> None:
     staff_text, physician_text = (" ".join(reply["reply"]["reply"]["paragraphs"]) for reply in (staff, physician))
     assert "per your rules" in physician_text
     assert "per your rules" not in staff_text and "’s rules" in staff_text
+
+
+# ------------------------------------------------------------ Step 18 truthfulness fixes
+
+
+def test_briefing_phrases_add_up_to_the_lead_count() -> None:
+    from backend.pilot.home import HomeService
+
+    words = {"One": 1, "Two": 2, "Three": 3, "Four": 4, "Five": 5, "Something": 1}
+    needs = [{"kind": "learning_question"}, {"kind": "proposed_learning"}, {"kind": "ready_for_review"},
+             {"kind": "correction_conflict"}, {"kind": "correction_conflict"}, {"kind": "something_new"}]
+    briefing = HomeService._briefing(needs, [], [], [], physician=True)
+    assert briefing["lead"] == "Six things need you today."
+    detail = briefing["detail"]
+    assert "I noticed two things I’d like you to confirm" in detail
+    assert "two referrals have a correction" in detail.lower() and "one referral is ready for review" in detail.lower()
+    assert "one other item below" in detail.lower(), "a new kind is still counted"
+    counted = sum(words.get(token.strip(",.").capitalize(), 0) for token in detail.split())
+    assert counted == 6
+
+
+def test_next_step_reflects_now_and_hides_once_closed(pilot: Pilot) -> None:
+    _ready(pilot)
+    rid = pilot.referral("user-c", submitted_items=[COMPLETE_ITEMS[0]])["referral"]["id"]
+    before = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["standing"]["next_step_now"]
+    assert before == "Request missing information"
+    _send_request(pilot, rid)
+    after = pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["standing"]["next_step_now"]
+    assert after == "Wait for the referring office (request sent)"
+    pilot.post(f"/api/me/practice/referrals/{rid}/disposition", "user-a", {"decision": "decline", "reason": "Not ours"})
+    assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["standing"]["next_step_now"] is None

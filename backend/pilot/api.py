@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.auth import AuthenticatedUser, require_authenticated_user
 
+from .activation import ActivationService
 from .assistant import AssistantService, history_days
 from .documents import MAX_DOCUMENT_BYTES
 from .home import HomeService
@@ -63,6 +64,7 @@ class PilotServices:
     home: HomeService
     assistant: AssistantService
     representation: RepresentationService
+    activation: ActivationService
 
     @classmethod
     def build(
@@ -90,8 +92,16 @@ class PilotServices:
             "information_requests": missing.for_referral(context.practice_id, referral_id),
             "sender_responses": sender.responses(context.practice_id, referral_id),
         })
+        # Step 18: capabilities are gated in the backend. The triage hook runs AFTER requests are
+        # reconciled, so "nobody has asked yet" is current when auto-drafting decides.
+        activation = ActivationService(store, intake, representation, learning)
+        intake.after_triage.append(activation.on_triaged)
+        intake.detail_extensions.append(activation.agent_items_for_referral)
+        learning.capability_gate = activation.learning_enabled
+        home.activation = activation
+        representation.activation = activation
         return cls(store, PracticeService(store), rules, intake, missing, sender, teaching, learning,
-                   publication, home, assistant, representation)
+                   publication, home, assistant, representation, activation)
 
 
 _default: dict[str, PilotServices] = {}
@@ -652,6 +662,58 @@ class DelegationInput(_Strict):
 
 class PracticeSettingsInput(_Strict):
     allow_physician_loosening: bool
+
+
+# ------------------------------------------------- Step 18: readiness review & activation
+
+
+class CapabilityStateInput(_Strict):
+    state: Literal["off", "shadow", "active"]
+    confirm: bool = False
+    excluded_types: list[str] = Field(default_factory=list, max_length=100)
+    frequency: Literal["daily", "weekly"] | None = None
+
+
+class CapabilityLimitInput(_Strict):
+    max_state: Literal["off", "shadow", "active"]
+
+
+class FlagInput(_Strict):
+    serious: bool = False
+    note: str | None = Field(default=None, max_length=1000)
+
+
+@router.get("/activation")
+def activation_review(context: Practice, services: Services) -> dict:
+    """Physicians: the readiness review for their own agent. Staff: read-only capability view."""
+    return _run(lambda: services.activation.review(context))
+
+
+@router.put("/activation/capabilities/{capability}")
+def activation_set(capability: str, update: CapabilityStateInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.activation.set_state(
+        context, capability, update.state, confirm=update.confirm, excluded_types=update.excluded_types,
+        frequency=update.frequency))
+
+
+@router.post("/activation/pause-all")
+def activation_pause_all(context: Practice, services: Services) -> dict:
+    return _run(lambda: services.activation.pause_all(context))
+
+
+@router.put("/activation/limits/{capability}")
+def activation_limit(capability: str, update: CapabilityLimitInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.activation.set_limit(context, capability, update.max_state))
+
+
+@router.post("/activation/items/{item_id}/flag")
+def activation_flag(item_id: str, update: FlagInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.activation.flag(context, item_id, update.serious, update.note))
+
+
+@router.post("/activation/flags/{flag_id}/resolve")
+def activation_resolve_flag(flag_id: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.activation.resolve_flag(context, flag_id))
 
 
 @router.get("/representation")

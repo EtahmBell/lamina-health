@@ -35,6 +35,8 @@ class LearningService:
         self.store = store
         self.rules = rules
         self.teaching = teaching
+        # Step 18: (practice_id) -> (enabled, interval). Off means no question is ever asked.
+        self.capability_gate = None
 
     # --------------------------------------------------------------- detection
 
@@ -177,9 +179,12 @@ class LearningService:
     # --------------------------------------------------------------- questions
 
     def question_for_today(self, practice_id: str, *, mark_shown: bool, actor: str = "agent:learning") -> dict | None:
+        enabled, interval = self.capability_gate(practice_id) if self.capability_gate else (True, QUESTION_INTERVAL)
+        if not enabled:
+            return None  # the physician turned learning questions off
         rows = self.store.fetch_all(
             "SELECT * FROM learning_questions WHERE practice_id = ? ORDER BY created_at", (practice_id,))
-        cutoff = (datetime.now(UTC) - QUESTION_INTERVAL).isoformat(timespec="seconds")
+        cutoff = (datetime.now(UTC) - interval).isoformat(timespec="seconds")
         recent = [row for row in rows if (row["last_shown_at"] and row["last_shown_at"] > cutoff)
                   or (row["answered_at"] and row["answered_at"] > cutoff)]
         if recent:

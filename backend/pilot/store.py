@@ -400,6 +400,87 @@ CREATE TRIGGER IF NOT EXISTS correction_conflict_resolutions_no_delete BEFORE DE
 BEGIN SELECT RAISE(ABORT, 'conflict resolutions are append-only'); END;
 """
 
+# Step 18 (additive): per-physician capability states, an append-only audit of every change,
+# practice-wide maximums, what the agent prepared (shadow records are never shown to referring
+# offices and never sent), and flags on agent-prepared items.
+_SCHEMA_V7 = """
+CREATE TABLE IF NOT EXISTS capability_states (
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  owner_scope_id TEXT NOT NULL,
+  capability TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('off', 'shadow', 'active')),
+  config_json TEXT NOT NULL DEFAULT '{}',
+  representation_version_id TEXT,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (practice_id, owner_scope_id, capability)
+);
+CREATE TABLE IF NOT EXISTS capability_events (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  owner_scope_id TEXT,
+  capability TEXT,
+  event_type TEXT NOT NULL,
+  from_state TEXT,
+  to_state TEXT,
+  reason TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  representation_version_id TEXT,
+  actor TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS capability_events_owner ON capability_events(practice_id, owner_scope_id, created_at);
+CREATE TRIGGER IF NOT EXISTS capability_events_no_update BEFORE UPDATE ON capability_events
+BEGIN SELECT RAISE(ABORT, 'capability events are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS capability_events_no_delete BEFORE DELETE ON capability_events
+BEGIN SELECT RAISE(ABORT, 'capability events are append-only'); END;
+CREATE TABLE IF NOT EXISTS practice_capability_limits (
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  capability TEXT NOT NULL,
+  max_state TEXT NOT NULL CHECK(max_state IN ('off', 'shadow', 'active')),
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (practice_id, capability)
+);
+CREATE TABLE IF NOT EXISTS agent_prepared_items (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  owner_scope_id TEXT NOT NULL,
+  capability TEXT NOT NULL,
+  referral_id TEXT,
+  mode TEXT NOT NULL CHECK(mode IN ('shadow', 'active')),
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  object_id TEXT,
+  -- Shadow records exist only for the physician's review: never shown to referring offices,
+  -- never sent. Always 1 for mode = 'shadow'.
+  never_sent INTEGER NOT NULL DEFAULT 1,
+  representation_version_id TEXT,
+  created_at TEXT NOT NULL,
+  CHECK (mode = 'active' OR never_sent = 1)
+);
+CREATE INDEX IF NOT EXISTS agent_prepared_items_owner ON agent_prepared_items(practice_id, owner_scope_id, capability, created_at);
+CREATE TRIGGER IF NOT EXISTS agent_prepared_items_no_update BEFORE UPDATE ON agent_prepared_items
+BEGIN SELECT RAISE(ABORT, 'agent-prepared items are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS agent_prepared_items_no_delete BEFORE DELETE ON agent_prepared_items
+BEGIN SELECT RAISE(ABORT, 'agent-prepared items are append-only'); END;
+CREATE TABLE IF NOT EXISTS agent_item_flags (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL,
+  owner_scope_id TEXT NOT NULL,
+  capability TEXT NOT NULL,
+  item_id TEXT NOT NULL REFERENCES agent_prepared_items(id),
+  serious INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  actor TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  resolved_by TEXT,
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS agent_item_flags_owner ON agent_item_flags(practice_id, owner_scope_id, capability);
+"""
+
 # A raw sender access link path (`/r/<token>`). Tokens are urlsafe base64, >= 20 chars.
 SENDER_LINK_PATTERN = re.compile(r"/r/[A-Za-z0-9_-]{20,200}")
 # The same link including any scheme/host prefix, for restoring templates.
@@ -459,6 +540,7 @@ class PilotStore:
             # Staff paperwork hand-off to the physician: {"kind": "ready" | "flag", note, by, role, at}.
             self._add_column(db, "intake_referrals", "handoff_json", "TEXT")
             db.executescript(_SCHEMA_V6)
+            db.executescript(_SCHEMA_V7)
             # Who wrote and who confirmed each rule version. `author_source` says how we know:
             # 'recorded' (written with the version), 'backfilled' (from older records), 'unknown'.
             self._add_column(db, "physician_referral_preferences", "created_by", "TEXT")

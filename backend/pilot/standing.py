@@ -19,6 +19,7 @@ NEXT_STEP_LABELS = {
     "confirm_referral_type": "Confirm the referral type",
 }
 _OPEN_REQUEST = {"draft", "approved", "sent", "partially_resolved"}
+_CLOSED = {"accepted", "redirected", "declined"}
 
 
 def referral_standing(*, status: str, recommendation: dict | None, next_step: str | None,
@@ -74,8 +75,22 @@ def referral_standing(*, status: str, recommendation: dict | None, next_step: st
         heading, still_open = f"Check, then mark ready for {voice.doctor}", None
     else:
         heading, still_open = (NEXT_STEP_LABELS.get(next_step or "", "Waiting for triage") if next_step else "Waiting for triage"), None
+    # The step that is next NOW -- never the agent's original suggestion once things have moved
+    # on (a request went out, the referral was decided or closed). None when nothing is next.
+    if status in _CLOSED:
+        next_step_now = None
+    elif unverified:
+        next_step_now = "Verify what the referring office sent"
+    elif has_draft:
+        next_step_now = "Review and send the information request"
+    elif waiting_on_office:
+        next_step_now = "Wait for the referring office (request sent)"
+    elif status == "ready_for_review":
+        next_step_now = "Physician decision" if not voice.physician else "Your decision"
+    else:
+        next_step_now = NEXT_STEP_LABELS.get(next_step or "")
     return {
-        "heading": heading, "still_open": still_open, "readiness_text": readiness_text,
+        "heading": heading, "still_open": still_open, "readiness_text": readiness_text, "next_step_now": next_step_now,
         "complete": complete, "no_requirements": no_requirements, "open_items": open_items,
         "unverified_items": unverified, "waiting_on_office": waiting_on_office, "has_draft": has_draft,
     }

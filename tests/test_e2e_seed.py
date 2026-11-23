@@ -58,7 +58,7 @@ def test_seeds_two_isolated_fictional_practices(e2e_paths: Path) -> None:
     a, b = state["practice_a"]["id"], state["practice_b"]["id"]
     names_a = {json.loads(row["patient_json"])["name"] for row in store.referral_rows(a)}
     names_b = {json.loads(row["patient_json"])["name"] for row in store.referral_rows(b)}
-    assert len(names_a) == 11 and names_b == {"Ito Isolated-E2E", "Ives Isolated-E2E"}
+    assert len(names_a) == 11 + 12 and names_b == {"Ito Isolated-E2E", "Ives Isolated-E2E"}  # scenarios + shadow history
     assert all(name.endswith("-E2E") for name in names_a | names_b), "fictional, marked E2E"
     refs = state["referrals"]
     still_open = store.referral_row(a, refs["still_open"])
@@ -93,3 +93,17 @@ def test_seeds_two_isolated_fictional_practices(e2e_paths: Path) -> None:
         e2e_seed.shadow_second()
     rules_b = e2e_seed.Seeder(e2e_seed._accounts()).call("GET", "/api/me/practice/rules", "second_physician")
     assert [rule["referral_type"] for rule in rules_b] == ["Kidney stones"]
+    # Step 18: physician A has enough shadow history to be eligible; physician B does not.
+    drafting = services.activation.eligibility(a, services.practice.context("e2e-physician").owner_scope_id, "auto_draft_requests")
+    assert drafting["eligible"], drafting["reasons"]
+    assert "Adrenal nodule" in drafting["coverage"]["gaps"]
+    b_owner = services.practice.context("e2e-second_physician").owner_scope_id
+    assert not services.activation.eligibility(b, b_owner, "auto_draft_requests")["eligible"]
+    # Steps: turn drafting on, then a referral with a missing item gets an agent-drafted request.
+    e2e_seed.set_auto_draft("active")
+    e2e_seed.new_missing_referral()
+    rid = json.loads(e2e_seed.STATE.read_text())["referrals"]["auto_draft"]
+    [request] = services.missing.for_referral(a, rid)
+    assert request["status"] == "draft" and request["created_by"].startswith("agent:auto_draft:")
+    e2e_seed.set_auto_draft("shadow")
+    assert services.activation.state(a, services.practice.context("e2e-physician").owner_scope_id, "auto_draft_requests")["state"] == "shadow"

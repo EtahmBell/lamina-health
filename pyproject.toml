@@ -40,3 +40,4 @@ line-length = 100
 "tests/test_pilot_signoff.py" = ["F811"]
 "tests/test_pilot_rule_authors.py" = ["F811"]
 "tests/test_pilot_followup.py" = ["F811"]
+"tests/test_pilot_activation.py" = ["F811"]

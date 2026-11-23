@@ -49,6 +49,7 @@ class HomeService:
                  rules: PracticeRules, learning: LearningService, representation: Any = None) -> None:
         self.store, self.intake, self.missing, self.rules, self.learning = store, intake, missing, rules, learning
         self.representation = representation
+        self.activation: Any = None  # Step 18: readiness review / capability items
 
     def _since(self, context: PracticeContext, record_view: bool = True) -> str:
         views = [e for e in self.store.events(practice_id=context.practice_id, event_type="home_viewed", actor=context.actor)]
@@ -199,6 +200,8 @@ class HomeService:
         for event in public_new:
             done.append({"kind": "public_referral", "title": f"New referral via your public page: {names.get(event['referral_id'], 'referral')}",
                          "at": event["created_at"], "by_agent": True, "path": f"/me/referrals/{event['referral_id']}"})
+        if physician and self.activation is not None:
+            needs.extend(self.activation.home_items(context))
         needs.sort(key=lambda item: item.get("rank", 9))
         done.sort(key=lambda item: item["at"], reverse=True)
         learned = [{"referral_type": rule.referral_type, "version": rule.version, "confirmed_at": rule.confirmed_at}
@@ -237,38 +240,45 @@ class HomeService:
 
     @staticmethod
     def _briefing(needs: list, waiting: list, prepared: list, done: list, physician: bool) -> dict:
-        kinds = [item["kind"] for item in needs]
-        parts = []
-        ready = kinds.count("ready_for_review")
-        if ready:
-            parts.append(f"{_plural(ready, 'referral is', 'referrals are').lower()} ready for review")
-        routing = kinds.count("triage_uncertain")
-        if routing:
-            parts.append(f"{_plural(routing, 'referral has', 'referrals have').lower()} a routing or fit question")
-        review = kinds.count("triage_review")
-        if review:
-            parts.append(f"{_plural(review, 'triaged referral is', 'triaged referrals are').lower()} waiting for your decision"
+        """The lead count and the sentence describing it come from the SAME list: every item in
+        "Needs you" is counted in exactly one phrase, so the phrases always add up to the lead."""
+        counts: dict[str, int] = {}
+        for item in needs:
+            counts[item["kind"]] = counts.get(item["kind"], 0) + 1
+
+        def take(*kinds: str) -> int:
+            return sum(counts.pop(kind, 0) for kind in kinds)
+
+        parts: list[str] = []
+        if take("setup"):
+            parts.append("your agent’s setup isn’t finished")
+        if n := take("capability_returned"):
+            parts.append(f"{_plural(n, 'capability was', 'capabilities were').lower()} returned to shadow after a serious flag")
+        if n := take("correction_conflict"):
+            parts.append(f"{_plural(n, 'referral has', 'referrals have').lower()} a correction that differs from your newer rule")
+        if n := take("ready_for_review"):
+            parts.append(f"{_plural(n, 'referral is', 'referrals are').lower()} ready for review")
+        if n := take("triage_uncertain"):
+            parts.append(f"{_plural(n, 'referral has', 'referrals have').lower()} a routing or fit question")
+        if n := take("triage_review"):
+            parts.append(f"{_plural(n, 'triaged referral is', 'triaged referrals are').lower()} waiting for your decision"
                          if physician else
-                         f"{_plural(review, 'triaged referral needs', 'triaged referrals need').lower()} checking before the physician sees {'it' if review == 1 else 'them'}")
-        conflicts = kinds.count("correction_conflict")
-        if conflicts:
-            parts.insert(0, f"{_plural(conflicts, 'referral has', 'referrals have').lower()} a correction that differs from your newer rule")
-        notify = kinds.count("notify_office")
-        if notify:
-            parts.append(f"{_plural(notify, 'referring office needs', 'referring offices need').lower()} telling about a decision")
-        evidence = kinds.count("confirm_evidence")
-        if evidence:
-            parts.append(f"{_plural(evidence, 'referral needs', 'referrals need').lower()} document evidence confirmed")
-        if "setup" in kinds:
-            parts.insert(0, "your agent’s setup isn’t finished")
-        unrequested = kinds.count("request_missing")
-        if unrequested:
-            parts.append(f"{_plural(unrequested, 'referral is', 'referrals are').lower()} missing information nobody has asked for yet")
-        replies = kinds.count("verify_sender_information")
-        if replies:
-            parts.append(f"{_plural(replies, 'referral has', 'referrals have').lower()} a reply from the referring office to verify")
-        if "learning_question" in kinds or "proposed_learning" in kinds:
-            parts.append("I noticed something I’d like you to confirm")
+                         f"{_plural(n, 'triaged referral needs', 'triaged referrals need').lower()} checking before the physician sees {'it' if n == 1 else 'them'}")
+        if n := take("confirm_evidence"):
+            parts.append(f"{_plural(n, 'referral needs', 'referrals need').lower()} document evidence confirmed")
+        if n := take("request_missing"):
+            parts.append(f"{_plural(n, 'referral is', 'referrals are').lower()} missing information nobody has asked for yet")
+        if n := take("verify_sender_information"):
+            parts.append(f"{_plural(n, 'referral has', 'referrals have').lower()} a reply from the referring office to verify")
+        if n := take("notify_office"):
+            parts.append(f"{_plural(n, 'referring office needs', 'referring offices need').lower()} telling about a decision")
+        if n := take("learning_question", "proposed_learning"):
+            parts.append("I noticed something I’d like you to confirm" if n == 1
+                         else f"I noticed {_plural(n, 'thing', 'things').lower()} I’d like you to confirm")
+        if n := take("readiness_review"):
+            parts.append("your agent’s readiness review is available")
+        if n := sum(counts.values()):  # anything new is still counted, never dropped
+            parts.append(f"{_plural(n, 'other item', 'other items').lower()} below")
         if needs:
             lead = f"{_plural(len(needs), 'thing needs', 'things need')} you today."
             detail = _join(parts)

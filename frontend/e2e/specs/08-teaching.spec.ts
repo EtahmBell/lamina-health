@@ -16,7 +16,8 @@ test('a staff suggestion is pending for the physician', async ({ as, seed }) => 
 
   const physician = await as('physician')
   await physician.goto('/me/home')
-  await expect(physician.locator('main')).toContainText('I noticed something I’d like you to confirm')
+  // The count is in the sentence now ("I noticed two things …"): the briefing adds up to its lead.
+  await expect(physician.locator('main')).toContainText(/I noticed (something|\w+ things) I’d like you to confirm/)
   await physician.goto('/me/for-you')
   await expect(physician.getByText(`${staffLabel} suggested something for your agent`)).toBeVisible()
   await physician.goto('/me/agent?tab=teach')

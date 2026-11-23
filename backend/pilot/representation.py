@@ -92,6 +92,7 @@ class RepresentationService:
         self.teaching = teaching
         # LearningService: decides which ONE question is answerable today (pacing lives there).
         self.learning = learning
+        self.activation: Any = None  # Step 18 ActivationService (set when services are wired)
 
     # ------------------------------------------------------------- physicians
 
@@ -149,10 +150,14 @@ class RepresentationService:
         statuses = {stage: stages.get(stage, {}).get("status", "not_started") for stage in STAGES}
         next_stage = next((stage for stage in STAGES if statuses[stage] in {"not_started", "in_progress"}), None)
         remaining = sum(STAGE_MINUTES[stage] for stage in STAGES if statuses[stage] in {"not_started", "in_progress"})
+        partly = self.activation.lifecycle_line(context.practice_id, owner) if self.activation is not None else None
         return {
             "state": row["state"],
-            "label": ("Shadow mode — your agent recommends; you and your staff decide."
+            # Step 18: once a capability is on, say so -- the agent prepares work; people still decide.
+            "label": (f"{partly} — your agent prepares drafts for review; you and your staff decide." if partly and row["state"] == "shadow"
+                      else "Shadow mode — your agent recommends; you and your staff decide."
                       if row["state"] == "shadow" else "Setting up — your agent is not representing you yet."),
+            "capabilities_line": partly,
             "shadow_at": row["shadow_at"],
             "stages": [{"id": stage, "label": STAGE_LABELS[stage], "status": statuses[stage],
                         "minutes": STAGE_MINUTES[stage]} for stage in STAGES],

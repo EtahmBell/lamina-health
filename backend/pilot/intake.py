@@ -223,7 +223,9 @@ class IntakeService:
         history = []
         for event in self.store.events(practice_id=context.practice_id, referral_id=referral_id):
             # Chat audit rows are never part of a referral's clinical history.
-            if event["event_type"] == "agent_conversation_turn":
+            # Chat turns and the agent's own bookkeeping (what a capability prepared) are not part
+            # of a referral's history; the draft it creates appears as the draft itself.
+            if event["event_type"] in {"agent_conversation_turn", "agent_prepared_shadow", "agent_prepared_active"}:
                 continue
             who = directory.describe(event["actor"], sender)
             history.append({

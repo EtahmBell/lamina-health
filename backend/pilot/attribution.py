@@ -64,6 +64,10 @@ class ActorDirectory:
         if actor.startswith("sender:") or actor == "public:form":
             office = (sender or {}).get("practice") or (sender or {}).get("name") or "The referring office"
             return {"name": office, "role": "referring_office"}
+        if actor.startswith("agent:auto_draft:"):
+            # Work a physician's agent prepared under an activated capability: "Dr. X's agent".
+            owner = self._users.get(actor[len("agent:auto_draft:"):])
+            return {"name": f"{owner['name']}’s agent" if owner else "The physician’s agent", "role": "lamina"}
         if actor.startswith("agent:"):
             return {"name": "Lamina", "role": "lamina"}
         return {"name": "Lamina (system)", "role": "system"}

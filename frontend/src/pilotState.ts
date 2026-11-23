@@ -284,7 +284,7 @@ export function itemLabel(key: string, detail: Pick<ReferralDetail, 'recommendat
 
 /** My Agent sections, in the demo's tab order (Overview first). Rules live under the
  * agent because they ARE the agent's confirmed representation of the practice. */
-export const AGENT_TABS = ['overview', 'teach', 'rules'] as const
+export const AGENT_TABS = ['overview', 'teach', 'rules', 'readiness'] as const
 export type AgentTab = typeof AGENT_TABS[number]
 export const resolveAgentTab = (value: string | null | undefined): AgentTab =>
   value && (AGENT_TABS as readonly string[]).includes(value) ? (value as AgentTab) : 'overview'
@@ -377,7 +377,7 @@ const HISTORY_LABELS: Record<string, string> = {
   document_viewed: 'Document opened',
   referral_item_recorded: 'Information recorded',
   referral_escalated: 'Flagged for physician review',
-  information_requested: 'Information requested',
+  information_requested: 'Information request drafted (not sent)',
   missing_information_request_created: 'Information request drafted',
   missing_information_request_edited: 'Information request edited',
   missing_information_request_sent: 'Information request sent',
@@ -683,8 +683,9 @@ export function representationItemText(text: string, voice: Voice): string {
   return fixed[text] ?? text
 }
 /** The agent's lifecycle line, by state, in the reader's voice. */
-export function lifecycleLine(lifecycle: { state: string | null; label: string | null }, voice: Voice): string | null {
+export function lifecycleLine(lifecycle: { state: string | null; label: string | null; capabilities_line?: string | null }, voice: Voice): string | null {
   if (!lifecycle.label || voice.physician) return lifecycle.label
+  if (lifecycle.capabilities_line) return `${lifecycle.capabilities_line} — ${voice.doctor}’s agent prepares drafts for review; ${voice.doctor} decides.`
   if (lifecycle.state === 'shadow') return `Shadow mode — ${voice.doctor}’s agent recommends; ${voice.doctor} decides. Staff handle intake and paperwork.`
   if (lifecycle.state === 'initializing') return `Setting up — ${voice.doctor}’s agent doesn’t represent the practice yet.`
   return lifecycle.label

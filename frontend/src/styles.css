@@ -3515,3 +3515,61 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .public-shell .public-sender-date-echo { display: block; margin-top: 4px; color: var(--text-secondary); font-size: max(.74rem, 12px); }
 /* A question's drafted rule, shown once inside the question. */
 .pilot-question .pilot-question-draft { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+
+/* ---- Step 18: readiness review & capabilities ---- */
+.pilot-readiness { display: grid; gap: 28px; max-width: 900px; margin-top: 24px; }
+.pilot-readiness-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.pilot-readiness-status { margin: 0; color: var(--text-primary); font-family: var(--font-display); font-size: 1.15rem; }
+.pilot-readiness-section h2 { margin: 0 0 8px; font-family: var(--font-display); font-size: 1.35rem; font-weight: 500; }
+.pilot-readiness-section .pilot-section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px; }
+.pilot-readiness-table { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: .8rem; }
+.pilot-readiness-table th, .pilot-readiness-table td { border-top: 1px solid var(--border); padding: 10px 8px; text-align: left; vertical-align: top; }
+.pilot-readiness-table thead th { border-top: 0; color: var(--text-secondary); font-size: .7rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.pilot-readiness-table tbody th { width: 42%; font-weight: 600; }
+.pilot-readiness-table tbody th small { display: block; margin-top: 2px; font-weight: 400; }
+.pilot-readiness-by-type { margin-top: 10px; }
+.pilot-readiness-by-type summary { cursor: pointer; color: var(--mineral-deep); font-size: .76rem; font-weight: 600; }
+.pilot-gap { color: #7a4a17; font-weight: 600; }
+.pilot-segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.pilot-segmented button { min-height: 36px; border: 0; background: var(--surface); padding: 6px 12px; color: var(--text-secondary); font-size: .72rem; font-weight: 600; cursor: pointer; }
+.pilot-segmented button.active { background: var(--mineral-surface); color: var(--mineral-deep); }
+.pilot-disagreements { display: grid; gap: 0; margin: 8px 0 0; padding: 0; list-style: none; }
+.pilot-disagreements li { display: grid; gap: 2px; border-top: 1px solid var(--border); padding: 10px 0; font-size: .8rem; }
+.pilot-disagreements li .text-button { justify-self: start; }
+.pilot-capability-list { display: grid; gap: 16px; margin-top: 12px; }
+.pilot-capability { padding: 20px 22px; }
+.pilot-capability .pilot-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pilot-capability h3 { margin: 0; font-family: var(--font-display); font-size: 1.1rem; font-weight: 500; }
+.pilot-capability-state { border-radius: 999px; padding: 3px 10px; font-size: max(.7rem, 11.5px); font-weight: 600; }
+.pilot-capability-state.state-active { border: 1px solid rgb(182 106 69 / 30%); background: #f8ece3; color: #8a4a2c; }
+.pilot-capability-state.state-shadow { border: 1px solid var(--mineral-subtle); background: var(--mineral-surface); color: var(--mineral-deep); }
+.pilot-capability-state.state-off { border: 1px solid var(--border); background: #f2f0eb; color: #4b4e49; }
+.pilot-eligibility { margin-top: 10px; border-left: 3px solid var(--mineral-subtle); padding: 2px 0 2px 12px; font-size: .78rem; }
+.pilot-eligibility ul { margin: 4px 0; padding-left: 18px; }
+.pilot-capability-scope { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; font-size: .78rem; }
+.pilot-capability-scope ul, .pilot-shadow-examples ul, .pilot-capability-flags ul { margin: 4px 0 0; padding-left: 18px; }
+.pilot-shadow-examples, .pilot-capability-flags { margin-top: 12px; font-size: .78rem; }
+.pilot-capability-confirm { margin-top: 12px; border-left: 3px solid var(--copper); }
+.pilot-always-yours ul { margin: 6px 0; padding-left: 18px; }
+.pilot-coming-later { margin-top: 10px; }
+.pilot-limit-list { display: grid; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
+.pilot-limit-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .8rem; }
+.pilot-agent-flag { margin-top: 6px; }
+@media (max-width: 760px) {
+  .pilot-capability-scope { grid-template-columns: 1fr; }
+  .pilot-readiness-table { font-size: .76rem; }
+  .pilot-readiness-table tbody th { width: auto; }
+  .pilot-segmented button { min-height: 44px; }
+}
+/* Step 18 review fixes: selected state not by fill alone; full touch targets for selects. */
+.pilot-segmented button.active { box-shadow: inset 0 -3px 0 var(--mineral-deep); }
+.pilot-segmented button.active::before { content: "✓ "; }
+.pilot-readiness select { min-height: 36px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); padding: 4px 8px; font: inherit; font-size: .78rem; }
+.pilot-capability h3 { font-variant: normal; text-transform: none; letter-spacing: 0; }
+.pilot-limit-list li { justify-content: flex-start; gap: 16px; }
+.pilot-limit-list li span { min-width: 260px; }
+@media (max-width: 760px) {
+  .pilot-readiness select { min-height: 44px; }
+  .pilot-capability .pilot-section-head { justify-content: space-between; text-align: left; }
+  .pilot-limit-list li { flex-wrap: wrap; }
+}

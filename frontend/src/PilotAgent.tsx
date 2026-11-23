@@ -17,6 +17,7 @@ import {
 import { useOnPilotDataChange } from './pilotSync.ts'
 import { PageLoading, TrainingReminderBand } from './pilotUi.tsx'
 import { PublicProfileView } from './PublicPages.tsx'
+import { ReadinessTab } from './PilotReadiness.tsx'
 
 type Navigate = (path: string) => void
 const errorText = (err: unknown, fallback: string) =>
@@ -133,7 +134,8 @@ export function QuestionCard({ question, onChange, proposal, referralTypes = [] 
   </section>
 }
 
-const TAB_LABELS: Record<AgentTab, string> = { overview: 'Overview', teach: 'Train', rules: 'Rules' }
+// Staff see the same tab as a read-only view of what the agent is allowed to do.
+const tabLabel = (tab: AgentTab, physician: boolean) => ({ overview: 'Overview', teach: 'Train', rules: 'Rules', readiness: physician ? 'Readiness' : 'Capabilities' })[tab]
 
 /** My Agent, in the demo's structure: agent hero, Overview / Train / Rules tabs. Overview
  * follows the demo's order — learning band, current representation, the agent's real
@@ -174,11 +176,12 @@ export function AgentPage({ status, navigate, tab }: { status: PilotStatus; navi
         ? <>Represents how you and your practice work. {lifecycle?.label ?? 'Shadow mode — your agent recommends; you decide.'}</>
         : <>Represents how {doctor} and the practice work. It recommends; {doctor} decides. You can see what it represents and suggest changes for {doctor} to confirm.</>}</p>
     </div></section>
-    <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => navigate(pilotPaths.agentTab(item))}>{TAB_LABELS[item]}{item === 'teach' && trainBadge > 0 ? ` · ${trainBadge}` : ''}</button>)}</nav>
+    <nav className="agent-tabs" aria-label="My Agent sections">{AGENT_TABS.map((item) => <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => navigate(pilotPaths.agentTab(item))}>{tabLabel(item, physician)}{item === 'teach' && trainBadge > 0 ? ` · ${trainBadge}` : ''}</button>)}</nav>
     {error && <div className="error-banner" role="alert">{error}</div>}
     {tab === 'overview' && <AgentOverview status={status} navigate={navigate} rules={rules} summary={summary} representation={representation} referrals={referrals} weekly={weekly} />}
     {tab === 'teach' && <TeachTab physician={physician} doctor={doctor} data={teaching} summary={summary} navigate={navigate} onChange={reload} />}
     {tab === 'rules' && <RulesTab physician={physician} rules={rules} onChange={reload} />}
+    {tab === 'readiness' && <ReadinessTab physician={physician} doctor={doctor} navigate={navigate} />}
   </main>
 }
 

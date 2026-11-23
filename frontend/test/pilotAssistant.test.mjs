@@ -109,7 +109,7 @@ test('cards render the backend state; resolved cards offer no action and history
 
 test('the referral page passes explicit structured context to the same dock', () => {
   const detail = slice(pilot, 'function ReferralDetailPage', '/* -------------------------------------------------------------- profile')
-  assert.match(detail, /<PracticeAgentDock key=\{referral\.id\} status=\{status\} navigate=\{navigate\}\s*context=\{\{ referralId: referral\.id, patientName: referral\.patient\.name, referralType: referral\.referral_type, closed, missing: missingItems\.length \}\} \/>/)
+  assert.match(detail, /<PracticeAgentDock key=\{referral\.id\} status=\{status\} navigate=\{navigate\}\s*context=\{\{ referralId: referral\.id, patientName: referral\.patient\.name, referralType: referral\.referral_type, closed, missing: openRequests\.length \? 0 : missingItems\.length \}\} \/>/)
   // Suggestions follow the referral's state: closed referrals don't offer "what's missing".
   assert.match(slice(pilot, 'function PracticeAgentDock', '/* ------------------------------------------------------------- referrals'), /suggestions=\{context\.closed \? \['Summarize what happened\.', 'Why did you recommend this\?'\]/)
   assert.match(pilot, /section="patients" agentDock><ReferralDetailPage/)

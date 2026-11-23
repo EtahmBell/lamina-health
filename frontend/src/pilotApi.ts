@@ -172,6 +172,8 @@ export type RationaleItem = {
 /** Where a referral stands -- ONE statement shared by the referral page, Home and Patients. */
 export type ReferralStanding = {
   heading: string; still_open: string | null; readiness_text: string; complete: boolean; no_requirements: boolean
+  /** What is next NOW (null once the referral is closed) -- never a stale original suggestion. */
+  next_step_now: string | null
   open_items: string[]; unverified_items: string[]; waiting_on_office: boolean; has_draft: boolean
 }
 /** Decline / redirect: has a person told the referring office (outside Lamina)? */
@@ -195,6 +197,8 @@ export type ReferralDetail = {
   allowed_actions: ReferralAction[]
   standing?: ReferralStanding
   office_notification?: OfficeNotification | null
+  /** Information requests the physician's agent drafted (request id → the agent-prepared item). */
+  agent_items?: Record<string, AgentItem>
   information_requests?: InformationRequest[]
   sender_responses?: SenderResponse[]
 }
@@ -400,6 +404,8 @@ export type SetupStageId = 'identity' | 'scope' | 'requirements' | 'delegation' 
 export type SetupStageStatus = 'not_started' | 'in_progress' | 'done' | 'skipped'
 export type Lifecycle = {
   state: 'initializing' | 'shadow' | null; label: string | null; shadow_at?: string | null
+  /** Step 18: "Partly active · 1 capability on" once a capability is on; null in plain shadow. */
+  capabilities_line?: string | null
   stages: Array<{ id: SetupStageId; label: string; status: SetupStageStatus; minutes: number }>
   next_stage: SetupStageId | null; minutes_remaining: number; setup_complete: boolean; migrated: boolean
 }
@@ -456,6 +462,50 @@ export const finishSetupStage = (stage: SetupStageId) => apiRequest<SetupView>(r
 export const skipSetupStage = (stage: SetupStageId) => apiRequest<SetupView>(representationPath(`/setup/${stage}/skip`), { method: 'POST' })
 export const confirmRepresentation = () => apiRequest<{ version: { id: string; version: number }; lifecycle: Lifecycle; representation: Representation }>(representationPath('/confirm'), { method: 'POST' })
 export const leaveProposalUnknown = (id: string) => apiRequest<Representation>(representationPath(`/proposals/${encodeURIComponent(id)}/leave-unknown`), { method: 'POST' })
+
+/* ---------------------------------------------- Step 18: readiness review & activation */
+
+export type CapabilityState = 'off' | 'shadow' | 'active'
+export type AgreementTally = { agreed: number; disagreed: number; deferred: number; of: number; text: string; percent: number | null }
+export type AgreementDimension = 'fit' | 'priority' | 'visit_type' | 'readiness'
+export type AgreementWindow = {
+  decided: number; dimensions: Record<AgreementDimension, AgreementTally>
+  by_type: Record<string, { decided: number } & Record<AgreementDimension, AgreementTally>>
+}
+export type Disagreement = {
+  referral_id: string; patient_name: string | null; referral_type: string; dimension: AgreementDimension
+  agent_said: string | null; physician_did: string | null; decided_at: string; current: boolean
+  rule: { rule_id: string; referral_type: string; version: number } | null
+  learning: { proposal_id: string; status: string; referral_type: string } | null
+}
+export type CapabilityView = {
+  key: string; name: string; description: string; state: CapabilityState; will: string[]; never: string[]; updated_at?: string | null
+  // Physician view only:
+  risk?: string; states?: CapabilityState[]; practice_limit?: CapabilityState; config?: { excluded_types?: string[]; frequency?: 'daily' | 'weekly' }
+  confirm_text?: string; depends_on?: string[]
+  eligibility?: { eligible: boolean; reasons: string[]; coverage: { covered: string[]; gaps: string[]; min_per_type: number }; always_available: boolean }
+  shadow_examples?: Array<{ items: string[]; referral_type: string; patient_name: string | null; created_at: string; recommendation_id: string }>
+  flags?: Array<{ id: string; serious: boolean; note: string | null; actor_role: string; created_at: string; resolved_at: string | null }>
+}
+export type ActivationReview = {
+  available: boolean; physician_view?: boolean; capabilities: CapabilityView[]; always_yours: string[]; coming_later: string[]
+  status?: { shadow_since: string | null; decided: number; active: string[]; line: string }
+  limits?: Record<string, CapabilityState>; can_set_limits?: boolean
+  metrics?: { all_time: AgreementWindow; current_rules: AgreementWindow; min_for_percent: number; by_version: Record<string, number>
+    conflict_choices: { keep_correction: number; apply_rule: number }; disagreements: Disagreement[] }
+  settings?: { min_shadow_days: number; min_decided: number; min_per_type: number; min_for_percent: number }
+  open?: { questions: number; pending_learnings: number }
+}
+export type AgentItem = { item_id: string; capability: string; flags: Array<{ id: string; serious: boolean; actor_role: string; created_at: string; resolved_at: string | null }> }
+export const getActivation = () => apiRequest<ActivationReview>('/api/me/practice/activation')
+export const setCapabilityState = (key: string, body: { state: CapabilityState; confirm?: boolean; excluded_types?: string[]; frequency?: 'daily' | 'weekly' }) =>
+  apiRequest<ActivationReview>(`/api/me/practice/activation/capabilities/${encodeURIComponent(key)}`, { ...json(body), method: 'PUT' })
+export const pauseAllCapabilities = () => apiRequest<ActivationReview>('/api/me/practice/activation/pause-all', json({}))
+export const setCapabilityLimit = (key: string, maxState: CapabilityState) =>
+  apiRequest<{ limits: Record<string, CapabilityState> }>(`/api/me/practice/activation/limits/${encodeURIComponent(key)}`, { ...json({ max_state: maxState }), method: 'PUT' })
+export const flagAgentItem = (itemId: string, serious: boolean, note: string) =>
+  apiRequest<{ flag_id: string; state: CapabilityState }>(`/api/me/practice/activation/items/${encodeURIComponent(itemId)}/flag`, json({ serious, note: note || null }))
+export const resolveAgentFlag = (flagId: string) => apiRequest<ActivationReview>(`/api/me/practice/activation/flags/${encodeURIComponent(flagId)}/resolve`, json({}))
 
 /* ------------------------------------------------- public (no account needed) */
 

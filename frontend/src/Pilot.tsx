@@ -13,11 +13,11 @@ import { useOnPilotDataChange, usePilotDataVersion } from './pilotSync.ts'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
   acceptInvitation, correctTriage, createPractice, createReferral, decideReferral,
-  escalateReferral, getPilotStatus, markOfficeNotified, getPracticeMembers, getPracticeRules, getReferral, markReferralReady, markReferralSeen, resolveCorrectionConflict,
+  escalateReferral, flagAgentItem, getPilotStatus, markOfficeNotified, getPracticeMembers, getPracticeRules, getReferral, markReferralReady, markReferralSeen, resolveCorrectionConflict,
   inviteStaff, listReferrals, openReferralDocument, previewInvitation, recordReferralItem,
   removeStaffMember, requestInformation, setMemberAdmin, retriageReferral, revokeInvitation, updatePractice, uploadReferralDocument,
   type EffectiveTriage, type Fit, type Modality, type NextStep, type PilotStatus, type PracticeFields,
-  type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type OfficeNotification, type ReferralDetail, type TriageChange,
+  type AgentItem, type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type OfficeNotification, type ReferralDetail, type TriageChange,
   type ReferralSummary, type RequirementAssessment, getHome, teachAgent, editInformationRequest,
   sendInformationRequest, cancelInformationRequest, resolveInformationRequest, reissueRequestLink, setReferralType, verifyReferralItem,
   type HomeItem, type HomeProjection, type InformationRequest,
@@ -644,7 +644,37 @@ const sentViaText = (via: string | null | undefined, at: string, by: string) =>
     : via === 'dev_outbox' ? `approved ${at} by ${by} — saved to Lamina’s local test outbox, not delivered to anyone`
     : `sent ${at} by ${by} via ${via ?? 'email'}`
 
-function InformationRequestPanel({ request, senderName, onChanged }: { request: InformationRequest; senderName: string; onChanged: () => void }) {
+/** "This was wrong" on something the agent prepared. Anyone can flag; only a physician can mark it
+ * serious, which returns that capability to shadow at once. Nothing is silently ignored. */
+function AgentItemFlag({ item, physician, onChanged }: { item: AgentItem; physician: boolean; onChanged: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const [serious, setSerious] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState('')
+  const submit = async () => {
+    setBusy(true); setError('')
+    try {
+      const result = await flagAgentItem(item.item_id, serious, note)
+      setDone(result.state === 'shadow' && serious ? 'Flagged as serious — drafting went back to shadow.' : 'Flagged. It appears in the readiness review.')
+      setOpen(false); onChanged()
+    } catch (err) { setError(errorText(err, 'Could not flag this.')) } finally { setBusy(false) }
+  }
+  const earlier = item.flags.length
+  return <div className="pilot-agent-flag">
+    {done && <p className="pilot-decision" role="status">{done}</p>}
+    {!open ? <button type="button" className="button-quiet" onClick={() => setOpen(true)}>Flag this draft as wrong{earlier ? ` · flagged ${earlier}×` : ''}</button>
+      : <div className="pilot-inline-form">
+        <label><span>What was wrong? (optional)</span><input value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} disabled={busy} /></label>
+        {physician && <label className="pilot-check"><input type="checkbox" checked={serious} onChange={(event) => setSerious(event.target.checked)} disabled={busy} /> Serious — return drafting to shadow now</label>}
+        {error && <p className="error-banner" role="alert">{error}</p>}
+        <div className="onboarding-actions"><button className="button-primary" disabled={busy} onClick={() => void submit()}>Flag it</button><button className="text-button" onClick={() => setOpen(false)}>Cancel</button></div>
+      </div>}
+  </div>
+}
+
+function InformationRequestPanel({ request, senderName, onChanged, agentItem, physician = false }: { request: InformationRequest; senderName: string; onChanged: () => void; agentItem?: AgentItem; physician?: boolean }) {
   const [editing, setEditing] = useState(false)
   const [message, setMessage] = useState(request.draft_message)
   const [recipient, setRecipient] = useState(request.recipient ?? '')
@@ -677,6 +707,7 @@ function InformationRequestPanel({ request, senderName, onChanged }: { request: 
       {(request.status === 'sent' || request.status === 'partially_resolved') && <button className="text-button" disabled={busy} onClick={() => void run(() => reissueRequestLink(request.id, request.channel === 'email' && request.recipient ? 'send' : 'mark_sent'), true)}>{request.channel === 'email' && request.recipient ? `Email a new secure link` : 'New secure link'}</button>}
       {(request.status === 'sent' || request.status === 'partially_resolved') && <button className="text-button" disabled={busy} onClick={() => void run(() => resolveInformationRequest(request.id))}>Mark resolved</button>}
     </div>
+    {agentItem && <AgentItemFlag item={agentItem} physician={physician} onChanged={onChanged} />}
     {request.status !== 'resolved' && <div className="pilot-actions pilot-request-cancel">
       {!confirmCancel
         ? <button className="text-button pilot-danger-link" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel request…</button>
@@ -768,7 +799,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const changes = visitChanges
   // Where the referral stands comes from the server (the same statement Home and Patients use),
   // so no surface can say "complete" while anything is open.
-  const standing = detail.standing ?? { heading: 'Waiting for triage', still_open: null, readiness_text: 'Not triaged yet' }
+  const standing = detail.standing ?? { heading: 'Waiting for triage', still_open: null, readiness_text: 'Not triaged yet', next_step_now: null }
   const readiness = recommendation ? standing.readiness_text : null
   const timeline = historyHighlights(detail.history)
   // "Not specified" alone in a summary line doesn't say WHAT is unspecified.
@@ -850,7 +881,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
             {/* With a draft open, "Request information" would only fail (one draft per referral): edit the draft below instead. */}
             {canUse(actions, 'request_information') && !hasDraft && <button className={requestLeads ? 'button-primary' : 'button-secondary'} disabled={busy} onClick={() => openPanel('request')}>Request information</button>}
             {/* Staff paperwork hand-off. Physicians decide below; they don't flag for themselves. */}
-            {!physician && canUse(actions, 'mark_ready') && <button className={toVerify.length || requestLeads ? 'button-secondary' : 'button-primary'} disabled={busy} onClick={() => openPanel('ready')}>Ready for {doctor}</button>}
+            {!physician && canUse(actions, 'mark_ready') && <button className={toVerify.length || requestLeads || hasDraft ? 'button-secondary' : 'button-primary'} disabled={busy} onClick={() => openPanel('ready')}>Ready for {doctor}</button>}
             {!physician && canUse(actions, 'escalate') && <button className="button-secondary" disabled={busy} onClick={() => openPanel('escalate')}>Flag for {doctor}</button>}
           </div>}
 
@@ -922,7 +953,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           {!physician && !closed && <p className="muted-note">{doctor} makes the final accept, redirect, or decline decision, and decides fit, priority and visit type.</p>}
         </div>
 
-        {(detail.information_requests ?? []).filter((request) => request.status !== 'cancelled').map((request) => <InformationRequestPanel key={request.id} request={request} senderName={referral.sender.name} onChanged={() => void load()} />)}
+        {(detail.information_requests ?? []).filter((request) => request.status !== 'cancelled').map((request) => <InformationRequestPanel key={request.id} request={request} senderName={referral.sender.name} onChanged={() => void load()} agentItem={detail.agent_items?.[request.id]} physician={physician} />)}
         {(detail.sender_responses ?? []).length > 0 && <div className="pilot-panel"><h3>Replies from the referring office</h3><ul className="pilot-documents">{(detail.sender_responses ?? []).map((response) => <li key={response.id}><span>{response.message ?? 'Provided requested values'}</span><span className="muted-note">{response.items.map((item) => `${itemLabel(item.key, detail, item.label)}: ${item.value}${item.observed_date ? ` (${item.observed_date})` : ''}`).join('; ')} · {formatDateTime(response.created_at)}</span></li>)}</ul></div>}
       </aside>
 
@@ -953,7 +984,8 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
               <section><h3>Readiness</h3><ul className="clinical-list">
                 <li>{readiness}</li>
                 <li>{triage.requires_physician ? 'Needs physician judgment' : 'No physician judgment flagged'}</li>
-                <li>Suggested next step: {NEXT_STEP_LABELS[triage.next_step]}</li>
+                {/* The step that is next NOW (from the server's standing), hidden once closed. */}
+                {standing.next_step_now && <li>Next step: {standing.next_step_now}</li>}
               </ul></section>
             </div>
             <section className="clinical-block">
@@ -1004,7 +1036,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
     {/* The same practice agent, told explicitly which referral is on screen. Keyed by the
       * referral so moving between patients never carries one patient's framing into another. */}
     <PracticeAgentDock key={referral.id} status={status} navigate={navigate}
-      context={{ referralId: referral.id, patientName: referral.patient.name, referralType: referral.referral_type, closed, missing: missingItems.length }} />
+      context={{ referralId: referral.id, patientName: referral.patient.name, referralType: referral.referral_type, closed, missing: openRequests.length ? 0 : missingItems.length }} />
   </main>
 }
 

@@ -59,6 +59,8 @@ ADRENAL = {"referral_type": "Adrenal nodule", "good_fit": ["incidental adrenal n
 OSTEOPOROSIS = {"referral_type": "Osteoporosis", "good_fit": ["low bone density"], "modality": "econsult"}
 HYPERPARA = {"referral_type": "Hyperparathyroidism", "good_fit": ["raised calcium"], "modality": "unspecified"}
 KIDNEY_STONES = {"referral_type": "Kidney stones", "good_fit": ["recurrent kidney stones"], "modality": "either"}
+THYROID_ITEMS = [{"key": "thyroid_ultrasound", "value": "1.3 cm nodule on ultrasound (E2E)", "observed_date": RECENT},
+                 {"key": "tsh", "value": "TSH 2.0 mIU/L (E2E)", "observed_date": RECENT}]
 DIABETES_ITEMS = [{"key": "recent_a1c", "value": "HbA1c 8.4% (E2E)", "observed_date": RECENT},
                   {"key": "renal_function", "value": "eGFR 82 (E2E)", "observed_date": RECENT}]
 
@@ -144,6 +146,11 @@ class Seeder:
         sent = self.call("POST", f"/api/me/practice/information-requests/{request['id']}/send", role, {"mode": "mark_sent"})
         return sent["status_link"].rsplit("/r/", 1)[1]
 
+    def workflow_store_execute(self, sql: str, values: tuple) -> None:
+        from backend.pilot.store import PilotStore
+
+        PilotStore(workflow=self.workflow).execute([(sql, values)])
+
     def revise(self, rid: str, base: dict, **changes) -> dict:
         return self.call("PUT", f"/api/me/practice/rules/{rid}", "physician", {**base, **changes})
 
@@ -211,6 +218,31 @@ def reset() -> None:
            {"items": [{"key": "tsh", "value": "TSH 1.9 mIU/L (E2E)", "observed_date": RECENT}]})
     s.call("POST", f"/api/me/practice/referrals/{r['still_open']}/items/tsh/verify", "staff", {})
     s.call("POST", f"/api/me/practice/referrals/{r['still_open']}/mark-ready", "staff", {"note": "TSH verified (E2E)."})
+    # ---- Step 18: shadow history for the readiness review. Physician A has decided enough
+    # referrals over enough days to be eligible; physician B (below) has not. Includes real
+    # disagreements: a strong-fit decline, priority corrections and a visit-type correction.
+    history = []
+    for index in range(8):
+        rid = s.referral("staff", f"Hale History{index + 1}-E2E", "Diabetes management", "Type 2 diabetes not at goal.", DIABETES_ITEMS)
+        if index in (2, 5):
+            s.call("POST", f"/api/me/practice/referrals/{rid}/correct", "physician", {"suggested_priority": "soon"})
+        if index == 6:
+            s.call("POST", f"/api/me/practice/referrals/{rid}/correct", "physician", {"suggested_modality": "econsult"})
+        s.call("POST", f"/api/me/practice/referrals/{rid}/disposition", "physician", {"decision": "accept"})
+        history.append(rid)
+    for index, decision in enumerate(("accept", "accept", "decline")):
+        rid = s.referral("staff", f"Hart History{index + 1}-E2E", "Thyroid nodule", "1.3 cm thyroid nodule; please evaluate.", THYROID_ITEMS)
+        body = {"decision": decision} if decision == "accept" else {"decision": decision, "reason": "Better seen locally (E2E)."}
+        s.call("POST", f"/api/me/practice/referrals/{rid}/disposition", "physician", body)
+        if decision == "decline":
+            s.call("POST", f"/api/me/practice/referrals/{rid}/office-notified", "staff")
+        history.append(rid)
+    rid = s.referral("staff", "Hood History-E2E", "Adrenal nodule", "Incidental adrenal nodule on CT.")
+    s.call("POST", f"/api/me/practice/referrals/{rid}/disposition", "physician", {"decision": "accept"})
+    history.append(rid)
+    # Shadow began eight days ago (dev-only: the e2e database has no real elapsed time).
+    s.workflow_store_execute("UPDATE agent_lifecycle SET shadow_at = ? WHERE practice_id = ?",
+                             ((datetime.now(UTC) - timedelta(days=8)).isoformat(timespec="seconds"), practice_a["id"]))
     # ---- practice B: second physician, agent initializing, closed referrals only
     practice_b = s.physician("second_physician", NPI_B, "Riverside Nephrology (E2E)", "Nephrology")
     b = {
@@ -228,7 +260,7 @@ def reset() -> None:
         "practice_a": {"id": practice_a["id"], "name": "Northfield Endocrinology (E2E)",
                        "physician_name": status.get("physician_name"), "staff_label": "Front desk (E2E)"},
         "practice_b": {"id": practice_b["id"], "name": "Riverside Nephrology (E2E)"},
-        "referrals": r, "practice_b_referrals": b, "practice_proposal_id": proposal["id"],
+        "referrals": r, "practice_b_referrals": b, "practice_proposal_id": proposal["id"], "history": history,
         "private_markers": [PRIVATE_NOTE, "calcium level", "Vega Verify-E2E", "Rhee Ready-E2E", "Ito Isolated-E2E",
                             "Front desk (E2E)", "Thyroid ultrasound"],
     }
@@ -275,6 +307,36 @@ def shadow_second() -> None:
     print("step shadow-second-physician: done")
 
 
+def new_missing_referral() -> None:
+    """Staff enter a referral with a required item missing; triage runs and, when auto-drafting
+    is on, the agent drafts the request in the staff queue. The id is added to seed.json."""
+    guard()
+    s = Seeder(_accounts())
+    state = json.loads(STATE.read_text(encoding="utf-8"))
+    count = sum(1 for key in state["referrals"] if key.startswith("auto_draft"))
+    rid = s.referral("staff", f"Ada AutoDraft{count + 1}-E2E", "Thyroid nodule", "1.6 cm thyroid nodule; please evaluate.",
+                     [THYROID_ITEMS[1]])  # the ultrasound is missing
+    state["referrals"]["auto_draft" if not count else f"auto_draft_{count + 1}"] = rid
+    STATE.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    print("step new-missing-referral: done")
+
+
+def set_auto_draft(state_name: str) -> None:
+    guard()
+    s = Seeder(_accounts())
+    s.call("PUT", "/api/me/practice/activation/capabilities/auto_draft_requests", "physician",
+           {"state": state_name, "confirm": state_name == "active"})
+    print(f"step auto-draft-{state_name}: done")
+
+
+SEEDER_STEPS = {
+    "shadow-second-physician": lambda: shadow_second(),
+    "new-missing-referral": lambda: new_missing_referral(),
+    "activate-auto-draft": lambda: set_auto_draft("active"),
+    "shadow-auto-draft": lambda: set_auto_draft("shadow"),
+}
+
+
 def inspect(what: str, referral_id: str) -> None:
     guard()
     from backend.pilot.store import PilotStore
@@ -307,7 +369,7 @@ def main(argv: list[str]) -> int:
     if argv[0] == "reset":
         reset()
     elif argv[0] == "step" and len(argv) == 2:
-        shadow_second() if argv[1] == "shadow-second-physician" else step(argv[1])
+        SEEDER_STEPS[argv[1]]() if argv[1] in SEEDER_STEPS else step(argv[1])
     elif argv[0] == "inspect" and len(argv) == 3:
         inspect(argv[1], argv[2])
     else:

@@ -9,7 +9,7 @@
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { Page } from '@playwright/test'
-import { ROOT_DIR, type SeedState } from '../support/env.ts'
+import { ROOT_DIR, seedState, type SeedState } from '../support/env.ts'
 import { expect, referralPath, seedStep, test, type Actor } from '../support/fixtures.ts'
 
 const runName = (process.env.E2E_RUN_NAME || new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')).replace(/[^\w.-]/g, '-')
@@ -18,7 +18,7 @@ const main = (page: Page) => expect(page.locator('main').first()).toBeVisible()
 const card = (page: Page) => expect(page.locator('.next-step-card')).toBeVisible()
 const text = (value: string | RegExp) => (page: Page) => expect(page.getByText(value).first()).toBeVisible()
 
-type Shot = { name: string; actor: Actor; to: (seed: SeedState) => string; ready?: (page: Page) => Promise<void>; before?: () => void; mock?: 'loading' | 'error' }
+type Shot = { name: string; actor: Actor; to: (seed: SeedState) => string; ready?: (page: Page) => Promise<void>; before?: () => void; mock?: 'loading' | 'error'; act?: (page: Page) => Promise<void> }
 
 const SHOTS: Shot[] = [
   // Physician (practice admin)
@@ -56,6 +56,14 @@ const SHOTS: Shot[] = [
   { name: 'state-error-referral', actor: 'physician', mock: 'error', to: (s) => referralPath(s.referrals.ready), ready: (p) => expect(p.getByRole('alert')).toBeVisible() },
   // Added in the follow-up round (appended so earlier numbering is unchanged).
   { name: 'staff-referral-declined-notify', actor: 'staff', to: (s) => referralPath(s.referrals.declined_notify), ready: text('Not sent — notify the referring office') },
+  // Step 18 (appended): readiness review and activation.
+  { name: 'physician-readiness-review', actor: 'physician', before: () => seedStep('shadow-auto-draft'), to: () => '/me/agent?tab=readiness', ready: text('What your agent observed') },
+  { name: 'physician-readiness-confirm', actor: 'physician', to: () => '/me/agent?tab=readiness', ready: text('Eligible to turn on.'),
+    act: async (p) => { await p.locator('.pilot-capability', { hasText: 'Draft missing-information requests' }).getByRole('button', { name: 'Turn on' }).click(); await expect(p.getByText('Nothing is sent without staff.')).toBeVisible() } },
+  { name: 'second-physician-readiness-not-eligible', actor: 'second_physician', to: () => '/me/agent?tab=readiness', ready: text('Not eligible yet:') },
+  { name: 'staff-capabilities-readonly', actor: 'staff', before: () => seedStep('activate-auto-draft'), to: () => '/me/agent?tab=readiness', ready: text(/can change this\./) },
+  { name: 'staff-auto-drafted-request', actor: 'staff', before: () => seedStep('new-missing-referral'), to: () => referralPath(seedState().referrals.auto_draft!), ready: text(/drafted by .*’s agent/) },
+  { name: 'physician-agent-partly-active', actor: 'physician', to: () => '/me/agent', ready: text(/Partly active · drafting requests on/) },
 ]
 
 // E2E_ONLY=name,name captures just those screens (e.g. a follow-up round on affected screens);
@@ -84,6 +92,7 @@ test('capture the UI-review screens', async ({ as, seed }, testInfo) => {
     }
     await page.goto(shot.to(seed))
     await shot.ready?.(page)
+    await shot.act?.(page)
     if (!shot.mock) await page.waitForLoadState('networkidle').catch(() => undefined)
     await page.evaluate(() => document.fonts?.ready)
     const file = path.join(dir, `${String(index + 1).padStart(2, '0')}-${shot.name}.png`)
