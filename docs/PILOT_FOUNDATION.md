@@ -6,12 +6,13 @@ Demo mode is unchanged; see `AGENTS.md` for the mode rules.
 ## Revised pilot plan (foundation first)
 
 ```text
-sign in (Supabase)
+sign in (Supabase) → two-step sign-in (TOTP; required for every pilot user)
   → confirm professional profile (NPPES search by name or NPI → "This is me" → self-attested claim)
+  → Lamina approval of the request (or an operator invitation for that NPI) — invite-only
   → practice setup (prefilled from NPPES, confirmed/edited by the physician)
-  → practice membership (physician owner; staff via single-use invitation links)
-  → manual Lamina pilot approval (unchanged policy; staff inherit it)
+  → practice membership (physician owner; staff and other physicians via email invitations)
   → specialist workspace (/me/*): referrals, triage review, rules, practice
+(Accounts and access: docs/PILOT_ACCOUNTS.md.)
 ```
 
 Built in this pass: Steps 0, 0.5, 0.75, 1, 1.5, 1.75, 2, 3, 4. Not built: public practice page/agent,
@@ -37,7 +38,8 @@ actions, PCP accounts, specialist-to-specialist UX, agent-to-agent coordination.
 - `practices` — id, name, specialty, website, address, phone, contact_email, status, created_by_user_id.
 - `practice_members` — practice_id, user_id, physician_owner_scope_id (required for physicians), role
   (`physician`/`staff`), status. One active practice per account (pilot simplification).
-- `practice_invitations` — hashed single-use token, role `staff`, 14-day expiry, accepted/revoked.
+- `practice_invitations` — hashed single-use token, role `staff | physician`, invited email,
+  7-day expiry, accepted/revoked (see docs/PILOT_ACCOUNTS.md).
 - `intake_referrals` — practice_id, source (`manual`/`upload`/`public_form`), status, sender JSON
   (name, practice, contact, optional NPI, optional Lamina physician id), patient JSON (as submitted),
   referral_type (free string), reason, clinical context, sender priority, submitted items,
@@ -92,7 +94,8 @@ priority (an urgent sender flag is never downgraded); else routine.
 
 `physician_signed_in` / `staff_signed_in` (≤1 per 30 min), `physician_claimed_profile`,
 `practice_created`, `practice_updated`, `staff_invited`, `staff_joined`, `staff_invitation_revoked`,
-`staff_removed`, `referral_received`, `referral_triaged`, `recommendation_generated`,
+`member_deactivated` (was `staff_removed`; the accounts events are listed in docs/PILOT_ACCOUNTS.md),
+`referral_received`, `referral_triaged`, `recommendation_generated`,
 `missing_information_detected`, `recommendation_accepted|edited|rejected`, `information_requested`,
 `referral_escalated`, `referral_item_recorded`, `document_uploaded`, `document_viewed`,
 `referral_ready`, `referral_status_changed`, `referral_accepted|redirected|declined`,
@@ -133,16 +136,18 @@ Prerequisites: a Supabase project (email/password auth) and the repo installed p
    ```
 3. Start: `uvicorn backend.main:app --reload` (repo root) and `npm run dev` (frontend/). Check
    `http://127.0.0.1:8000/health` returns `"product_mode": "pilot"`.
-4. Open `http://127.0.0.1:5173/me`, create an account, confirm your NPPES profile, set up the practice.
+4. Open `http://127.0.0.1:5173/me`, request access (create an account), set up two-step
+   sign-in, and confirm your NPPES profile.
 5. Approve the physician (as an allow-listed admin, or locally):
    `python -m scripts.pilot_physicians list` then
    `python -m scripts.pilot_physicians approve <owner-scope-id> --operator <your-name>`.
+   Then set up the practice (practice setup opens only after approval).
 6. Add a referral rule (Referral rules), then enter a referral (Referrals → New referral).
-7. Invite staff from Practice → share the one-time link (`/me/join?invite=…`).
+7. Invite staff or another physician by email from Profile & practice → send the one-time link
+   (`/me/join?invite=…`) to that address.
 
-Private pilot invitations: approval stays manual. A simpler invite-only path (e.g. pre-approving
-specific NPIs or emails) is possible later but is **not** implemented, to avoid silently changing
-the approval policy.
+Invite-only: a new practice needs an operator invitation (email + NPI, which approves that NPI on
+confirmation) or an operator-approved request. See docs/PILOT_ACCOUNTS.md.
 
 ## Known follow-ups
 

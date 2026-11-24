@@ -66,7 +66,8 @@ test('physician-only destinations and controls are hidden for staff, never shown
   // with admin rights), still hidden -- never disabled -- for everyone else.
   assert.match(profile, /const admin = physician && Boolean\(status\.is_admin\)/)
   assert.match(profile, /\{admin && !editing && <button className="button-primary" onClick=\{\(\) => setEditing\(true\)\}>Edit practice/)
-  assert.match(profile, /\{admin && <section className="profile-section-v2">\s*<div className="profile-section-heading"><h2>Invite staff/)
+  assert.match(profile, /\{admin && <section className="profile-section-v2" aria-labelledby="invite-heading">\s*<div className="profile-section-heading"><h2 id="invite-heading">Invite someone/)
+  assert.match(profile, /\{member\.can_deactivate && deactivating !== member\.id && <button/, 'deactivation is offered only where the server allows it')
   const settings = slice(agent, 'export function PublicSettingsPage', '/* ----------------------------------------------------------------- metrics')
   assert.match(settings, /\{physician && <section className="pilot-card">/, 'staff see only the read-only preview')
   assert.doesNotMatch(settings, /disabled=\{!physician/, 'no disabled physician-only inputs')

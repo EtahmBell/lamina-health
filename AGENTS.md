@@ -89,6 +89,13 @@ Rules that keep the modes separate:
   (full access) and `staff` (intake and triage review; no rule edits, membership changes, identity
   changes, publication, or final accept/redirect/decline). Staff inherit the practice's approval gate.
 - All practice-scoped routes go through `backend/pilot/api.py: require_practice`.
+- Every pilot route requires an unrevoked session that passed TOTP MFA (Supabase `aal2`); only
+  status, invitation preview/accept, the lost-authenticator request and "sign out everywhere"
+  accept an `aal1` session. Practices are invite-only (operator invitation or operator-approved
+  request); invitations are email-bound, single use, 7 days. A staff account can never claim a
+  physician identity. Only a Lamina operator can reset a member's MFA. See `docs/PILOT_ACCOUNTS.md`.
+- `backend/dev_test_auth.py` (e2e test sign-in) is DEV-only: never import it from `backend.main`;
+  it refuses to install outside the e2e harness or in production.
 
 ## Pilot workflow integrity
 

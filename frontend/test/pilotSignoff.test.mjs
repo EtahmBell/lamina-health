@@ -67,8 +67,10 @@ test('a referral with received values lands on Verify as the primary action', ()
 })
 
 test('layout fixes: join header, sender notice spacing, setup button spacing', () => {
-  assert.match(slice(pilot, 'function JoinPracticePage', 'function ProfilePage'), /<ClaimShell navigate=\{navigate\} physicianLinks=\{false\}>/)
-  assert.doesNotMatch(slice(pilot, 'function JoinPracticePage', '\n}\n'), /<ClaimShell navigate=\{navigate\}>/, 'every join-page shell hides it')
+  // The join page now lives in PilotAccess.tsx: every state renders in Panel, which hides the physician links.
+  const access = source('PilotAccess.tsx')
+  assert.match(slice(access, 'function Panel', '\n}\n'), /<ClaimShell navigate=\{navigate\} physicianLinks=\{false\}>/)
+  assert.doesNotMatch(slice(access, 'export function JoinPracticePage', '\n}\n'), /<ClaimShell/, 'every join-page state uses Panel')
   assert.match(source('PublicPages.tsx'), /public-sender-notice/)
   assert.match(source('PilotSetup.tsx'), /pilot-setup-staff-actions/)
   const css = source('styles.css')

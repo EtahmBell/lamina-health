@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useAuth } from './AuthProvider.tsx'
 import { ApiError } from './api.ts'
-import { ClaimShell, signInPath, signUpPath, SignInPage, SignUpPage } from './Claim.tsx'
+import { ClaimShell, signInPath, signUpPath } from './Claim.tsx'
 import { greetingPrefix, timeAwareGreeting } from './greeting.ts'
 import { LaminaMark } from './LaminaMark.tsx'
 import { PhysicianOnboardingPage } from './Onboarding.tsx'
+import { AccessEndedPage, IdleWarning, JoinPracticePage, MfaPage, PilotSignInPage, PilotSignUpPage, SecuritySection, signInWithReason, useIdleSignOut } from './PilotAccess.tsx'
 import { AgentPage, MetricsPage, PublicSettingsPage } from './PilotAgent.tsx'
 import { NetworkPage } from './PilotNetwork.tsx'
 import { SetupPage } from './PilotSetup.tsx'
@@ -12,10 +13,10 @@ import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavI
 import { useOnPilotDataChange, usePilotDataVersion } from './pilotSync.ts'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
-  acceptInvitation, correctTriage, createPractice, createReferral, decideReferral,
+  correctTriage, createPractice, createReferral, decideReferral, deactivateMember,
   escalateReferral, flagAgentItem, getPilotStatus, markOfficeNotified, getPracticeMembers, getPracticeRules, getReferral, markReferralReady, markReferralSeen, resolveCorrectionConflict,
-  inviteStaff, listReferrals, openReferralDocument, previewInvitation, recordReferralItem,
-  removeStaffMember, requestInformation, setMemberAdmin, retriageReferral, revokeInvitation, updatePractice, uploadReferralDocument,
+  inviteMember, listReferrals, openReferralDocument, recordReferralItem,
+  requestInformation, setMemberAdmin, retriageReferral, revokeInvitation, updatePractice, uploadReferralDocument,
   type EffectiveTriage, type Fit, type Modality, type NextStep, type PilotStatus, type PracticeFields,
   type AgentItem, type PracticeInvitation, type PracticeMember, type PracticeRule, type Priority, type OfficeNotification, type ReferralDetail, type TriageChange,
   type ReferralSummary, type RequirementAssessment, getHome, teachAgent, editInformationRequest,
@@ -28,7 +29,7 @@ import {
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
   resolvePilotRoute, resolveSetupStage, itemKindLabel, layerNote, representationItemText, statementText, STATUS_LABELS,
-  dockMessagesFrom, displayTemplate, setReferralPrefill, takeReferralPrefill, turnsForReferral,
+  dockMessagesFrom, displayTemplate, INVITATION_DAYS, invitationLink, readyAnywayLine, readyCheck, setReferralPrefill, takeReferralPrefill, turnsForReferral,
   type PatientWorkItem, type ReferralForm,
 } from './pilotState.ts'
 
@@ -58,7 +59,7 @@ export function PilotApp({ path, params, navigate }: { path: string; params: URL
   useEffect(() => { document.title = 'Lamina' }, [])
   switch (route.kind) {
     case 'redirect': return <main className="page-shell owner-gate"><p className="muted-note">Opening Lamina…</p></main>
-    case 'auth': return route.page === 'sign-in' ? <SignInPage navigate={navigate} params={params} /> : <SignUpPage navigate={navigate} params={params} />
+    case 'auth': return route.page === 'sign-in' ? <PilotSignInPage navigate={navigate} params={params} /> : <PilotSignUpPage navigate={navigate} params={params} />
     case 'join': return <JoinPracticePage navigate={navigate} params={params} />
     case 'onboarding':
     case 'home': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="home" agentDock><PilotHomePage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
@@ -81,33 +82,49 @@ export function PilotApp({ path, params, navigate }: { path: string; params: URL
 
 /* ------------------------------------------------------------------ gate */
 
-/** Server-derived gate: sign in → confirm profile → practice setup → approval → workspace. */
+/** Server-derived gate: sign in → two-step sign-in → (invitation | confirm profile → approved
+ * request → practice setup) → approval → workspace. Invite-only: no open self-service practice. */
 function PilotGate({ navigate, params, children }: { navigate: Navigate; params: URLSearchParams; children: (status: PilotStatus, reload: () => void) => ReactNode }) {
-  const { configured, loading, user } = useAuth()
+  const { configured, loading, user, signOut } = useAuth()
   const [status, setStatus] = useState<PilotStatus | null>(null)
   const [error, setError] = useState('')
+  const [signedOut, setSignedOut] = useState(false)
   const reload = useCallback(() => {
-    getPilotStatus().then((next) => { setStatus(next); setError('') }).catch((err) => setError(errorText(err, 'Could not open your workspace')))
+    getPilotStatus().then((next) => { setStatus(next); setError(''); setSignedOut(false) }).catch((err) => {
+      // A session revoked elsewhere ("sign out everywhere", deactivation, MFA reset): say so plainly.
+      if (err instanceof ApiError && err.status === 401) setSignedOut(true)
+      setError(errorText(err, 'Could not open your workspace'))
+    })
   }, [])
-  useEffect(() => { setStatus(null); if (user) reload() }, [user, reload])
+  // Keyed on the account, not the session object: a token refresh must not reload (or remount) the workspace.
+  useEffect(() => { setStatus(null); if (user) reload() }, [user?.id, reload]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!configured) return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Authentication is not configured in this environment.</p></div></ClaimShell>
   if (loading) return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Checking your session…</p></div></ClaimShell>
   if (!user) return <ClaimShell navigate={navigate}><div className="onboarding-panel">
-    <p className="eyebrow">Lamina pilot</p>
+    <p className="eyebrow">Lamina pilot · invite-only</p>
     <h1>Your physician agent</h1>
     <p>Lamina works alongside you and your practice. It learns how you work, prepares what it can (today, starting with incoming referrals), and brings you only the decisions that need you.</p>
     <div className="onboarding-actions">
-      <button className="button-primary" onClick={() => navigate(signUpPath(pilotPaths.home))}>Create account <span>→</span></button>
-      <button className="text-button" onClick={() => navigate(signInPath(pilotPaths.home))}>Sign in</button>
+      <button className="button-primary" onClick={() => navigate(signInPath(pilotPaths.home))}>Sign in <span>→</span></button>
+      <button className="text-button" onClick={() => navigate(signUpPath(pilotPaths.home))}>Request pilot access</button>
     </div>
-    <p className="muted-note">Joining a practice as staff? Open the invitation link your physician sent you.</p>
+    <p className="muted-note">Joining a practice? Open the invitation link you were sent. New practices are set up by invitation from the Lamina team, or after the team approves a request.</p>
   </div></ClaimShell>
-  if (error) return <ClaimShell navigate={navigate}><div className="onboarding-panel"><div className="error-banner" role="alert">{error}</div><button className="text-button" onClick={reload}>Try again</button></div></ClaimShell>
+  if (error) return <ClaimShell navigate={navigate}><div className="onboarding-panel">
+    {signedOut && <><p className="eyebrow">Lamina pilot</p><h1>You’ve been signed out</h1></>}
+    <div className="error-banner" role="alert">{error}</div>
+    {signedOut
+      ? <button className="button-primary" onClick={() => void signOut().then(() => navigate(signInWithReason('revoked')))}>Sign in again <span>→</span></button>
+      : <button className="text-button" onClick={reload}>Try again</button>}
+  </div></ClaimShell>
   if (!status) return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Opening your workspace…</p></div></ClaimShell>
 
   switch (status.next_step) {
-    case 'physician_onboarding': return <PhysicianOnboardingPage navigate={navigate} params={params} onConfirmed={reload} />
+    case 'mfa': return <MfaPage status={status} navigate={navigate} onVerified={reload} />
+    case 'access_ended': return <AccessEndedPage status={status} navigate={navigate} />
+    case 'physician_onboarding': return <PhysicianOnboardingPage navigate={navigate} params={params} onConfirmed={reload}
+      context={status.invitation ? <p className="pilot-access-note" role="note">You’re joining <strong>{status.invitation.practice_name}</strong> as a physician. Confirm your own professional profile — only you can; staff accounts can’t.</p> : undefined} />
     case 'practice_setup': return <PracticeSetupPage status={status} navigate={navigate} onCreated={reload} />
     case 'pilot_pending':
     case 'practice_pending': return <PendingPage status={status} navigate={navigate} reload={reload} />
@@ -159,48 +176,24 @@ function PracticeSetupPage({ status, navigate, onCreated }: { status: PilotStatu
 
 function PendingPage({ status, navigate, reload }: { status: PilotStatus; navigate: Navigate; reload: () => void }) {
   const staff = status.next_step === 'practice_pending'
+  // No practice yet: an access request the Lamina team reviews (invite-only).
+  if (!status.practice) return <ClaimShell navigate={navigate}><div className="onboarding-panel">
+    <p className="eyebrow">Pilot access request</p>
+    <h1>Your request is with the Lamina team</h1>
+    <p>Your professional profile is confirmed. Lamina opens new practices by invitation or after the team reviews a request; once yours is approved, you’ll set up your practice here.</p>
+    <p className="muted-note">You don’t need to do anything else. No referral or patient information is stored until then.</p>
+    <button className="text-button" onClick={reload}>Check status again</button>
+  </div></ClaimShell>
   return <ClaimShell navigate={navigate}><div className="onboarding-panel">
     <p className="eyebrow">Pilot approval</p>
     <h1>{status.practice?.name ?? 'Your practice'} is awaiting approval</h1>
     <p>{staff
       ? 'You’ve joined this practice. Its workspace opens once Lamina approves the practice’s physician.'
+      : status.role === 'physician' && !status.is_admin
+      ? 'You’ve joined this practice and confirmed your professional profile. Your workspace opens here once the Lamina team approves your physician account.'
       : 'Your professional profile is confirmed and your practice is set up. Lamina is onboarding a small number of pilot practices; your workspace opens here once the team approves your account.'}</p>
     <p className="muted-note">No referral or patient information is available until approval.</p>
     <button className="text-button" onClick={reload}>Check status again</button>
-  </div></ClaimShell>
-}
-
-function JoinPracticePage({ navigate, params }: { navigate: Navigate; params: URLSearchParams }) {
-  const { configured, loading, user } = useAuth()
-  const [token] = useState(() => params.get('invite') ?? '')
-  const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewInvitation>> | null>(null)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const returnHere = `${pilotPaths.join}?invite=${encodeURIComponent(token)}`
-  useEffect(() => {
-    if (!user || !token) return
-    previewInvitation(token).then(setPreview).catch((err) => setError(errorText(err, 'This invitation could not be opened.')))
-  }, [user, token])
-  if (!configured || loading) return <ClaimShell navigate={navigate} physicianLinks={false}><div className="onboarding-panel"><p className="muted-note">Checking your session…</p></div></ClaimShell>
-  if (!token) return <ClaimShell navigate={navigate} physicianLinks={false}><div className="onboarding-panel"><h1>Invitation link missing</h1><p>Open the full invitation link your physician sent you.</p></div></ClaimShell>
-  if (!user) return <ClaimShell navigate={navigate} physicianLinks={false}><div className="onboarding-panel">
-    <p className="eyebrow">Practice invitation</p><h1>Join your practice on Lamina</h1>
-    <p>Create an account or sign in to accept this staff invitation.</p>
-    <div className="onboarding-actions">
-      <button className="button-primary" onClick={() => navigate(signUpPath(returnHere))}>Create account <span>→</span></button>
-      <button className="text-button" onClick={() => navigate(signInPath(returnHere))}>I already have an account</button>
-    </div>
-  </div></ClaimShell>
-  const accept = async () => {
-    setBusy(true); setError('')
-    try { await acceptInvitation(token); navigate(pilotPaths.home) } catch (err) { setError(errorText(err, 'Could not accept this invitation.')) } finally { setBusy(false) }
-  }
-  return <ClaimShell navigate={navigate} physicianLinks={false}><div className="onboarding-panel">
-    <p className="eyebrow">Practice invitation</p>
-    <h1>{preview?.practice_name ? `Join ${preview.practice_name}` : 'Join a practice'}</h1>
-    {preview && <p>You’ll join as staff{preview.practice_specialty ? ` · ${preview.practice_specialty}` : ''}. Staff can enter and review referrals; physicians make the final decisions.</p>}
-    {error && <p className="error-banner" role="alert">{error}</p>}
-    {preview && <button className="button-primary" disabled={busy} onClick={() => void accept()}>{busy ? 'Joining…' : 'Accept invitation'} <span>→</span></button>}
   </div></ClaimShell>
 }
 
@@ -224,15 +217,22 @@ function PilotShell({ status, navigate, section, agentDock = false, children }: 
   const { user, signOut } = useAuth()
   const me = accountIdentity(status, user?.email)
   const physician = status.role === 'physician'
+  // Session safety: idle sign-out on this device, with a warning first.
+  const onIdle = useCallback(() => { void signOut().then(() => navigate(signInWithReason('idle'))) }, [signOut, navigate])
+  const idle = useIdleSignOut(onIdle)
   const account = <AccountMenu initials={me.initials} name={me.name} items={[
     { label: 'Profile & practice', onSelect: () => navigate(pilotPaths.practice) },
     ...(physician ? [{ label: 'Public physician profile', onSelect: () => navigate(pilotPaths.publicProfile) }, { label: 'Pilot metrics', onSelect: () => navigate(pilotPaths.metrics) }] : []),
+    { label: 'Sign-in & security', onSelect: () => navigate(`${pilotPaths.practice}#security`) },
     'divider',
     { note: `${status.practice?.name ?? 'Your practice'} · ${me.role}` },
     ...(user?.email ? [{ note: user.email }] : []),
     { label: 'Sign out', onSelect: () => void signOut().then(() => navigate(pilotPaths.home)) },
   ]} />
-  return <LaminaShell items={navFor(physician, physicianLabel(status.physician_name))} section={section} navigate={navigate} homePath={pilotPaths.home} account={account} status={`Pilot · ${me.role}`} agentDock={agentDock}>{children}</LaminaShell>
+  return <LaminaShell items={navFor(physician, physicianLabel(status.physician_name))} section={section} navigate={navigate} homePath={pilotPaths.home} account={account} status={`Pilot · ${me.role}`} agentDock={agentDock}>
+    {idle.warning && <IdleWarning onStay={idle.stay} />}
+    {children}
+  </LaminaShell>
 }
 
 /* ------------------------------------------------------------------ home */
@@ -790,7 +790,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
   const closed = isClosed(referral.status)
   // Received values to verify: in that state Verify is THE next step (and the primary action).
   const toVerify = !closed && canUse(actions, 'verify_item') ? (recommendation?.requirements ?? []).filter((item) => item.state === 'sender_reported') : []
-  const missingRequired = (recommendation?.requirements ?? []).filter((item) => item.required && item.state !== 'satisfied').map((item) => item.label)
+  const readyOpen = readyCheck(recommendation?.requirements ?? [])
   const handoffEvent = [...detail.history].reverse().find((event) => event.event_type === 'referral_marked_ready' || event.event_type === 'referral_escalated')
   const corrections = detail.corrections ?? []
   const overridden = (field: string, differs: boolean, laminaValue: string) => {
@@ -870,7 +870,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
             </div>}
           </div>)}
           {corrections.length > 0 && <p className="pilot-decision">Corrected: {corrections.map(correctionText).join('; ')}</p>}
-          {referral.handoff ? <p className="pilot-decision">{referral.handoff.kind === 'ready' ? `Marked ready for ${doctor}` : `Flagged for ${doctor}`} by {handoffEvent ? actorText(handoffEvent) : 'a practice member'} · {formatDateTime(referral.handoff.at)}{referral.handoff.note ? ` — “${referral.handoff.note}”` : ''}{referral.handoff.missing_items?.length ? ` · still missing ${referral.handoff.missing_items.join(', ')}` : ''}</p>
+          {referral.handoff ? <p className="pilot-decision">{referral.handoff.kind === 'ready' ? `Marked ready for ${doctor}` : `Flagged for ${doctor}`} by {handoffEvent ? actorText(handoffEvent) : 'a practice member'} · {formatDateTime(referral.handoff.at)}{referral.handoff.note ? ` — “${referral.handoff.note}”` : ''}{referral.handoff.missing_items?.length ? ` · still missing ${referral.handoff.missing_items.join(', ')}` : ''}{referral.handoff.unverified_items?.length ? ` · received, not verified: ${referral.handoff.unverified_items.join(', ')}` : ''}</p>
             : referral.escalated_at && <p className="pilot-decision">Flagged for {doctor}{referral.escalation_note ? ` — “${referral.escalation_note}”` : ''}</p>}
           {detail.legacy_review && <p className="muted-note">{detail.legacy_review.kind === 'staff_review' ? 'Staff review' : 'Physician review'} by {detail.legacy_review.actor_name} · {formatDateTime(detail.legacy_review.created_at)} — from the retired approval step{detail.legacy_review.kind === 'staff_review' ? '; not a physician sign-off' : ''}.</p>}
 
@@ -901,13 +901,15 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           {panel === 'ready' && <div className="pilot-panel">
             <h4>Ready for {doctor}</h4>
             <p className="muted-note">Says the paperwork is done. {doctor} still decides fit, priority and visit type.</p>
-            {/* Required items still missing: allowed, but only once staff confirm by name; recorded in the history and the hand-off note. */}
-            {missingRequired.length > 0 && <div className="pilot-ready-missing" role="group" aria-label="Required items still missing">
-              <p><strong>Still missing:</strong> {missingRequired.join(', ')}.{hasDraft ? ` A request for ${missingRequired.length === 1 ? 'it' : 'them'} is drafted but not sent.` : ''}</p>
-              <label className="pilot-check"><input type="checkbox" checked={readyAnyway} onChange={(event) => setReadyAnyway(event.target.checked)} /> Mark ready anyway — {doctor} will see that {missingRequired.length === 1 ? 'it is' : 'they are'} still missing</label>
+            {/* Required items not yet in hand: allowed, but only once staff confirm them by name (still missing AND
+                received but not verified, listed separately); recorded in the history and the hand-off note. */}
+            {readyOpen.all.length > 0 && <div className="pilot-ready-missing" role="group" aria-label="Required items not yet verified">
+              {readyOpen.missing.length > 0 && <p><strong>Still missing:</strong> {readyOpen.missing.join(', ')}.{hasDraft ? ` A request for ${readyOpen.missing.length === 1 ? 'it' : 'them'} is drafted but not sent.` : ''}</p>}
+              {readyOpen.unverified.length > 0 && <p><strong>Received, not verified:</strong> {readyOpen.unverified.join(', ')}. Verify {readyOpen.unverified.length === 1 ? 'it' : 'them'} under “What’s needed” first, or confirm below.</p>}
+              <label className="pilot-check"><input type="checkbox" checked={readyAnyway} onChange={(event) => setReadyAnyway(event.target.checked)} /> {readyAnywayLine(readyOpen, doctor)}</label>
             </div>}
             <textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder={`Optional note for ${doctor}`} aria-label={`Note for ${doctor}`} />
-            <div className="onboarding-actions"><button className="button-primary" disabled={busy || (missingRequired.length > 0 && !readyAnyway)} onClick={() => void act(() => markReferralReady(referral.id, note, missingRequired.length ? missingRequired : undefined))}>Mark ready</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
+            <div className="onboarding-actions"><button className="button-primary" disabled={busy || (readyOpen.all.length > 0 && !readyAnyway)} onClick={() => void act(() => markReferralReady(referral.id, note, readyOpen.all.length ? readyOpen.all : undefined))}>Mark ready</button><button className="text-button" onClick={() => setPanel(null)}>Cancel</button></div>
           </div>}
           {panel === 'request' && <div className="pilot-panel">
             <h4>Request information</h4>
@@ -1058,7 +1060,11 @@ function ProfilePage({ status, reload, navigate }: { status: PilotStatus; reload
   const [members, setMembers] = useState<PracticeMember[] | null>(null)
   const [invitations, setInvitations] = useState<PracticeInvitation[]>([])
   const [label, setLabel] = useState('')
-  const [link, setLink] = useState('')
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState<'staff' | 'physician'>('staff')
+  const [created, setCreated] = useState<{ link: string; email: string; role: 'staff' | 'physician'; expires_at: string } | null>(null)
+  const [deactivating, setDeactivating] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(false)
   const physician = status.role === 'physician'
@@ -1068,16 +1074,25 @@ function ProfilePage({ status, reload, navigate }: { status: PilotStatus; reload
     .then(() => { void load(); if (member.is_you) reload() })
     .catch((err) => setError(errorText(err, makeAdmin ? 'Could not make this physician an admin.' : 'Could not remove admin rights.')))
   const identity = status.physician_onboarding.confirmed_identity
-  const load = () => getPracticeMembers().then((result) => { setMembers(result.members); setInvitations(result.invitations) }).catch((err) => setError(errorText(err, 'Could not load members')))
+  const load = () => getPracticeMembers().then((result) => { setMembers(result.members); setInvitations(result.invitations) }).catch((err) => setError(errorText(err, 'Could not load the team')))
   useEffect(() => { void load() }, [])
+  useEffect(() => { if (window.location.hash === '#security') document.getElementById('security-heading')?.scrollIntoView() }, [])
   useOnPilotDataChange(() => void load())
   const invite = async (event: FormEvent) => {
-    event.preventDefault(); setError('')
+    event.preventDefault(); setError(''); setCreated(null)
+    if (!email.trim()) { setError('Enter the email address to invite.'); return }
+    setBusy(true)
     try {
-      const created = await inviteStaff(label.trim())
-      setLink(`${window.location.origin}${pilotPaths.join}?invite=${encodeURIComponent(created.token)}`)
-      setLabel(''); void load()
-    } catch (err) { setError(errorText(err, 'Could not create the invitation.')) }
+      const result = await inviteMember(role, email.trim(), label.trim())
+      // Shown once, here only: the link is never stored or shown again.
+      setCreated({ link: invitationLink(window.location.origin, result.token), email: result.email, role: result.role, expires_at: result.expires_at })
+      setLabel(''); setEmail(''); void load()
+    } catch (err) { setError(errorText(err, 'Could not create the invitation.')) } finally { setBusy(false) }
+  }
+  const deactivate = async (member: PracticeMember) => {
+    setBusy(true); setError('')
+    try { const view = await deactivateMember(member.id); setMembers(view.members); setInvitations(view.invitations); setDeactivating(null) }
+    catch (err) { setError(errorText(err, 'Could not deactivate this member.')) } finally { setBusy(false) }
   }
   const practice = status.practice
   const pending = invitations.filter((item) => item.state === 'pending')
@@ -1120,30 +1135,48 @@ function ProfilePage({ status, reload, navigate }: { status: PilotStatus; reload
       </dl>
     </section>}
 
-    <section className="profile-section-v2">
-      <div className="profile-section-heading"><h2>Team</h2></div>
-      {!members && <p className="profile-section-empty">Loading…</p>}
-      {members && <div className="profile-item-list">{members.map((member) => <div className="profile-item-row" key={member.id}>
+    <section className="profile-section-v2" aria-labelledby="team-heading">
+      <div className="profile-section-heading"><h2 id="team-heading">Team</h2></div>
+      {!members && !error && <p className="profile-section-empty" role="status">Loading the team…</p>}
+      {members && <div className="profile-item-list">{members.map((member) => <div className="profile-item-row pilot-member" key={member.id}>
         <div><strong>{member.label ?? (member.role === 'physician' ? 'Physician' : 'Staff member')}</strong><p>{member.role === 'physician' ? 'Physician' : 'Staff'}{member.is_admin ? ' · admin' : ''}{member.is_you ? ' · you' : ''}</p><small>Joined {formatDate(member.joined_at)}</small></div>
-        {admin && member.role === 'staff' && <button className="text-button" onClick={() => void removeStaffMember(member.id).then(load).catch((err) => setError(errorText(err, 'Could not remove member.')))}>Remove</button>}
-        {admin && member.role === 'physician' && !member.is_admin && <button className="text-button" onClick={() => changeAdmin(member, true)}>Make admin</button>}
-        {admin && member.role === 'physician' && member.is_admin && members.filter((item) => item.is_admin).length > 1 && <button className="text-button" onClick={() => changeAdmin(member, false)}>{member.is_you ? 'Step down as admin' : 'Remove admin'}</button>}
+        {admin && <div className="pilot-member-actions">
+          {member.role === 'physician' && !member.is_admin && <button className="text-button" disabled={busy} onClick={() => changeAdmin(member, true)}>Make admin</button>}
+          {member.role === 'physician' && member.is_admin && members.filter((item) => item.is_admin).length > 1 && <button className="text-button" disabled={busy} onClick={() => changeAdmin(member, false)}>{member.is_you ? 'Step down as admin' : 'Remove admin'}</button>}
+          {member.can_deactivate && deactivating !== member.id && <button className="text-button danger-text" disabled={busy} onClick={() => setDeactivating(member.id)}>Deactivate…</button>}
+        </div>}
+        {deactivating === member.id && <div className="pilot-panel pilot-deactivate" role="group" aria-label={`Deactivate ${member.label ?? 'this member'}`}>
+          <p><strong>Deactivate {member.label ?? 'this member'}?</strong> Their access ends now, on every device. Their past work stays in the history under their name. To bring them back, invite them again.</p>
+          <div className="pilot-actions"><button className="button-primary" disabled={busy} onClick={() => void deactivate(member)}>{busy ? 'Deactivating…' : 'Deactivate'}</button><button className="text-button" disabled={busy} onClick={() => setDeactivating(null)}>Cancel</button></div>
+        </div>}
       </div>)}
-      {admin && pending.map((item) => <div className="profile-item-row" key={item.id}>
-        <div><strong>{item.label ?? 'Staff invitation'}</strong><p>Invitation pending</p><small>Expires {formatDate(item.expires_at)}</small></div>
-        <button className="text-button" onClick={() => void revokeInvitation(item.id).then(load).catch((err) => setError(errorText(err, 'Could not revoke.')))}>Revoke</button>
+      {admin && pending.map((item) => <div className="profile-item-row pilot-invitation" key={item.id}>
+        <div><strong>{item.email ?? item.label ?? 'Invitation'}</strong><p>Invited as {item.role === 'physician' ? 'a physician' : 'staff'}{item.label && item.email ? ` · ${item.label}` : ''} · pending</p><small>Expires {formatDate(item.expires_at)}{item.invited_by_name ? ` · invited by ${item.invited_by_name}` : ''}</small></div>
+        <button className="text-button" disabled={busy} onClick={() => void revokeInvitation(item.id).then(load).catch((err) => setError(errorText(err, 'Could not revoke.')))}>Revoke</button>
       </div>)}</div>}
+      {members && admin && pending.length === 0 && members.length === 1 && <p className="profile-section-empty">It’s just you so far. Invite your staff or another physician below.</p>}
     </section>
 
-    {physician && !admin && <p className="profile-section-explainer">A practice admin manages the team and practice details. You still confirm clinical statements and decide referrals.</p>}
-    {admin && <section className="profile-section-v2">
-      <div className="profile-section-heading"><h2>Invite staff</h2></div>
-      <p className="profile-section-explainer">Staff can enter referrals, attach documents, and review triage. Only physicians accept, redirect, or decline referrals and change referral rules. Admins manage the team and practice details; to hand admin over, make another physician an admin, then step down.</p>
-      <form className="auth-form pilot-form pilot-invite" onSubmit={(event) => void invite(event)}>
-        <label><span>Name or role (for your reference)</span><input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="e.g. Maria — front desk" /></label>
-        <button className="button-primary" type="submit">Create invitation link</button>
+    {!admin && <p className="profile-section-explainer">A practice admin manages the team and practice details.{physician ? ' You still confirm clinical statements and decide referrals.' : ''}</p>}
+    {admin && <section className="profile-section-v2" aria-labelledby="invite-heading">
+      <div className="profile-section-heading"><h2 id="invite-heading">Invite someone</h2></div>
+      <p className="profile-section-explainer">Staff can enter referrals, attach documents, and review triage. Physicians confirm their own professional profile, have their own agent, and decide referrals; they aren’t admins unless you make them one. Each person signs up with their own account and sets up two-step sign-in — never share a login.</p>
+      <form className="auth-form pilot-form pilot-invite" onSubmit={(event) => void invite(event)} aria-busy={busy}>
+        <fieldset className="pilot-role-choice"><legend>Invite as</legend>
+          <label className="pilot-check"><input type="radio" name="invite-role" checked={role === 'staff'} onChange={() => setRole('staff')} disabled={busy} /> Staff</label>
+          <label className="pilot-check"><input type="radio" name="invite-role" checked={role === 'physician'} onChange={() => setRole('physician')} disabled={busy} /> Physician</label>
+        </fieldset>
+        <label><span>Their email address</span><input type="email" autoComplete="off" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} placeholder="name@practice.org" /></label>
+        <label><span>Name or role (optional, for your reference)</span><input value={label} onChange={(event) => setLabel(event.target.value)} disabled={busy} placeholder="e.g. Maria — front desk" /></label>
+        <button className="button-primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create invitation'}</button>
       </form>
-      {link && <div className="pilot-panel"><p><strong>Share this link with your staff member.</strong> It works once and expires in 14 days. It won’t be shown again.</p><code className="pilot-link">{link}</code><button className="text-button" onClick={() => void navigator.clipboard?.writeText(link)}>Copy link</button></div>}
+      {created && <div className="pilot-panel pilot-invite-created" role="status">
+        <p><strong>Send this link to {created.email}.</strong> Only that email address can use it, once, until {formatDate(created.expires_at)} ({INVITATION_DAYS} days). It won’t be shown again — if it’s lost, revoke it and invite again.</p>
+        <label className="pilot-link-field"><span className="sr-only">Invitation link</span><input readOnly value={created.link} onFocus={(event) => event.currentTarget.select()} /></label>
+        <div className="pilot-actions"><button className="text-button" onClick={() => void navigator.clipboard?.writeText(created.link)}>Copy link</button><button className="button-secondary" onClick={() => setCreated(null)}>Done — hide the link</button></div>
+      </div>}
     </section>}
+
+    <SecuritySection status={status} navigate={navigate} />
   </main>
 }

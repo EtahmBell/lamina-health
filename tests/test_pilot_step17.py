@@ -287,19 +287,19 @@ def test_practice_admin_creator_default_transfer_and_multiple_admins(pilot: Pilo
     members = pilot.get("/api/me/practice/members", "user-b").json()["members"]
     assert [m["is_admin"] for m in members if m["is_you"]] == [False]
     # A non-admin physician manages neither membership nor settings ...
-    assert pilot.post("/api/me/practice/invitations", "user-b", {"label": "x"}).status_code == 403
+    assert pilot.post("/api/me/practice/invitations", "user-b", {"label": "x", "email": "x@example.test"}).status_code == 403
     assert _put(pilot, f"{BASE}/practice-settings", "user-b", {"allow_physician_loosening": True}).status_code == 403
     assert _put(pilot, f"/api/me/practice/members/{other_id}/admin", "user-b", {"is_admin": True}).status_code == 403
     # ... until an admin grants it. Several admins are allowed.
     assert _put(pilot, f"/api/me/practice/members/{other_id}/admin", "user-a", {"is_admin": True}).status_code == 200
-    assert pilot.post("/api/me/practice/invitations", "user-b", {"label": "Desk"}).status_code == 201
+    assert pilot.post("/api/me/practice/invitations", "user-b", {"label": "Desk", "email": "desk@example.test"}).status_code == 201
     admins = [m for m in pilot.get("/api/me/practice/members", "user-a").json()["members"] if m["is_admin"]]
     assert len(admins) == 2
     # Transfer: the creator steps down; the practice keeps an admin.
     self_id = pilot.store.membership_for_user("user-a")["id"]
     assert _put(pilot, f"/api/me/practice/members/{self_id}/admin", "user-a", {"is_admin": False}).status_code == 200
     assert pilot.status("user-a")["is_admin"] is False
-    assert pilot.post("/api/me/practice/invitations", "user-a", {"label": "x"}).status_code == 403
+    assert pilot.post("/api/me/practice/invitations", "user-a", {"label": "x", "email": "x@example.test"}).status_code == 403
     # The last admin can't step down.
     last = _put(pilot, f"/api/me/practice/members/{other_id}/admin", "user-b", {"is_admin": False})
     assert last.status_code == 409 and _code(last) == "last_admin", last.text
@@ -481,8 +481,8 @@ def test_representation_is_practice_isolated(pilot: Pilot) -> None:
     pilot.ready_physician()
     proposal = _setup_thyroid(pilot)["proposals"][0]
     pilot.confirm_physician("user-b", NPI_B)
-    pilot.create_practice("user-b", "Doe Cardiology")
     pilot.approve("user-b")
+    pilot.create_practice("user-b", "Doe Cardiology")
     assert pilot.get(BASE, "user-b").json()["types"] == []
     assert pilot.post(f"/api/me/practice/teach/{proposal['id']}/confirm", "user-b", {}).status_code == 404
     assert pilot.post(f"{BASE}/proposals/{proposal['id']}/leave-unknown", "user-b").status_code == 404

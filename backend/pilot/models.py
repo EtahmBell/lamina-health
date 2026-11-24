@@ -36,7 +36,9 @@ class PracticeInput(_Strict):
 
 
 class InvitationInput(_Strict):
-    role: Literal["staff"] = "staff"
+    """Invite by email: a staff member or another physician (never an admin by default)."""
+    role: Literal["staff", "physician"] = "staff"
+    email: str = Field(min_length=3, max_length=254)
     label: str | None = Field(default=None, max_length=200)
 
 

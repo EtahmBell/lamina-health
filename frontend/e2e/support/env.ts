@@ -75,7 +75,7 @@ export type SeedState = {
   public_slug: string
   practice_a: { id: string; name: string; physician_name: string; staff_label: string }
   practice_b: { id: string; name: string }
-  referrals: Record<'verify' | 'ready' | 'flag' | 'signoff' | 'redirect' | 'decline' | 'change' | 'conflict_keep' | 'conflict_apply' | 'still_open' | 'declined_notify', string> & { auto_draft?: string }
+  referrals: Record<'verify' | 'ready' | 'flag' | 'signoff' | 'redirect' | 'decline' | 'change' | 'conflict_keep' | 'conflict_apply' | 'still_open' | 'declined_notify', string> & { auto_draft?: string; unverified?: string }
   history: string[]
   practice_b_referrals: { accepted: string; declined: string }
   practice_proposal_id: string
@@ -95,11 +95,25 @@ export function pythonExecutable(): string {
   return existsSync(windows) ? windows : path.join(ROOT_DIR, '.venv', 'bin', 'python')
 }
 
-/** Environment for the e2e API and the seed command: always the dedicated e2e database. */
+/** The three captured DEV Supabase accounts (user ids only; no tokens). */
+export function capturedUserIds(): string[] {
+  const file = path.join(AUTH_DIR, 'accounts.json')
+  if (!existsSync(file)) return []
+  const accounts = JSON.parse(readFileSync(file, 'utf8')) as Record<string, { user_id?: string }>
+  return ROLES.map((role) => accounts[role]?.user_id ?? '').filter(Boolean)
+}
+
+/** Environment for the e2e API and the seed command: always the dedicated e2e database.
+ * LAMINA_E2E_TEST_AUTH turns on the dev-only test sign-in (new invitee accounts + TOTP) on the DEV
+ * launcher; the API refuses it outside this harness and in production (backend/dev_test_auth.py).
+ * The captured accounts were signed in before MFA was required: they alone count as MFA-verified
+ * here (the explicit, gated bypass) -- every new account in the specs sets up real TOTP. */
 export function apiEnvironment(): NodeJS.ProcessEnv {
   return {
     ...process.env,
     LAMINA_E2E: '1',
+    LAMINA_E2E_TEST_AUTH: '1',
+    LAMINA_E2E_MFA_EXEMPT_USER_IDS: capturedUserIds().join(','),
     LAMINA_PRODUCT_MODE: 'pilot',
     LAMINA_DEV_FAKE_NPPES: 'true',
     LAMINA_WORKFLOW_DATABASE: E2E_DB,

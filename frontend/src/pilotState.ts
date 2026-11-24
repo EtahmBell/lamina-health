@@ -67,6 +67,47 @@ export function resolvePilotRoute(path: string): PilotRoute {
   return { kind: 'redirect', to: pilotPaths.home }
 }
 
+/* ---------------------------------------------------------- accounts & access */
+
+/** Invitations expire after a week (server-enforced; this is only the copy). */
+export const INVITATION_DAYS = 7
+/** Session safety: sign out after this long without activity, with a warning before. */
+export const IDLE_TIMEOUT_MINUTES = 30
+export const IDLE_WARNING_MINUTES = 2
+
+/** The invitation link an admin shares (shown once; the token is never stored client-side). */
+export const invitationLink = (origin: string, token: string) => `${origin}${pilotPaths.join}?invite=${encodeURIComponent(token)}`
+
+/** An authenticator setup key, in groups of four for typing by hand. */
+export const formatSetupKey = (secret: string) => secret.replace(/\s+/g, '').toUpperCase().match(/.{1,4}/g)?.join(' ') ?? ''
+
+/** A TOTP code as typed: digits only, at most six. */
+export const normalizeTotpInput = (value: string) => value.replace(/\D/g, '').slice(0, 6)
+
+/** 'active' | 'warning' (sign-out is close) | 'expired' (sign out now), from the last activity. */
+export function idleState(lastActivity: number, now: number, timeoutMinutes = IDLE_TIMEOUT_MINUTES, warningMinutes = IDLE_WARNING_MINUTES): 'active' | 'warning' | 'expired' {
+  const idle = now - lastActivity
+  if (idle >= timeoutMinutes * 60_000) return 'expired'
+  if (idle >= (timeoutMinutes - warningMinutes) * 60_000) return 'warning'
+  return 'active'
+}
+
+/** What an invitation means for the person accepting it. */
+export function invitationCopy(preview: { kind: 'practice' | 'new_practice'; role: 'physician' | 'staff'; practice_name: string | null; practice_specialty?: string | null }): { title: string; body: string } {
+  if (preview.kind === 'new_practice') return {
+    title: 'Set up your practice on Lamina',
+    body: 'The Lamina team invited you to set up a new practice. Next you’ll set up two-step sign-in, then confirm your professional profile (NPI).',
+  }
+  const practice = preview.practice_name ?? 'the practice'
+  return preview.role === 'physician' ? {
+    title: `Join ${practice}`,
+    body: 'You’ll join as a physician. Next you’ll set up two-step sign-in and confirm your own professional profile (NPI) — only you can. You’ll have your own agent, and you won’t be a practice admin unless an admin makes you one.',
+  } : {
+    title: `Join ${practice}`,
+    body: `You’ll join as staff${preview.practice_specialty ? ` · ${preview.practice_specialty}` : ''}. Staff enter and review referrals; physicians make the final decisions. Next you’ll set up two-step sign-in.`,
+  }
+}
+
 /** Which gate screen a non-workspace account sees. Workspace routes render only on 'workspace'. */
 export const gateScreen = (step: PilotNextStep) => step
 
@@ -99,6 +140,26 @@ export const NEXT_STEP_LABELS: Record<NextStep, string> = {
   review_sender_information: 'Verify what the referring office sent',
   confirm_referral_type: 'Confirm the referral type',
 }
+/** The staff "Ready" check: required items not yet in hand, split into still missing and
+ * received but not yet verified (the office reported it, or it may be in a document). */
+export type ReadyCheck = { missing: string[]; unverified: string[]; all: string[] }
+const UNVERIFIED_STATES: RequirementState[] = ['sender_reported', 'proposed_from_document']
+export function readyCheck(requirements: Array<{ label: string; required: boolean; state: RequirementState }>): ReadyCheck {
+  const open = requirements.filter((item) => item.required && item.state !== 'satisfied')
+  const unverified = open.filter((item) => UNVERIFIED_STATES.includes(item.state)).map((item) => item.label)
+  const missing = open.filter((item) => !UNVERIFIED_STATES.includes(item.state)).map((item) => item.label)
+  return { missing, unverified, all: [...missing, ...unverified] }
+}
+
+/** What the physician will see when staff mark it ready anyway: names both kinds. */
+export function readyAnywayLine(check: ReadyCheck, doctor: string): string {
+  const parts = [
+    check.missing.length ? `${check.missing.join(', ')} ${check.missing.length === 1 ? 'is' : 'are'} still missing` : '',
+    check.unverified.length ? `${check.unverified.join(', ')} ${check.unverified.length === 1 ? 'was' : 'were'} received but not verified` : '',
+  ].filter(Boolean)
+  return `Mark ready anyway — ${doctor} will see that ${parts.join(' and ')}`
+}
+
 export const REQUIREMENT_STATE_LABELS: Record<RequirementState, string> = {
   satisfied: 'Satisfied',
   proposed_from_document: 'Possibly in a document — confirm',
@@ -255,10 +316,20 @@ export function ruleFormFrom(rule: { referral_type: string; content: { good_fit:
 
 export const PILOT_ERROR_COPY: Record<string, string> = {
   practice_required: 'Set up or join a practice first.',
-  pilot_access_pending: 'Your physician profile is awaiting Lamina pilot approval.',
+  pilot_access_pending: 'The Lamina team reviews each new practice first. You can set it up once your request is approved.',
+  invitation_email_mismatch: 'This invitation was sent to a different email address. Sign in with that address, or ask for a new invitation.',
+  staff_account: 'This is a staff account. A staff account can’t claim a physician identity — physicians use their own account.',
+  already_invited: 'This account already accepted an invitation to join as a physician.',
+  mfa_required: 'Finish two-step sign-in to continue.',
+  session_revoked: 'You were signed out on this device. Sign in again.',
+  invalid_email: 'Enter a valid email address.',
+  cannot_deactivate_self: 'You can’t deactivate yourself. Ask another admin.',
+  last_admin: 'A practice needs at least one admin. Make someone else an admin first.',
+  practice_creation_unavailable: 'This account can’t start a new practice. Ask the Lamina team.',
+  member_not_found: 'That member is no longer active in this practice.',
   practice_not_approved: 'This practice is awaiting Lamina pilot approval.',
   physician_required: 'Only a physician in this practice can do that.',
-  invitation_unavailable: 'This invitation link is invalid, expired, or already used. Ask the practice for a new one.',
+  invitation_unavailable: 'This invitation link is invalid, expired, revoked, or already used. Ask for a new one.',
   physician_account: 'This account holds a confirmed physician profile, so it cannot join as staff.',
   already_in_practice: 'This account already belongs to a practice.',
   stale_referral: 'This referral changed while you were working. It has been refreshed — please try again.',

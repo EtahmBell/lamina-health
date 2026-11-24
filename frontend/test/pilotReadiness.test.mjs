@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { lifecycleLine } from '../src/pilotState.ts'
+import { lifecycleLine, readyAnywayLine, readyCheck } from '../src/pilotState.ts'
 
 /* Step 18: readiness review and physician-approved activation (frontend). */
 
@@ -90,10 +90,36 @@ test('staff see who made the last change', () => {
   assert.match(staff, /Last changed by \{cap\.updated_by_name \?\? 'a practice member'\}/)
 })
 
-test('"Ready" with required items missing needs a confirmation naming them', () => {
-  assert.match(pilot, /Still missing:<\/strong> \{missingRequired\.join\(', '\)\}/)
-  assert.match(pilot, /disabled=\{busy \|\| \(missingRequired\.length > 0 && !readyAnyway\)\}/)
-  assert.match(pilot, /markReferralReady\(referral\.id, note, missingRequired\.length \? missingRequired : undefined\)/)
+test('"Ready" with required items open needs a confirmation naming all of them', () => {
+  assert.match(pilot, /Still missing:<\/strong> \{readyOpen\.missing\.join\(', '\)\}/)
+  assert.match(pilot, /Received, not verified:<\/strong> \{readyOpen\.unverified\.join\(', '\)\}/)
+  assert.match(pilot, /disabled=\{busy \|\| \(readyOpen\.all\.length > 0 && !readyAnyway\)\}/)
+  assert.match(pilot, /markReferralReady\(referral\.id, note, readyOpen\.all\.length \? readyOpen\.all : undefined\)/)
+  assert.match(pilot, /received, not verified: \$\{referral\.handoff\.unverified_items\.join\(', '\)\}/)
+})
+
+test('the ready check splits still missing from received but not verified', () => {
+  const check = readyCheck([
+    { label: 'Recent HbA1c', required: true, state: 'missing' },
+    { label: 'Renal function', required: true, state: 'sender_reported' },
+    { label: 'Thyroid ultrasound', required: true, state: 'proposed_from_document' },
+    { label: 'TSH', required: true, state: 'satisfied' },
+    { label: 'Photos', required: false, state: 'optional_missing' },
+  ])
+  assert.deepEqual(check, { missing: ['Recent HbA1c'], unverified: ['Renal function', 'Thyroid ultrasound'], all: ['Recent HbA1c', 'Renal function', 'Thyroid ultrasound'] })
+  assert.equal(readyAnywayLine(check, 'Dr. Testwell'),
+    'Mark ready anyway — Dr. Testwell will see that Recent HbA1c is still missing and Renal function, Thyroid ultrasound were received but not verified')
+  assert.equal(readyAnywayLine(readyCheck([{ label: 'TSH', required: true, state: 'sender_reported' }]), 'Dr. X'),
+    'Mark ready anyway — Dr. X will see that TSH was received but not verified')
+})
+
+test('resolving a flag takes a note; blocking flags say so', () => {
+  assert.match(api, /resolveAgentFlag = \(flagId: string, note: string\).*json\(\{ note \}\)/)
+  const row = slice(readiness, 'function FlagRow', 'function CapabilityCard')
+  assert.match(row, /const resolvable = !flag\.resolved_at && \(flag\.serious \|\| flag\.blocking\)/)
+  assert.match(row, /What did you find\?/)
+  assert.match(row, /disabled=\{busy \|\| !note\.trim\(\)\}>Resolve flag</)
+  assert.match(readiness, /Resolve each flag below with a short note before/)
 })
 
 test('an agent draft keeps the status and says who drafted it', () => {

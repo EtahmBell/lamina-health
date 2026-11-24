@@ -75,7 +75,10 @@ A capability is **eligible for review** only when all hold:
    and ≥ `LAMINA_READINESS_MIN_PER_TYPE` (default 3) for each referral type it will act on.
    Types below that are **coverage gaps** ("not enough cases yet"); the capability can be turned
    on with them excluded (stored in `config_json.excluded_types`).
-3. **No unresolved serious flag** on that capability.
+3. **No unresolved serious flag** on that capability, and no unresolved flag among those behind an
+   automatic return to shadow (three non-serious flags in 7 days). Each is resolved by the
+   physician **with a note** (`POST /activation/flags/{id}/resolve {note}`; stored in
+   `agent_item_flags.resolution_note`); the review marks them "needs resolving".
 4. **No open conflict** in the representation it depends on (layer conflicts in the confirmed
    representation).
 
@@ -120,9 +123,11 @@ own agent).
   "Triaged · draft request ready for staff" until staff send the request, then "Needs
   information". The history reads "Information request drafted by Dr. X's agent (not sent)".
   (A request staff draft themselves still moves the referral to "Needs information" as before.)
-* **Staff "Ready" with required items missing**: allowed only after a confirmation that names
-  the missing items (the API refuses unless `confirm_missing` names every one). The missing
-  items are recorded in the history event and in the hand-off note the physician sees.
+* **Staff "Ready" with required items open**: allowed only after a confirmation that names them
+  (the API refuses unless `confirm_missing` names every one). Items still missing and items
+  received but not yet verified (office-reported, or possibly in a document) are listed
+  separately ("Still missing: …", "Received, not verified: TSH"), and both are recorded in the
+  history event and the hand-off note (`missing_items`, `unverified_items`).
 * Agreement keeps being measured while capabilities are active.
 
 ## Screens

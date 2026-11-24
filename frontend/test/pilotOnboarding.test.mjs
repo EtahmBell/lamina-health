@@ -133,7 +133,9 @@ test('pending approval shows the pilot copy and no workspace entry point', () =>
 })
 
 test('an approved account is redirected into /me/home by backend status alone', () => {
-  assert.match(onboarding, /if \(status && onboardingScreen\(status\) === 'active'\) navigate\(onboardingCompletePath\)/)
+  // Demo: redirect on its own. Pilot (onConfirmed): the gate re-reads the server status instead.
+  assert.match(onboarding, /if \(!onConfirmed && status && onboardingScreen\(status\) === 'active'\) navigate\(onboardingCompletePath\)/)
+  assert.match(onboarding, /if \(onConfirmed && status && \['pending', 'active'\]\.includes\(onboardingScreen\(status\)\)\) onConfirmed\(\)/)
 })
 
 test('reloading re-reads backend status; nothing about onboarding is kept in browser storage', () => {

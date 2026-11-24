@@ -22,6 +22,8 @@ FICTIONAL_PHYSICIANS = {
     # NPI (Luhn-valid test numbers) -> (first, last, specialty, taxonomy, city, state)
     "1234567893": ("Avery", "Testwell", "Endocrinology, Diabetes & Metabolism", "207RE0101X", "Palo Alto", "CA"),
     "1234567802": ("Jordan", "Sampleton", "Nephrology", "207RN0300X", "Oakland", "CA"),
+    # Invited into practice A by the e2e "second physician joins" spec (never seeded).
+    "1234567810": ("Riley", "Newcomb", "Endocrinology, Diabetes & Metabolism", "207RE0101X", "Palo Alto", "CA"),
 }
 
 
@@ -70,8 +72,20 @@ def main() -> int:
     from backend.main import create_app
 
     port = int(os.environ.get("LAMINA_API_PORT", "8000"))
+    app = create_app("pilot")
+    if os.environ.get("LAMINA_E2E_TEST_AUTH") == "1":
+        # E2E only: local test sign-in + TOTP for invitee accounts; refused unless every e2e/dev
+        # condition holds (see backend/dev_test_auth.py).
+        from backend.dev_test_auth import install_dev_test_auth
+
+        try:
+            install_dev_test_auth(app)
+        except RuntimeError as error:
+            print(str(error))
+            return 2
+        print("DEV test sign-in is ON (e2e only).")
     print(f"DEV pilot API with FICTIONAL NPPES on http://127.0.0.1:{port} — not for deployment.")
-    uvicorn.run(create_app("pilot"), host="127.0.0.1", port=port)
+    uvicorn.run(app, host="127.0.0.1", port=port)
     return 0
 
 

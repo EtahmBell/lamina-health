@@ -109,7 +109,23 @@ def confirm_identity(update: NpiInput, user: RequiredUser) -> dict:
     before = _run(lambda: onboarding_service.status(user.id))["status"]
     result = _run(lambda: onboarding_service.confirm(user.id, update.npi))
     _record_profile_claim(user.id, before, result)
-    return result
+    return _complete_pilot_access(user.id) or result
+
+
+def _complete_pilot_access(user_id: str) -> dict | None:
+    """Pilot: right after a physician confirms their own identity, an accepted physician
+    invitation becomes their membership and an operator invitation approves their request.
+    Returns the refreshed onboarding status when one of those applies (the demo never has them)."""
+    from backend.pilot.store import pilot_store_for
+
+    store = pilot_store_for(onboarding_service.store)
+    if not store.pending_physician_invitation(user_id) and not store.fetch_one(
+            "SELECT 1 FROM pilot_access_invitations WHERE accepted_by_user_id = ? AND approved_at IS NULL", (user_id,)):
+        return None
+    from backend.pilot.practice import PracticeService
+
+    PracticeService(store).complete_pending_access(user_id)
+    return onboarding_service.status(user_id)
 
 
 # ------------------------------------------------------------------ internal

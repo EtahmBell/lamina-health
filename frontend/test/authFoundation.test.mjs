@@ -19,7 +19,10 @@ test('the reusable provider exposes session lifecycle primitives', () => {
   for (const primitive of ['signUp', 'signIn', 'signOut', 'getSession', 'getAccessToken']) {
     assert.match(auth, new RegExp(`function ${primitive}`))
   }
-  assert.match(auth, /signOut\(\{ scope: 'local' \}\)/)
+  // This device only by default; "sign out everywhere" is the explicit global scope.
+  assert.match(auth, /signOut\('local'\)/)
+  assert.match(auth, /auth\.signOut\(\{ scope \}\)/)
+  assert.match(auth, /export async function signOutEverywhere\(\) \{\s+await \(await authBackend\(\)\)\.signOut\('global'\)/)
   assert.match(provider, /onAuthStateChange/)
   assert.match(provider, /useAuth/)
   assert.match(main, /<AuthProvider><App \/><\/AuthProvider>/)

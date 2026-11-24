@@ -88,10 +88,10 @@ class Pilot:
         return response.json()
 
     def ready_physician(self, user: str = "user-a", npi: str = NPI_A) -> dict:
+        # Invite-only: the request (a confirmed identity) is approved before the practice exists.
         self.confirm_physician(user, npi)
-        practice = self.create_practice(user)
         self.approve(user)
-        return practice
+        return self.create_practice(user)
 
     def add_rule(self, user: str = "user-a", rule: dict | None = None) -> dict:
         response = self.post("/api/me/practice/rules", user, rule or DIABETES_RULE)
@@ -99,7 +99,8 @@ class Pilot:
         return response.json()
 
     def add_staff(self, physician: str = "user-a", staff: str = "user-c") -> None:
-        invite = self.post("/api/me/practice/invitations", physician, {"label": "Front desk"})
+        invite = self.post("/api/me/practice/invitations", physician,
+                           {"label": "Front desk", "email": f"{staff}@example.test"})
         assert invite.status_code == 201, invite.text
         accepted = self.post("/api/me/practice/invitations/accept", staff, {"token": invite.json()["token"]})
         assert accepted.status_code == 200, accepted.text
@@ -156,7 +157,8 @@ def test_pilot_mode_exposes_no_demo_routes(pilot: Pilot) -> None:
     paths = set(create_app("pilot").openapi()["paths"])
     assert all(
         path.startswith(("/api/me/onboarding", "/api/me/practice", "/api/internal/pilot-physicians",
-                         "/api/internal/pilot-metrics", "/api/public/p/", "/api/public/r/"))
+                         "/api/internal/pilot-metrics", "/api/internal/pilot-access/",
+                         "/api/public/p/", "/api/public/r/"))
         or path == "/health"
         for path in paths
     ), paths
@@ -261,9 +263,13 @@ def test_name_search_returns_candidates_without_creating_ownership(pilot: Pilot)
 def test_real_user_resolves_owner_scope_then_practice_setup(pilot: Pilot) -> None:
     assert pilot.status("user-a")["next_step"] == "physician_onboarding"
     pilot.confirm_physician("user-a", NPI_A)
+    # Invite-only: a confirmed identity is a REQUEST; practice setup opens once Lamina approves it.
+    pending = pilot.status("user-a")
+    assert pending["next_step"] == "pilot_pending" and pending["practice"] is None
+    assert pending["physician_onboarding"]["status"] == "pilot_approval_pending"
+    pilot.approve("user-a")
     status = pilot.status("user-a")
     assert status["next_step"] == "practice_setup"
-    assert status["physician_onboarding"]["status"] == "pilot_approval_pending"
     assert status["practice_defaults"]["specialty"] == "Nephrology"
     assert "Palo Alto" in status["practice_defaults"]["address"]
     scope = pilot.workflow.selected_physician_owner_scope("user-a")
@@ -284,13 +290,15 @@ def test_duplicate_physician_claim_is_refused_with_a_stable_code(pilot: Pilot) -
     assert pilot.workflow.provider_claims("user-b") == []
 
 
-def test_pilot_approval_gates_the_workspace_not_practice_setup(pilot: Pilot) -> None:
+def test_pilot_approval_gates_practice_creation_and_the_workspace(pilot: Pilot) -> None:
     pilot.confirm_physician("user-a", NPI_A)
-    pilot.create_practice("user-a")
     assert pilot.status("user-a")["next_step"] == "pilot_pending"
-    blocked = pilot.get("/api/me/practice/referrals", "user-a")
-    assert blocked.status_code == 403 and blocked.json()["detail"]["code"] == "pilot_access_pending"
+    # No open self-service: an unapproved request can't create a practice.
+    refused = pilot.post("/api/me/practice", "user-a", {"name": "Smith Endocrinology"})
+    assert refused.status_code == 403 and refused.json()["detail"]["code"] == "pilot_access_pending"
+    assert pilot.get("/api/me/practice/referrals", "user-a").json()["detail"]["code"] == "practice_required"
     pilot.approve("user-a")
+    pilot.create_practice("user-a")
     assert pilot.status("user-a")["next_step"] == "workspace"
     assert pilot.get("/api/me/practice/referrals", "user-a").status_code == 200
     scope = pilot.workflow.selected_physician_owner_scope("user-a")
@@ -321,7 +329,7 @@ def test_practice_creation_records_owner_membership_and_event(pilot: Pilot) -> N
 
 def test_staff_invitation_is_single_use_and_staff_permissions_are_limited(pilot: Pilot) -> None:
     pilot.ready_physician()
-    invite = pilot.post("/api/me/practice/invitations", "user-a", {"label": "Front desk"}).json()
+    invite = pilot.post("/api/me/practice/invitations", "user-a", {"label": "Front desk", "email": "user-c@example.test"}).json()
     preview = pilot.post("/api/me/practice/invitations/preview", "user-c", {"token": invite["token"]})
     assert preview.json()["practice_name"] == "Smith Endocrinology"
     joined = pilot.post("/api/me/practice/invitations/accept", "user-c", {"token": invite["token"]})
@@ -348,7 +356,7 @@ def test_staff_invitation_is_single_use_and_staff_permissions_are_limited(pilot:
     # practice admin (Step 17 follow-up). Staff are refused both.
     for method, path, body, code in (
         ("POST", "/api/me/practice/rules", DIABETES_RULE, "physician_required"),
-        ("POST", "/api/me/practice/invitations", {"label": "x"}, "practice_admin_required"),
+        ("POST", "/api/me/practice/invitations", {"label": "x", "email": "x@example.test"}, "practice_admin_required"),
         ("PUT", "/api/me/practice", {"name": "Renamed"}, "practice_admin_required"),
         ("POST", f"/api/me/practice/referrals/{referral_id}/disposition", {"decision": "accept"}, "physician_required"),
         ("GET", "/api/me/practice/events", None, "physician_required"),
@@ -374,11 +382,11 @@ def test_confirmed_physician_cannot_join_as_staff_and_practices_are_isolated(pil
     pilot.add_rule()
     referral_id = pilot.referral()["referral"]["id"]
     pilot.confirm_physician("user-b", NPI_B)
-    invite = pilot.post("/api/me/practice/invitations", "user-a", {}).json()
+    invite = pilot.post("/api/me/practice/invitations", "user-a", {"email": "user-b@example.test"}).json()
     refused = pilot.post("/api/me/practice/invitations/accept", "user-b", {"token": invite["token"]})
     assert refused.status_code == 409 and refused.json()["detail"]["code"] == "physician_account"
-    pilot.create_practice("user-b", "Doe Cardiology")
     pilot.approve("user-b")
+    pilot.create_practice("user-b", "Doe Cardiology")
     assert pilot.get("/api/me/practice/referrals", "user-b").json() == []
     assert pilot.get(f"/api/me/practice/referrals/{referral_id}", "user-b").status_code == 404
     assert pilot.post(f"/api/me/practice/referrals/{referral_id}/approve", "user-b").status_code == 404
@@ -677,8 +685,8 @@ def test_documents_are_private_validated_and_practice_scoped(pilot: Pilot, tmp_p
     )
     assert spoofed.status_code == 422 and spoofed.json()["detail"]["code"] == "document_rejected"
     pilot.confirm_physician("user-b", NPI_B)
-    pilot.create_practice("user-b", "Other")
     pilot.approve("user-b")
+    pilot.create_practice("user-b", "Other")
     assert pilot.get(f"/api/me/practice/documents/{doc['id']}", "user-b").status_code == 404
     assert "document_viewed" in _event_types(pilot.store, referral_id=rid)
 

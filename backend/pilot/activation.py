@@ -416,6 +416,27 @@ class ActivationService:
             "SELECT * FROM agent_item_flags WHERE practice_id = ? AND owner_scope_id = ? AND capability = ? "
             "AND serious = 1 AND resolved_at IS NULL", (practice_id, owner_scope_id, capability))
 
+    def _repeated_open(self, practice_id: str, owner_scope_id: str, capability: str) -> list[dict]:
+        """Unresolved non-serious flags behind an automatic return to shadow (since it was last
+        turned on). Like a serious flag, each must be resolved with a note before turning it back on."""
+        activated = self.store.fetch_one(
+            "SELECT MAX(created_at) AS at FROM capability_events WHERE practice_id = ? AND owner_scope_id = ? "
+            "AND capability = ? AND event_type = 'activated'", (practice_id, owner_scope_id, capability))
+        returns = self.store.fetch_all(
+            "SELECT metadata_json FROM capability_events WHERE practice_id = ? AND owner_scope_id = ? AND capability = ? "
+            "AND event_type = 'auto_returned_repeated_flags' AND created_at >= ?",
+            (practice_id, owner_scope_id, capability, (activated or {}).get("at") or ""))
+        ids = sorted({flag_id for row in returns for flag_id in json.loads(row["metadata_json"] or "{}").get("flag_ids", [])})
+        if not ids:
+            return []
+        return self.store.fetch_all(
+            f"SELECT * FROM agent_item_flags WHERE id IN ({', '.join('?' for _ in ids)}) AND serious = 0 "
+            "AND resolved_at IS NULL ORDER BY created_at", ids)
+
+    def _blocking_flags(self, practice_id: str, owner_scope_id: str, capability: str) -> list[dict]:
+        return [*self._serious_open(practice_id, owner_scope_id, capability),
+                *self._repeated_open(practice_id, owner_scope_id, capability)]
+
     def eligibility(self, practice_id: str, owner_scope_id: str, capability: str, metrics: dict | None = None) -> dict:
         spec = CAPABILITIES[capability]
         config = settings()
@@ -441,6 +462,10 @@ class ActivationService:
             reasons.append(f"No referral type has {config['min_per_type']} decided referrals yet")
         if self._serious_open(practice_id, owner_scope_id, capability):
             reasons.append("A serious “this was wrong” flag is unresolved")
+        repeated = self._repeated_open(practice_id, owner_scope_id, capability)
+        if repeated:
+            reasons.append(f"{len(repeated)} “this was wrong” flag{'s' if len(repeated) != 1 else ''} that returned it to "
+                           f"shadow {'are' if len(repeated) != 1 else 'is'} unresolved — resolve each with a note")
         if "requirements" in spec["depends_on"] and self._representation_conflicts(practice_id, owner_scope_id):
             reasons.append("Your representation has an open conflict to resolve first")
         return {"eligible": not reasons, "reasons": reasons, "coverage": coverage, "shadow_since": since,
@@ -466,8 +491,9 @@ class ActivationService:
                         "SELECT * FROM agent_prepared_items WHERE practice_id = ? AND owner_scope_id = ? AND capability = ? "
                         "AND mode = 'shadow' ORDER BY created_at DESC LIMIT 5", (practice_id, owner_scope_id, key))]
         flags = self.store.fetch_all(
-            "SELECT id, serious, note, actor, actor_role, created_at, resolved_at, item_id FROM agent_item_flags "
+            "SELECT id, serious, note, actor, actor_role, created_at, resolved_at, resolution_note, item_id FROM agent_item_flags "
             "WHERE practice_id = ? AND owner_scope_id = ? AND capability = ? ORDER BY created_at DESC", (practice_id, owner_scope_id, key))
+        blocking = {flag["id"] for flag in self._blocking_flags(practice_id, owner_scope_id, key)}
         frequency = state["config"].get("frequency", "daily")
         return {
             "key": key, "name": spec["name"], "description": spec["description"], "risk": spec["risk"],
@@ -475,7 +501,8 @@ class ActivationService:
             "config": state["config"], "depends_on": spec["depends_on"], "will": spec["will"], "never": spec["never"],
             "confirm_text": spec["confirm"].format(staff=staff_label, frequency="a week" if frequency == "weekly" else "a day"),
             "eligibility": eligibility, "shadow_examples": examples,
-            "flags": [{**flag, "serious": bool(flag["serious"])} for flag in flags],
+            # `blocking`: must be resolved (with a note) before this can be turned on again.
+            "flags": [{**flag, "serious": bool(flag["serious"]), "blocking": flag["id"] in blocking} for flag in flags],
             "updated_at": state["updated_at"],
             "updated_by_name": ActorDirectory(self.store, practice_id).describe(state["updated_by"])["name"] if state["updated_by"] else None,
         }
@@ -525,12 +552,18 @@ class ActivationService:
                         for cap in delegated if cap["state"] != "active" and cap["eligibility"]["reasons"]]
         active = [cap["name"] for cap in delegated if cap["state"] == "active"]
         serious = next((cap for cap in delegated if any(f["serious"] and not f["resolved_at"] for f in cap["flags"])), None)
+        repeated = next((cap for cap in delegated if any(f["blocking"] and not f["serious"] for f in cap["flags"])), None)
         if serious:
             action = {"text": f"Review the serious flag on {serious['name'].lower()} — it stays in shadow until you resolve it.",
                       "label": "Review the flag", "target": f"cap-{serious['key']}"}
         elif notices:
             action = {"text": notices[0]["title"] + ". " + notices[0]["detail"], "label": "See what changed",
                       "target": "readiness-notices"}
+        elif repeated:
+            count = sum(1 for f in repeated["flags"] if f["blocking"])
+            action = {"text": f"Resolve the {count} flag{'s' if count != 1 else ''} that returned {repeated['name'].lower()} to "
+                              "shadow, each with a short note, before turning it back on.",
+                      "label": "Review the flags", "target": f"cap-{repeated['key']}"}
         elif eligible:
             action = {"text": f"Look over where you disagreed, then decide whether to turn on {eligible[0].lower()}. "
                               "Eligible only allows it; nothing changes until you choose.",
@@ -687,8 +720,8 @@ class ActivationService:
             to = STATE_WORDS.get(row["to_state"], row["to_state"])
             if row["event_type"] == "auto_returned_repeated_flags":
                 title = f"{name} went back to shadow"
-                detail = (f"{row['reason']} returned it to shadow automatically. Look at the flagged drafts, then decide "
-                          "whether to turn it back on.")
+                detail = (f"{row['reason']} returned it to shadow automatically. Resolve each flag with a short note "
+                          "before deciding whether to turn it back on.")
             else:
                 by = directory.describe(row["actor"])["name"]
                 title = f"{name} was lowered to {to.lower()}"
@@ -707,7 +740,8 @@ class ActivationService:
                                                   {"event_id": event_id}, self._version_id(context.practice_id, owner), now_iso())])
         return self.review(context)
 
-    def resolve_flag(self, context: PracticeContext, flag_id: str) -> dict:
+    def resolve_flag(self, context: PracticeContext, flag_id: str, note: str | None = None) -> dict:
+        """The physician resolves one flag, always with a short note on what they found."""
         context.require_physician("resolve a flag on your agent's work")
         flag = self.store.fetch_one("SELECT * FROM agent_item_flags WHERE id = ? AND practice_id = ? AND owner_scope_id = ?",
                                     (flag_id, context.practice_id, context.owner_scope_id or ""))
@@ -715,12 +749,16 @@ class ActivationService:
             raise PilotError("flag_not_found", "Flag not found", 404)
         if flag["resolved_at"]:
             raise PilotError("flag_resolved", "This flag is already resolved", 409)
+        text = (note or "").strip()[:1000]
+        if not text:
+            raise PilotError("note_required", "Add a short note on what you found before resolving the flag", 422)
         now = now_iso()
         self.store.execute([
-            ("UPDATE agent_item_flags SET resolved_by = ?, resolved_at = ? WHERE id = ? AND resolved_at IS NULL",
-             (context.actor, now, flag_id)),
-            self._event_statement(context, flag["owner_scope_id"], flag["capability"], "flag_resolved", None, None, None,
-                                  {"flag_id": flag_id}, self._version_id(context.practice_id, flag["owner_scope_id"]), now),
+            ("UPDATE agent_item_flags SET resolved_by = ?, resolved_at = ?, resolution_note = ? WHERE id = ? AND resolved_at IS NULL",
+             (context.actor, now, text, flag_id)),
+            self._event_statement(context, flag["owner_scope_id"], flag["capability"], "flag_resolved", None, None, text[:500],
+                                  {"flag_id": flag_id, "serious": bool(flag["serious"])},
+                                  self._version_id(context.practice_id, flag["owner_scope_id"]), now),
         ])
         return self.review(context)
 

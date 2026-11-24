@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.auth import AuthenticatedUser, require_authenticated_user
 
+from .accounts import AccountService
 from .activation import ActivationService
 from .assistant import AssistantService, history_days
 from .documents import MAX_DOCUMENT_BYTES
@@ -47,6 +48,8 @@ from .teaching import TeachingService, is_practice_admin, require_can_edit
 
 router = APIRouter(prefix="/api/me/practice", tags=["pilot-practice"])
 internal_router = APIRouter(prefix="/api/internal/pilot-metrics", tags=["pilot-admin"])
+# Lamina operators: invitations to set up a new practice, and lost-authenticator recovery.
+internal_access_router = APIRouter(prefix="/api/internal/pilot-access", tags=["pilot-admin"])
 RequiredUser = Annotated[AuthenticatedUser, Depends(require_authenticated_user)]
 
 
@@ -65,6 +68,7 @@ class PilotServices:
     assistant: AssistantService
     representation: RepresentationService
     activation: ActivationService
+    accounts: AccountService
 
     @classmethod
     def build(
@@ -101,7 +105,7 @@ class PilotServices:
         home.activation = activation
         representation.activation = activation
         return cls(store, PracticeService(store), rules, intake, missing, sender, teaching, learning,
-                   publication, home, assistant, representation, activation)
+                   publication, home, assistant, representation, activation, AccountService(store))
 
 
 _default: dict[str, PilotServices] = {}
@@ -133,7 +137,36 @@ def _run(action):
         raise HTTPException(409, {"code": "rule_conflict", "message": str(error)}) from error
 
 
-def require_practice(user: RequiredUser, services: Services) -> PracticeContext:
+def require_pilot_session(user: RequiredUser, services: Services) -> AuthenticatedUser:
+    """A verified session that hasn't been revoked (sign out everywhere, deactivation, MFA
+    reset). Two-step sign-in may still be pending: only status, accepting an invitation, the
+    lost-authenticator request and "sign out everywhere" accept such a session."""
+    _run(lambda: services.accounts.check_session(user))
+    return user
+
+
+PilotSession = Annotated[AuthenticatedUser, Depends(require_pilot_session)]
+
+
+def require_pilot_user(user: PilotSession, services: Services) -> AuthenticatedUser:
+    """Every other pilot route: the session must have passed MFA (Supabase `aal2`)."""
+    _run(lambda: services.accounts.require_mfa(user))
+    return user
+
+
+PilotUser = Annotated[AuthenticatedUser, Depends(require_pilot_user)]
+
+
+def require_onboarding_user(user: PilotUser, services: Services) -> AuthenticatedUser:
+    """Physician onboarding in pilot mode: MFA done, and never a staff account -- a staff member
+    can never claim a physician identity."""
+    if services.store.has_staff_history(user.id):
+        raise HTTPException(403, {"code": "staff_account",
+                                  "message": "Staff accounts can't claim a physician identity"})
+    return user
+
+
+def require_practice(user: PilotUser, services: Services) -> PracticeContext:
     """The one guard for every practice-scoped pilot route."""
     return _run(lambda: services.practice.context(user.id))
 
@@ -157,17 +190,40 @@ class NoteInput(_Strict):
 
 
 @router.get("/status")
-def practice_status(user: RequiredUser, services: Services) -> dict:
+def practice_status(user: PilotSession, services: Services) -> dict:
     from backend.api import physician_onboarding
 
+    verified = services.accounts.mfa_verified(user)
+    if verified:
+        services.accounts.note_mfa(user)
+        # Before reading onboarding: joining by invitation / an invitation's approval may change it.
+        services.practice.complete_pending_access(user.id)
     onboarding = physician_onboarding._run(
         lambda: physician_onboarding.onboarding_service.status(user.id)
     )
-    return _run(lambda: services.practice.status(user.id, onboarding))
+    status = _run(lambda: services.practice.status(
+        user.id, onboarding, mfa_verified=verified, recovery=services.accounts.recovery_view(user.id)))
+    return {**status, "account": {"email": user.email, "mfa_verified": verified}}
+
+
+@router.post("/sessions/revoke-all")
+def revoke_all_sessions(user: PilotSession, services: Services) -> dict:
+    """Sign out everywhere: every session issued up to now is refused from now on."""
+    return services.accounts.revoke_all_sessions(user)
+
+
+class RecoveryInput(_Strict):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/mfa/recovery-request")
+def request_mfa_recovery(update: RecoveryInput, user: PilotSession, services: Services) -> dict:
+    """Lost authenticator: the member asks the Lamina team (never a practice admin) for a reset."""
+    return services.accounts.request_recovery(user, update.reason)
 
 
 @router.post("", status_code=201)
-def create_practice(update: PracticeInput, user: RequiredUser, services: Services) -> dict:
+def create_practice(update: PracticeInput, user: PilotUser, services: Services) -> dict:
     return _run(lambda: services.practice._practice_view(
         services.practice.create_practice(user.id, update.model_dump())
     ))
@@ -185,7 +241,7 @@ def members(context: Practice, services: Services) -> dict:
 
 @router.post("/invitations", status_code=201)
 def invite(update: InvitationInput, context: Practice, services: Services) -> dict:
-    return _run(lambda: services.practice.invite(context, update.role, update.label))
+    return _run(lambda: services.practice.invite(context, update.role, update.email, update.label))
 
 
 @router.delete("/invitations/{invitation_id}", status_code=204)
@@ -204,21 +260,29 @@ def set_member_admin(member_id: str, update: AdminInput, context: Practice, serv
     return _run(lambda: services.practice.set_admin(context, member_id, update.is_admin))
 
 
+@router.post("/members/{member_id}/deactivate")
+def deactivate_member(member_id: str, context: Practice, services: Services) -> dict:
+    """Admin: end a member's access now (their sessions stop working; their history keeps their name)."""
+    return _run(lambda: services.practice.deactivate_member(context, member_id))
+
+
 @router.delete("/members/{member_id}", status_code=204)
 def remove_member(member_id: str, context: Practice, services: Services) -> Response:
-    _run(lambda: services.practice.remove_member(context, member_id))
+    _run(lambda: services.practice.deactivate_member(context, member_id))
     return Response(status_code=204)
 
 
 @router.post("/invitations/preview")
-def preview_invitation(update: TokenInput, user: RequiredUser, services: Services) -> dict:
-    del user  # Signed-in only, so practice names are not enumerable anonymously.
-    return _run(lambda: services.practice.preview_invitation(update.token))
+def preview_invitation(update: TokenInput, user: PilotSession, services: Services) -> dict:
+    # Signed-in only, so practice names are not enumerable anonymously.
+    return _run(lambda: services.practice.preview_invitation(update.token, user.email))
 
 
 @router.post("/invitations/accept")
-def accept_invitation(update: TokenInput, user: RequiredUser, services: Services) -> dict:
-    _run(lambda: services.practice.accept_invitation(user.id, update.token))
+def accept_invitation(update: TokenInput, user: PilotSession, services: Services) -> dict:
+    """Accepting comes before two-step sign-in is set up (invite -> accept -> MFA -> first
+    sign-in); nothing in the practice opens until MFA is done."""
+    _run(lambda: services.practice.accept_invitation(user.id, update.token, user.email))
     return practice_status(user, services)
 
 
@@ -717,9 +781,14 @@ def activation_flag(item_id: str, update: FlagInput, context: Practice, services
     return _run(lambda: services.activation.flag(context, item_id, update.serious, update.note))
 
 
+class ResolveFlagInput(_Strict):
+    note: str = Field(min_length=1, max_length=1000)
+
+
 @router.post("/activation/flags/{flag_id}/resolve")
-def activation_resolve_flag(flag_id: str, context: Practice, services: Services) -> dict:
-    return _run(lambda: services.activation.resolve_flag(context, flag_id))
+def activation_resolve_flag(flag_id: str, update: ResolveFlagInput, context: Practice, services: Services) -> dict:
+    """Resolving a flag always takes a note (what the physician found)."""
+    return _run(lambda: services.activation.resolve_flag(context, flag_id, update.note))
 
 
 @router.post("/activation/notices/{event_id}/acknowledge")
@@ -867,12 +936,56 @@ def metrics(context: Practice, services: Services) -> dict:
             "weekly": weekly_summary(services.store, context.practice_id)}
 
 
-def _require_admin(user: RequiredUser) -> AuthenticatedUser:
+def _require_admin(user: PilotUser) -> AuthenticatedUser:
+    """Lamina operators (allow-listed accounts) -- with MFA like everyone else."""
     from backend.api.physician_onboarding import pilot_admin_user_ids
 
     if user.id not in pilot_admin_user_ids():
         raise HTTPException(404, "Not Found")
     return user
+
+
+Operator = Annotated[AuthenticatedUser, Depends(_require_admin)]
+
+
+class AccessInvitationInput(_Strict):
+    email: str = Field(min_length=3, max_length=254)
+    npi: str = Field(min_length=10, max_length=20)
+    note: str | None = Field(default=None, max_length=300)
+
+
+@internal_access_router.get("/invitations")
+def operator_access_invitations(operator: Operator, services: Services) -> list[dict]:
+    del operator
+    return services.accounts.access_invitations()
+
+
+@internal_access_router.post("/invitations", status_code=201)
+def operator_create_access_invitation(update: AccessInvitationInput, operator: Operator, services: Services) -> dict:
+    """Invite one physician (email + NPI) to set up a new practice. The token is returned once."""
+    return _run(lambda: services.accounts.create_access_invitation(operator, update.email, update.npi, update.note))
+
+
+@internal_access_router.delete("/invitations/{invitation_id}", status_code=204)
+def operator_revoke_access_invitation(invitation_id: str, operator: Operator, services: Services) -> Response:
+    _run(lambda: services.accounts.revoke_access_invitation(operator, invitation_id))
+    return Response(status_code=204)
+
+
+@internal_access_router.get("/mfa-recovery")
+def operator_recovery_queue(operator: Operator, services: Services) -> list[dict]:
+    del operator
+    return services.accounts.recovery_queue()
+
+
+class RecoveryDecisionInput(_Strict):
+    note: str = Field(min_length=1, max_length=500)
+
+
+@internal_access_router.post("/mfa-recovery/{request_id}/{decision}")
+def operator_decide_recovery(request_id: str, decision: Literal["complete", "decline"], update: RecoveryDecisionInput,
+                             operator: Operator, services: Services) -> dict:
+    return _run(lambda: services.accounts.decide_recovery(operator, request_id, decision, update.note))
 
 
 @internal_router.get("")

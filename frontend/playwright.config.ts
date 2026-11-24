@@ -46,7 +46,9 @@ export default defineConfig({
       url: APP_URL,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { VITE_LAMINA_PRODUCT_MODE: 'pilot', VITE_API_BASE_URL: API_URL },
+      // VITE_LAMINA_DEV_TEST_AUTH: this dev server only (never a build) may use the dev test sign-in,
+      // for browser contexts that opt in (the invitee fixtures).
+      env: { VITE_LAMINA_PRODUCT_MODE: 'pilot', VITE_API_BASE_URL: API_URL, VITE_LAMINA_DEV_TEST_AUTH: '1' },
       stdout: 'ignore',
       stderr: 'pipe',
     },

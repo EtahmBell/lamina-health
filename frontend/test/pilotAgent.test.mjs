@@ -96,7 +96,8 @@ test('email confirmation returns to this origin and keeps only a safe relative r
 
 test('signup passes the confirmation redirect to Supabase', () => {
   const auth = source('authClient.ts')
-  assert.match(auth, /auth\.signUp\(\{ email, password, options: \{ emailRedirectTo: confirmationRedirectUrl\(\) \} \}\)/)
+  assert.match(auth, /auth\.signUp\(\{ email, password, options: \{ emailRedirectTo: redirectTo \} \}\)/)
+  assert.match(auth, /\.signUp\(email, password, confirmationRedirectUrl\(\)\)/)
 })
 
 test('publishing includes on-screen public-page edits and rule toggles keep them', () => {

@@ -48,9 +48,10 @@ export function ReadinessTab({ physician, doctor, navigate }: { physician: boole
   const load = () => { getActivation().then((data) => { setReview(data); setError('') }).catch((err) => setError(errorText(err, 'Could not load the readiness review'))) }
   useEffect(load, [])
   useOnPilotDataChange(load)
-  const act = async (action: () => Promise<unknown>) => {
+  /** Runs one change; true when it worked (the error, if any, shows above the page). */
+  const act = async (action: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true); setActionError('')
-    try { await action(); setConfirming(null); load() } catch (err) { setActionError(errorText(err, 'That didn’t work.')) } finally { setBusy(false) }
+    try { await action(); setConfirming(null); load(); return true } catch (err) { setActionError(errorText(err, 'That didn’t work.')); return false } finally { setBusy(false) }
   }
   if (error && !review) return <PageError title="Couldn’t open the readiness review" detail={error} onRetry={load} />
   if (!review) return <PageLoading label="Opening the readiness review…" />
@@ -159,7 +160,7 @@ export function ReadinessTab({ physician, doctor, navigate }: { physician: boole
       <div className="pilot-capability-list">{review.capabilities.map((cap) => <CapabilityCard key={cap.key} cap={cap} busy={busy}
         confirming={confirming === cap.key} onConfirm={() => setConfirming(cap.key)} onCancel={() => setConfirming(null)}
         onSet={(state, extra) => void act(() => setCapabilityState(cap.key, { state, ...extra }))}
-        onResolve={(flagId) => void act(() => resolveAgentFlag(flagId))} />)}</div>
+        onResolve={(flagId, note) => act(() => resolveAgentFlag(flagId, note))} />)}</div>
     </section>
 
     <AlwaysYours review={review} />
@@ -171,9 +172,28 @@ function DisagreementMeta({ item }: { item: Disagreement }) {
   return <small className="muted-note">{item.rule ? `${item.rule.referral_type} rule v${item.rule.version}` : 'No rule'}{item.current ? '' : ' · under earlier rules'}{item.learning ? ` · a learning was ${item.learning.status} from this` : ''}</small>
 }
 
+type CapabilityFlag = NonNullable<CapabilityView['flags']>[number]
+
+/** One "this was wrong" flag. A flag that blocks turning the capability back on (serious, or one
+ * of the flags behind an automatic return to shadow) is resolved with a short note. */
+function FlagRow({ flag, busy, onResolve }: { flag: CapabilityFlag; busy: boolean; onResolve: (flagId: string, note: string) => Promise<boolean> }) {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const resolvable = !flag.resolved_at && (flag.serious || flag.blocking)
+  return <li>
+    {flag.serious ? <strong>Serious · </strong> : null}{flag.note ?? 'No note'} <small className="muted-note">· by {flag.actor_role} · {formatDate(flag.created_at)}{flag.resolved_at ? ' · resolved' : flag.blocking ? ' · needs resolving' : ''}</small>
+    {flag.resolved_at && flag.resolution_note && <small className="muted-note pilot-flag-resolution">Resolved: “{flag.resolution_note}”</small>}
+    {resolvable && !open && <button type="button" className="text-button" disabled={busy} onClick={() => setOpen(true)}>Resolve…</button>}
+    {resolvable && open && <form className="pilot-flag-resolve" aria-label="Resolve this flag" onSubmit={(event) => { event.preventDefault(); if (note.trim()) void onResolve(flag.id, note.trim()).then((ok) => { if (ok) setOpen(false) }) }}>
+      <label><span>What did you find?</span><textarea value={note} onChange={(event) => setNote(event.target.value)} rows={2} maxLength={1000} required disabled={busy} /></label>
+      <div className="pilot-actions"><button className="button-primary" type="submit" disabled={busy || !note.trim()}>Resolve flag</button><button className="text-button" type="button" disabled={busy} onClick={() => { setOpen(false); setNote('') }}>Cancel</button></div>
+    </form>}
+  </li>
+}
+
 function CapabilityCard({ cap, busy, confirming, onConfirm, onCancel, onSet, onResolve }: {
   cap: CapabilityView; busy: boolean; confirming: boolean; onConfirm: () => void; onCancel: () => void
-  onSet: (state: CapabilityState, extra?: { confirm?: boolean; frequency?: 'daily' | 'weekly' }) => void; onResolve: (flagId: string) => void
+  onSet: (state: CapabilityState, extra?: { confirm?: boolean; frequency?: 'daily' | 'weekly' }) => void; onResolve: (flagId: string, note: string) => Promise<boolean>
 }) {
   const eligibility = cap.eligibility
   const canActivate = cap.states?.includes('active') && cap.practice_limit === 'active'
@@ -200,8 +220,8 @@ function CapabilityCard({ cap, busy, confirming, onConfirm, onCancel, onSet, onR
     </div>}
     {(cap.flags ?? []).length > 0 && <div className="pilot-capability-flags">
       <p className="practice-subheading">“This was wrong” flags</p>
-      <ul>{(cap.flags ?? []).map((flag) => <li key={flag.id}>{flag.serious ? <strong>Serious · </strong> : null}{flag.note ?? 'No note'} <small className="muted-note">· by {flag.actor_role} · {formatDate(flag.created_at)}{flag.resolved_at ? ' · resolved' : ''}</small>
-        {flag.serious && !flag.resolved_at && <button type="button" className="text-button" disabled={busy} onClick={() => onResolve(flag.id)}>Mark resolved</button>}</li>)}</ul>
+      {(cap.flags ?? []).some((flag) => flag.blocking) && <p className="muted-note">Resolve each flag below with a short note before {cap.name.toLowerCase()} can be turned back on.</p>}
+      <ul>{(cap.flags ?? []).map((flag) => <FlagRow key={flag.id} flag={flag} busy={busy} onResolve={onResolve} />)}</ul>
     </div>}
     {confirming
       ? <div className="pilot-panel pilot-capability-confirm" role="group" aria-label={`Turn on ${cap.name}`}>

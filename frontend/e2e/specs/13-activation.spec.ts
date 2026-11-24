@@ -81,7 +81,7 @@ test('turning drafting on: confirmation, agent draft in the staff queue, staff r
   await expect(staff.locator('.timeline-event h4', { hasText: `Information request drafted by ${doctor}’s agent (not sent)` })).toHaveCount(1)
   // "Ready" while a required item is missing: only after confirming it by name.
   await nextStep(staff).getByRole('button', { name: `Ready for ${doctor}` }).click()
-  const missing = staff.getByRole('group', { name: 'Required items still missing' })
+  const missing = staff.getByRole('group', { name: 'Required items not yet verified' })
   await expect(missing).toContainText('Still missing: Thyroid ultrasound.')
   await expect(staff.getByRole('button', { name: 'Mark ready' })).toBeDisabled()
   await missing.getByRole('checkbox').check()
@@ -108,7 +108,12 @@ test('turning drafting on: confirmation, agent draft in the staff queue, staff r
   await expect(drafting).toContainText('A serious “this was wrong” flag is unresolved')
 
   // Resolve, turn it back on, then pause everything in one action.
-  await drafting.getByRole('button', { name: 'Mark resolved' }).click()
+  // Resolving takes a note (what the physician found).
+  await drafting.getByRole('button', { name: 'Resolve…' }).click()
+  await expect(drafting.getByRole('button', { name: 'Resolve flag' })).toBeDisabled()
+  await drafting.getByLabel('What did you find?').fill('Rule asked for the wrong study; fixed (E2E)')
+  await drafting.getByRole('button', { name: 'Resolve flag' }).click()
+  await expect(drafting).toContainText('Resolved: “Rule asked for the wrong study; fixed (E2E)”')
   await drafting.getByRole('button', { name: 'Turn on' }).click()
   await drafting.getByRole('group', { name: 'Turn on Draft missing-information requests' }).getByRole('button', { name: 'Turn on' }).click()
   await expect(drafting.locator('.pilot-capability-state')).toHaveText('On')

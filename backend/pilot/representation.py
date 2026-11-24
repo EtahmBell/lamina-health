@@ -115,8 +115,16 @@ class RepresentationService:
             "SELECT * FROM agent_lifecycle WHERE practice_id = ? AND owner_scope_id = ?", (practice_id, owner_scope_id))
         if row:
             return row
-        # First read: a physician who already confirmed rules before Step 17 is in shadow.
-        existing = bool(self.rules.list(practice_id, owner_scope_id=owner_scope_id))
+        # First read: a physician who already confirmed rules before Step 17 is in shadow. Only rules
+        # they wrote or confirmed themselves count: a physician who joins a practice that already has
+        # rules (by invitation) starts at the beginning of their OWN setup.
+        member = self.store.fetch_one(
+            "SELECT user_id FROM practice_members WHERE practice_id = ? AND physician_owner_scope_id = ? "
+            "ORDER BY created_at LIMIT 1", (practice_id, owner_scope_id))
+        actor = f"user:{member['user_id']}" if member else None
+        existing = any(
+            actor in {rule.created_by, rule.confirmed_by} or getattr(rule, "owner_scope_id", None) == owner_scope_id
+            for rule in self.rules.list(practice_id, owner_scope_id=owner_scope_id))
         now = now_iso()
         state = "shadow" if existing else "initializing"
         self.store.execute(

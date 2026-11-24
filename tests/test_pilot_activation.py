@@ -340,7 +340,10 @@ def test_serious_flag_returns_to_shadow_and_is_on_home(pilot: Pilot) -> None:
     assert "unresolved" in " ".join(_cap(_review(pilot))["eligibility"]["reasons"])
     assert _activate(pilot).status_code == 409, "a serious flag blocks turning it back on until resolved"
     flag_id = needs[0]["flag_id"]
-    assert pilot.post(f"/api/me/practice/activation/flags/{flag_id}/resolve", "user-a").status_code == 200
+    resolve = f"/api/me/practice/activation/flags/{flag_id}/resolve"
+    assert pilot.post(resolve, "user-a", {}).status_code == 422, "resolving a flag takes a note"
+    assert pilot.post(resolve, "user-a", {"note": "  "}).status_code == 422
+    assert pilot.post(resolve, "user-a", {"note": "Checked the rule; fixed (synthetic)"}).status_code == 200
     assert _activate(pilot).status_code == 200
     rows = pilot.store.fetch_all("SELECT event_type, actor_role, representation_version_id FROM capability_events ORDER BY created_at")
     assert [row["event_type"] for row in rows] == ["activated", "flagged", "flagged", "auto_returned", "flag_resolved", "activated"]
@@ -510,6 +513,19 @@ def test_three_flags_in_seven_days_return_to_shadow_with_a_home_item(pilot: Pilo
     assert not [e for e in pilot.get("/api/me/practice/home", "user-a").json()["needs_you"] if e["kind"] == "capability_notice"]
     events = [row["event_type"] for row in services.store.fetch_all("SELECT event_type FROM capability_events ORDER BY created_at")]
     assert "auto_returned_repeated_flags" in events and events[-1] == "notice_acknowledged"
+    # Turning it back on needs each flag behind the return resolved, with a note (follow-up).
+    cap = _cap(_review(pilot))
+    blocking = [flag for flag in cap["flags"] if flag["blocking"]]
+    assert {flag["note"] for flag in blocking} == {"Off 1", "Off 2", "Off 3"}, "the old flag outside 7 days isn't one of them"
+    assert any("resolve each with a note" in reason for reason in cap["eligibility"]["reasons"])
+    assert _review(pilot)["summary"]["recommended"]["label"] == "Review the flags"
+    refused = _activate(pilot)
+    assert refused.status_code == 409 and "3 “this was wrong” flags" in refused.json()["detail"]["message"]
+    assert pilot.post(f"/api/me/practice/activation/flags/{blocking[0]['id']}/resolve", "user-c", {"note": "x"}).status_code == 403
+    for flag in blocking:
+        done = pilot.post(f"/api/me/practice/activation/flags/{flag['id']}/resolve", "user-a", {"note": f"Reviewed {flag['note']}"})
+        assert done.status_code == 200, done.text
+    assert all(flag["resolution_note"] for flag in _cap(_review(pilot))["flags"] if flag["note"] != "Off 0")
     # Turned back on: earlier flags no longer count.
     assert _activate(pilot).status_code == 200
     assert pilot.post(f"/api/me/practice/activation/items/{item}/flag", "user-c", {"note": "Again"}).json()["state"] == "active"
@@ -565,3 +581,33 @@ def test_staff_view_names_who_made_the_last_change(pilot: Pilot) -> None:
     assert staff_cap["updated_by_name"]
     assert _cap(_review(pilot))["updated_by_name"] == staff_cap["updated_by_name"]
     assert staff_cap["updated_by_name"] == pilot.get("/api/me/practice/activation", "user-a").json()["capabilities"][0]["updated_by_name"]
+
+
+# ------------------------------------------------------- Step 18 follow-ups (run 1)
+
+
+def test_ready_check_separates_received_but_unverified_from_missing(pilot: Pilot) -> None:
+    from tests.test_pilot_agent import _request_and_send, _token
+
+    _ready(pilot)
+    rid = pilot.referral("user-c")["referral"]["id"]  # nothing submitted: A1c and renal both missing
+    token = _token(_request_and_send(pilot, rid, "user-c")["status_link"])
+    responded = pilot.client.post(f"/api/public/r/{token}/response", json={
+        "message": "Renal panel below (synthetic).",
+        "items": [{"key": "renal_function", "value": "Cr 0.9 eGFR 88", "observed_date": RECENT}],
+    })
+    assert responded.status_code == 200, responded.text
+    path = f"/api/me/practice/referrals/{rid}/mark-ready"
+    refused = pilot.post(path, "user-c", {"note": "Checked"})
+    assert refused.status_code == 409
+    message = refused.json()["detail"]["message"]
+    assert "Still missing: Recent HbA1c" in message and "Received, not verified: Renal function" in message
+    # The confirmation must name both kinds; naming only the missing one isn't enough.
+    assert pilot.post(path, "user-c", {"confirm_missing": ["Recent HbA1c"]}).status_code == 409
+    ok = pilot.post(path, "user-c", {"note": "Office says the A1c is coming (synthetic)",
+                                    "confirm_missing": ["Recent HbA1c", "Renal function"]})
+    assert ok.status_code == 200, ok.text
+    handoff = ok.json()["referral"]["handoff"]
+    assert handoff["missing_items"] == ["Recent HbA1c"] and handoff["unverified_items"] == ["Renal function"]
+    event = next(e for e in ok.json()["history"] if e["event_type"] == "referral_marked_ready")
+    assert event["summary"] == "Marked ready while still missing Recent HbA1c; received, not verified: Renal function"

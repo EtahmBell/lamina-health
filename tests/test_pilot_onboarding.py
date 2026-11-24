@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -167,16 +168,28 @@ class FakeTransport:
 
 
 class FakeVerifier:
+    """Test sessions. By default a token is a fresh, MFA-verified (aal2) session whose account
+    email is <user>@example.test. Suffixes: "-aal1" (two-step sign-in not done yet), "-old"
+    (issued an hour ago, e.g. before a revocation)."""
+
     users: ClassVar = {
         "token-user-a": "user-a",
         "token-user-b": "user-b",
         "token-user-c": "user-c",
+        "token-user-d": "user-d",
+        "token-user-e": "user-e",
         "token-admin": "admin",
     }
 
     def verify(self, token: str) -> AuthenticatedUser:
+        aal, issued_at = "aal2", int(time.time())
+        while token.endswith(("-aal1", "-old")):
+            if token.endswith("-aal1"):
+                token, aal = token[:-5], "aal1"
+            else:
+                token, issued_at = token[:-4], issued_at - 3600
         if user := self.users.get(token):
-            return AuthenticatedUser(id=user)
+            return AuthenticatedUser(id=user, email=f"{user}@example.test", aal=aal, issued_at=issued_at)
         raise AuthenticationError("invalid")
 
 

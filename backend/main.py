@@ -14,6 +14,7 @@ from backend.api.referrals import router as referrals_router
 from backend.api.specialist import router as specialist_router
 from backend.api.workspace import router as workspace_router
 from backend.demo_workspace import configured_cors_origins
+from backend.pilot.api import internal_access_router as pilot_access_router
 from backend.pilot.api import internal_router as pilot_metrics_router
 from backend.pilot.api import router as pilot_practice_router
 from backend.pilot.mode import ProductMode, product_mode
@@ -42,6 +43,7 @@ PILOT_ROUTERS = (
     pilot_admin_router,
     pilot_practice_router,
     pilot_metrics_router,
+    pilot_access_router,
     pilot_public_router,
 )
 
@@ -80,8 +82,22 @@ def create_app(mode: str | None = None) -> FastAPI:
             "X-Lamina-Workspace-Bootstrap",
         ],
     )
-    for router in PILOT_ROUTERS if resolved == "pilot" else DEMO_ROUTERS:
-        application.include_router(router)
+    if resolved == "pilot":
+        # Pilot only (the demo shares the onboarding and approval routers and is unchanged):
+        # onboarding needs MFA and is closed to staff accounts; operator routes need MFA.
+        from fastapi import Depends
+
+        from backend.pilot.api import require_onboarding_user, require_pilot_user
+
+        guarded = {
+            id(physician_onboarding_router): [Depends(require_onboarding_user)],
+            id(pilot_admin_router): [Depends(require_pilot_user)],
+        }
+        for router in PILOT_ROUTERS:
+            application.include_router(router, dependencies=guarded.get(id(router), []))
+    else:
+        for router in DEMO_ROUTERS:
+            application.include_router(router)
 
     @application.get("/health")
     def health() -> dict[str, str]:

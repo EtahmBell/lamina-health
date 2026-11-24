@@ -9,8 +9,9 @@
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { Page } from '@playwright/test'
+import { createAccountFromInvitation, invite } from '../support/access.ts'
 import { ROOT_DIR, seedState, type SeedState } from '../support/env.ts'
-import { expect, referralPath, seedStep, test, type Actor } from '../support/fixtures.ts'
+import { expect, referralPath, seedStep, test, totpCode, type Actor, type Invitee } from '../support/fixtures.ts'
 
 const runName = (process.env.E2E_RUN_NAME || new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')).replace(/[^\w.-]/g, '-')
 
@@ -18,7 +19,16 @@ const main = (page: Page) => expect(page.locator('main').first()).toBeVisible()
 const card = (page: Page) => expect(page.locator('.next-step-card')).toBeVisible()
 const text = (value: string | RegExp) => (page: Page) => expect(page.getByText(value).first()).toBeVisible()
 
-type Shot = { name: string; actor: Actor; to: (seed: SeedState) => string; ready?: (page: Page) => Promise<void>; before?: () => void; mock?: 'loading' | 'error'; act?: (page: Page) => Promise<void> }
+/* Accounts and access shots drive two brand-new invitee accounts (dev-only test sign-in) and the
+ * admin's page. Anything credential-like on screen is masked in every screenshot: the invitation
+ * link, the authenticator setup key and its QR code. */
+type Tools = { admin: () => Promise<Page>; newcomer: () => Promise<Invitee>; leaver: () => Promise<Invitee> }
+type Shot = {
+  name: string; actor: Actor | 'newcomer' | 'leaver'; to: (seed: SeedState) => string; ready?: (page: Page) => Promise<void>; before?: () => void
+  mock?: 'loading' | 'error'; act?: (page: Page, tools: Tools) => Promise<void>; prepare?: (page: Page) => Promise<void>; mask?: string[]
+}
+const MASK = ['.pilot-link-field input', '.pilot-setup-key', '.pilot-mfa-secret img']
+let pendingInvite = '' // the join path from the admin's invitation (never printed)
 
 const SHOTS: Shot[] = [
   // Physician (practice admin)
@@ -57,7 +67,7 @@ const SHOTS: Shot[] = [
   // Added in the follow-up round (appended so earlier numbering is unchanged).
   { name: 'staff-referral-declined-notify', actor: 'staff', to: (s) => referralPath(s.referrals.declined_notify), ready: text('Not sent — notify the referring office') },
   // Step 18 (appended): readiness review and activation.
-  { name: 'physician-readiness-review', actor: 'physician', before: () => seedStep('shadow-auto-draft'), to: () => '/me/agent?tab=readiness', ready: text('What your agent observed') },
+  { name: 'physician-readiness-review', actor: 'physician', before: () => { seedStep('resolve-auto-draft-flags'); seedStep('shadow-auto-draft') }, to: () => '/me/agent?tab=readiness', ready: text('What your agent observed') },
   { name: 'physician-readiness-confirm', actor: 'physician', to: () => '/me/agent?tab=readiness', ready: text('Eligible to turn on.'),
     act: async (p) => { await p.locator('.pilot-capability', { hasText: 'Draft missing-information requests' }).getByRole('button', { name: 'Turn on' }).click(); await expect(p.getByText('Nothing is sent without staff.')).toBeVisible() } },
   { name: 'second-physician-readiness-not-eligible', actor: 'second_physician', to: () => '/me/agent?tab=readiness', ready: text('Not eligible yet:') },
@@ -67,17 +77,93 @@ const SHOTS: Shot[] = [
   // Step 18 decisions (appended): "Ready" while a required item is missing needs a named confirmation.
   { name: 'staff-ready-missing-confirm', actor: 'staff', to: () => referralPath(seedState().referrals.auto_draft!), ready: text(/drafted by .*’s agent/),
     act: async (p) => { await p.locator('.next-step-card').getByRole('button', { name: /^Ready for / }).click(); await expect(p.getByText('Still missing:')).toBeVisible() } },
+  // Accounts and access, run 1 (appended).
+  { name: 'admin-team-and-invite', actor: 'physician', to: () => '/me/practice', ready: text('Invite someone') },
+  { name: 'admin-invitation-created', actor: 'physician', to: () => '/me/practice', ready: text('Invite someone'), mask: MASK,
+    act: async (p, tools) => {
+      const email = (await tools.newcomer()).email
+      const section = p.getByRole('region', { name: 'Invite someone' })
+      await section.getByLabel('Physician', { exact: true }).check()
+      await section.getByLabel('Their email address').fill(email)
+      await section.getByLabel(/Name or role/).fill('Dr. Newcomb (E2E)')
+      await section.getByRole('button', { name: 'Create invitation' }).click()
+      const link = new URL(await section.getByRole('textbox', { name: 'Invitation link' }).inputValue())
+      pendingInvite = `${link.pathname}${link.search}`
+    } },
+  { name: 'admin-deactivate-confirm', actor: 'physician', to: () => '/me/practice', ready: text('Invite someone'),
+    act: async (p) => { await p.locator('.pilot-member', { hasText: 'Front desk (E2E)' }).getByRole('button', { name: 'Deactivate…' }).click(); await expect(p.getByText('Their access ends now, on every device.')).toBeVisible() } },
+  { name: 'security-sign-out-everywhere', actor: 'physician', to: () => '/me/practice#security', ready: text('Sign-in & security'),
+    act: async (p) => { await p.getByRole('button', { name: 'Sign out everywhere' }).click(); await expect(p.getByText('Sign out on every device?')).toBeVisible() } },
+  { name: 'landing-invite-only', actor: 'office', to: () => '/me/home', ready: text('Request pilot access') },
+  { name: 'sign-in-after-idle', actor: 'office', to: () => '/claim/sign-in?reason=idle&return=%2Fme%2Fhome', ready: text(/signed out after 30 minutes/) },
+  { name: 'request-pilot-access', actor: 'office', to: () => '/claim/sign-up?return=%2Fme%2Fhome', ready: (p) => expect(p.getByRole('heading', { name: 'Request pilot access' })).toBeVisible() },
+  { name: 'join-signed-out', actor: 'office', to: () => pendingInvite, ready: text('You’ve been invited to Lamina') },
+  { name: 'join-physician-preview', actor: 'newcomer', to: () => '/me/home', ready: main,
+    act: async (_p, tools) => { const newcomer = await tools.newcomer(); await createAccountFromInvitation(newcomer, pendingInvite); await expect(newcomer.page.getByText('only you can')).toBeVisible() } },
+  { name: 'mfa-setup', actor: 'newcomer', to: () => pendingInvite, ready: text('only you can'), mask: MASK,
+    act: async (p) => {
+      await p.getByRole('button', { name: 'Accept invitation' }).click()
+      await p.getByRole('button', { name: 'Set up my authenticator' }).click()
+      await expect(p.getByLabel('Setup key')).toBeVisible()
+    } },
+  { name: 'onboarding-invited-physician', actor: 'newcomer', to: () => '/me/home', ready: text('Set up two-step sign-in'),
+    act: async (p) => {
+      await p.getByRole('button', { name: 'Set up my authenticator' }).click()
+      const key = (await p.getByLabel('Setup key').innerText()).trim()
+      await p.getByLabel('6-digit code').fill(totpCode(key)); await p.getByRole('button', { name: 'Verify' }).click()
+      await expect(p.getByRole('note')).toContainText('as a physician')
+    } },
+  { name: 'mfa-enter-code', actor: 'newcomer', to: () => '/me/home', ready: main,
+    act: async (p, tools) => {
+      const newcomer = await tools.newcomer()
+      await p.getByRole('button', { name: 'Sign out' }).first().click()
+      await p.goto('/claim/sign-in?return=%2Fme%2Fhome')
+      await p.getByLabel('Email').fill(newcomer.email); await p.getByLabel('Password').fill(newcomer.password)
+      await p.getByRole('main').getByRole('button', { name: /^Sign in/ }).click()
+      await expect(p.getByRole('heading', { name: 'Enter your code' })).toBeVisible()
+    } },
+  { name: 'mfa-recovery-request', actor: 'newcomer', to: () => '/me/home', ready: text('Enter your code'),
+    act: async (p) => { await p.getByRole('button', { name: 'Lost your authenticator?' }).click(); await expect(p.getByText('never a practice admin')).toBeVisible() } },
+  { name: 'access-ended', actor: 'leaver', to: () => '/me/home', ready: main,
+    act: async (p, tools) => {
+      const admin = await tools.admin()
+      const leaver = await tools.leaver()
+      const path = await invite(admin, leaver.email, 'Staff', 'Temp desk (E2E)')
+      await createAccountFromInvitation(leaver, path)
+      await p.getByRole('button', { name: 'Accept invitation' }).click()
+      await p.getByRole('button', { name: 'Set up my authenticator' }).click()
+      await p.getByLabel('6-digit code').fill(totpCode((await p.getByLabel('Setup key').innerText()).trim())); await p.getByRole('button', { name: 'Verify' }).click()
+      await expect(p.getByRole('navigation').getByRole('button', { name: 'Home' })).toBeVisible()
+      await admin.goto('/me/practice')
+      await admin.locator('.pilot-member', { hasText: 'Temp desk (E2E)' }).getByRole('button', { name: 'Deactivate…' }).click()
+      await admin.getByRole('group', { name: 'Deactivate Temp desk (E2E)' }).getByRole('button', { name: 'Deactivate' }).click()
+      await expect(admin.locator('.pilot-member', { hasText: 'Temp desk (E2E)' })).toHaveCount(0)
+      await p.goto('/me/home')
+      await expect(p.getByRole('heading', { name: /has ended|signed out/ })).toBeVisible()
+    } },
+  // Step 18 follow-ups (appended): flags behind an automatic return need notes; the Ready check splits items.
+  { name: 'readiness-flags-need-notes', actor: 'physician', before: () => seedStep('flag-auto-draft-three-times'), to: () => '/me/agent?tab=readiness', ready: text('needs resolving'),
+    act: async (p) => { await p.getByRole('button', { name: 'Resolve…' }).first().click(); await expect(p.getByLabel('What did you find?')).toBeVisible() } },
+  { name: 'staff-ready-received-not-verified', actor: 'staff', before: () => seedStep('new-unverified-referral'), to: () => referralPath(seedState().referrals.unverified!), ready: card,
+    act: async (p) => { await p.locator('.next-step-card').getByRole('button', { name: /^Ready for / }).click(); await expect(p.getByText('Received, not verified:')).toBeVisible() } },
 ]
 
 // E2E_ONLY=name,name captures just those screens (e.g. a follow-up round on affected screens);
 // numbering stays the same as the full list so rounds compare file-for-file.
 const only = new Set((process.env.E2E_ONLY ?? '').split(',').map((name) => name.trim()).filter(Boolean))
 
-test('capture the UI-review screens', async ({ as, seed }, testInfo) => {
-  test.setTimeout(10 * 60_000)
+test('capture the UI-review screens', async ({ as, seed, invitee }, testInfo) => {
+  test.setTimeout(20 * 60_000)
   const size = testInfo.project.use.viewport!
   const dir = path.join(ROOT_DIR, 'ui-review', runName, `${size.width}x${size.height}`)
   mkdirSync(dir, { recursive: true })
+  let newcomer: Invitee | null = null
+  let leaver: Invitee | null = null
+  const tools: Tools = {
+    admin: () => as('physician'),
+    newcomer: async () => (newcomer ??= await invitee('newcomer')),
+    leaver: async () => (leaver ??= await invitee('leaver')),
+  }
   for (const [index, shot] of SHOTS.entries()) {
     if (only.size && !only.has(shot.name)) {
       // Steps that set up later shots still run, so a filtered run sees the same states.
@@ -85,8 +171,9 @@ test('capture the UI-review screens', async ({ as, seed }, testInfo) => {
       continue
     }
     shot.before?.()
-    const page = await as(shot.actor)
+    const page = shot.actor === 'newcomer' ? (await tools.newcomer()).page : shot.actor === 'leaver' ? (await tools.leaver()).page : await as(shot.actor)
     await page.unrouteAll({ behavior: 'ignoreErrors' })
+    await shot.prepare?.(page)
     if (shot.mock) {
       await page.route(/\/api\/me\/practice\/referrals\/[^/]+$/, async (route) => {
         if (shot.mock === 'loading') return // never answered: the page stays in its loading state
@@ -95,13 +182,14 @@ test('capture the UI-review screens', async ({ as, seed }, testInfo) => {
     }
     await page.goto(shot.to(seed))
     await shot.ready?.(page)
-    await shot.act?.(page)
+    await shot.act?.(page, tools)
     if (!shot.mock) await page.waitForLoadState('networkidle').catch(() => undefined)
     await page.evaluate(() => document.fonts?.ready)
     const file = path.join(dir, `${String(index + 1).padStart(2, '0')}-${shot.name}.png`)
-    await page.screenshot({ path: file, fullPage: true, animations: 'disabled' })
+    const mask = (shot.mask ?? []).map((selector) => page.locator(selector))
+    await page.screenshot({ path: file, fullPage: true, animations: 'disabled', mask })
     // On the phone, also the first screen exactly as the viewport shows it (fixed elements in place).
-    if (size.width < 600) await page.screenshot({ path: file.replace(/\.png$/, '.fold.png'), animations: 'disabled' })
+    if (size.width < 600) await page.screenshot({ path: file.replace(/\.png$/, '.fold.png'), animations: 'disabled', mask })
     if (shot.mock) await page.unrouteAll({ behavior: 'ignoreErrors' })
   }
 })

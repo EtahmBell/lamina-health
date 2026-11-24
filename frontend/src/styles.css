@@ -3595,3 +3595,46 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
   .pilot-notice { flex-direction: column; }
 }
 .pilot-panel .button-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---- Accounts and access (go-live prep, run 1): sign-in, invitations, two-step sign-in, team, session safety. */
+.pilot-access h1 { margin-bottom: 8px; }
+.pilot-access-note { border-left: 3px solid var(--mineral); background: var(--mineral-surface); border-radius: 8px; padding: 10px 12px; font-size: .74rem; margin: 0 0 14px; }
+.pilot-access-footer { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: .72rem; color: var(--text-secondary); }
+.pilot-access-footer p { margin: 0; }
+.pilot-mfa-steps { margin: 14px 0 0; padding-left: 20px; display: grid; gap: 16px; font-size: .76rem; }
+.pilot-mfa-steps li::marker { color: var(--text-secondary); }
+.pilot-mfa-secret { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-top: 10px; }
+.pilot-mfa-secret img { border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 6px; }
+.pilot-mfa-secret > div { display: grid; gap: 4px; min-width: 0; }
+.pilot-setup-key { display: block; font-size: .82rem; letter-spacing: .06em; background: var(--slate-surface); border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; user-select: all; }
+.pilot-mfa-code { max-width: 320px; margin-top: 10px; }
+.pilot-mfa-code input { font-size: 1.05rem; letter-spacing: .3em; font-variant-numeric: tabular-nums; }
+.pilot-recovery { margin-top: 16px; }
+.pilot-recovery p { margin: 0; font-size: .74rem; }
+.pilot-idle-warning { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--sage-surface-strong); background: var(--mineral-surface); color: var(--mineral-deep); border-radius: 10px; font-size: .74rem; }
+.pilot-idle-warning p { margin: 0; }
+.pilot-member { flex-wrap: wrap; }
+.pilot-member-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.pilot-deactivate { flex-basis: 100%; }
+.pilot-deactivate p, .pilot-invite-created p { margin: 0; font-size: .74rem; }
+.danger-text { color: var(--danger); }
+.pilot-role-choice { border: 0; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.pilot-role-choice legend { font-size: .7rem; color: var(--text-secondary); margin-bottom: 6px; padding: 0; }
+.pilot-role-choice .pilot-check { margin-bottom: 0; }
+.pilot-link-field input { width: 100%; font-size: .68rem; background: var(--slate-surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.pilot-flag-resolution { display: block; margin-top: 2px; }
+.pilot-flag-resolve { margin-top: 8px; display: grid; gap: 6px; max-width: 520px; }
+.pilot-flag-resolve label { display: grid; gap: 4px; font-size: .72rem; }
+.pilot-flag-resolve .pilot-actions { margin-top: 4px; }
+@media (max-width: 640px) {
+  .pilot-mfa-secret { flex-direction: column; align-items: flex-start; }
+  .pilot-idle-warning { position: static; }
+}
+
+/* Narrow screens: the account chip (the page names the account) yields so "Sign out" is never covered or clipped. */
+@media (max-width: 640px) {
+  .claim-header { height: auto; min-height: 64px; padding: 10px 16px; gap: 8px 12px; flex-wrap: wrap; }
+  .claim-header-actions { min-width: 0; gap: 12px; flex-wrap: wrap; }
+  .claim-account-chip { display: none; }
+  .claim-header-actions .text-button { flex: none; }
+}

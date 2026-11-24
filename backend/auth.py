@@ -23,7 +23,18 @@ class AuthenticationError(ValueError):
 
 @dataclass(frozen=True)
 class AuthenticatedUser:
+    """The verified account. Beyond `id` (the token's `sub`), the pilot reads:
+
+    * `email`      -- the account's email claim (invitations are bound to an email address);
+    * `aal`        -- Supabase's authenticator assurance level: "aal2" once the session passed a
+                      second factor (TOTP), otherwise "aal1";
+    * `issued_at`  -- the token's `iat` (seconds), so sessions can be revoked server-side.
+    """
+
     id: str
+    email: str | None = None
+    aal: str = "aal1"
+    issued_at: int | None = None
 
 
 class TokenVerifier(Protocol):
@@ -125,10 +136,22 @@ class SupabaseTokenVerifier:
             raise
         except jwt.PyJWTError as error:
             raise AuthenticationError("Access token is invalid") from error
-        subject = claims.get("sub")
-        if not isinstance(subject, str) or not subject.strip():
-            raise AuthenticationError("Access token subject is invalid")
-        return AuthenticatedUser(id=subject)
+        return user_from_claims(claims)
+
+
+def user_from_claims(claims: dict[str, Any]) -> AuthenticatedUser:
+    subject = claims.get("sub")
+    if not isinstance(subject, str) or not subject.strip():
+        raise AuthenticationError("Access token subject is invalid")
+    email = claims.get("email")
+    aal = claims.get("aal")
+    issued_at = claims.get("iat")
+    return AuthenticatedUser(
+        id=subject,
+        email=email.strip().casefold() if isinstance(email, str) and email.strip() else None,
+        aal=aal if aal in {"aal1", "aal2"} else "aal1",
+        issued_at=int(issued_at) if isinstance(issued_at, int | float) else None,
+    )
 
 
 @lru_cache(maxsize=1)

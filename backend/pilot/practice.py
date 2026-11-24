@@ -147,16 +147,49 @@ class PracticeService:
 
     # ------------------------------------------------------------------ status
 
-    def status(self, user_id: str, physician_onboarding: dict[str, Any]) -> dict[str, Any]:
+    def complete_pending_access(self, user_id: str) -> None:
+        """Idempotent follow-through once the account has confirmed its own physician identity:
+        * an accepted physician invitation becomes a (non-admin) physician membership;
+        * an accepted operator invitation for a new practice pre-approves pilot access, but only
+          for the NPI the operator named."""
+        scope = self._confirmed_physician_scope(user_id)
+        if not scope or self.store.membership_for_user(user_id):
+            return
+        invitation = self.store.pending_physician_invitation(user_id)
+        if invitation:
+            self.store.complete_physician_join(invitation, user_id, scope["id"])
+            return
+        access = self.store.fetch_one(
+            "SELECT * FROM pilot_access_invitations WHERE accepted_by_user_id = ? AND approved_at IS NULL "
+            "AND revoked_at IS NULL ORDER BY accepted_at DESC LIMIT 1", (user_id,))
+        if access and access["npi"] == scope["npi"] and scope.get("pilot_access_status") == "pending":
+            self.workflow.decide_pilot_access(scope["id"], "approve", f"invitation:{access['id']}",
+                                              "Pre-approved by a Lamina invitation for this NPI")
+            self.store.execute(
+                [("UPDATE pilot_access_invitations SET approved_at = ? WHERE id = ? AND approved_at IS NULL",
+                  (datetime.now(UTC).isoformat(timespec="seconds"), access["id"]))],
+                [{"event_type": "pilot_access_approved_by_invitation", "actor": f"invitation:{access['id']}",
+                  "autonomy": "automatic", "metadata": {"invitation_id": access["id"], "owner_scope_id": scope["id"]}}])
+
+    def status(self, user_id: str, physician_onboarding: dict[str, Any], *, mfa_verified: bool = True,
+               recovery: dict | None = None) -> dict[str, Any]:
         """One projection the frontend routes on. Never trusts client state.
 
-        next_step: physician_onboarding | practice_setup | pilot_pending |
-                   practice_pending | workspace | unavailable
+        next_step: mfa | physician_onboarding | practice_setup | pilot_pending | practice_pending |
+                   workspace | access_ended | unavailable
         """
+        if not mfa_verified:
+            # Nothing about the practice is shown until two-step sign-in is done.
+            return {"next_step": "mfa", "role": None, "is_admin": False, "practice": None, "physician_name": None,
+                    "physician_onboarding": {"status": physician_onboarding.get("status")},
+                    "practice_defaults": None, "invitation": None, "mfa_recovery": recovery}
+        self.complete_pending_access(user_id)
         membership = self.store.membership_for_user(user_id)
         practice = self.store.practice(membership["practice_id"]) if membership else None
         role = membership["role"] if membership else None
         onboarding_status = physician_onboarding.get("status")
+        pending_join = None if membership else self.store.pending_physician_invitation(user_id)
+        removed = None if membership or pending_join else self.store.removed_membership(user_id)
 
         if membership and practice:
             if role == "physician":
@@ -168,16 +201,26 @@ class PracticeService:
                 next_step = "workspace" if self.practice_approved(practice["id"]) else "practice_pending"
             if practice["status"] != "active":
                 next_step = "unavailable"
+        elif removed:
+            # A deactivated member: access ended. They can't start over on their own (no new
+            # practice, no identity claim); a new invitation is the way back.
+            next_step = "access_ended"
+        elif pending_join:
+            next_step = "physician_onboarding"  # confirm your own NPI, then you join
         elif onboarding_status in {"rejected", "disabled"}:
             next_step = "unavailable"
-        elif onboarding_status in {"pilot_approval_pending", "active"}:
-            next_step = "practice_setup"
+        elif onboarding_status == "active":
+            next_step = "practice_setup"  # an operator-approved request (or invitation)
+        elif onboarding_status == "pilot_approval_pending":
+            next_step = "pilot_pending"  # the request is with the Lamina team; no practice yet
         else:
             next_step = "physician_onboarding"
 
         if next_step == "workspace":
             self.record_sign_in(user_id, role, practice["id"] if practice else None)
 
+        invited_to = self.store.practice(pending_join["practice_id"]) if pending_join else None
+        ended_at = self.store.practice(removed["practice_id"]) if removed else None
         return {
             "next_step": next_step,
             "role": role,
@@ -189,6 +232,11 @@ class PracticeService:
             "practice_defaults": (
                 self._practice_defaults(user_id) if next_step == "practice_setup" else None
             ),
+            # Joining a practice as a physician: confirm your own identity first.
+            "invitation": {"practice_name": invited_to["name"], "role": "physician"} if invited_to else None,
+            "access_ended": {"practice_name": ended_at["name"] if ended_at else None, "at": removed["updated_at"]}
+            if removed else None,
+            "mfa_recovery": recovery,
         }
 
     @staticmethod
@@ -239,6 +287,15 @@ class PracticeService:
             )
         if scope.get("pilot_access_status") in {"rejected", "disabled"}:
             raise PilotError("account_unavailable", "This account cannot create a practice", 403)
+        # Invite-only: a new practice needs an operator-approved request or an operator invitation
+        # (which approves on identity confirmation). No open self-service practice creation.
+        if scope.get("pilot_access_status") != "approved":
+            raise PilotError("pilot_access_pending",
+                             "The Lamina team reviews each new practice first. You can set it up once your "
+                             "request is approved", 403)
+        if self.store.removed_membership(user_id) or self.store.pending_physician_invitation(user_id):
+            raise PilotError("practice_creation_unavailable",
+                             "This account can't start a new practice. Ask the Lamina team", 403)
         cleaned = {key: (value.strip() if isinstance(value, str) else value) for key, value in fields.items()}
         cleaned = {key: (value or None) for key, value in cleaned.items()}
         if not cleaned.get("name"):
@@ -278,8 +335,11 @@ class PracticeService:
                 "is_admin": bool(member.get("is_admin")),
                 "joined_at": member["created_at"],
             })
+        from .attribution import ActorDirectory
+
         invitations = []
         if context.is_admin:
+            directory = ActorDirectory(self.store, context.practice_id)
             now = datetime.now(UTC).isoformat(timespec="seconds")
             for invitation in self.store.invitations(context.practice_id):
                 state = (
@@ -288,20 +348,33 @@ class PracticeService:
                     "expired" if invitation["expires_at"] <= now else "pending"
                 )
                 invitations.append({
-                    "id": invitation["id"], "role": invitation["role"],
+                    "id": invitation["id"], "role": invitation["role"], "email": invitation.get("email"),
                     "label": invitation["label"], "state": state,
                     "created_at": invitation["created_at"], "expires_at": invitation["expires_at"],
+                    "invited_by_name": directory.describe(invitation["created_by"])["name"],
                 })
-        return {"members": members, "invitations": invitations}
+        admins = sum(1 for member in members if member["is_admin"])
+        for member in members:
+            # Who can be deactivated (admins only): never yourself, never the last admin.
+            member["can_deactivate"] = context.is_admin and not member["is_you"] and not (member["is_admin"] and admins <= 1)
+        return {"members": members, "invitations": invitations, "can_manage": context.is_admin}
 
-    def invite(self, context: PracticeContext, role: str, label: str | None) -> dict:
-        context.require_admin("invite staff")
+    def invite(self, context: PracticeContext, role: str, email: str | None, label: str | None) -> dict:
+        """An admin invites a staff member or another physician by email. The invitee signs up
+        with their own account (no shared credentials); the invitation is bound to that email,
+        expires after a week, and can be revoked until it is accepted."""
+        from .accounts import valid_email
+
+        context.require_admin("invite people to the practice")
+        if role not in {"staff", "physician"}:
+            raise PilotError("invalid_role", "Invite as staff or as a physician", 422)
+        address = valid_email(email)
         invitation, token = self.store.create_invitation(
-            context.practice_id, role=role, label=(label or "").strip() or None, actor=context.actor
+            context.practice_id, role=role, label=(label or "").strip() or None, email=address, actor=context.actor
         )
         return {
             "id": invitation["id"], "role": invitation["role"], "label": invitation["label"],
-            "expires_at": invitation["expires_at"],
+            "email": invitation["email"], "expires_at": invitation["expires_at"],
             # Returned exactly once; only its hash is stored.
             "token": token,
         }
@@ -311,10 +384,17 @@ class PracticeService:
         if not self.store.revoke_invitation(context.practice_id, invitation_id, context.actor):
             raise PilotError("invitation_unavailable", "This invitation is no longer pending", 404)
 
-    def remove_member(self, context: PracticeContext, member_id: str) -> None:
-        context.require_admin("remove staff")
-        if not self.store.remove_member(context.practice_id, member_id, context.actor):
-            raise PilotError("member_not_found", "Staff member not found", 404)
+    def deactivate_member(self, context: PracticeContext, member_id: str) -> dict:
+        """Admin: end a member's access now. Recorded; their past work keeps their name."""
+        context.require_admin("deactivate members")
+        result = self.store.deactivate_member(context.practice_id, member_id, context.actor)
+        if result == "not_found":
+            raise PilotError("member_not_found", "Member not found", 404)
+        if result == "self":
+            raise PilotError("cannot_deactivate_self", "You can't deactivate yourself. Ask another admin", 409)
+        if result == "last_admin":
+            raise PilotError("last_admin", "A practice needs at least one admin. Make someone else an admin first", 409)
+        return self.members_view(context)
 
     def set_admin(self, context: PracticeContext, member_id: str, is_admin: bool) -> dict:
         context.require_admin("change who administers the practice")
@@ -328,46 +408,79 @@ class PracticeService:
             raise PilotError("last_admin", "A practice needs at least one admin. Make someone else an admin first", 409)
         return self.members_view(context)
 
-    def _usable_invitation(self, token: str) -> dict:
-        invitation = self.store.invitation_by_token(token) if token else None
+    def _usable_invitation(self, token: str) -> tuple[str, dict]:
+        """('practice', row) for a practice invitation, ('new_practice', row) for an operator
+        invitation to set up a new practice. Invalid, expired, used and revoked look the same."""
         now = datetime.now(UTC).isoformat(timespec="seconds")
-        if (
-            not invitation
-            or invitation["accepted_at"]
-            or invitation["revoked_at"]
-            or invitation["expires_at"] <= now
-        ):
-            raise PilotError(
-                "invitation_unavailable",
-                "This invitation link is invalid, expired, or already used. Ask the practice "
-                "for a new one",
-                404,
-            )
-        return invitation
+        for kind, row in (("practice", self.store.invitation_by_token(token) if token else None),
+                          ("new_practice", self.store.access_invitation_by_token(token) if token else None)):
+            if row and not row["accepted_at"] and not row["revoked_at"] and row["expires_at"] > now:
+                if kind == "practice" and not row.get("email"):
+                    break  # issued before email-bound invitations: not usable any more
+                return kind, row
+        raise PilotError(
+            "invitation_unavailable",
+            "This invitation link is invalid, expired, revoked, or already used. Ask for a new one",
+            404,
+        )
 
-    def preview_invitation(self, token: str) -> dict:
-        invitation = self._usable_invitation(token)
+    @staticmethod
+    def _require_email_match(row: dict, email: str | None) -> None:
+        if not email or email != (row.get("email") or "").casefold():
+            raise PilotError(
+                "invitation_email_mismatch",
+                "This invitation was sent to a different email address. Sign in with the address it "
+                "was sent to, or ask for a new invitation",
+                403,
+            )
+
+    def preview_invitation(self, token: str, email: str | None = None) -> dict:
+        kind, invitation = self._usable_invitation(token)
+        matches = bool(email) and email == (invitation.get("email") or "").casefold()
+        if kind == "new_practice":
+            return {"kind": kind, "practice_name": None, "practice_specialty": None, "role": "physician",
+                    "expires_at": invitation["expires_at"], "email_matches": matches}
         practice = self.store.practice(invitation["practice_id"]) or {}
         return {
+            "kind": kind,
             "practice_name": practice.get("name"),
             "practice_specialty": practice.get("specialty"),
             "role": invitation["role"],
             "expires_at": invitation["expires_at"],
+            # Never the invited address itself: only whether the signed-in account matches it.
+            "email_matches": matches,
         }
 
-    def accept_invitation(self, user_id: str, token: str) -> dict:
-        invitation = self._usable_invitation(token)
+    def accept_invitation(self, user_id: str, token: str, email: str | None = None) -> dict | None:
+        kind, invitation = self._usable_invitation(token)
+        self._require_email_match(invitation, email)
         if self.store.membership_for_user(user_id):
             raise PilotError("already_in_practice", "This account already belongs to a practice")
-        if self._confirmed_physician_scope(user_id):
-            raise PilotError(
-                "physician_account",
-                "This account holds a confirmed physician profile. Physicians create their own "
-                "practice; staff invitations are for staff accounts",
-            )
+        role = "physician" if kind == "new_practice" else invitation["role"]
+        if role == "staff":
+            if self._confirmed_physician_scope(user_id):
+                raise PilotError(
+                    "physician_account",
+                    "This account holds a confirmed physician profile. Physicians join as physicians; "
+                    "staff invitations are for staff accounts",
+                )
+            if self.store.pending_physician_invitation(user_id):
+                raise PilotError("already_invited", "This account already accepted a physician invitation")
+        elif self.store.has_staff_history(user_id):
+            # A staff account can never become (or claim) a physician identity.
+            raise PilotError("staff_account", "This is a staff account. Physicians use their own account", 403)
         try:
-            return self.store.accept_invitation(invitation, user_id)
+            if kind == "new_practice":
+                if not self.store.accept_access_invitation(invitation, user_id):
+                    raise ValueError("invitation_unavailable")
+                self.complete_pending_access(user_id)
+                return None
+            membership = self.store.accept_invitation(invitation, user_id)
         except ValueError as error:
             raise PilotError(
                 "invitation_unavailable", "This invitation is no longer available", 404
             ) from error
+        if role == "physician":
+            # Already a confirmed physician (no practice): join now. Otherwise after NPI confirmation.
+            self.complete_pending_access(user_id)
+        return membership

@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import type { Session, User } from '@supabase/supabase-js'
 import {
   authConfigured,
+  type AuthSession,
+  type AuthUser,
   getSession,
   onAuthStateChange,
   signIn as authSignIn,
@@ -12,8 +13,8 @@ import {
 type AuthContextValue = {
   configured: boolean
   loading: boolean
-  session: Session | null
-  user: User | null
+  session: AuthSession | null
+  user: AuthUser | null
   signUp: typeof authSignUp
   signIn: typeof authSignIn
   signOut: typeof authSignOut
@@ -22,7 +23,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null)
+  const [session, setSession] = useState<AuthSession | null>(null)
   const [loading, setLoading] = useState(authConfigured)
 
   useEffect(() => {

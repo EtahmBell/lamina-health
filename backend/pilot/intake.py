@@ -295,8 +295,10 @@ class IntakeService:
                 keys = metadata.get("item_keys") or []
                 sent = ", ".join(labels.get(key, key.replace("_", " ")) for key in keys)
                 event["summary"] = (f"Sent {sent}" if sent else "Sent a message") + (" with a message" if sent and metadata.get("has_message") else "")
-            elif event["event_type"] == "referral_marked_ready" and metadata.get("missing_items"):
-                event["summary"] = "Marked ready while still missing " + ", ".join(metadata["missing_items"])
+            elif event["event_type"] == "referral_marked_ready" and (metadata.get("missing_items") or metadata.get("unverified_items")):
+                parts = (([f"still missing {', '.join(metadata['missing_items'])}"] if metadata.get("missing_items") else [])
+                         + ([f"received, not verified: {', '.join(metadata['unverified_items'])}"] if metadata.get("unverified_items") else []))
+                event["summary"] = "Marked ready while " + "; ".join(parts)
             elif event["event_type"] == "referring_office_notified":
                 event["summary"] = "Marked as sent to the referring office (outside Lamina)"
 
@@ -967,11 +969,21 @@ class IntakeService:
         self._row(context, referral_id)
         raise PilotError("triage_approval_removed", APPROVAL_REMOVED, 410)
 
-    def missing_required(self, practice_id: str, row: dict) -> list[str]:
-        """Required items the current recommendation doesn't have as satisfied."""
+    # Received (reported by the office, or possibly in a document) but not yet verified by staff.
+    UNVERIFIED_STATES = frozenset({"sender_reported", "proposed_from_document"})
+
+    def ready_check(self, practice_id: str, row: dict) -> tuple[list[str], list[str]]:
+        """Required items that aren't satisfied, split into (still missing, received but not verified)."""
         recommendation = self.recommendation(practice_id, row["current_recommendation_id"])
-        return [item.label for item in (recommendation.requirements if recommendation else [])
-                if item.required and item.state != "satisfied"]
+        open_items = [item for item in (recommendation.requirements if recommendation else [])
+                      if item.required and item.state != "satisfied"]
+        unverified = [item.label for item in open_items if item.state in self.UNVERIFIED_STATES]
+        return [item.label for item in open_items if item.state not in self.UNVERIFIED_STATES], unverified
+
+    def missing_required(self, practice_id: str, row: dict) -> list[str]:
+        """Every required item the current recommendation doesn't have as satisfied."""
+        missing, unverified = self.ready_check(practice_id, row)
+        return [*missing, *unverified]
 
     def mark_ready(self, context: PracticeContext, referral_id: str, note: str | None,
                    confirm_missing: list[str] | None = None) -> dict:
@@ -987,16 +999,23 @@ class IntakeService:
         if current == S.RECEIVED:
             raise PilotError("invalid_transition", "Wait for triage before marking this referral ready")
         text = (note or "").strip() or None
-        missing = self.missing_required(context.practice_id, row)
-        if missing and {item.casefold() for item in missing} - {item.casefold() for item in confirm_missing or []}:
+        # The one confirmation must name every open required item: still missing AND received but
+        # not yet verified (each listed separately for the physician).
+        missing, unverified = self.ready_check(context.practice_id, row)
+        named = {item.casefold() for item in confirm_missing or []}
+        if {item.casefold() for item in [*missing, *unverified]} - named:
+            parts = (([f"Still missing: {', '.join(missing)}"] if missing else [])
+                     + ([f"Received, not verified: {', '.join(unverified)}"] if unverified else []))
             raise PilotError("missing_items_unconfirmed",
-                             "Still missing: " + ", ".join(missing) + ". Confirm you want to mark it ready anyway", 409)
+                             ". ".join(parts) + ". Confirm you want to mark it ready anyway", 409)
         self._transition(
             context, row, S.READY_FOR_REVIEW,
             changes={"handoff_json": json.dumps({"kind": "ready", "note": text, "by": context.actor,
-                                                 "role": context.role, "at": now_iso(), "missing_items": missing})},
+                                                 "role": context.role, "at": now_iso(), "missing_items": missing,
+                                                 "unverified_items": unverified})},
             events=[{"event_type": "referral_marked_ready", "actor": context.actor,
-                     "metadata": {"role": context.role, "has_note": bool(text), "missing_items": missing}}],
+                     "metadata": {"role": context.role, "has_note": bool(text), "missing_items": missing,
+                                  "unverified_items": unverified}}],
         )
         return self.detail(context, referral_id)
 

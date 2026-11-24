@@ -22,6 +22,9 @@ download is needed.
 | `10-staff-third-person` | staff: Your Agent and the dock about the physician, in the third person |
 | `11-isolation` | physician, staff, second physician: two practices never see each other's referrals |
 | `12-public-privacy` | referring office: nothing private on the public page or the sender page (UI and API) |
+| `13-activation` | physician, second physician, staff: readiness review, activation, flags (resolved with a note), pause |
+| `14-staff-invite` | admin + new staff account: invite by email → create own account → accept → set up TOTP → first sign-in → sign in again with a code; email-bound and revoked links; deactivation ends access |
+| `15-physician-invite` | admin + new physician account: invite → accept → TOTP → confirm own NPI → operator approval → own agent (setup), not admin |
 
 Specs run one at a time (one shared seeded database) in file order. Each scenario uses its own
 seeded referral, so specs don't depend on each other.
@@ -91,8 +94,28 @@ path are all set. Ids and the sender link land in `frontend/e2e/.state/seed.json
 Dev-only scenario switches used by specs: `python -m scripts.e2e_seed step
 join-second-physician | return-second-physician | initializing-second-physician |
 shadow-second-physician`, and read-only `inspect signoff|resolutions <referral id>`.
-Joining a practice as a second physician isn't a product flow yet, so that step arranges it
-directly in the database.
+`join-second-physician` moves the SEEDED second physician between the practices directly in the
+database (spec 15 covers the real invite → join flow with a new account). Other steps:
+`approve-invited-physician` (the operator approves spec 15's physician through the internal API),
+`new-unverified-referral` and `flag-auto-draft-three-times` (screens only), and read-only
+`inspect account-events -` (event types only, for the audit assertions).
+
+## New accounts in specs 14–15 (dev-only test sign-in)
+
+Brand-new invitees can't use real DEV Supabase accounts without typing a password, so the e2e
+API runs a **dev-only test identity provider** (`backend/dev_test_auth.py`) and the e2e dev
+server (only) compiles in its client (`VITE_LAMINA_DEV_TEST_AUTH=1`). A browser context opts in
+(`lamina.devTestAuth` in localStorage, loopback only); the three captured roles keep using real
+DEV Supabase sessions. Invitee emails and passwords are generated per run in memory and never
+printed; TOTP codes are computed from the setup key the page shows (RFC 6238), exactly as an
+authenticator app would. The provider refuses to start unless every e2e/dev condition holds and
+nothing looks like production; `tests/test_pilot_accounts.py` checks that.
+
+**MFA for the captured accounts.** The three captured sessions were created before MFA was
+required; on the DEV launcher only, those three user ids (from `.auth/accounts.json`) count as
+MFA-verified (`LAMINA_E2E_MFA_EXEMPT_USER_IDS`, set by the harness). Everything else, including
+every invitee in specs 14–15, sets up and passes real TOTP. Screenshots mask the invitation link,
+the setup key and the QR code.
 
 ## Screenshots
 

@@ -29,7 +29,9 @@ export const searchPhysicianByName = (name: string, location = '') =>
 /* ----------------------------------------------------------------- practice */
 
 export type PracticeRole = 'physician' | 'staff'
-export type PilotNextStep = 'physician_onboarding' | 'practice_setup' | 'pilot_pending' | 'practice_pending' | 'workspace' | 'unavailable'
+/** Server-derived routing. `mfa`: two-step sign-in isn't done for this session (nothing about the
+ * practice is shown); `access_ended`: an admin deactivated this account's membership. */
+export type PilotNextStep = 'mfa' | 'physician_onboarding' | 'practice_setup' | 'pilot_pending' | 'practice_pending' | 'workspace' | 'access_ended' | 'unavailable'
 export type Practice = {
   id: string; name: string; specialty: string | null; website: string | null; address: string | null
   phone: string | null; contact_email: string | null; status: 'active' | 'archived'; created_at: string
@@ -45,20 +47,41 @@ export type PilotStatus = {
   practice: Practice | null
   physician_onboarding: OnboardingStatus
   practice_defaults: (Partial<PracticeFields> & { source: string }) | null
+  /** A physician invited to join a practice: they confirm their own NPI identity first. */
+  invitation?: { practice_name: string; role: PracticeRole } | null
+  access_ended?: { practice_name: string | null; at: string } | null
+  /** The latest lost-authenticator request, if any (only the Lamina team can complete it). */
+  mfa_recovery?: { status: 'open' | 'completed' | 'declined'; created_at: string; decided_at: string | null } | null
+  account?: { email: string | null; mfa_verified: boolean }
 }
-export type PracticeMember = { id: string; role: PracticeRole; label: string | null; is_you: boolean; is_admin?: boolean; joined_at: string }
-export type PracticeInvitation = { id: string; role: 'staff'; label: string | null; state: 'pending' | 'accepted' | 'revoked' | 'expired'; created_at: string; expires_at: string }
+export type PracticeMember = { id: string; role: PracticeRole; label: string | null; is_you: boolean; is_admin?: boolean; joined_at: string; can_deactivate?: boolean }
+export type PracticeInvitation = {
+  id: string; role: PracticeRole; email: string | null; label: string | null; state: 'pending' | 'accepted' | 'revoked' | 'expired'
+  created_at: string; expires_at: string; invited_by_name?: string | null
+}
+export type MembersView = { members: PracticeMember[]; invitations: PracticeInvitation[]; can_manage?: boolean }
+export type InvitationPreview = {
+  kind: 'practice' | 'new_practice'; practice_name: string | null; practice_specialty: string | null
+  role: PracticeRole; expires_at: string; email_matches: boolean
+}
 
 export const getPilotStatus = () => apiRequest<PilotStatus>('/api/me/practice/status')
 export const createPractice = (fields: PracticeFields) => apiRequest<Practice>('/api/me/practice', json(fields))
 export const updatePractice = (fields: PracticeFields) => apiRequest<Practice>('/api/me/practice', { ...json(fields), method: 'PUT' })
-export const getPracticeMembers = () => apiRequest<{ members: PracticeMember[]; invitations: PracticeInvitation[] }>('/api/me/practice/members')
-export const inviteStaff = (label: string) => apiRequest<{ id: string; token: string; expires_at: string; label: string | null }>('/api/me/practice/invitations', json({ role: 'staff', label: label || null }))
+export const getPracticeMembers = () => apiRequest<MembersView>('/api/me/practice/members')
+/** Admin: invite a staff member or another physician by email. The token comes back once. */
+export const inviteMember = (role: PracticeRole, email: string, label: string) =>
+  apiRequest<{ id: string; token: string; expires_at: string; email: string; role: PracticeRole; label: string | null }>('/api/me/practice/invitations', json({ role, email, label: label || null }))
 export const revokeInvitation = (id: string) => apiRequest<void>(`/api/me/practice/invitations/${encodeURIComponent(id)}`, { method: 'DELETE' })
-export const setMemberAdmin = (id: string, isAdmin: boolean) => apiRequest<{ members: PracticeMember[]; invitations: PracticeInvitation[] }>(`/api/me/practice/members/${encodeURIComponent(id)}/admin`, { ...json({ is_admin: isAdmin }), method: 'PUT' })
-export const removeStaffMember = (id: string) => apiRequest<void>(`/api/me/practice/members/${encodeURIComponent(id)}`, { method: 'DELETE' })
-export const previewInvitation = (token: string) => apiRequest<{ practice_name: string | null; practice_specialty: string | null; role: string; expires_at: string }>('/api/me/practice/invitations/preview', json({ token }))
+export const setMemberAdmin = (id: string, isAdmin: boolean) => apiRequest<MembersView>(`/api/me/practice/members/${encodeURIComponent(id)}/admin`, { ...json({ is_admin: isAdmin }), method: 'PUT' })
+/** Admin: end a member's access now (recorded; their past work keeps their name). */
+export const deactivateMember = (id: string) => apiRequest<MembersView>(`/api/me/practice/members/${encodeURIComponent(id)}/deactivate`, json({}))
+export const previewInvitation = (token: string) => apiRequest<InvitationPreview>('/api/me/practice/invitations/preview', json({ token }))
 export const acceptInvitation = (token: string) => apiRequest<PilotStatus>('/api/me/practice/invitations/accept', json({ token }))
+/** Sign out everywhere: the server refuses every session issued up to now. */
+export const revokeAllSessions = () => apiRequest<{ revoked_at: string }>('/api/me/practice/sessions/revoke-all', json({}))
+/** Lost authenticator: ask the Lamina team (never a practice admin) to reset two-step sign-in. */
+export const requestMfaRecovery = (reason: string) => apiRequest<{ status: string; created_at: string }>('/api/me/practice/mfa/recovery-request', json({ reason: reason || null }))
 
 /* -------------------------------------------------------------------- rules */
 
@@ -147,7 +170,7 @@ export type IntakeReferral = {
   information_request: { items: string[]; draft_message: string; sent: boolean; prepared_at: string } | null
   disposition: { decision: 'accept' | 'redirect' | 'decline'; reason: string | null; redirect_to: string | null; at: string } | null
   /** Staff paperwork hand-off to the physician. */
-  handoff?: { kind: 'ready' | 'flag'; note: string | null; by: string; role: PracticeRole; at: string; missing_items?: string[] } | null
+  handoff?: { kind: 'ready' | 'flag'; note: string | null; by: string; role: PracticeRole; at: string; missing_items?: string[]; unverified_items?: string[] } | null
   documents: ReferralDocument[]
 }
 /** No separate "approve triage": the physician's accept/redirect/decline is the sign-off.
@@ -488,7 +511,7 @@ export type CapabilityView = {
   confirm_text?: string; depends_on?: string[]
   eligibility?: { eligible: boolean; reasons: string[]; coverage: { covered: string[]; gaps: string[]; min_per_type: number }; always_available: boolean }
   shadow_examples?: Array<{ items: string[]; referral_type: string; patient_name: string | null; created_at: string; recommendation_id: string }>
-  flags?: Array<{ id: string; serious: boolean; note: string | null; actor_role: string; created_at: string; resolved_at: string | null }>
+  flags?: Array<{ id: string; serious: boolean; note: string | null; actor_role: string; created_at: string; resolved_at: string | null; resolution_note?: string | null; blocking?: boolean }>
 }
 export type ActivationReview = {
   available: boolean; physician_view?: boolean; capabilities: CapabilityView[]; always_yours: string[]; coming_later: string[]
@@ -514,7 +537,8 @@ export const setCapabilityLimit = (key: string, maxState: CapabilityState) =>
   apiRequest<{ limits: Record<string, CapabilityState> }>(`/api/me/practice/activation/limits/${encodeURIComponent(key)}`, { ...json({ max_state: maxState }), method: 'PUT' })
 export const flagAgentItem = (itemId: string, serious: boolean, note: string) =>
   apiRequest<{ flag_id: string; state: CapabilityState }>(`/api/me/practice/activation/items/${encodeURIComponent(itemId)}/flag`, json({ serious, note: note || null }))
-export const resolveAgentFlag = (flagId: string) => apiRequest<ActivationReview>(`/api/me/practice/activation/flags/${encodeURIComponent(flagId)}/resolve`, json({}))
+/** Resolving a flag always takes a short note on what the physician found. */
+export const resolveAgentFlag = (flagId: string, note: string) => apiRequest<ActivationReview>(`/api/me/practice/activation/flags/${encodeURIComponent(flagId)}/resolve`, json({ note }))
 export const acknowledgeCapabilityNotice = (eventId: string) => apiRequest<ActivationReview>(`/api/me/practice/activation/notices/${encodeURIComponent(eventId)}/acknowledge`, json({}))
 
 /* ------------------------------------------------- public (no account needed) */

@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -105,9 +106,13 @@ class Seeder:
         tokens = {f"seed-{role}": user for role, user in users.items()} | {"seed-operator": OPERATOR}
 
         class SeedVerifier:
+            """Seed-only sessions: MFA-verified (aal2), each with a fictional seed email so the
+            staff invitation (bound to an email) can be accepted in-process."""
+
             def verify(self, token: str) -> AuthenticatedUser:
                 if token in tokens:
-                    return AuthenticatedUser(id=tokens[token])
+                    return AuthenticatedUser(id=tokens[token], email=f"{token}@example.test", aal="aal2",
+                                             issued_at=int(time.time()))
                 raise AuthenticationError("invalid")
 
         fake = FictionalNppes()
@@ -127,12 +132,12 @@ class Seeder:
         return response.json() if response.content else {}
 
     def physician(self, role: str, npi: str, practice: str, specialty: str) -> dict:
+        # Invite-only: the request (a confirmed identity) is approved before the practice exists.
         self.call("POST", "/api/me/onboarding/npi/lookup", role, {"npi": npi})
         self.call("POST", "/api/me/onboarding/identity/confirm", role, {"npi": npi})
-        created = self.call("POST", "/api/me/practice", role, {"name": practice, "specialty": specialty})
         scope = self.workflow.selected_physician_owner_scope(self.users[role])
         self.call("POST", f"/api/internal/pilot-physicians/{scope['id']}/approve", "operator")
-        return created
+        return self.call("POST", "/api/me/practice", role, {"name": practice, "specialty": specialty})
 
     def referral(self, role: str, patient: str, referral_type: str, reason: str, items: list | None = None) -> str:
         detail = self.call("POST", "/api/me/practice/referrals", role, {
@@ -173,7 +178,8 @@ def reset() -> None:
     practice_a = s.physician("physician", NPI_A, "Northfield Endocrinology (E2E)", "Endocrinology")
     rules = {spec["referral_type"]: s.call("POST", "/api/me/practice/rules", "physician", spec)
              for spec in (THYROID, DIABETES, ADRENAL, OSTEOPOROSIS, HYPERPARA)}
-    invite = s.call("POST", "/api/me/practice/invitations", "physician", {"label": "Front desk (E2E)"})
+    invite = s.call("POST", "/api/me/practice/invitations", "physician",
+                    {"label": "Front desk (E2E)", "email": "seed-staff@example.test"})
     s.call("POST", "/api/me/practice/invitations/accept", "staff", {"token": invite["token"]})
     s.call("POST", "/api/me/practice/representation/confirm", "physician")  # agent enters shadow
     slug = "northfield-endocrinology-e2e"
@@ -280,7 +286,8 @@ def step(name: str) -> None:
     second = users["second_physician"]
     with store._connect() as db:
         if name == "join-second-physician":
-            # Joining a practice as a second physician isn't a product flow yet: arrange it directly.
+            # Moves the SEEDED second physician between the two practices for the specs that need
+            # them in practice A (spec 15 covers the real invite -> join flow with a new account).
             db.execute("UPDATE practice_members SET practice_id = ?, is_admin = 0 WHERE user_id = ?",
                        (state["practice_a"]["id"], second))
         elif name == "return-second-physician":
@@ -321,6 +328,62 @@ def new_missing_referral() -> None:
     print("step new-missing-referral: done")
 
 
+def new_unverified_referral() -> None:
+    """Screens only: a referral where the office sent one required item (received, not yet
+    verified) and another is still missing -- the staff "Ready" check lists them separately."""
+    guard()
+    s = Seeder(_accounts())
+    state = json.loads(STATE.read_text(encoding="utf-8"))
+    rid = s.referral("staff", "Uma Unverified-E2E", "Diabetes management", "Type 2 diabetes not at goal.")
+    token = s.send_request("staff", rid)
+    s.call("POST", f"/api/public/r/{token}/response", None,
+           {"items": [{"key": "renal_function", "value": "eGFR 79 (E2E)", "observed_date": RECENT}]})
+    state["referrals"]["unverified"] = rid
+    STATE.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    print("step new-unverified-referral: done")
+
+
+def flag_auto_draft_three_times() -> None:
+    """Screens only: three non-serious "this was wrong" flags (by staff) on the agent's drafted
+    request return drafting to shadow; each must then be resolved with a note."""
+    guard()
+    s = Seeder(_accounts())
+    state = json.loads(STATE.read_text(encoding="utf-8"))
+    detail = s.call("GET", f"/api/me/practice/referrals/{state['referrals']['auto_draft']}", "staff")
+    item = next(iter(detail["agent_items"].values()))["item_id"]
+    for n in range(3):
+        s.call("POST", f"/api/me/practice/activation/items/{item}/flag", "staff", {"note": f"Asked for the wrong item ({n + 1}, E2E)"})
+    print("step flag-auto-draft-three-times: done")
+
+
+def resolve_auto_draft_flags() -> None:
+    """Screens only: the physician resolves (with a note) every open flag on drafting, so a later
+    viewport's screenshots start from the same state (one database serves all three viewports)."""
+    guard()
+    s = Seeder(_accounts())
+    review = s.call("GET", "/api/me/practice/activation", "physician")
+    for cap in review.get("capabilities", []):
+        for flag in cap.get("flags", []):
+            if not flag.get("resolved_at") and (flag.get("serious") or flag.get("blocking")):
+                s.call("POST", f"/api/me/practice/activation/flags/{flag['id']}/resolve", "physician",
+                       {"note": "Reviewed for the screenshot run (E2E)."})
+    print("step resolve-auto-draft-flags: done")
+
+
+def approve_invited_physician() -> None:
+    """The Lamina operator approves the pilot request of the physician who joined by invitation in
+    spec 15 (a dev-test account), through the real internal approval API."""
+    guard()
+    s = Seeder(_accounts())
+    pending = s.call("GET", "/api/internal/pilot-physicians?status=pending", "operator")
+    invited = [row for row in pending if str(row["auth_user_id"]).startswith("devtest-")]
+    if not invited:
+        sys.exit("No invited physician is waiting for approval")
+    for row in invited:
+        s.call("POST", f"/api/internal/pilot-physicians/{row['owner_scope_id']}/approve", "operator")
+    print(f"step approve-invited-physician: approved {len(invited)}")
+
+
 def set_auto_draft(state_name: str) -> None:
     guard()
     s = Seeder(_accounts())
@@ -334,6 +397,10 @@ SEEDER_STEPS = {
     "new-missing-referral": lambda: new_missing_referral(),
     "activate-auto-draft": lambda: set_auto_draft("active"),
     "shadow-auto-draft": lambda: set_auto_draft("shadow"),
+    "approve-invited-physician": lambda: approve_invited_physician(),
+    "new-unverified-referral": lambda: new_unverified_referral(),
+    "flag-auto-draft-three-times": lambda: flag_auto_draft_three_times(),
+    "resolve-auto-draft-flags": lambda: resolve_auto_draft_flags(),
 }
 
 
@@ -353,6 +420,12 @@ def inspect(what: str, referral_id: str) -> None:
                               for c in row.get("corrections", [])]
         out["staff_rows"] = store.fetch_one(
             "SELECT COUNT(*) AS n FROM referral_signoffs WHERE referral_id = ? AND actor_role != 'physician'", (referral_id,))["n"]
+    elif what == "account-events":
+        # Audit trail for the access specs: event types and actors' kinds only (no ids, no secrets).
+        rows = store.fetch_all("SELECT event_type, actor, metadata_json FROM pilot_events WHERE practice_id = ? "
+                               "OR (practice_id IS NULL AND actor LIKE 'user:devtest-%') ORDER BY id", (practice,))
+        out = [{"type": row["event_type"], "by_invitee": row["actor"].startswith("user:devtest-"),
+                "role": json.loads(row["metadata_json"] or "{}").get("role")} for row in rows]
     elif what == "resolutions":
         out = store.fetch_all(
             "SELECT field, choice, rule_version, actor_role FROM correction_conflict_resolutions WHERE referral_id = ? "

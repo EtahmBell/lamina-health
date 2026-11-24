@@ -509,8 +509,8 @@ def test_new_surfaces_are_practice_isolated(pilot: Pilot) -> None:
     draft = pilot.post(f"/api/me/practice/referrals/{rid}/request-information", "user-a", {}).json()["information_requests"][0]
     proposal = pilot.post("/api/me/practice/teach", "user-a", {"text": "I need a TSH for thyroid referrals."}).json()
     pilot.confirm_physician("user-b", NPI_B)
-    pilot.create_practice("user-b", "Doe Cardiology")
     pilot.approve("user-b")
+    pilot.create_practice("user-b", "Doe Cardiology")
     assert pilot.post(f"/api/me/practice/information-requests/{draft['id']}/send", "user-b", {"mode": "mark_sent"}).status_code == 404
     assert pilot.post(f"/api/me/practice/teach/{proposal['id']}/confirm", "user-b", {}).status_code == 404
     assert pilot.get("/api/me/practice/teach", "user-b").json()["proposals"] == []

@@ -49,7 +49,9 @@ function IdentityCard({ identity, eyebrow }: { identity: OnboardingIdentity; eye
 /** The authenticated physician onboarding flow: NPI lookup → "Is this you?" → pilot approval.
  * Every screen is a projection of the backend's `/api/me/onboarding/status`. The client
  * never stores or asserts confirmation/approval state of its own. */
-export function PhysicianOnboardingPage({ navigate, params, onConfirmed }: { navigate: Navigate; params: URLSearchParams; onConfirmed?: () => void }) {
+/** `context` (pilot only): a note shown above the lookup and confirm steps, e.g. which practice an
+ * invited physician is joining. */
+export function PhysicianOnboardingPage({ navigate, params, onConfirmed, context }: { navigate: Navigate; params: URLSearchParams; onConfirmed?: () => void; context?: React.ReactNode }) {
   const { configured, loading: authLoading, user } = useAuth()
   const [status, setStatus] = useState<OnboardingStatus | null>(null)
   const [loadError, setLoadError] = useState('')
@@ -69,9 +71,10 @@ export function PhysicianOnboardingPage({ navigate, params, onConfirmed }: { nav
       setLoadError(err instanceof Error ? err.message : 'Could not load your onboarding status')
     })
   useEffect(() => { setStatus(null); if (user) void load() }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (status && onboardingScreen(status) === 'active') navigate(onboardingCompletePath) }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
-  /* Pilot mode: once the profile is confirmed, practice setup continues while approval is pending. */
-  useEffect(() => { if (onConfirmed && status && onboardingScreen(status) === 'pending') onConfirmed() }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!onConfirmed && status && onboardingScreen(status) === 'active') navigate(onboardingCompletePath) }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
+  /* Pilot mode: once the profile is confirmed (approval pending, or already approved by an
+   * invitation), the pilot gate takes over from the server's status. */
+  useEffect(() => { if (onConfirmed && status && ['pending', 'active'].includes(onboardingScreen(status))) onConfirmed() }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async (kind: Exclude<Busy, null>, action: () => Promise<OnboardingStatus>, fallback: string) => {
     setBusy(kind); setError('')
@@ -125,6 +128,7 @@ export function PhysicianOnboardingPage({ navigate, params, onConfirmed }: { nav
   if (screen === 'active') return <ClaimShell navigate={navigate}><div className="onboarding-panel"><p className="muted-note">Opening your private workspace…</p></div></ClaimShell>
 
   if (screen === 'lookup') return <ClaimShell navigate={navigate}><div className="onboarding-panel">
+    {context}
     <p className="eyebrow">Step 1 · Professional profile</p>
     <h1>Confirm your professional profile</h1>
     <p>{NPI_PURPOSE_COPY}</p>
@@ -158,6 +162,7 @@ export function PhysicianOnboardingPage({ navigate, params, onConfirmed }: { nav
     const selection = status.selection
     const canClear = status.allowed_actions.includes('clear_selection')
     return <ClaimShell navigate={navigate}><div className="onboarding-panel">
+      {context}
       <p className="eyebrow">Step 2 · Confirm</p>
       <h1>Is this you?</h1>
       <p>Check the name, NPI, specialty, and practice location carefully. If any of it is wrong, choose “Not me”.</p>

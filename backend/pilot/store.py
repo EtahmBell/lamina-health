@@ -53,15 +53,18 @@ CREATE INDEX IF NOT EXISTS practice_members_practice
 CREATE TABLE IF NOT EXISTS practice_invitations (
   id TEXT PRIMARY KEY,
   practice_id TEXT NOT NULL REFERENCES practices(id),
-  role TEXT NOT NULL CHECK(role IN ('staff')),
+  role TEXT NOT NULL CHECK(role IN ('staff', 'physician')),
   token_hash TEXT NOT NULL UNIQUE,
   label TEXT,
+  email TEXT,
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   accepted_by_user_id TEXT,
   accepted_at TEXT,
-  revoked_at TEXT
+  member_id TEXT,
+  revoked_at TEXT,
+  revoked_by TEXT
 );
 CREATE TABLE IF NOT EXISTS intake_referrals (
   id TEXT PRIMARY KEY,
@@ -481,6 +484,72 @@ CREATE TABLE IF NOT EXISTS agent_item_flags (
 CREATE INDEX IF NOT EXISTS agent_item_flags_owner ON agent_item_flags(practice_id, owner_scope_id, capability);
 """
 
+# Accounts and access (go-live prep, run 1).
+_SCHEMA_V8 = """
+-- Per-account session safety: sessions issued before `sessions_revoked_at` are refused (sign out
+-- everywhere, deactivation, MFA reset); a second factor verified before `mfa_reset_at` no longer
+-- counts. `mfa_enrolled_at` is when Lamina first saw this account pass MFA (audit).
+CREATE TABLE IF NOT EXISTS pilot_account_security (
+  user_id TEXT PRIMARY KEY,
+  sessions_revoked_at TEXT,
+  mfa_reset_at TEXT,
+  mfa_enrolled_at TEXT,
+  updated_at TEXT NOT NULL
+);
+-- Operator (Lamina team) invitations to set up a NEW practice: bound to an email and an NPI.
+CREATE TABLE IF NOT EXISTS pilot_access_invitations (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  npi TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  note TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  accepted_by_user_id TEXT,
+  accepted_at TEXT,
+  approved_at TEXT,
+  revoked_at TEXT,
+  revoked_by TEXT
+);
+-- Lost-authenticator recovery: only the member can open a request (from their own signed-in
+-- session); only a Lamina operator can complete it. Practice admins can do neither.
+CREATE TABLE IF NOT EXISTS mfa_recovery_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  practice_id TEXT,
+  reason TEXT,
+  status TEXT NOT NULL CHECK(status IN ('open', 'completed', 'declined')),
+  created_at TEXT NOT NULL,
+  decided_by TEXT,
+  decided_at TEXT,
+  decision_note TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS mfa_recovery_one_open
+  ON mfa_recovery_requests(user_id) WHERE status = 'open';
+"""
+
+_INVITATIONS_TABLE = """CREATE TABLE IF NOT EXISTS practice_invitations (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  role TEXT NOT NULL CHECK(role IN ('staff', 'physician')),
+  token_hash TEXT NOT NULL UNIQUE,
+  label TEXT,
+  email TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  accepted_by_user_id TEXT,
+  accepted_at TEXT,
+  member_id TEXT,
+  revoked_at TEXT,
+  revoked_by TEXT
+)"""
+_INVITATION_COLUMNS = (
+    "id", "practice_id", "role", "token_hash", "label", "email", "created_by", "created_at",
+    "expires_at", "accepted_by_user_id", "accepted_at", "member_id", "revoked_at", "revoked_by",
+)
+
 # A raw sender access link path (`/r/<token>`). Tokens are urlsafe base64, >= 20 chars.
 SENDER_LINK_PATTERN = re.compile(r"/r/[A-Za-z0-9_-]{20,200}")
 # The same link including any scheme/host prefix, for restoring templates.
@@ -491,6 +560,10 @@ REDACTED_LINK = "/r/[secure link removed]"
 def redact_sender_links(text: str | None) -> str | None:
     """Remove any raw sender access token from text that is about to be stored or shown."""
     return SENDER_LINK_PATTERN.sub(REDACTED_LINK, text) if text else text
+
+
+# Invitations (practice members and new practices) expire after a week.
+INVITATION_TTL_DAYS = 7
 
 
 def now_iso() -> str:
@@ -547,6 +620,26 @@ class PilotStore:
             self._add_column(db, "physician_referral_preferences", "confirmed_by", "TEXT")
             self._add_column(db, "physician_referral_preferences", "author_source", "TEXT")
             self._backfill_rule_authors(db)
+            # Step 18 follow-up: every resolved "this was wrong" flag carries the physician's note.
+            self._add_column(db, "agent_item_flags", "resolution_note", "TEXT")
+            self._rebuild_invitations(db)
+            db.executescript(_SCHEMA_V8)
+
+    @staticmethod
+    def _rebuild_invitations(db: sqlite3.Connection) -> None:
+        """One-time, idempotent: invitations gain a physician role, the invited email, the member
+        they became and who revoked them. SQLite can't widen a CHECK, so the table is rebuilt
+        (nothing references it). Older pending invitations have no email and can't be accepted."""
+        row = db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'practice_invitations'").fetchone()
+        if not row or "'physician'" in row[0]:
+            return
+        old = {r[1] for r in db.execute("PRAGMA table_info(practice_invitations)")}
+        columns = [c for c in _INVITATION_COLUMNS if c in old]
+        db.execute("ALTER TABLE practice_invitations RENAME TO practice_invitations_v1")
+        db.execute(_INVITATIONS_TABLE.replace("IF NOT EXISTS ", ""))
+        db.execute(f"INSERT INTO practice_invitations ({', '.join(columns)}) "
+                   f"SELECT {', '.join(columns)} FROM practice_invitations_v1")
+        db.execute("DROP TABLE practice_invitations_v1")
 
     @staticmethod
     def _add_column(db: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
@@ -829,41 +922,103 @@ class PilotStore:
             )
         return "ok"
 
-    def remove_member(self, practice_id: str, member_id: str, actor: str) -> bool:
+    def deactivate_member(self, practice_id: str, member_id: str, actor: str) -> str:
+        """Ends a member's access at once (their membership is no longer active, so every pilot
+        request they make is refused). Their past actions keep their attribution: the membership
+        row stays, marked 'removed'. Returns 'ok', 'not_found', 'self' or 'last_admin'."""
         with self._connect() as db:
-            changed = db.execute(
-                "UPDATE practice_members SET status = 'removed', updated_at = ? "
-                "WHERE id = ? AND practice_id = ? AND role = 'staff' AND status = 'active'",
-                (now_iso(), member_id, practice_id),
-            ).rowcount
-            if changed:
-                self.append_event(
-                    "staff_removed", actor=actor, practice_id=practice_id,
-                    metadata={"member_id": member_id}, db=db,
-                )
-        return bool(changed)
+            member = db.execute(
+                "SELECT * FROM practice_members WHERE id = ? AND practice_id = ? AND status = 'active'",
+                (member_id, practice_id),
+            ).fetchone()
+            if not member:
+                return "not_found"
+            if actor == f"user:{member['user_id']}":
+                return "self"
+            if member["is_admin"]:
+                admins = db.execute(
+                    "SELECT COUNT(*) FROM practice_members WHERE practice_id = ? AND status = 'active' AND is_admin = 1",
+                    (practice_id,),
+                ).fetchone()[0]
+                if admins <= 1:
+                    return "last_admin"
+            now = now_iso()
+            db.execute("UPDATE practice_members SET status = 'removed', is_admin = 0, updated_at = ? WHERE id = ?",
+                       (now, member_id))
+            self._security_upsert(db, member["user_id"], sessions_revoked_at=now)
+            self.append_event(
+                "member_deactivated", actor=actor, practice_id=practice_id,
+                metadata={"member_id": member_id, "role": member["role"], "was_admin": bool(member["is_admin"])},
+                db=db,
+            )
+        return "ok"
+
+    def removed_membership(self, user_id: str) -> dict | None:
+        """The account's most recent ended membership (for a truthful "access ended" page)."""
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM practice_members WHERE user_id = ? AND status = 'removed' "
+                "ORDER BY updated_at DESC LIMIT 1", (user_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def has_staff_history(self, user_id: str) -> bool:
+        """Ever a staff member, or holds an accepted staff invitation. Such an account can never
+        claim a physician identity."""
+        with self._connect() as db:
+            return bool(db.execute(
+                "SELECT 1 FROM practice_members WHERE user_id = ? AND role = 'staff' "
+                "UNION SELECT 1 FROM practice_invitations WHERE accepted_by_user_id = ? AND role = 'staff'",
+                (user_id, user_id),
+            ).fetchone())
+
+    # --------------------------------------------------------- account security
+
+    @staticmethod
+    def _security_upsert(db: sqlite3.Connection, user_id: str, **fields: str | None) -> None:
+        now = now_iso()
+        db.execute("INSERT INTO pilot_account_security (user_id, updated_at) VALUES (?, ?) "
+                   "ON CONFLICT(user_id) DO NOTHING", (user_id, now))
+        for column, value in fields.items():
+            assert column in {"sessions_revoked_at", "mfa_reset_at", "mfa_enrolled_at"}
+            db.execute(f"UPDATE pilot_account_security SET {column} = ?, updated_at = ? WHERE user_id = ?",
+                       (value, now, user_id))
+
+    def account_security(self, user_id: str) -> dict:
+        row = self.fetch_one("SELECT * FROM pilot_account_security WHERE user_id = ?", (user_id,))
+        return row or {"user_id": user_id, "sessions_revoked_at": None, "mfa_reset_at": None, "mfa_enrolled_at": None}
+
+    def set_account_security(self, user_id: str, *, event: dict | None = None, **fields: str | None) -> None:
+        with self._connect() as db:
+            self._security_upsert(db, user_id, **fields)
+            if event:
+                self.append_event(event["event_type"], actor=event["actor"], practice_id=event.get("practice_id"),
+                                  autonomy=event.get("autonomy", "human"), metadata=event.get("metadata"), db=db)
 
     # ------------------------------------------------------------- invitations
 
     def create_invitation(
-        self, practice_id: str, *, role: str, label: str | None, actor: str, ttl_days: int = 14
+        self, practice_id: str, *, role: str, label: str | None, actor: str, email: str | None = None,
+        ttl_days: int = INVITATION_TTL_DAYS,
     ) -> tuple[dict, str]:
+        """The raw token is returned once (to the admin who invites); only its hash is stored.
+        Events carry ids only: never the token, the link or the email address."""
         token = secrets.token_urlsafe(32)
         now = datetime.now(UTC)
         invitation_id = new_id("inv")
         with self._connect() as db:
             db.execute(
-                "INSERT INTO practice_invitations (id, practice_id, role, token_hash, label, "
-                "created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO practice_invitations (id, practice_id, role, token_hash, label, email, "
+                "created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    invitation_id, practice_id, role, hash_token(token), label, actor,
+                    invitation_id, practice_id, role, hash_token(token), label, email, actor,
                     now.isoformat(timespec="seconds"),
                     (now + timedelta(days=ttl_days)).isoformat(timespec="seconds"),
                 ),
             )
             self.append_event(
-                "staff_invited", actor=actor, practice_id=practice_id,
-                metadata={"invitation_id": invitation_id, "role": role}, db=db,
+                f"{role}_invited", actor=actor, practice_id=practice_id,
+                metadata={"invitation_id": invitation_id, "role": role, "ttl_days": ttl_days}, db=db,
             )
         return self.invitation(invitation_id), token
 
@@ -892,19 +1047,22 @@ class PilotStore:
     def revoke_invitation(self, practice_id: str, invitation_id: str, actor: str) -> bool:
         with self._connect() as db:
             changed = db.execute(
-                "UPDATE practice_invitations SET revoked_at = ? WHERE id = ? AND practice_id = ? "
+                "UPDATE practice_invitations SET revoked_at = ?, revoked_by = ? WHERE id = ? AND practice_id = ? "
                 "AND accepted_at IS NULL AND revoked_at IS NULL",
-                (now_iso(), invitation_id, practice_id),
+                (now_iso(), actor, invitation_id, practice_id),
             ).rowcount
             if changed:
+                role = db.execute("SELECT role FROM practice_invitations WHERE id = ?", (invitation_id,)).fetchone()[0]
                 self.append_event(
-                    "staff_invitation_revoked", actor=actor, practice_id=practice_id,
-                    metadata={"invitation_id": invitation_id}, db=db,
+                    f"{role}_invitation_revoked", actor=actor, practice_id=practice_id,
+                    metadata={"invitation_id": invitation_id, "role": role}, db=db,
                 )
         return bool(changed)
 
-    def accept_invitation(self, invitation: dict, user_id: str) -> dict:
-        """Single-use: the conditional UPDATE is the race guard."""
+    def accept_invitation(self, invitation: dict, user_id: str) -> dict | None:
+        """Single-use: the conditional UPDATE is the race guard. A staff invitation creates the
+        staff membership now; a physician invitation is only marked accepted -- the membership is
+        created once the physician has confirmed their own NPI identity (`complete_physician_join`)."""
         now = now_iso()
         member_id = new_id("mem")
         with self._connect() as db:
@@ -915,6 +1073,12 @@ class PilotStore:
             ).rowcount
             if not claimed:
                 raise ValueError("invitation_unavailable")
+            if invitation["role"] == "physician":
+                self.append_event(
+                    "physician_invitation_accepted", actor=f"user:{user_id}", practice_id=invitation["practice_id"],
+                    metadata={"invitation_id": invitation["id"]}, db=db,
+                )
+                return None
             db.execute(
                 "INSERT INTO practice_members (id, practice_id, user_id, physician_owner_scope_id, "
                 "role, status, label, invited_by, created_at, updated_at) "
@@ -924,11 +1088,119 @@ class PilotStore:
                     invitation.get("label"), invitation["created_by"], now, now,
                 ),
             )
+            db.execute("UPDATE practice_invitations SET member_id = ? WHERE id = ?", (member_id, invitation["id"]))
             self.append_event(
                 "staff_joined", actor=f"user:{user_id}", practice_id=invitation["practice_id"],
                 metadata={"invitation_id": invitation["id"], "member_id": member_id}, db=db,
             )
         return self.membership_for_user(user_id)
+
+    def pending_physician_invitation(self, user_id: str) -> dict | None:
+        """A physician invitation this account accepted that hasn't become a membership yet."""
+        return self.fetch_one(
+            "SELECT inv.* FROM practice_invitations inv JOIN practices p ON p.id = inv.practice_id "
+            "WHERE inv.accepted_by_user_id = ? AND inv.role = 'physician' AND inv.member_id IS NULL "
+            "AND inv.revoked_at IS NULL AND p.status = 'active' ORDER BY inv.accepted_at DESC LIMIT 1", (user_id,))
+
+    def complete_physician_join(self, invitation: dict, user_id: str, owner_scope_id: str) -> dict | None:
+        """The invited physician confirmed their own identity: they join as a physician, never an
+        admin by default. Their agent, representation and lifecycle are their own (owner scope)."""
+        now = now_iso()
+        member_id = new_id("mem")
+        with self._connect() as db:
+            claimed = db.execute(
+                "UPDATE practice_invitations SET member_id = ? WHERE id = ? AND accepted_by_user_id = ? "
+                "AND member_id IS NULL AND revoked_at IS NULL", (member_id, invitation["id"], user_id),
+            ).rowcount
+            if not claimed:
+                return None
+            db.execute(
+                "INSERT INTO practice_members (id, practice_id, user_id, physician_owner_scope_id, "
+                "role, status, label, invited_by, created_at, updated_at, is_admin) "
+                "VALUES (?, ?, ?, ?, 'physician', 'active', ?, ?, ?, ?, 0)",
+                (member_id, invitation["practice_id"], user_id, owner_scope_id, invitation.get("label"),
+                 invitation["created_by"], now, now),
+            )
+            self.append_event(
+                "physician_joined", actor=f"user:{user_id}", practice_id=invitation["practice_id"],
+                owner_scope_id=owner_scope_id, metadata={"invitation_id": invitation["id"], "member_id": member_id}, db=db,
+            )
+        return self.membership_for_user(user_id)
+
+    # ------------------------------------------------- access (new-practice) invitations
+
+    def create_access_invitation(self, *, email: str, npi: str, note: str | None, actor: str,
+                                 ttl_days: int = INVITATION_TTL_DAYS) -> tuple[dict, str]:
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(UTC)
+        invitation_id = new_id("acc")
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO pilot_access_invitations (id, email, npi, token_hash, note, created_by, created_at, "
+                "expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (invitation_id, email, npi, hash_token(token), note, actor, now.isoformat(timespec="seconds"),
+                 (now + timedelta(days=ttl_days)).isoformat(timespec="seconds")),
+            )
+            self.append_event("pilot_access_invited", actor=actor, metadata={"invitation_id": invitation_id}, db=db)
+        return self.fetch_one("SELECT * FROM pilot_access_invitations WHERE id = ?", (invitation_id,)), token
+
+    def access_invitation_by_token(self, token: str) -> dict | None:
+        return self.fetch_one("SELECT * FROM pilot_access_invitations WHERE token_hash = ?", (hash_token(token),))
+
+    def accept_access_invitation(self, invitation: dict, user_id: str) -> bool:
+        now = now_iso()
+        with self._connect() as db:
+            claimed = db.execute(
+                "UPDATE pilot_access_invitations SET accepted_by_user_id = ?, accepted_at = ? "
+                "WHERE id = ? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?",
+                (user_id, now, invitation["id"], now),
+            ).rowcount
+            if claimed:
+                self.append_event("pilot_access_invitation_accepted", actor=f"user:{user_id}",
+                                  metadata={"invitation_id": invitation["id"]}, db=db)
+        return bool(claimed)
+
+    def revoke_access_invitation(self, invitation_id: str, actor: str) -> bool:
+        with self._connect() as db:
+            changed = db.execute(
+                "UPDATE pilot_access_invitations SET revoked_at = ?, revoked_by = ? WHERE id = ? "
+                "AND accepted_at IS NULL AND revoked_at IS NULL", (now_iso(), actor, invitation_id),
+            ).rowcount
+            if changed:
+                self.append_event("pilot_access_invitation_revoked", actor=actor,
+                                  metadata={"invitation_id": invitation_id}, db=db)
+        return bool(changed)
+
+    # ----------------------------------------------------- MFA recovery requests
+
+    def open_recovery_request(self, user_id: str, practice_id: str | None, reason: str | None) -> dict:
+        existing = self.fetch_one("SELECT * FROM mfa_recovery_requests WHERE user_id = ? AND status = 'open'", (user_id,))
+        if existing:
+            return existing
+        request_id = new_id("mfr")
+        with self._connect() as db:
+            db.execute("INSERT INTO mfa_recovery_requests (id, user_id, practice_id, reason, status, created_at) "
+                       "VALUES (?, ?, ?, ?, 'open', ?)", (request_id, user_id, practice_id, reason, now_iso()))
+            self.append_event("mfa_recovery_requested", actor=f"user:{user_id}", practice_id=practice_id,
+                              metadata={"request_id": request_id}, db=db)
+        return self.fetch_one("SELECT * FROM mfa_recovery_requests WHERE id = ?", (request_id,))
+
+    def decide_recovery_request(self, request_id: str, decision: str, actor: str, note: str) -> dict | None:
+        """Operator only. 'completed' resets MFA: the old factor no longer counts and every session
+        issued before now is refused, so the member signs in again and sets up a new authenticator."""
+        now = now_iso()
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM mfa_recovery_requests WHERE id = ? AND status = 'open'", (request_id,)).fetchone()
+            if not row:
+                return None
+            db.execute("UPDATE mfa_recovery_requests SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? "
+                       "WHERE id = ?", (decision, actor, now, note, request_id))
+            if decision == "completed":
+                self._security_upsert(db, row["user_id"], mfa_reset_at=now, sessions_revoked_at=now, mfa_enrolled_at=None)
+            self.append_event("mfa_reset" if decision == "completed" else "mfa_recovery_declined", actor=actor,
+                              practice_id=row["practice_id"],
+                              metadata={"request_id": request_id, "user": f"user:{row['user_id']}"}, db=db)
+        return self.fetch_one("SELECT * FROM mfa_recovery_requests WHERE id = ?", (request_id,))
 
     # --------------------------------------------------------------- referrals
 

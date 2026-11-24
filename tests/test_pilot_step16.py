@@ -149,8 +149,8 @@ def test_link_and_reissue_respect_practice_boundaries(pilot: Pilot) -> None:
     rid = pilot.referral()["referral"]["id"]
     sent = _send_request(pilot, rid)
     pilot.confirm_physician("user-b", NPI_B)
-    pilot.create_practice("user-b", "Doe Cardiology")
     pilot.approve("user-b")
+    pilot.create_practice("user-b", "Doe Cardiology")
     assert pilot.post(f"/api/me/practice/information-requests/{sent['id']}/reissue-link", "user-b",
                       {"mode": "mark_sent"}).status_code == 404
     assert pilot.post(f"/api/me/practice/referrals/{rid}/items/recent_a1c/verify", "user-b", {}).status_code == 404
