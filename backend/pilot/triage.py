@@ -17,6 +17,7 @@ earlier deterministic result):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
@@ -122,26 +123,117 @@ def _is_fresh(observed: str | None, freshness_days: int | None, today: date) -> 
     return (today - date.fromisoformat(observed)).days <= freshness_days
 
 
+# Run 3: a mention that an item was NOT done -- negated, pending, ordered, planned -- is never
+# evidence, for the rule-based search or for a model's quote. Judged per clause, so "HbA1c 8.2%,
+# repeat pending" still counts the A1c while "HbA1c not drawn this year" does not.
+NOT_DONE = re.compile(
+    r"\b(?:not\s+(?:yet\s+)?(?:been\s+)?(?:done|drawn|performed|obtained|available|completed|checked|sent|received|"
+    r"collected|resulted|ordered)|no\s+(?:recent\s+|new\s+|prior\s+)?(?:result|results|value|labs?|imaging|study|report)s?\b"
+    r"|never\b|declined|refused|pending|ordered|planned|scheduled|awaiting|awaited|requested|deferred|to\s+be\s+"
+    r"(?:done|drawn|checked|obtained|ordered|repeated|performed|scheduled)|will\s+(?:be\s+)?(?:order|check|draw|obtain|"
+    r"schedul|perform|repeat)\w*|due\s+(?:next|in)\b|has\s+not\b|hasn't\b|haven't\b|wasn't\b|were\s+not\b|was\s+not\b)",
+    re.IGNORECASE,
+)
+_CLAUSES = re.compile(r"(?<=[.;!?])\s+|\n+|,\s+(?=(?:and\s+|but\s+)?[A-Za-z])")
+
+
+def clauses(text: str) -> list[str]:
+    return [part.strip() for part in _CLAUSES.split(text) if part and part.strip()]
+
+
+def is_not_done(clause: str) -> bool:
+    return bool(NOT_DONE.search(clause))
+
+
+def _affirmed_text(page: str) -> str:
+    """The page without its negated / pending / planned clauses."""
+    return "\n".join(clause for clause in clauses(page) if not is_not_done(clause))
+
+
 def _document_mention(label: str, key: str, documents: list[DocumentText]) -> RationaleSource | None:
     wanted = _tokens(label) or _tokens(key.replace("_", " "))
     if not wanted:
         return None
     for document in documents:
         for index, page in enumerate(document.pages, start=1):
-            if wanted <= _tokens(page):
+            affirmed = _affirmed_text(page)
+            if wanted <= _tokens(affirmed):
                 line = next(
                     (
                         candidate.strip()
-                        for candidate in page.splitlines()
+                        for candidate in affirmed.splitlines()
                         if wanted & _tokens(candidate)
                     ),
-                    page.strip()[:200],
+                    affirmed.strip()[:200],
                 )
                 return RationaleSource(
                     kind="document", document_id=document.document_id, page=index,
                     quote=line[:300], item_key=key,
                 )
     return None
+
+
+def _quote_not_done(quote: str, page: str) -> bool:
+    """True when the quote, or a clause of the page that contains it, says the item wasn't done."""
+    wanted = _normalize_ws(quote)
+    if any(is_not_done(clause) for clause in clauses(quote)):
+        return True
+    return any(is_not_done(clause) for clause in clauses(page) if wanted in _normalize_ws(clause)
+               or _normalize_ws(clause) in wanted)
+
+
+# ---------------------------------------------------------------- evidence age (run 3)
+
+_MONTHS = {name: index for index, name in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+_DATE_PATTERNS = (
+    (re.compile(r"\b(20\d\d|19\d\d)-(\d{1,2})-(\d{1,2})\b"), lambda m: (int(m[1]), int(m[2]), int(m[3]))),
+    (re.compile(r"\b(\d{1,2})/(\d{1,2})/(20\d\d|19\d\d)\b"), lambda m: (int(m[3]), int(m[1]), int(m[2]))),
+    (re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(20\d\d|19\d\d)\b", re.IGNORECASE),
+     lambda m: (int(m[3]), _MONTHS[m[1].lower()[:3]], int(m[2]))),
+    (re.compile(r"\b(\d{1,2})/(20\d\d|19\d\d)\b"), lambda m: (int(m[2]), int(m[1]), 1)),
+)
+
+
+def evidence_date(text: str) -> date | None:
+    """The first calendar date written in an evidence quote (ISO, US m/d/yyyy, "Oct 2, 2026", or
+    m/yyyy as the 1st of that month). None when the quote has no date: never guessed."""
+    found: list[tuple[int, date]] = []
+    for pattern, parts in _DATE_PATTERNS:
+        for match in pattern.finditer(text):
+            try:
+                year, month, day = parts(match)
+                found.append((match.start(), date(year, month, day)))
+            except (ValueError, KeyError):
+                continue
+    return min(found)[1] if found else None
+
+
+def _age_text(days: int) -> str:
+    if days < 0:
+        return "dated in the future"
+    if days < 60:
+        return f"dated {days} day{'s' if days != 1 else ''} ago"
+    months = round(days / 30.4)
+    if months < 24:
+        return f"dated {months} months ago"
+    return f"dated {round(days / 365.25)} years ago"
+
+
+def evidence_window(quote: str, freshness_days: int | None, today: date) -> dict:
+    """How a proposed piece of evidence sits against the rule's time window. Never changes the
+    state: a person still confirms (and the confirmed value's date is what triage checks)."""
+    found = evidence_date(quote)
+    if freshness_days is None:
+        return {"evidence_date": found.isoformat() if found else None, "window_status": None, "window_note": None}
+    if found is None:
+        return {"evidence_date": None, "window_status": "undated",
+                "window_note": f"no date found — check it is within the rule’s {freshness_days}-day window"}
+    days = (today - found).days
+    inside = 0 <= days <= freshness_days
+    return {"evidence_date": found.isoformat(), "window_status": "within" if inside else "outside",
+            "window_note": f"{_age_text(days)} ({found.isoformat()}) — "
+                           f"{'within' if inside else 'outside'} the rule’s {freshness_days}-day window"}
 
 
 def _validated_proposals(
@@ -159,6 +251,7 @@ def _validated_proposals(
             or not 1 <= proposal.page <= len(document.pages)
             or len(_normalize_ws(proposal.quote)) < 4
             or _normalize_ws(proposal.quote) not in _normalize_ws(document.pages[proposal.page - 1])
+            or _quote_not_done(proposal.quote, document.pages[proposal.page - 1])
         ):
             continue
         accepted[proposal.key] = RationaleSource(
@@ -378,9 +471,11 @@ def triage_referral(
     for index, requirement, _rule in pending_lookup:
         mention = _document_mention(requirement.label, requirement.key, documents)
         if mention is not None:
+            window = evidence_window(mention.quote or "", requirement.freshness_days, reference_day)
             requirements[index] = requirements[index].model_copy(update={
-                "state": "proposed_from_document", "evidence": mention,
-                "detail": f"Possibly in a document (page {mention.page}); needs confirmation",
+                "state": "proposed_from_document", "evidence": mention, **window,
+                "detail": f"Possibly in a document (page {mention.page})"
+                          + (f"; {window['window_note']}" if window["window_note"] else "") + "; needs confirmation",
             })
 
     generator, model_id = "deterministic", None
@@ -404,10 +499,11 @@ def triage_referral(
         for index, requirement in still_missing:
             evidence = validated.get(requirement.key)
             if evidence is not None:
+                window = evidence_window(evidence.quote or "", requirement.freshness_days, reference_day)
                 requirements[index] = requirements[index].model_copy(update={
-                    "state": "proposed_from_document", "evidence": evidence,
-                    "detail": f"Model-extracted from a document (page {evidence.page}); "
-                              "needs confirmation",
+                    "state": "proposed_from_document", "evidence": evidence, **window,
+                    "detail": f"Model-extracted from a document (page {evidence.page})"
+                              + (f"; {window['window_note']}" if window["window_note"] else "") + "; needs confirmation",
                 })
 
     for requirement in requirements:

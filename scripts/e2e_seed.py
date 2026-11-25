@@ -417,7 +417,101 @@ def set_auto_draft(state_name: str) -> None:
     print(f"step auto-draft-{state_name}: done")
 
 
+def intake_scenarios() -> None:
+    """Run 3 (intake specs and screens): practice A's fax number and intake email, the synthetic
+    fixtures on disk, a referral with an information request out to a fax number (the faxed reply
+    spec), and an existing patient record (the duplicate-patient spec). Idempotent per run."""
+    guard()
+    from scripts.intake_fixtures import write_all
+
+    state = json.loads(STATE.read_text(encoding="utf-8"))
+    if state.get("intake"):
+        print("step intake-scenarios: already done")
+        return
+    s = Seeder(_accounts())
+    fixtures = E2E_DIR / "intake-fixtures"
+    write_all(fixtures)
+    s.call("POST", "/api/me/practice/intake/addresses", "physician", {"channel": "fax", "address": "(555) 010-9000"})
+    addresses = s.call("POST", "/api/me/practice/intake/addresses", "physician", {"channel": "email"})
+    email = next(item["address"] for item in addresses if item["channel"] == "email")
+    reply = s.call("POST", "/api/me/practice/referrals", "staff", {
+        "sender": {"name": "Dr. Casey Placeholder (SYNTHETIC)", "practice": "Placeholder Family Medicine",
+                   "contact": "fax (555) 010-0199"},
+        "patient": {"name": "Robin Lumen-Synthetic", "date_of_birth": "1968-03-14"},
+        "referral_type": "Thyroid nodule", "reason": "Incidental 1.8 cm thyroid nodule on CT.", "submitted_items": []})["referral"]["id"]
+    s.send_request("staff", reply)
+    existing = s.call("POST", "/api/me/practice/referrals", "staff", {
+        "sender": {"name": "Dr. Riley Sample (SYNTHETIC)", "practice": "Sample Health Partners", "contact": "fax (555) 010-0123"},
+        "patient": {"name": "Rivera-Synthetic, Morgan", "date_of_birth": "1980-04-12", "phone": "(555) 010-0456"},
+        "referral_type": "Osteoporosis", "reason": "Low bone density after wrist fracture.", "submitted_items": []})["referral"]
+    state["intake"] = {"fax_number": "5550109000", "email": email, "fixtures": str(fixtures), "reply_referral": reply,
+                       "existing_patient_referral": existing["id"], "existing_patient": existing["patient_id"]}
+    STATE.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    print("step intake-scenarios: done")
+
+
+def intake_inbox() -> None:
+    """Screens only (run 3): an Intake inbox with something of each kind, delivered through the
+    signed mock fax/email webhooks exactly as a vendor would; a referral created from an upload
+    whose result is too old for the rule's window; and a second record for an existing patient."""
+    import base64
+
+    from backend.pilot.inbound import sign
+
+    intake_scenarios()
+    state = json.loads(STATE.read_text(encoding="utf-8"))
+    if state["intake"].get("items"):
+        print("step intake-inbox: already done")
+        return
+    s = Seeder(_accounts())
+    fixtures = Path(state["intake"]["fixtures"])
+
+    def deliver(channel: str, payload: dict) -> None:
+        body = json.dumps(payload).encode()
+        secret = os.environ[f"LAMINA_{channel.upper()}_WEBHOOK_SECRET"]
+        response = s.client.post(f"/api/public/inbound/{channel}/mock", content=body,
+                                 headers={"x-lamina-mock-signature": sign(secret, int(time.time()), body)})
+        assert response.status_code == 200, response.text
+
+    def attachment(name: str, kind: str) -> dict:
+        return {"filename": name, "content_type": kind, "data_base64": base64.b64encode((fixtures / name).read_bytes()).decode()}
+
+    for index, (name, kind, sender) in enumerate((
+            ("multi-referral-fax.pdf", "application/pdf", "(555) 010-0142"),
+            ("junk-fax-scan.png", "image/png", "(555) 010-0000"),
+            ("osteoporosis-referral-scan.png", "image/png", "(555) 010-0188"))):
+        deliver("fax", {"event_id": f"seed-fax-{index}", "to": state["intake"]["fax_number"], "from": sender,
+                        "document": attachment(name, kind)})
+    deliver("email", {"event_id": "seed-email-1", "to": state["intake"]["email"], "from": "referrals@placeholder.test",
+                      "subject": "New referral: thyroid nodule (synthetic)",
+                      "text": "Please see the attached referral. SYNTHETIC TEST MESSAGE - NOT A REAL PATIENT.",
+                      "attachments": [attachment("thyroid-referral.pdf", "application/pdf")]})
+    deliver("fax", {"event_id": "seed-fax-reply", "to": state["intake"]["fax_number"], "from": "(555) 010-0199",
+                    "document": attachment("info-reply-fax.pdf", "application/pdf")})
+    items = {f"{item['channel']}:{item['patient_name'] or 'unidentified'}": item["id"]
+             for item in s.call("GET", "/api/me/practice/intake/items", "staff")}
+    # An upload routed into a referral whose HbA1c is older than the rule's window.
+    upload = s.client.post("/api/me/practice/intake/items", content=(fixtures / "old-result-referral.pdf").read_bytes(),
+                           headers={"Authorization": "Bearer seed-staff", "content-type": "application/pdf", "x-filename": "old-result-referral.pdf"})
+    assert upload.status_code == 201, upload.text
+    created = s.call("POST", f"/api/me/practice/intake/items/{upload.json()['id']}/create-referral", "staff", {"referral": {
+        "sender": {"name": "Dr. Morgan Testcase (SYNTHETIC)", "practice": "Testcase Internal Medicine", "contact": "(555) 010-0177"},
+        "patient": {"name": "Avery Quartz-Synthetic", "date_of_birth": "1959-05-30"},
+        "referral_type": "Diabetes management", "reason": "Type 2 diabetes not at goal."}})
+    # A second record for the same person (entered by hand): a possible duplicate to review.
+    duplicate = s.call("POST", "/api/me/practice/referrals", "staff", {
+        "sender": {"name": "Dr. Riley Sample (SYNTHETIC)", "contact": "fax (555) 010-0123"},
+        "patient": {"name": "MORGAN RIVERA-SYNTHETIC", "date_of_birth": "1980-04-12", "phone": "555-010-0456"},
+        "referral_type": "Osteoporosis", "reason": "Follow-up of low bone density.", "submitted_items": []})["referral"]
+    state["intake"].update({"items": items, "old_result_referral": created["referral"]["id"],
+                            "duplicate_patient": duplicate["patient_id"]})
+    STATE.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    print("step intake-inbox: done")
+
+
 SEEDER_STEPS = {
+    "intake-scenarios": lambda: intake_scenarios(),
+    "intake-inbox": lambda: intake_inbox(),
     "shadow-second-physician": lambda: shadow_second(),
     "new-missing-referral": lambda: new_missing_referral(),
     "activate-auto-draft": lambda: set_auto_draft("active"),

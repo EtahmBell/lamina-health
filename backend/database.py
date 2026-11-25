@@ -33,7 +33,7 @@ from typing import Any, ClassVar, Self
 # Tables whose primary key is an integer identity (lastrowid is meaningful).
 INTEGER_ID_TABLES = frozenset({"provider_claims", "physician_onboarding_events", "pilot_events"})
 HIDDEN_COLUMNS = frozenset({"_rowid"})
-MIGRATION_HEAD = "0002_append_only_privileges"
+MIGRATION_HEAD = "0003_intake_pipeline"
 
 
 def database_url() -> str:

@@ -22,6 +22,9 @@ dependencies = [
   # machines block them by Application Control policy).
   "sqlalchemy>=2.0.30,<2.1",
   "boto3>=1.34,<2",
+  # Direct Anthropic API provider: dev, e2e and the hosted synthetic demo only (no BAA; production
+  # refuses it). In the base set because the Railway build installs base dependencies only.
+  "anthropic>=1,<2",
 ]
 
 [project.optional-dependencies]
@@ -30,8 +33,6 @@ dev = [
   "ruff>=0.9,<1",
   # Local AWS mock for the S3/Bedrock tests (never real AWS).
   "moto[s3]>=5,<6",
-  # Dev-only direct Anthropic API provider and the provider eval (never installed by the deployment).
-  "anthropic>=1,<2",
 ]
 
 [tool.setuptools.packages.find]
@@ -56,3 +57,4 @@ line-length = 100
 "tests/test_pilot_multi_physician.py" = ["F811"]
 "tests/test_document_storage.py" = ["F811"]
 "tests/test_database_postgres.py" = ["F811"]
+"tests/test_intake_pipeline.py" = ["F811"]

@@ -13,6 +13,10 @@ export const pilotPaths = {
   patients: '/me/patients',
   referrals: '/me/patients',
   network: '/me/network',
+  /** Run 3: received documents (upload, fax, email) waiting to be routed. */
+  intake: '/me/intake',
+  intakeItem: (id: string) => `/me/intake?item=${encodeURIComponent(id)}`,
+  patient: (id: string) => `/me/patients/${encodeURIComponent(id)}`,
   newReferral: '/me/referrals/new',
   referral: (id: string) => `/me/referrals/${encodeURIComponent(id)}`,
   practice: '/me/practice',
@@ -31,6 +35,7 @@ export const pilotPaths = {
 export type PilotRoute =
   | { kind: 'home' } | { kind: 'for_you' } | { kind: 'onboarding' } | { kind: 'join' }
   | { kind: 'patients' } | { kind: 'network' } | { kind: 'new_referral' } | { kind: 'referral'; id: string }
+  | { kind: 'intake' } | { kind: 'patient'; id: string }
   | { kind: 'practice' } | { kind: 'rules' } | { kind: 'agent' } | { kind: 'public_settings' } | { kind: 'metrics' } | { kind: 'setup' }
   | { kind: 'public_profile'; slug: string } | { kind: 'public_refer'; slug: string } | { kind: 'sender'; token: string }
   | { kind: 'auth'; page: 'sign-in' | 'sign-up' }
@@ -47,6 +52,9 @@ export function resolvePilotRoute(path: string): PilotRoute {
   if (clean === '/me/join') return { kind: 'join' }
   if (clean === '/me/patients' || clean === '/me/referrals') return { kind: 'patients' }
   if (clean === '/me/network') return { kind: 'network' }
+  if (clean === '/me/intake') return { kind: 'intake' }
+  const patient = clean.match(/^\/me\/patients\/([A-Za-z0-9_-]+)$/)?.[1]
+  if (patient) return { kind: 'patient', id: patient }
   if (clean === '/me/referrals/new') return { kind: 'new_referral' }
   const referral = clean.match(/^\/me\/referrals\/([A-Za-z0-9_-]+)$/)?.[1]
   if (referral) return { kind: 'referral', id: referral }
@@ -81,6 +89,12 @@ export const IDLE_TIMEOUT_CHOICES = [15, 20, 30, 45, 60]
  * so "your" is used only for the reader's own correction or rule; otherwise the author is named.
  * Staff always read it in the third person. */
 export type ConflictParties = { corrected_by_name: string | null; rule_by_name: string | null; corrected_by_you: boolean; rule_by_you: boolean }
+/** Who decides a correction conflict when the reader can't: its author or an admin physician. */
+export function conflictDecider(conflict: { corrected_by_name: string | null }): string {
+  const author = conflict.corrected_by_name ?? 'the physician who made it'
+  return `Only ${author} (who made this correction) or an admin physician can keep it or apply the rule.`
+}
+
 export function conflictWording(conflict: ConflictParties, physician: boolean, doctor: string): { title: string; keep: string; caution: string } {
   const corrector = conflict.corrected_by_name || doctor
   const mine = physician && conflict.corrected_by_you
@@ -841,4 +855,70 @@ export function statementText(item: string, voice: Voice = PHYSICIAN_VOICE): str
   if (item.startsWith('outside: ')) return `Not seen: ${item.slice(9)}`
   if (item.startsWith('modality:')) return `Prefers ${item.slice(9).replace('_', '-')}`
   return item.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+}
+
+
+/* ------------------------------------------------------------- intake pipeline (run 3) */
+
+export const INTAKE_CHANNEL_LABELS: Record<string, string> = { upload: 'Upload', fax: 'Fax', email: 'Email', public_form: 'Public page' }
+export const INTAKE_STATUS_LABELS: Record<string, string> = {
+  received: 'Received', extracted: 'Ready to review', needs_review: 'Needs a look', routed: 'Routed', split: 'Split', dismissed: 'Dismissed',
+}
+export const DISMISS_REASON_LABELS: Record<string, string> = {
+  junk: 'Junk / advertising', not_a_referral: 'Not a referral', duplicate: 'Duplicate of one already received',
+  wrong_practice: 'Meant for another practice', other: 'Other (say why)',
+}
+export const INTAKE_FIELD_LABELS: Record<string, string> = {
+  patient_name: 'Patient', date_of_birth: 'Date of birth', mrn: 'MRN', patient_phone: 'Patient phone',
+  referring_clinician: 'Referring clinician', referring_practice: 'Referring practice', contact: 'Office contact / fax',
+  referral_question: 'Referral question', referral_type: 'Referral type',
+}
+export const ROUTED_LABELS: Record<string, string> = {
+  new_referral: 'Created a referral', attached: 'Attached to a referral', request_reply: 'Answered an information request',
+}
+
+type IntakeProposals = { fields?: Record<string, { value: string } | undefined> }
+
+/** The referral form prefilled from the extraction PROPOSALS -- staff check and edit every field
+ * before anything is created (nothing is verified by being proposed). */
+export function intakeFormFrom(extraction: IntakeProposals, suggestedType: string | null | undefined): ReferralForm {
+  const field = (name: string) => extraction.fields?.[name]?.value ?? ''
+  return {
+    ...emptyReferralForm(),
+    senderName: field('referring_clinician'), senderPractice: field('referring_practice'), senderContact: field('contact'),
+    patientName: field('patient_name'), patientDob: /^\d{4}-\d{2}-\d{2}$/.test(field('date_of_birth')) ? field('date_of_birth') : '',
+    patientPhone: field('patient_phone'), patientExternalId: field('mrn'),
+    referralType: suggestedType ?? field('referral_type'), reason: field('referral_question'),
+  }
+}
+
+/** "1-2, 3-4" -> [[1,2],[3,4]]; null when it doesn't cover pages 1..total exactly once. */
+export function parsePageRanges(text: string, total: number): Array<[number, number]> | null {
+  const ranges: Array<[number, number]> = []
+  for (const part of text.split(',').map((piece) => piece.trim()).filter(Boolean)) {
+    const match = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/)
+    if (!match) return null
+    const start = Number(match[1]); const end = Number(match[2] ?? match[1])
+    if (start < 1 || end < start) return null
+    ranges.push([start, end])
+  }
+  ranges.sort((a, b) => a[0] - b[0])
+  let next = 1
+  for (const [start, end] of ranges) {
+    if (start !== next) return null
+    next = end + 1
+  }
+  return ranges.length >= 2 && next === total + 1 ? ranges : null
+}
+
+/** A proposal's region on the page preview, as CSS percentages. */
+export const regionStyle = (bbox: [number, number, number, number]) =>
+  ({ left: `${bbox[0] * 100}%`, top: `${bbox[1] * 100}%`, width: `${bbox[2] * 100}%`, height: `${Math.max(bbox[3], 0.02) * 100}%` })
+
+/** How a received item came in, in one line ("Fax from (555) 010-0199", "Email: Referral"). */
+export function intakeSourceLine(item: { channel: string; from_address: string | null; subject: string | null }): string {
+  const channel = INTAKE_CHANNEL_LABELS[item.channel] ?? item.channel
+  if (item.channel === 'email') return `${channel}${item.from_address ? ` from ${item.from_address}` : ''}${item.subject ? ` · “${item.subject}”` : ''}`
+  if (item.channel === 'fax') return `${channel}${item.from_address ? ` from ${item.from_address}` : ''}`
+  return item.channel === 'upload' ? 'Uploaded by your team' : channel
 }

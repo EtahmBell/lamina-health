@@ -166,6 +166,8 @@ class IntakeReferral(_Strict):
     # The referral type exactly as it was submitted, kept when the team confirms a
     # different (canonical) practice type.
     submitted_referral_type: str | None = None
+    # Run 3: the practice's patient record this referral is for (never auto-merged).
+    patient_id: str | None = None
     current_recommendation_id: str | None = None
     review: dict | None = None
     escalated_at: str | None = None
@@ -226,6 +228,12 @@ class RequirementAssessment(_Strict):
     rule_version: int
     evidence: RationaleSource | None = None
     detail: str
+    # Run 3: a proposed document item's date against the rule's window. `window_status` is
+    # within | outside | undated (None when the rule sets no window). Shown, never decisive:
+    # a person still confirms, and the confirmed value's date is what triage checks.
+    evidence_date: str | None = None
+    window_status: Literal["within", "outside", "undated"] | None = None
+    window_note: str | None = None
 
 
 class TriageRecommendation(_Strict):

@@ -6,8 +6,10 @@
                 never patient data. `demo_problems()` lists what makes it unsafe; `create_app`
                 refuses to start if there is any. No test sign-in, MFA exemptions, fictional NPPES
                 or debug flags; the patient-data approval flag can never be set (and is ignored:
-                `model_provider.patient_data_approved()` is always false here); the dev-only
-                `anthropic` provider is refused. Like production, `.env` is never read.
+                `model_provider.patient_data_approved()` is always false here). The `anthropic`
+                provider (no BAA) is allowed here for synthetic data; model spend is limited per
+                session/IP and per day (backend/demo_model_budget.py). Like production, `.env` is
+                never read.
 * production -- real deployment. `production_problems()` lists everything that makes the
                 configuration unsafe; `create_app` refuses to start if there is any. Secrets come
                 only from the environment (injected from a secrets manager): in production the
@@ -23,11 +25,11 @@ from collections.abc import Mapping
 from pathlib import Path
 
 PROFILES = ("dev", "e2e", "demo", "production")
-# Providers a profile may use. `anthropic` (direct API) is dev-only: no BAA, never patient data.
+# Providers a profile may use. `anthropic` (direct API) has no BAA: synthetic profiles only.
 PROVIDERS_BY_PROFILE = {
     "dev": ("openai", "bedrock", "anthropic", "disabled"),
     "e2e": ("openai", "bedrock", "anthropic", "disabled"),
-    "demo": ("openai", "bedrock", "disabled"),
+    "demo": ("openai", "bedrock", "anthropic", "disabled"),
     "production": ("openai", "bedrock", "disabled"),
 }
 REPOSITORY_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
@@ -90,7 +92,7 @@ def production_problems(env: Mapping[str, str] | None = None, *, env_file: Path 
     if not provider:
         problems.append("LAMINA_MODEL_PROVIDER must be set explicitly (openai, bedrock or disabled)")
     elif provider == "anthropic":
-        problems.append("LAMINA_MODEL_PROVIDER=anthropic (direct Anthropic API) is dev-only: no BAA, never patient data")
+        problems.append("LAMINA_MODEL_PROVIDER=anthropic (direct Anthropic API) has no BAA: synthetic profiles only, never production")
     elif provider not in PROVIDERS_BY_PROFILE["production"]:
         problems.append("LAMINA_MODEL_PROVIDER must be openai, bedrock or disabled")
     elif provider != "disabled":
@@ -101,6 +103,19 @@ def production_problems(env: Mapping[str, str] | None = None, *, env_file: Path 
         problems.extend(f"{name} is missing" for name in needed if not env.get(name, "").strip())
     if _on(env.get("LAMINA_PILOT_LLM_EXTRACTION_ENABLED")) and provider in {"", "disabled"}:
         problems.append("LAMINA_PILOT_LLM_EXTRACTION_ENABLED is on without an approved model provider")
+    # Run 3: the intake pipeline. Extraction reads patient data: Amazon Textract under the BAA only.
+    if env.get("LAMINA_EXTRACTION_PROVIDER", "local").strip().casefold() != "textract":
+        problems.append("LAMINA_EXTRACTION_PROVIDER must be textract (local extraction is dev-only)")
+    elif not _on(env.get("LAMINA_EXTRACTION_PATIENT_DATA_APPROVED")):
+        problems.append("LAMINA_EXTRACTION_PATIENT_DATA_APPROVED must confirm Textract is covered by the signed BAA")
+    if _on(env.get("LAMINA_PILOT_LLM_INTAKE_EXTRACTION_ENABLED")) and provider in {"", "disabled"}:
+        problems.append("LAMINA_PILOT_LLM_INTAKE_EXTRACTION_ENABLED is on without an approved model provider")
+    for channel in ("FAX", "EMAIL"):
+        vendor = env.get(f"LAMINA_{channel}_PROVIDER", "").strip().casefold()
+        if vendor == "mock":
+            problems.append(f"LAMINA_{channel}_PROVIDER=mock is the synthetic test vendor (use the real vendor under a BAA)")
+        if vendor and len(env.get(f"LAMINA_{channel}_WEBHOOK_SECRET", "").strip()) < 32:
+            problems.append(f"LAMINA_{channel}_WEBHOOK_SECRET must be set (at least 32 characters)")
     # Identity: Supabase with TOTP MFA (the API enforces it; the project must allow enrolment).
     if not _on(env.get("LAMINA_SUPABASE_MFA_TOTP_ENABLED")):
         problems.append("LAMINA_SUPABASE_MFA_TOTP_ENABLED must confirm the Supabase project has TOTP MFA enabled")
@@ -117,9 +132,11 @@ def production_problems(env: Mapping[str, str] | None = None, *, env_file: Path 
     return problems
 
 
-# Never allowed on the hosted synthetic deployment. LAMINA_DEMO_VERIFICATION_ENABLED is not here:
-# it only verifies the controlled synthetic roster (real NPPES profiles never use it).
-FORBIDDEN_IN_DEMO = tuple(name for name in FORBIDDEN_IN_PRODUCTION if name != "LAMINA_DEMO_VERIFICATION_ENABLED")
+# Never allowed on the hosted synthetic deployment (run 3: including LAMINA_DEMO_VERIFICATION_ENABLED.
+# The synthetic demo flow doesn't need it -- the personas and Consult Network never verify a claim; it
+# only shortcuts "claim a synthetic physician -> verify -> activate", which on a public site would let
+# anyone self-verify. With it off, that path stops at "verification pending", as the UI already says).
+FORBIDDEN_IN_DEMO = FORBIDDEN_IN_PRODUCTION
 
 
 def _set(value: str | None) -> bool:
@@ -142,10 +159,15 @@ def demo_problems(env: Mapping[str, str] | None = None, *, env_file: Path | None
     provider = env.get("LAMINA_MODEL_PROVIDER", "").strip().casefold()
     if not provider:
         problems.append("LAMINA_MODEL_PROVIDER must be set explicitly (openai, bedrock or disabled)")
-    elif provider == "anthropic":
-        problems.append("LAMINA_MODEL_PROVIDER=anthropic (direct Anthropic API) is dev-only")
     elif provider not in PROVIDERS_BY_PROFILE["demo"]:
-        problems.append("LAMINA_MODEL_PROVIDER must be openai, bedrock or disabled")
+        problems.append("LAMINA_MODEL_PROVIDER must be openai, bedrock, anthropic or disabled")
+    elif provider == "anthropic" and not env.get("ANTHROPIC_API_KEY", "").strip():
+        problems.append("ANTHROPIC_API_KEY is missing")
+    for name in ("LAMINA_DEMO_MODEL_DAILY_CAP", "LAMINA_DEMO_MODEL_PER_SESSION_LIMIT", "LAMINA_DEMO_MODEL_PER_IP_LIMIT",
+                 "LAMINA_DEMO_MODEL_WINDOW_SECONDS"):
+        raw = env.get(name, "").strip()
+        if raw and not raw.isdigit():
+            problems.append(f"{name} must be a whole number")
     origins = env.get("LAMINA_CORS_ORIGINS", "")
     if not origins.strip():
         problems.append("LAMINA_CORS_ORIGINS is missing (the hosted frontend origin)")

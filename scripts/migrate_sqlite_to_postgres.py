@@ -4,8 +4,11 @@
     ... --dry-run     # check and report only; writes nothing
 
 Steps (all or nothing -- one Postgres transaction):
-1. Open the SQLite file through the current code once, so its own pending SQLite upgrades run
-   (token scrub, author backfill, column additions) and the source is the latest SQLite shape.
+1. Run the source's one-time SQLite upgrades automatically (token scrub + link revocation, rule
+   author backfill, column additions, invitation rebuild) by opening it through the current code,
+   then CHECK that they took effect (`upgrade_problems`). If an upgrade raises or a check fails,
+   nothing is moved. A real run first copies the source to `<name>.pre-upgrade-<time>.sqlite`;
+   `--dry-run` upgrades a temporary copy and leaves the source untouched.
 2. Check the source: `PRAGMA integrity_check` and `PRAGMA foreign_key_check` must be clean.
 3. The target must be at the Alembic head with every pilot table EMPTY (never merges).
 4. Copy each table in dependency order, rows in their original insertion order (so `_rowid`
@@ -24,8 +27,11 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,8 +39,22 @@ BASELINE_SQL = ROOT / "backend" / "migrations" / "versions" / "0001_pilot_tables
 
 
 def table_order() -> list[str]:
-    """Dependency order = the baseline's creation order."""
-    return re.findall(r"^CREATE TABLE (\w+) \(", BASELINE_SQL.read_text(encoding="utf-8"), re.MULTILINE)
+    """Foreign-key dependency order over EVERY migration's tables (run 3: 0003 adds `patients`,
+    which `intake_referrals.patient_id` references), creation order breaking ties."""
+    sql = "\n".join(path.read_text(encoding="utf-8") for path in sorted(BASELINE_SQL.parent.glob("*.sql")))
+    blocks = re.findall(r"^CREATE TABLE (\w+) \((.*?)^\);", sql, re.MULTILINE | re.DOTALL)
+    created = [name for name, _ in blocks]
+    needs = {name: set(re.findall(r"REFERENCES (\w+)", body)) - {name} for name, body in blocks}
+    for table, target in re.findall(r"^ALTER TABLE (\w+) ADD COLUMN \w+ [^;]*REFERENCES (\w+)", sql, re.MULTILINE):
+        if table != target:
+            needs.setdefault(table, set()).add(target)
+    order: list[str] = []
+    while len(order) < len(created):
+        ready = next((name for name in created if name not in order and needs.get(name, set()) <= set(order) | (needs.get(name, set()) - set(created))), None)
+        if ready is None:
+            raise SystemExit("Circular foreign keys between migrated tables")
+        order.append(ready)
+    return order
 
 
 def _canonical(value: object) -> str:
@@ -59,26 +79,88 @@ def _pk(pg, table: str) -> list[str]:
     return [row[0] for row in rows]
 
 
+# Columns the one-time SQLite upgrades add; a source without them was not upgraded.
+UPGRADED_COLUMNS = {
+    "physician_referral_preferences": ("layer", "owner_scope_id", "created_by", "confirmed_by", "author_source"),
+    "practice_members": ("is_admin",),
+    "practices": ("allow_physician_loosening", "idle_timeout_minutes"),
+    "intake_referrals": ("submitted_referral_type", "handoff_json"),
+    "learning_questions": ("owner_scope_id",),
+}
+
+
+def upgrade_problems(source: sqlite3.Connection) -> list[str]:
+    """What the one-time SQLite upgrades should have left true. Names tables/columns, never data."""
+    from backend.pilot.store import SENDER_LINK_PATTERN
+
+    problems = []
+    tables = {row[0] for row in source.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    for table, columns in UPGRADED_COLUMNS.items():
+        if table not in tables:
+            continue
+        present = {row[1] for row in source.execute(f"PRAGMA table_info({table})")}
+        problems += [f"{table}.{column} is missing" for column in columns if column not in present]
+    if problems:
+        return problems
+    if "physician_referral_preferences" in tables and source.execute(
+            "SELECT COUNT(*) FROM physician_referral_preferences WHERE scope = 'practice' AND author_source IS NULL").fetchone()[0]:
+        problems.append("rule versions without an author record (the author backfill did not run)")
+    for table, column in (("missing_information_requests", "draft_message"), ("outbound_messages", "body")):
+        if table in tables and any(SENDER_LINK_PATTERN.search(row[0] or "") for row in
+                                   source.execute(f"SELECT {column} FROM {table} WHERE {column} LIKE '%/r/%'")):
+            problems.append(f"{table} still holds a raw sender link (the token scrub did not run)")
+    if "practice_invitations" in tables:
+        sql = source.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'practice_invitations'").fetchone()[0]
+        if "'physician'" not in sql:
+            problems.append("practice_invitations was not rebuilt")
+    return problems
+
+
+def run_source_upgrades(sqlite_path: Path) -> None:
+    """The source's own one-time upgrades, run through the current code; refuses on any failure."""
+    from backend.pilot.store import PilotStore
+    from backend.workflow import WorkflowStore
+
+    try:
+        PilotStore(workflow=WorkflowStore(sqlite_path))
+    except Exception as error:
+        raise SystemExit(f"The SQLite source's one-time upgrades failed ({type(error).__name__}); not migrating") from error
+    with sqlite3.connect(sqlite_path) as check:
+        problems = upgrade_problems(check)
+    if problems:
+        raise SystemExit("The SQLite source's one-time upgrades did not complete; not migrating:\n  - "
+                         + "\n  - ".join(problems))
+
+
 def migrate(sqlite_path: Path, url: str, *, dry_run: bool = False) -> dict:
     import psycopg
 
     from backend.database import MIGRATION_HEAD, _psycopg_url
     from backend.pilot.assistant import _SCHEMA as ASSISTANT_SCHEMA
-    from backend.pilot.store import PilotStore
-    from backend.workflow import WorkflowStore
 
     if not sqlite_path.is_file():
         raise SystemExit(f"No SQLite database at {sqlite_path}")
-    # 1. Bring the source to the latest SQLite shape (its own one-time upgrades).
-    PilotStore(workflow=WorkflowStore(sqlite_path))
-    source = sqlite3.connect(sqlite_path)
+    backup = None
+    if dry_run:
+        # Upgrade and read a temporary copy: a dry run never changes the source.
+        scratch = Path(tempfile.mkdtemp(prefix="lamina-move-"))
+        working = scratch / sqlite_path.name
+        shutil.copy2(sqlite_path, working)
+    else:
+        working = sqlite_path
+        backup = sqlite_path.with_name(f"{sqlite_path.stem}.pre-upgrade-{datetime.now(UTC):%Y%m%dT%H%M%S}{sqlite_path.suffix}")
+        shutil.copy2(sqlite_path, backup)
+    # 1. The source's one-time SQLite upgrades, checked; any failure stops here.
+    run_source_upgrades(working)
+    source = sqlite3.connect(working)
     source.executescript(ASSISTANT_SCHEMA)  # the assistant's table, if the source never created it
     # 2. Source integrity.
     if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
         raise SystemExit("The SQLite source fails PRAGMA integrity_check; not migrating")
     if source.execute("PRAGMA foreign_key_check").fetchall():
         raise SystemExit("The SQLite source has foreign-key violations; not migrating")
-    report: dict = {"source": str(sqlite_path), "dry_run": dry_run, "tables": {}}
+    report: dict = {"source": str(sqlite_path), "dry_run": dry_run, "tables": {}, "upgrades": "ok",
+                    "backup": str(backup) if backup else None}
     with psycopg.connect(_psycopg_url(url), autocommit=False) as pg:
         head = pg.execute("SELECT version_num FROM alembic_version").fetchone()
         if not head or head[0] != MIGRATION_HEAD:
@@ -138,6 +220,8 @@ def migrate(sqlite_path: Path, url: str, *, dry_run: bool = False) -> dict:
         else:
             pg.commit()
     source.close()
+    if dry_run:
+        shutil.rmtree(working.parent, ignore_errors=True)
     report["verified"] = not dry_run
     report["total_rows"] = sum(entry["rows"] for entry in report["tables"].values())
     return report

@@ -27,6 +27,10 @@ export function HomeNavIcon() {
 export function ForYouNavIcon() {
   return <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true"><path d="M2 10.5l2-7h10l2 7v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" /><path d="M2 10.5h4l1 2h4l1-2h4" /></svg>
 }
+/** Run 3: Intake -- a tray with a document arriving. */
+export function IntakeNavIcon() {
+  return <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true"><path d="M5.5 2.25h7v6" /><path d="M7.5 5h3M7.5 7h3" /><path d="M2 10.5h4l1 2h4l1-2h4v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" /></svg>
+}
 export function AgentNavIcon() {
   return <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M9 1.75l1.7 4.55 4.55 1.7-4.55 1.7L9 14.25l-1.7-4.55L2.75 8l4.55-1.7z" /><path d="M14.25 12.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" /></svg>
 }

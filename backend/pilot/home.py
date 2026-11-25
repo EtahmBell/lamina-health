@@ -208,6 +208,15 @@ class HomeService:
                          "at": event["created_at"], "by_agent": True, "path": f"/me/referrals/{event['referral_id']}"})
         if physician and self.activation is not None:
             needs.extend(self.activation.home_items(context))
+        # Run 3: received documents waiting in Intake -- for whoever does the paperwork.
+        inbox = getattr(self, "inbox", None)
+        if inbox is not None and paperwork_is_mine:
+            waiting_docs = inbox.open_count(context.practice_id)
+            if waiting_docs:
+                needs.append({"kind": "intake_waiting", "rank": 1, "referral_id": None, "patient_name": None,
+                              "referral_type": None, "path": "/me/intake", "action": "Open Intake",
+                              "title": f"{waiting_docs} received document{'s' if waiting_docs != 1 else ''} waiting in Intake",
+                              "detail": "Faxes, emails and uploads to turn into referrals, attach, split or dismiss"})
         needs.sort(key=lambda item: item.get("rank", 9))
         done.sort(key=lambda item: item["at"], reverse=True)
         learned = [{"referral_type": rule.referral_type, "version": rule.version, "confirmed_at": rule.confirmed_at}

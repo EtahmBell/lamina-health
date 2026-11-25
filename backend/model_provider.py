@@ -6,10 +6,10 @@ Providers:
 * `bedrock`  -- Anthropic Claude via Amazon Bedrock (Converse API; structured output through a
                 single forced tool whose input schema is the requested JSON schema). Bedrock is
                 HIPAA-eligible under the AWS BAA. Tested with mocks only.
-* `anthropic`-- DEV ONLY: Claude through the direct Anthropic API (ANTHROPIC_API_KEY,
-                LAMINA_ANTHROPIC_MODEL, LAMINA_ANTHROPIC_EFFORT). No BAA: it is never approved for
-                patient data, whatever any flag says; the demo and production profiles refuse it
-                (backend/profiles.py) and `guarded_call` refuses it outside dev/e2e as well.
+* `anthropic`-- Claude through the direct Anthropic API (ANTHROPIC_API_KEY, LAMINA_ANTHROPIC_MODEL,
+                LAMINA_ANTHROPIC_EFFORT) for dev, e2e and the hosted SYNTHETIC demo only. No BAA: it is
+                never approved for patient data, whatever any flag says; production refuses it
+                (backend/profiles.py) and `guarded_call` refuses it in production as well.
 * `disabled` -- no model; every caller falls back to its deterministic path.
 
 Patient data. `LAMINA_MODEL_PATIENT_DATA_APPROVED=true` declares that the configured provider is
@@ -35,7 +35,8 @@ from backend.config import environment
 
 logger = logging.getLogger(__name__)
 PROVIDERS = ("openai", "bedrock", "anthropic", "disabled")
-DEV_ONLY_PROVIDERS = frozenset({"anthropic"})
+# Providers without a BAA: allowed only in these profiles (synthetic data), never in production.
+NO_BAA_PROVIDERS = {"anthropic": frozenset({"dev", "e2e", "demo"})}
 
 
 class PatientDataNotApprovedError(RuntimeError):
@@ -200,7 +201,7 @@ class BedrockClaudeProvider:
 
 
 class AnthropicProvider:
-    """DEV ONLY. Claude through the direct Anthropic API, structured output via
+    """Claude through the direct Anthropic API (dev, e2e, synthetic demo), structured output via
     `output_config.format` (JSON schema). Never approved for patient data: there is no BAA."""
 
     name = "anthropic"
@@ -221,7 +222,7 @@ class AnthropicProvider:
 
     def _client(self) -> Any:
         if self._client_instance is None:
-            import anthropic  # dev extra only; the deployment build never installs it
+            import anthropic
 
             self._client_instance = anthropic.Anthropic(api_key=self._api_key, timeout=60.0, max_retries=1)
         return self._client_instance
@@ -288,9 +289,16 @@ def guarded_call(provider: ModelProvider, instructions: str, payload: dict[str, 
 
     if not provider.available:
         raise RuntimeError("AI service is not configured")
-    if provider.name in DEV_ONLY_PROVIDERS and current_profile() not in {"dev", "e2e"}:
-        raise PatientDataNotApprovedError("This model provider is for local development only")
-    if contains_patient_data and current_profile() == "production" and not provider.approved_for_patient_data:
+    profile = current_profile()
+    if provider.name in NO_BAA_PROVIDERS and profile not in NO_BAA_PROVIDERS[provider.name]:
+        raise PatientDataNotApprovedError("This model provider is only for synthetic data (dev, e2e, demo)")
+    if profile == "demo":
+        # The public synthetic demo: per-session/IP rate limits and a daily cap on model calls.
+        # A refusal raises ModelLimitReached; callers fall back to their non-AI behaviour.
+        from backend.demo_model_budget import budget
+
+        budget.admit()
+    if contains_patient_data and profile == "production" and not provider.approved_for_patient_data:
         logger.warning("lamina_ai_call", extra={"use_case": use_case, "success": False, "provider": provider.name,
                                                 "refused": "patient_data_not_approved"})
         raise PatientDataNotApprovedError("This model provider isn't approved for patient data")

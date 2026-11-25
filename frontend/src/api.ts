@@ -721,6 +721,9 @@ export const apiBaseUrl = API_BASE_URL
 /** Exported for the pilot client (pilotApi.ts): same auth header, error shape, and CORS mode. */
 export const apiRequest = <T,>(path: string, init?: RequestInit) => request<T>(path, init)
 
+export const AI_LIMITED_HEADER = 'X-Lamina-AI-Limited'
+export const AI_LIMITED_EVENT = 'lamina:ai-limited'
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const accessToken = await getAccessToken()
@@ -734,6 +737,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers,
     credentials: 'include',
   })
+  // The hosted synthetic demo reached an AI limit while answering: the reply is the non-AI one.
+  const aiLimited = response.headers.get(AI_LIMITED_HEADER)
+  if (aiLimited) globalThis.dispatchEvent?.(new CustomEvent(AI_LIMITED_EVENT, { detail: aiLimited }))
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: unknown } | null
     const { message, code } = parseErrorDetail(body?.detail, response.status)

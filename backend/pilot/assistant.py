@@ -75,6 +75,10 @@ def kind_text(kind: str, voice: Voice = PHYSICIAN) -> str:
     }.get(kind, kind)
 
 
+# The kind alone, when the rule itself is named with its owner (no "your").
+NEUTRAL_KIND_TEXT = {"hard_requirement": "a confirmed requirement", "scope_policy": "a confirmed scope",
+                     "soft_preference": "a stated preference", "exception": "an exception (not applied automatically)",
+                     "physician_judgment": "a case-by-case decision"}
 KIND_TEXT = {kind: kind_text(kind) for kind in
              ("hard_requirement", "scope_policy", "soft_preference", "exception", "physician_judgment", "unknown")}
 _SETUP = re.compile(r"\b(set ?up|setup|initiali[sz]e|onboarding|finish setting up|resume setup|continue setup|"
@@ -721,7 +725,7 @@ class AssistantService:
             "rules_used": [{"referral_type": r["referral_type"], "version": r["version"]} for r in snapshot.get("rules", [])],
             # The exact statements relied on, by kind and version (Step 17).
             "statements": [{"kind": item["kind"], "item": item.get("label") or item["item"], "version": item["version"], "layer": item["layer"],
-                            "referral_type": item["referral_type"]}
+                            "referral_type": item["referral_type"], "rule": item.get("rule_phrase")}
                            for item in recommendation.get("statements_used", []) if item.get("drives", True)],
             "conflicts": recommendation.get("conflicts", []),
             "generator": recommendation["generator"],
@@ -1080,7 +1084,11 @@ class AssistantService:
             paragraphs.append(f"{decided['by']} {verb} the referral; that decision is the sign-off on this triage.")
         bullets = [f"Rules used: {rules}", *(f"{r['statement']} ({r['source']})" for r in facts["rationale"][:8])]
         own = ", your own" if voice.physician else f", {voice.doctor}’s own"
-        relied = [f"Relied on {kind_text(item['kind'], voice)}: {item['item'].replace('_', ' ')} "
+        # Run 3: each statement names its rule for this reader ("the practice’s X rule (confirmed by
+        # Dr. Y, v3)", "your X rule (v2)", "Dr. Z’s X rule (v2)"); older facts keep the earlier wording.
+        relied = [f"Relied on {NEUTRAL_KIND_TEXT.get(item['kind'], item['kind'])}: {item['item'].replace('_', ' ')} — {item['rule']}"
+                  if item.get("rule") else
+                  f"Relied on {kind_text(item['kind'], voice)}: {item['item'].replace('_', ' ')} "
                   f"({item['referral_type']} v{item['version']}{own if item['layer'] == 'physician' else ''})"
                   for item in facts.get("statements", [])[:6]]
         if facts.get("conflicts"):

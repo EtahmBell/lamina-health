@@ -18,7 +18,7 @@ synthetic data; AWS was only ever mocked (moto, stub clients).
 | Identity | Supabase JWT (JWKS) + TOTP MFA (`aal2`) on every pilot route | production requires `LAMINA_SUPABASE_MFA_TOTP_ENABLED=true` (an operator attestation) |
 
 Verified locally on Postgres 16.4 (container from `docker-compose.dev.yml`, loopback only): the
-migrations reach head with 36 tables and 43 triggers; every pilot test runs on its own database
+migrations reach head (`0003_intake_pipeline`, run 3) with 42 tables and 49 triggers; every pilot test runs on its own database
 cloned from a migrated template; e2e runs on `lamina_e2e`, dropped and re-migrated each run.
 
 ## 2. Model-provider feature audit
@@ -33,7 +33,7 @@ What the code calls, per provider, and what is not something to rely on under a 
 | `backend/pilot/assistant.py` compose | practice agent: phrasing the answer over referral facts | **yes** | same |
 | `backend/pilot/public_agent.py` | public practice page Q&A (an office may type patient details) | **yes** | same; also off unless `LAMINA_PILOT_PUBLIC_AGENT_LLM_ENABLED` |
 | `backend/pilot/triage.py` evidence extraction | quotes from referral documents | **yes** | same; also off unless `LAMINA_PILOT_LLM_EXTRACTION_ENABLED` |
-| `backend/pilot/teaching.py` interpretation | turning a physician's rule ("I need an A1c…") into a structured rule | declared **no** | runs with any provider (see residual risk) |
+| `backend/pilot/teaching.py` interpretation | turning a physician's rule ("I need an A1c…") into a structured rule | **yes** (run 3: identifiers could be typed into a rule; the Teach input says "Avoid patient names or identifiers.") | production refuses unless approved; falls back to the deterministic parser |
 | `backend/professional_services.py`, `referral_preferences.py`, `referrals/coordination_chat.py` | **demo only** (synthetic personas) | no | never runs in pilot mode |
 
 Every pilot call site declares `contains_patient_data` explicitly (a test fails if one is missing).
@@ -68,21 +68,30 @@ is per account and per feature — **confirm in writing with OpenAI** that the R
 Bedrock is covered by the AWS BAA (confirm it is on the current *HIPAA Eligible Services
 Reference* for the region, and that the chosen Claude model is offered in that region).
 
-### Anthropic API (direct) -- dev only
+### Anthropic API (direct) -- synthetic profiles only
 
-`LAMINA_MODEL_PROVIDER=anthropic` (Messages API, structured output via `output_config.format`) exists
-for local development and the synthetic provider eval (docs/PROVIDER_EVAL.md). There is no BAA: it is
-never approved for patient data (hard-coded), the `demo` and `production` profiles refuse it at
-startup, and `guarded_call` refuses it outside dev/e2e. Its SDK is in the `dev` extra only, so the
-deployment build never installs it.
+`LAMINA_MODEL_PROVIDER=anthropic` (Messages API, structured output via `output_config.format`) is for
+local development, the synthetic provider eval (docs/PROVIDER_EVAL.md) and, since run 4, the hosted
+SYNTHETIC demo. There is no BAA: it is never approved for patient data (hard-coded); the `production`
+profile refuses it at startup and `guarded_call` refuses it in production. On the demo, model calls
+are limited per session/IP and per day (`LAMINA_DEMO_MODEL_DAILY_CAP`; docs/RAILWAY_SYNTHETIC_DEPLOYMENT.md).
+Its SDK is a base dependency (the Railway build installs base dependencies only).
 
 Run-3 prompt changes from the eval (extraction, teaching, agent compose) and a validator fix for
 per-item time windows are listed in docs/PROVIDER_EVAL.md.
 
+### Intake pipeline (run 3)
+
+| Call | Carries patient data | Gate |
+|---|---|---|
+| Amazon Textract text extraction (`backend/pilot/extraction.py`) | **yes** (every received document) | production requires `LAMINA_EXTRACTION_PROVIDER=textract` and `LAMINA_EXTRACTION_PATIENT_DATA_APPROVED=true`; refused at startup and at call time otherwise |
+| Optional model field mapper (`pilot_intake_field_extraction`) | **yes** | off unless `LAMINA_PILOT_LLM_INTAKE_EXTRACTION_ENABLED`; approved provider only |
+| Fax / email vendors (`backend/pilot/inbound.py`) | **yes** | `mock` refused in production; webhook secrets ≥ 32 chars; the vendor needs a BAA |
+
+Textract is HIPAA-eligible under the AWS BAA (confirm the region). See docs/PILOT_INTAKE_PIPELINE.md.
+
 ### Residual risks
-* Teaching interpretation is declared non-patient-data; a physician could still type identifiers
-  into a rule. Either route it like patient data (simplest: approved provider only) or keep the
-  model off for it (`LAMINA_MODEL_PROVIDER=disabled` until approved).
+* (Resolved in run 3) Teaching interpretation is now declared patient data, so it follows the same approval gate.
 * Model output is never stored as a fact without the existing validators; that is unchanged.
 
 ## 3. AWS services (HIPAA-eligible only)

@@ -147,3 +147,12 @@ the sender page, and loading and error states. Output goes to `ui-review/` (giti
   request headers and typed input); failure screenshots stay in `frontend/test-results/`
   (gitignored).
 - Synthetic data only; every name is fictional and marked "E2E".
+
+## Intake pipeline specs (run 3)
+
+`specs/16-intake.spec.ts`: upload → extract → create referral → triage → Verify; a faxed reply delivered
+through the signed mock fax webhook → matched to its information request → Verify; a duplicate patient
+suggested, merged on confirmation, then undone. The e2e API runs the `mock` fax/email vendors with
+synthetic webhook secrets (`frontend/e2e/support/env.ts`) and the `local` extractor. The seed steps
+`intake-scenarios` and `intake-inbox` write the synthetic fixtures (`scripts/intake_fixtures.py`) to
+`data/e2e/intake-fixtures` (gitignored) and deliver them through the webhooks for the screens.

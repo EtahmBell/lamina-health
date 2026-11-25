@@ -546,7 +546,10 @@ def test_assistant_cites_kinds_and_never_calls_proposals_confirmed(pilot: Pilot)
     rid = _thyroid_referral(pilot)["referral"]["id"]
     why = pilot.post("/api/me/practice/assistant/messages", "user-a",
                      {"text": "Why did you recommend this?", "referral_id": rid}).json()["reply"]
-    assert "Relied on your confirmed requirement: Recent TSH (Thyroid nodule v1)" in json.dumps(why["reply"], ensure_ascii=False)
+    # Run 3: the statement names its rule -- a practice rule, with who confirmed it and its version.
+    relied = json.dumps(why["reply"], ensure_ascii=False)
+    assert "Relied on a confirmed requirement: Recent TSH — the practice’s Thyroid nodule rule (confirmed by Dr." in relied
+    assert ", v1)" in relied and "Relied on your" not in relied
 
 
 def test_home_surfaces_referrals_missing_information_nobody_requested(pilot: Pilot) -> None:

@@ -131,3 +131,41 @@ def test_someone_elses_items_name_their_author_never_your(pilot: Pilot) -> None:
     assert as_b["by_you"] is False and as_b["author_name"] == conflict_for_b["corrected_by_name"] and as_b["can_confirm"] is False
     as_a = next(p for p in pilot.get("/api/me/practice/teach", "user-a").json()["proposals"] if p["id"] == taught.json()["id"])
     assert as_a["by_you"] is True and as_a["author_name"] is None
+
+
+def _resolve(pilot: Pilot, rid: str, user: str, choice: str = "keep_correction"):
+    return pilot.post(f"/api/me/practice/referrals/{rid}/correction-conflicts", user,
+                      {"field": "suggested_modality", "choice": choice})
+
+
+def test_only_the_corrections_author_or_an_admin_physician_resolves_a_conflict(pilot: Pilot) -> None:
+    """Run 3: user-a is the admin physician, user-b a non-admin physician, user-c staff."""
+    rule = _two_physicians(pilot)
+    # The admin's correction: the other (non-admin) physician and staff can't decide it.
+    rid, _ = _conflict_referral(pilot, rule, corrected_by="user-a")
+    as_b = pilot.get(f"/api/me/practice/referrals/{rid}", "user-b").json()["correction_conflicts"][0]
+    assert as_b["can_resolve"] is False
+    refused = _resolve(pilot, rid, "user-b")
+    assert refused.status_code == 403 and refused.json()["detail"]["code"] == "not_your_correction"
+    assert _resolve(pilot, rid, "user-c").status_code == 403, "staff never decide"
+    assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["correction_conflicts"][0]["can_resolve"] is True
+    assert _resolve(pilot, rid, "user-a").status_code == 200, "the author decides"
+    assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["correction_conflicts"] == []
+
+
+def test_the_author_and_an_admin_can_each_resolve_a_non_admins_correction(pilot: Pilot) -> None:
+    rule = _two_physicians(pilot)
+    rid, v2 = _conflict_referral(pilot, rule, corrected_by="user-b")
+    assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-b").json()["correction_conflicts"][0]["can_resolve"] is True
+    assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["correction_conflicts"][0]["can_resolve"] is True
+    assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-c").json()["correction_conflicts"][0]["can_resolve"] is False
+    assert _resolve(pilot, rid, "user-c").status_code == 403
+    admin = _resolve(pilot, rid, "user-a", "apply_rule")
+    assert admin.status_code == 200, admin.text
+    # A second referral: this time the author decides their own correction.
+    rid2 = pilot.referral("user-c", submitted_items=COMPLETE)["referral"]["id"]
+    assert pilot.post(f"/api/me/practice/referrals/{rid2}/correct", "user-b", {"suggested_modality": "econsult"}).status_code == 200
+    v3 = pilot.client.put(f"/api/me/practice/rules/{v2['id']}", headers=_h("user-a"), json={**DIABETES_RULE, "modality": "in_person"})
+    assert v3.status_code == 200, v3.text
+    pilot.post(f"/api/me/practice/referrals/{rid2}/triage", "user-a")
+    assert _resolve(pilot, rid2, "user-b").status_code == 200

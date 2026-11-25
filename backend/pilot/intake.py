@@ -22,7 +22,6 @@ from .documents import (
     DocumentRejectedError,
     DocumentStorage,
     document_storage_from_environment,
-    extract_pages,
     safe_filename,
     sha256_hex,
     validate_document,
@@ -43,7 +42,7 @@ from .models import (
     item_verified,
 )
 from .practice import PilotError, PracticeContext
-from .rationale import rationale_view
+from .rationale import RuleRef, rationale_view
 from .rules import PracticeRules
 from .standing import referral_standing
 from .store import PilotStore, hash_token, new_id, now_iso
@@ -177,6 +176,7 @@ class IntakeService:
             entered_at=row["entered_at"],
             entered_by=row["entered_by"],
             submitted_referral_type=row.get("submitted_referral_type"),
+            patient_id=row.get("patient_id"),
             current_recommendation_id=row["current_recommendation_id"],
             review=json.loads(row["review_json"]) if row["review_json"] else None,
             escalated_at=row["escalated_at"],
@@ -254,7 +254,8 @@ class IntakeService:
             "correction_conflicts": [
                 {**item, "corrected_by_name": directory.describe(item["corrected_by"])["name"] if item["corrected_by"] else None,
                  "rule_by_name": directory.describe(item["rule_by"])["name"] if item["rule_by"] else None,
-                 "corrected_by_you": item["corrected_by"] == context.actor, "rule_by_you": item["rule_by"] == context.actor}
+                 "corrected_by_you": item["corrected_by"] == context.actor, "rule_by_you": item["rule_by"] == context.actor,
+                 "can_resolve": self._can_resolve_conflict(context, item)}
                 for item in self._correction_conflicts(referral, recommendation)],
             "effective_triage": self._effective(recommendation, referral),
             "history": history,
@@ -266,7 +267,13 @@ class IntakeService:
         voice = Voice.for_context(context, result["physician_name"])
         if result["recommendation"]:
             # Display text rendered from structured rationale for THIS reader (never a rewrite).
-            result["recommendation"]["rationale"] = [rationale_view(item, voice) for item in result["recommendation"]["rationale"]]
+            used = result["recommendation"].get("statements_used") or []
+            refs = self.rule_refs(context, [*result["recommendation"]["rationale"],
+                                            *({"source": {"rule_id": item.get("rule_id")}} for item in used)], directory)
+            result["recommendation"]["rationale"] = [rationale_view(item, voice, refs) for item in result["recommendation"]["rationale"]]
+            # Each relied-on statement names its rule for this reader (layer, author/confirmer, version).
+            result["recommendation"]["statements_used"] = [
+                {**item, "rule_phrase": refs[item["rule_id"]].phrase if item.get("rule_id") in refs else None} for item in used]
         requests = result.get("information_requests") or []
         result["standing"] = referral_standing(
             status=referral.status, recommendation=result["recommendation"],
@@ -513,6 +520,11 @@ class IntakeService:
             })
         return conflicts
 
+    @staticmethod
+    def _can_resolve_conflict(context: PracticeContext, conflict: dict) -> bool:
+        """Only the physician who made the correction, or an admin physician, decides it."""
+        return context.role == "physician" and (context.is_admin or conflict.get("corrected_by") == context.actor)
+
     def resolve_conflict(self, context: PracticeContext, referral_id: str, field: str, choice: str) -> dict:
         """The physician keeps their earlier correction or applies the updated rule. Both choices
         are recorded; applying the rule is also recorded as a correction back to the rule's value."""
@@ -525,6 +537,9 @@ class IntakeService:
         conflict = next((item for item in self._correction_conflicts(referral, recommendation) if item["field"] == field), None)
         if conflict is None:
             raise PilotError("no_conflict", "There is no open conflict for that field", 409)
+        if not self._can_resolve_conflict(context, conflict):
+            raise PilotError("not_your_correction",
+                             "Only the physician who made this correction, or an admin physician, can decide it", 403)
         now = now_iso()
         inserts = [(
             ("INSERT INTO correction_conflict_resolutions (id, practice_id, referral_id, field, corrected_value, "
@@ -636,9 +651,22 @@ class IntakeService:
 
     # ---------------------------------------------------------------- creation
 
-    def create(self, context: PracticeContext, update: IntakeReferralInput, source: str | None = None) -> dict:
+    def create(self, context: PracticeContext, update: IntakeReferralInput, source: str | None = None,
+               patient_id: str | None = None) -> dict:
+        """`patient_id`: an existing patient record staff chose (it must be this practice's, and is
+        followed through merges). Otherwise a NEW record is created from the referral's patient
+        fields -- never matched automatically; possible duplicates are suggested for staff."""
         now = now_iso()
         referral_id = new_id("ref")
+        from .patients import PatientService
+
+        patients = PatientService(self.store)
+        if patient_id:
+            patient_id = patients.resolve(context.practice_id, patient_id)
+        else:
+            patient_id = patients.create(
+                context.practice_id, context.actor, name=update.patient.name, date_of_birth=update.patient.date_of_birth,
+                phone=update.patient.phone, mrn=update.patient.external_id)
         team_member = context.role in {"physician", "staff"}
         items = [
             item.model_copy(update={
@@ -671,6 +699,7 @@ class IntakeService:
             "entered_by": context.actor,
             # Only the hash is stored; the token is reserved for the sender status link.
             "sender_status_token_hash": hash_token(sender_token),
+            "patient_id": patient_id,
             "created_at": now,
             "updated_at": now,
         }
@@ -695,8 +724,27 @@ class IntakeService:
             suffix = validate_document(content, content_type)
         except DocumentRejectedError as error:
             raise PilotError("document_rejected", str(error), 422) from error
-        status, pages = extract_pages(content, content_type)
+        if content[:2] == b"MZ" or content[:4] == b"\x7fELF" or content.lstrip()[:2] == b"#!":
+            raise PilotError("document_rejected", "Executable files are never accepted", 422)
         storage_key = self.storage.put(context.practice_id, content, suffix)
+        # Run 3: the same text extraction as the intake pipeline (local in dev/e2e, Textract in
+        # production -- a patient-data call; refused there unless approved).
+        from .extraction import (
+            Extraction,
+            ExtractionNotApprovedError,
+            extractor_from_environment,
+            guarded_extract,
+        )
+        from .inbox import storage_location
+
+        if getattr(self, "text_extractor", None) is None:
+            self.text_extractor = extractor_from_environment()
+        try:
+            extraction = guarded_extract(self.text_extractor, content, content_type.split(";")[0].strip().casefold(),
+                                         location=storage_location(self.storage, storage_key))
+        except ExtractionNotApprovedError:
+            extraction = Extraction("failed", [], self.text_extractor.name)
+        status, pages = extraction.status, (extraction.page_texts() if extraction.status == "extracted" else [])
         document_id = new_id("doc")
         self.store.insert_document(
             {
@@ -834,6 +882,28 @@ class IntakeService:
         for hook in self.after_triage:
             hook(context, referral_id, recommendation)
         return self.detail(context, referral_id)
+
+    def rule_refs(self, context: PracticeContext, items: list[dict], directory: ActorDirectory) -> dict[str, RuleRef]:
+        """How THIS reader names each rule a rationale cites (run 3): the practice's rule with who
+        confirmed it, or a physician's own rule as "your" / "Dr. X's" -- always with its version."""
+        ids = sorted({(item.get("source") or {}).get("rule_id") for item in items} - {None, ""})
+        if not ids:
+            return {}
+        rows = self.store.fetch_all(
+            "SELECT id, referral_type, version, COALESCE(layer, 'practice') AS layer, owner_scope_id, created_by, confirmed_by "
+            f"FROM physician_referral_preferences WHERE practice_id = ? AND id IN ({','.join('?' * len(ids))})",
+            (context.practice_id, *ids))
+        mine_scope = context.member.get("physician_owner_scope_id") if context.role == "physician" else None
+        refs: dict[str, RuleRef] = {}
+        for row in rows:
+            physician_layer = row["layer"] == "physician"
+            confirmer = row.get("confirmed_by") or row.get("created_by")
+            refs[row["id"]] = RuleRef.build(
+                layer="physician" if physician_layer else "practice", referral_type=row["referral_type"],
+                version=row["version"], mine=physician_layer and row["owner_scope_id"] == mine_scope,
+                owner_name=directory.physician_name(row.get("owner_scope_id")) if physician_layer else None,
+                confirmed_by_name=directory.describe(confirmer)["name"] if confirmer else None)
+        return refs
 
     def _rule_author(self, practice_id: str, rule_id: str) -> str | None:
         """Who made this rule version active: its confirmer, else its author, as stored on the

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { SYNTHETIC_BANNER_TEXT, isSyntheticDeployment } from '../src/syntheticDeployment.ts'
+import { SYNTHETIC_BANNER_TEXT, aiLimitedText, isSyntheticDeployment } from '../src/syntheticDeployment.ts'
 
 const source = (name) => readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8')
 
@@ -19,4 +19,13 @@ test('the strip is mounted above every route, demo and pilot, and is never hidde
   assert.match(css, /\.synthetic-deployment-banner \{ position: sticky; top: 0;/)
   assert.doesNotMatch(css, /\.synthetic-deployment-banner \{ display: none/)
   assert.doesNotMatch(css, /\.synthetic-deployment-banner[^{]*\{[^}]*display:\s*none/)
+})
+
+test('when the demo hits an AI limit, the page says so and that it fell back to non-AI answers', () => {
+  assert.match(aiLimitedText('daily_cap'), /paused for today .*daily limit reached.*non-AI responses/)
+  assert.match(aiLimitedText('session'), /paused for a few minutes .*non-AI responses/)
+  const api = source('api.ts')
+  assert.match(api, /response\.headers\.get\(AI_LIMITED_HEADER\)/)
+  assert.match(api, /export const AI_LIMITED_HEADER = 'X-Lamina-AI-Limited'/)
+  assert.match(source('SyntheticDeploymentBanner.tsx'), /globalThis\.addEventListener\(AI_LIMITED_EVENT, onLimited\)/)
 })

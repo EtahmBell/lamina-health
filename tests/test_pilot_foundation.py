@@ -174,7 +174,8 @@ def test_pilot_mode_exposes_no_demo_routes(pilot: Pilot) -> None:
     assert all(
         path.startswith(("/api/me/onboarding", "/api/me/practice", "/api/internal/pilot-physicians",
                          "/api/internal/pilot-metrics", "/api/internal/pilot-access/",
-                         "/api/public/p/", "/api/public/r/"))
+                         "/api/public/p/", "/api/public/r/",
+                         "/api/public/inbound/"))  # run 3: signed fax/email vendor webhooks
         or path == "/health"
         for path in paths
     ), paths

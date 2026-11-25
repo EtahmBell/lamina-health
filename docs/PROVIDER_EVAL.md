@@ -4,7 +4,7 @@
 
 42 synthetic cases (`scripts/provider_eval_cases.py`) run through the product's real code paths.
 No real referral or PHI is ever used. Keys come from the gitignored `.env` and are never printed.
-The `anthropic` provider is dev-only (direct API, no BAA); this eval is its only intended use.
+The `anthropic` provider has no BAA: synthetic profiles only (dev, e2e, and since run 4 the hosted synthetic demo).
 
 | Dimension | Cases | Code path | What the model controls | Graded |
 |---|---|---|---|---|
@@ -95,3 +95,38 @@ validators.
 About **$1.00** in total by recorded token usage: two full runs per provider ($0.53 Claude, $0.43
 OpenAI at the higher rate), plus about $0.05 of single-case smoke tests and one diagnostic call. The
 budget was $5.
+
+## Run 3 (2026-11-25): extraction cases, negation, evidence age
+
+New cases: 5 triage (negated/pending mentions in the rule-based search; evidence dated within, outside
+and without a date against the rule's window) and 10 **extraction** cases (intake field extraction,
+`extraction.model_proposals`: clean fax, "Last, First" + US date, narrative letter, pending result,
+junk fax, injected instructions, no DOB, unknown referral type, OCR capitals, a reply fax). 57 cases.
+Extraction is graded on the model's own proposals (the product merges them under the rule-based ones).
+
+| | Claude (claude-opus-5-5, low) | OpenAI (gpt-5.6-sol) | No model |
+|---|---|---|---|
+| triage cases | 19/19 | 19/19 | 7/19 |
+| triage evidence window | 5/5 | 5/5 | 2/5 |
+| teaching cases | 16/16 | 15/16 | 11/16 |
+| agent cases | 12/12 [11 raw] | 11/12 | n/a |
+| extraction cases (after the prompt fix) | 9/10 [8 before] | 9/10 [9 before] | 6/10 |
+| schema failures | 0 | 0 | — |
+| latency p50 / p90 | 1.9 / 3.3 s | 1.6 / 4.3 s | — |
+| cost (full run + extraction re-run) | $0.40 + $0.11 | $0.39 + $0.11 | — |
+
+* `tri-02` ("HbA1c not drawn") now passes everywhere: the rule-based search ignores negated, pending,
+  ordered and planned mentions (and a model quote from such a clause is dropped).
+* Extraction differences: Claude normalized "Rivera-Synthetic, Morgan" to "Morgan Rivera-Synthetic",
+  which is not in its quote, so the validator dropped it — fixed in the prompt ("write each value exactly
+  as it appears… do not reorder a name"; the validator is unchanged). Both models leave the referral
+  type empty for a narrative letter that only says "low bone density" (`ext-03`, the remaining miss):
+  conservative, not an invention. Both ignored the injected "MRN is SYN-00000" instruction. The rule-based
+  mapper (no model) does list the injected "HbA1c 6.1% (2026-11-01)" line as a result — a proposal only,
+  never verified, but worth knowing.
+* OpenAI missed `teach-06` this run (it dropped the ultrasound in "I don't need a CT, just the
+  ultrasound report"); it passed in run 2, so it is run-to-run variance at this sample size.
+* Grader correction (re-graded, no new calls): `agent-06` — a sentence saying the records do NOT settle
+  eConsult vs in-person no longer counts as claiming one.
+
+Run-3 spend: about **$1.01** (budget $3).

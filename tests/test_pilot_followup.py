@@ -132,12 +132,14 @@ def test_conflicts_are_marked_in_the_physician_queue_and_sorted_first(pilot: Pil
 def test_rationale_is_structured_and_rendered_for_each_reader(pilot: Pilot) -> None:
     _ready(pilot)
     rid = pilot.referral("user-c", submitted_items=COMPLETE_ITEMS)["referral"]["id"]
-    for user, fit_line in (("user-a", "your fit criterion"), ("user-c", "’s fit criterion")):
+    # Run 3: a practice-layer rule is "the practice's rule (confirmed by Dr. X, vN)" for every reader.
+    for user, fit_line in (("user-a", "in the practice’s Diabetes management rule (confirmed by Dr."),
+                           ("user-c", "in the practice’s Diabetes management rule (confirmed by Dr.")):
         rationale = pilot.get(f"/api/me/practice/referrals/{rid}", user).json()["recommendation"]["rationale"]
         fit = next(item for item in rationale if item["code"] == "fit_match")
         assert fit["params"]["phrase"] == "type 2 diabetes not at goal" and fit["params"]["matched"]
         assert fit_line in fit["text"] and fit["worded_for_physician"] is False
-        assert fit["source"]["rule_version"] == 1
+        assert fit["source"]["rule_version"] == 1 and fit["text"].endswith("v1) (matched: " + ", ".join(fit["params"]["matched"]) + ").")
     staff_text = " ".join(item["text"] for item in pilot.get(f"/api/me/practice/referrals/{rid}", "user-c").json()["recommendation"]["rationale"])
     assert "your" not in staff_text.lower().split()
     # The stored statement is the physician wording of the same parts (older readers).
@@ -251,3 +253,23 @@ def test_next_step_reflects_now_and_hides_once_closed(pilot: Pilot) -> None:
     assert after == "Wait for the referring office (request sent)"
     pilot.post(f"/api/me/practice/referrals/{rid}/disposition", "user-a", {"decision": "decline", "reason": "Not ours"})
     assert pilot.get(f"/api/me/practice/referrals/{rid}", "user-a").json()["standing"]["next_step_now"] is None
+
+
+def test_rule_lines_name_the_rule_by_layer_and_reader() -> None:
+    """Run 3: practice rules say who confirmed them; physician-layer rules are "your" only for
+    their owner and "Dr. X's" for everyone else -- always with the version."""
+    from backend.pilot.rationale import RuleRef
+
+    practice = RuleRef.build(layer="practice", referral_type="Thyroid nodule", version=5, mine=False, owner_name=None,
+                             confirmed_by_name="Dr. Avery Testwell")
+    assert render("default_modality", {"modality": "either"}, STAFF, practice) ==         "The practice’s Thyroid nodule rule (confirmed by Dr. Avery Testwell, v5) sets the default modality to either."
+    own = RuleRef.build(layer="physician", referral_type="Thyroid nodule", version=2, mine=True, owner_name="Dr. A",
+                        confirmed_by_name="Dr. A")
+    assert render("urgency_match", {"phrase": "stridor"}, rule=own) == "Matches the urgency signal “stridor” in your Thyroid nodule rule (v2)."
+    theirs = RuleRef.build(layer="physician", referral_type="Thyroid nodule", version=2, mine=False, owner_name="Dr. A",
+                           confirmed_by_name="Dr. A")
+    assert render("type_accepted", {"referral_type": "Thyroid nodule"}, rule=theirs).startswith(
+        "Dr. A sees “Thyroid nodule” referrals (Dr. A’s Thyroid nodule rule (v2))")
+    assert "your" not in render("fit_match", {"phrase": "x", "matched": ["x"]}, STAFF, theirs).lower().split()
+    unknown = RuleRef.build(layer="practice", referral_type="Osteoporosis", version=1, mine=False, owner_name=None, confirmed_by_name=None)
+    assert unknown.phrase == "the practice’s Osteoporosis rule (v1)"

@@ -7,8 +7,8 @@ from scripts import provider_eval_cases as cases
 
 
 def test_the_case_set_is_sized_and_well_formed() -> None:
-    every = [*cases.TRIAGE, *cases.TEACHING, *cases.AGENT]
-    assert 30 <= len(every) <= 50
+    every = [*cases.TRIAGE, *cases.TEACHING, *cases.AGENT, *cases.EXTRACTION]
+    assert 30 <= len(every) <= 70
     assert len({case["id"] for case in every}) == len(every), "case ids are unique"
     assert all(case["type"] in cases.RULES for case in cases.TRIAGE)
 

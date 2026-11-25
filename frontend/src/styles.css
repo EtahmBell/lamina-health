@@ -3383,8 +3383,8 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
   .pilot-shell .sidebar .wordmark { font-size: 1.2rem; }
   .pilot-shell .sidebar-account { grid-column: 2; grid-row: 1; border-top: 0; padding-top: 0; }
   .pilot-shell .sidebar-account .profile-control { width: 44px; height: 44px; padding: 0; justify-content: center; }
-  .pilot-shell .sidebar nav { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; margin: 8px 0 0; overflow: visible; }
-  .pilot-shell .sidebar .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: auto; min-height: 52px; padding: 6px 2px; font-size: 11px; line-height: 1.15; text-align: center; }
+  .pilot-shell .sidebar nav { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; margin: 8px 0 0; overflow: visible; }
+  .pilot-shell .sidebar .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: auto; min-width: 0; min-height: 52px; padding: 6px 1px; font-size: 10.5px; line-height: 1.15; text-align: center; }
   .pilot-shell .sidebar .nav-icon { display: inline-flex; }
   .pilot-shell .sidebar .nav-item:has(.nav-item-short) .nav-item-label { display: none; }
   .pilot-shell .sidebar .nav-item-short { display: inline; }
@@ -3645,3 +3645,70 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 
 /* Hosted synthetic deployment (LAMINA_PROFILE=demo): always visible, every width. */
 .synthetic-deployment-banner { position: sticky; top: 0; z-index: 1000; padding: 6px 16px; text-align: center; font-size: .72rem; font-weight: 600; color: var(--text-primary, #1f2421); background: var(--surface-warning, #f6ead2); border-bottom: 1px solid var(--border, #e2ddd3); }
+
+/* Run 3: a proposed document item dated outside (or without a date against) the rule's window. */
+.pilot-window-flag { margin: 6px 0 0; border-left: 3px solid var(--warning); padding: 3px 0 3px 9px; color: var(--text-primary); font-size: .74rem; }
+.pilot-window-flag.undated { border-left-color: var(--border); color: var(--text-secondary); }
+
+/* ------------------------------------------------------------------ Intake (run 3) */
+.pilot-intake-page { max-width: 1240px; }
+.pilot-intake-header h1 { margin: 2px 0 6px; }
+.pilot-intake-readonly { margin: 10px 0; border-left: 3px solid var(--border); padding: 6px 10px; color: var(--text-secondary); font-size: .78rem; }
+.pilot-dropzone { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0; border: 1.5px dashed var(--border); border-radius: 12px; background: var(--surface, #fbfaf7); padding: 16px 18px; font-size: .8rem; }
+.pilot-dropzone.over { border-color: var(--mineral-deep); background: var(--mineral-surface); }
+.pilot-dropzone p { margin: 0; color: var(--text-secondary); }
+.pilot-dropzone label.button-secondary { position: relative; display: inline-flex; align-items: center; justify-content: center; height: auto; min-height: 0; padding: 8px 14px; cursor: pointer; }
+.pilot-dropzone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.pilot-intake-layout { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.pilot-intake-list .pilot-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.pilot-intake-list .pilot-tabs button { border: 1px solid var(--border); border-radius: 999px; background: transparent; padding: 5px 11px; font-size: .74rem; cursor: pointer; }
+.pilot-intake-list .pilot-tabs button.active { border-color: var(--clinical); background: var(--clinical); color: #fff; }
+.pilot-intake-items { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pilot-intake-row { display: grid; gap: 3px; width: 100%; border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 10px 12px; text-align: left; cursor: pointer; }
+.pilot-intake-row.selected { border-color: var(--mineral-deep); box-shadow: 0 0 0 2px var(--mineral-surface); }
+.pilot-intake-row strong { font-size: .86rem; }
+.pilot-intake-flags { display: flex; flex-wrap: wrap; gap: 4px; }
+.pilot-intake-flags em { border-radius: 999px; background: #f6ecdf; padding: 1px 7px; color: #8a571f; font-size: .64rem; font-style: normal; }
+.pilot-channel-tag { justify-self: start; border-radius: 4px; background: #eef1f4; padding: 1px 6px; color: var(--clinical); font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.pilot-channel-tag.channel-fax { background: #f2ece4; color: #7a4b22; }
+.pilot-channel-tag.channel-email { background: #e9f0ec; color: var(--success); }
+.pilot-intake-detail { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 16px 18px; }
+.pilot-intake-item header h2 { margin: 6px 0 2px; font-size: 1.25rem; }
+.pilot-intake-outcome { margin: 10px 0; border-left: 3px solid var(--success); padding: 6px 10px; font-size: .8rem; }
+.pilot-intake-columns { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; margin-top: 12px; }
+.pilot-intake-document { margin: 0 0 12px; }
+.pilot-intake-document figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; font-size: .76rem; }
+.pilot-intake-page { position: relative; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; background: #fdfcfa; }
+.pilot-intake-page.image img { display: block; width: 100%; height: auto; border-radius: 6px; }
+.pilot-intake-page.text { padding: 22px 16px 12px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .7rem; line-height: 1.5; }
+.pilot-intake-page.text p { margin: 0; border-radius: 3px; }
+.pilot-intake-page.text p.highlighted, .pilot-intake-region { background: rgb(255 214 102 / 55%); }
+.pilot-intake-region { position: absolute; border: 1.5px solid #c99a1a; border-radius: 3px; pointer-events: none; }
+.pilot-intake-page-number { position: absolute; top: 4px; right: 8px; color: var(--text-secondary); font-family: var(--font-body, inherit); font-size: .6rem; }
+.pilot-intake-extraction h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 8px; font-size: .9rem; }
+.pilot-intake-extraction h3 small { color: var(--text-secondary); font-size: .64rem; font-weight: 500; }
+.pilot-intake-fields { display: grid; gap: 4px; margin: 0; }
+.pilot-intake-fields > div { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); gap: 8px; border-radius: 6px; padding: 4px 6px; font-size: .78rem; }
+.pilot-intake-fields > div:hover, .pilot-intake-fields > div:focus { background: #fbf3e2; outline: none; }
+.pilot-intake-fields dt { color: var(--text-secondary); }
+.pilot-intake-fields dd { margin: 0; overflow-wrap: anywhere; }
+.pilot-intake-fields small, .pilot-intake-results small { color: var(--text-secondary); white-space: nowrap; }
+.pilot-intake-multiple { margin: 8px 0; border-left: 3px solid var(--warning); padding: 6px 10px; font-size: .78rem; }
+.pilot-intake-results { margin: 4px 0; padding-left: 18px; font-size: .76rem; }
+.pilot-intake-suggestions { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; font-size: .78rem; }
+.pilot-intake-suggestion { margin: 6px 0; border-radius: 8px; background: #f4f6f8; padding: 8px 10px; }
+.pilot-intake-suggestion p { margin: 0 0 6px; }
+.pilot-intake-actions { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.pilot-intake-form { display: grid; gap: 10px; margin-top: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.pilot-intake-form label { display: grid; gap: 4px; font-size: .76rem; }
+.pilot-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pilot-form-grid label { display: grid; gap: 4px; font-size: .76rem; }
+.pilot-form-grid .wide { grid-column: 1 / -1; }
+.pilot-patient-choice { display: grid; gap: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: .78rem; }
+.pilot-patient-choice label { display: flex; align-items: baseline; gap: 6px; }
+.pilot-patient-referrals, .pilot-merge-history { margin: 0; padding-left: 18px; font-size: .8rem; }
+.pilot-teach-hint { margin: 4px 0 0; font-size: .72rem; }
+@media (max-width: 900px) {
+  .pilot-intake-layout, .pilot-intake-columns, .pilot-form-grid { grid-template-columns: 1fr; }
+  .pilot-intake-fields > div { grid-template-columns: 1fr; gap: 0; }
+}

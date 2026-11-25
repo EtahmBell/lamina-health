@@ -7,9 +7,10 @@ import { LaminaMark } from './LaminaMark.tsx'
 import { PhysicianOnboardingPage } from './Onboarding.tsx'
 import { AccessEndedPage, IdleWarning, JoinPracticePage, MfaPage, PilotSignInPage, PilotSignUpPage, SecuritySection, signInWithReason, useIdleSignOut } from './PilotAccess.tsx'
 import { AgentPage, MetricsPage, PublicSettingsPage } from './PilotAgent.tsx'
+import { IntakePage, PatientPage } from './PilotIntake.tsx'
 import { NetworkPage } from './PilotNetwork.tsx'
 import { SetupPage } from './PilotSetup.tsx'
-import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavIcon, LaminaShell, NetworkNavIcon, PageError, PageLoading, type DockCard, type DockReply, type NavEntry } from './pilotUi.tsx'
+import { AccountMenu, AgentDock, AgentNavIcon, AgentOrb, ForYouNavIcon, HomeNavIcon, IntakeNavIcon, LaminaShell, NetworkNavIcon, PageError, PageLoading, type DockCard, type DockReply, type NavEntry } from './pilotUi.tsx'
 import { useOnPilotDataChange, usePilotDataVersion } from './pilotSync.ts'
 import { PublicProfilePage, PublicReferralPage, SenderStatusPage } from './PublicPages.tsx'
 import {
@@ -25,7 +26,7 @@ import {
   getAssistant, sendAssistantMessage, type AgentCardExecute, type AgentReplyBody,
 } from './pilotApi.ts'
 import {
-  accountIdentity, actorText, canUse, conflictText, conflictWording, historyHighlights, changeText, correctionText, countWord, emptyReferralForm, eventLabel, itemLabel, FIT_LABELS, isClosed, physicianLabel,
+  accountIdentity, actorText, canUse, conflictDecider, conflictText, conflictWording, historyHighlights, changeText, correctionText, countWord, emptyReferralForm, eventLabel, itemLabel, FIT_LABELS, isClosed, physicianLabel,
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
   resolvePilotRoute, resolveSetupStage, itemKindLabel, layerNote, representationItemText, statementText, STATUS_LABELS,
@@ -65,6 +66,8 @@ export function PilotApp({ path, params, navigate }: { path: string; params: URL
     case 'home': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="home" agentDock><PilotHomePage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'for_you': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="for-you" agentDock><ForYouPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'patients': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><PatientsPage navigate={navigate} /></PilotShell>}</PilotGate>
+    case 'intake': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="intake"><IntakePage status={status} navigate={navigate} params={params} /></PilotShell>}</PilotGate>
+    case 'patient': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><PatientPage id={route.id} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'network': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="network"><NetworkPage status={status} navigate={navigate} /></PilotShell>}</PilotGate>
     case 'new_referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients"><NewReferralPage navigate={navigate} /></PilotShell>}</PilotGate>
     case 'referral': return <PilotGate navigate={navigate} params={params}>{(status) => <PilotShell status={status} navigate={navigate} section="patients" agentDock><ReferralDetailPage id={route.id} status={status} navigate={navigate} /></PilotShell>}</PilotGate>
@@ -205,6 +208,8 @@ function PendingPage({ status, navigate, reload }: { status: PilotStatus; naviga
 const navFor = (physician: boolean, doctor: string): NavEntry[] => [
   { id: 'home', title: 'Home', icon: <HomeNavIcon />, path: pilotPaths.home },
   { id: 'for-you', title: 'For you', icon: <ForYouNavIcon />, path: pilotPaths.forYou },
+  // Run 3: received documents (upload, fax, email) waiting to be routed.
+  { id: 'intake', title: 'Intake', icon: <IntakeNavIcon />, path: pilotPaths.intake },
   { id: 'patients', title: 'Patients', icon: '✦', path: pilotPaths.patients },
   { id: 'network', title: 'Network', icon: <NetworkNavIcon />, path: pilotPaths.network },
   // Staff see the physician's agent in the third person; the phone tab bar uses the short label.
@@ -586,7 +591,8 @@ function NewReferralPage({ navigate }: { navigate: Navigate }) {
 function RequirementRow({ requirement, referralId, canRecord, canVerify, onDetail }: { requirement: RequirementAssessment; referralId: string; canRecord: boolean; canVerify: boolean; onDetail: (detail: ReferralDetail) => void }) {
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(requirement.evidence?.quote ?? '')
-  const [date, setDate] = useState('')
+  // A proposed document item's own date (when the quote has one) starts the confirm form.
+  const [date, setDate] = useState(requirement.evidence_date ?? '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const fromDocument = requirement.state === 'proposed_from_document' && requirement.evidence?.document_id
@@ -615,6 +621,8 @@ function RequirementRow({ requirement, referralId, canRecord, canVerify, onDetai
       <span className="pilot-requirement-state">{REQUIREMENT_STATE_LABELS[requirement.state]}</span>
       <span className="muted-note">{requirement.detail}{requirement.freshness_days ? ` · needed within ${requirement.freshness_days} days` : ''}</span>
       {requirement.evidence?.quote && <blockquote>“{requirement.evidence.quote}”{requirement.evidence.page ? ` — page ${requirement.evidence.page}` : ''}</blockquote>}
+      {requirement.state === 'proposed_from_document' && requirement.window_status === 'outside' && <p className="pilot-window-flag" role="note"><strong>Outside the window.</strong> This result is older than the rule allows — a person still decides whether it counts.</p>}
+      {requirement.state === 'proposed_from_document' && requirement.window_status === 'undated' && <p className="pilot-window-flag undated" role="note">{requirement.window_note}.</p>}
     </div>
     {reported && canVerify && !open && <div className="pilot-actions">
       <button className="button-secondary" disabled={busy} onClick={() => void verify()}>{busy ? 'Verifying…' : 'Verify'}</button>
@@ -840,7 +848,7 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
       {/* Original wording is always kept when the team confirms a practice referral type. */}
       {referral.submitted_referral_type && referral.submitted_referral_type !== referral.referral_type && <p className="pilot-episode-note">Submitted as “{referral.submitted_referral_type}”</p>}
       {/* Honest scope: the pilot stores patient details per referral, not a chart. */}
-      <p className="pilot-episode-note">Received referral · patient details as recorded on this referral, not a full patient record</p></div></header>
+      <p className="pilot-episode-note">Received referral · patient details as recorded on this referral, not a full patient record{referral.patient_id && <> · <button className="text-button" onClick={() => navigate(pilotPaths.patient(referral.patient_id ?? ''))}>Patient record</button></>}</p></div></header>
     <p className="patient-current-issue"><span className="section-label">Reason for referral</span>{referral.reason}</p>
     <hr className="patient-header-divider" />
     {error && <div className="error-banner" role="alert">{error}</div>}
@@ -865,7 +873,8 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           {!closed && (detail.correction_conflicts ?? []).map((conflict) => <div className="pilot-conflict" role="region" aria-label="Correction differs from a newer rule" key={`${conflict.field}-${conflict.rule_version}`}>
             <p className="pilot-conflict-title"><span aria-hidden="true">!</span> {conflictWording(conflict, physician, doctor).title}</p>
             <p>{conflictText(conflict)}. The correction still applies.</p>
-            {physician && <div className="pilot-actions">
+            {physician && conflict.can_resolve === false && <p className="muted-note">{conflictDecider(conflict)}</p>}
+            {physician && conflict.can_resolve !== false && <div className="pilot-actions">
               <button className="button-secondary" disabled={busy} onClick={() => void act(() => resolveCorrectionConflict(referral.id, conflict.field, 'keep_correction'))}>{conflictWording(conflict, physician, doctor).keep}</button>
               <button className="button-secondary" disabled={busy} onClick={() => void act(() => resolveCorrectionConflict(referral.id, conflict.field, 'apply_rule'))}>Apply the rule</button>
             </div>}
@@ -1013,11 +1022,11 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
               }</small></li>)}</ul>
               {/* Exactly which confirmed statements this recommendation relied on (kind + version). */}
               {(recommendation.statements_used ?? []).filter((item) => item.drives).length > 0 && <div className="pilot-relied-on">
-                <p className="practice-subheading">{physician ? 'Relied on your confirmed representation' : `Relied on ${doctor}’s confirmed representation`}</p>
+                <p className="practice-subheading">Relied on these confirmed statements</p>
                 <ul className="pilot-statement-list">{(recommendation.statements_used ?? []).filter((item) => item.drives).map((item, index) => <li key={`${item.rule_id}-${item.item}-${index}`}>
                   <span className={`pilot-kind-tag kind-${item.kind}`}>{itemKindLabel(item, { physician, doctor })}</span>
                   <span>{item.label ? representationItemText(item.label, { physician, doctor }) : statementText(item.item, { physician, doctor })}</span>
-                  <small className="muted-note">{item.referral_type} v{item.version} · {layerNote(item.layer, { physician, doctor }, 'your own') ?? 'practice'}</small>
+                  <small className="muted-note">{item.rule_phrase ? item.rule_phrase.charAt(0).toUpperCase() + item.rule_phrase.slice(1) : `${item.referral_type} v${item.version} · ${layerNote(item.layer, { physician, doctor }, 'your own') ?? 'practice'}`}</small>
                 </li>)}</ul>
               </div>}
               <p className="muted-note">Rules snapshot {recommendation.rules_snapshot_id} · {recommendation.generator === 'deterministic' ? 'deterministic rule checks' : `rule checks + model-proposed evidence (${recommendation.model_id})`}</p>

@@ -21,6 +21,7 @@ from .activation import ActivationService
 from .assistant import AssistantService, history_days
 from .documents import MAX_DOCUMENT_BYTES
 from .home import HomeService
+from .inbox import IntakeInboxService, ReceivedFile
 from .intake import IntakeService
 from .learning import LearningService
 from .messaging import MailSender, mail_sender_from_environment
@@ -39,6 +40,7 @@ from .models import (
     TriageEditInput,
     VerifyItemInput,
 )
+from .patients import PatientService
 from .practice import PilotError, PracticeContext, PracticeService
 from .publication import PublicationService
 from .representation import RepresentationService
@@ -69,6 +71,8 @@ class PilotServices:
     representation: RepresentationService
     activation: ActivationService
     accounts: AccountService
+    inbox: IntakeInboxService | None = None
+    patients: PatientService | None = None
 
     @classmethod
     def build(
@@ -104,8 +108,12 @@ class PilotServices:
         learning.capability_gate = activation.learning_enabled
         home.activation = activation
         representation.activation = activation
+        # Run 3: the intake pipeline (every channel) and basic patient identity.
+        inbox = IntakeInboxService(store, intake, missing)
+        home.inbox = inbox
         return cls(store, PracticeService(store), rules, intake, missing, sender, teaching, learning,
-                   publication, home, assistant, representation, activation, AccountService(store))
+                   publication, home, assistant, representation, activation, AccountService(store),
+                   inbox, PatientService(store))
 
 
 _default: dict[str, PilotServices] = {}
@@ -1023,3 +1031,181 @@ def internal_metrics(
          "all_time": practice_metrics(services.store, practice["id"])}
         for practice in services.store.fetch_all("SELECT id, name FROM practices ORDER BY created_at")
     ]
+
+
+# ------------------------------------------------------------------ intake pipeline (run 3)
+
+MAX_UPLOAD_FILES = 20
+
+
+async def _read_capped(request: Request) -> bytes:
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(413, {"code": "document_too_large", "message": "Files must be 15 MB or smaller"})
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_DOCUMENT_BYTES:
+            raise HTTPException(413, {"code": "document_too_large", "message": "Files must be 15 MB or smaller"})
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _uploaded(content: bytes, content_type: str, x_filename: str | None) -> ReceivedFile:
+    from urllib.parse import unquote
+
+    return ReceivedFile(unquote(x_filename) if x_filename else None, content_type, content)
+
+
+def _upload_rate(context: PracticeContext) -> None:
+    from .public_api import limiter
+
+    limiter.check(f"intake_upload:{context.practice_id}:{context.user_id}", 120, 600)
+
+
+@router.get("/intake/items")
+def intake_items(context: Practice, services: Services, view: str = "open") -> list[dict]:
+    """The Intake inbox: received documents by channel, with proposals and suggestions."""
+    return _run(lambda: services.inbox.list(context, view))
+
+
+@router.post("/intake/items", status_code=201)
+async def intake_upload(
+    request: Request, context: Practice, services: Services,
+    content_type: Annotated[str, Header()] = "application/octet-stream",
+    x_filename: Annotated[str | None, Header()] = None,
+) -> dict:
+    """Manual upload (staff drag in a PDF/TIFF/PNG/JPG): a new intake item. More files for the
+    same referral go to /intake/items/{id}/files."""
+    _upload_rate(context)
+    content = await _read_capped(request)
+    item_id = _run(lambda: services.inbox.receive(context.practice_id, channel="upload", actor=context.actor,
+                                                  files=[_uploaded(content, content_type, x_filename)]))
+    return _run(lambda: services.inbox.detail(context, item_id))
+
+
+@router.post("/intake/items/{item_id}/files", status_code=201)
+async def intake_add_file(
+    item_id: str, request: Request, context: Practice, services: Services,
+    content_type: Annotated[str, Header()] = "application/octet-stream",
+    x_filename: Annotated[str | None, Header()] = None,
+) -> dict:
+    _upload_rate(context)
+    content = await _read_capped(request)
+    return _run(lambda: services.inbox.add_files(context, item_id, [_uploaded(content, content_type, x_filename)]))
+
+
+@router.get("/intake/items/{item_id}")
+def intake_item(item_id: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.inbox.detail(context, item_id))
+
+
+@router.get("/intake/documents/{document_id}")
+def intake_document(document_id: str, context: Practice, services: Services) -> Response:
+    """The received file, for the side-by-side preview (inline, sandboxed, never cached)."""
+    row, content = _run(lambda: services.inbox.document_content(context, document_id))
+    return Response(content=content, media_type=row["content_type"], headers={
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(row['filename'])}",
+        "Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; sandbox",
+    })
+
+
+class IntakeCreateReferralInput(_Strict):
+    referral: IntakeReferralInput
+    # An existing patient record staff confirmed; omitted = a new record (never matched automatically).
+    patient_id: str | None = Field(default=None, max_length=100)
+
+
+@router.post("/intake/items/{item_id}/create-referral", status_code=201)
+def intake_create_referral(item_id: str, update: IntakeCreateReferralInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.inbox.create_referral(context, item_id, update.referral, update.patient_id))
+
+
+class IntakeAttachInput(_Strict):
+    referral_id: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/intake/items/{item_id}/attach")
+def intake_attach(item_id: str, update: IntakeAttachInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.inbox.attach(context, item_id, update.referral_id))
+
+
+class IntakeReplyInput(_Strict):
+    request_id: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/intake/items/{item_id}/reply")
+def intake_reply(item_id: str, update: IntakeReplyInput, context: Practice, services: Services) -> dict:
+    """Staff confirmed this fax/email answers an open information request; it goes to Verify."""
+    return _run(lambda: services.inbox.reply_to_request(context, item_id, update.request_id))
+
+
+class IntakeSplitInput(_Strict):
+    ranges: list[tuple[int, int]] = Field(min_length=2, max_length=50)
+
+
+@router.post("/intake/items/{item_id}/split")
+def intake_split(item_id: str, update: IntakeSplitInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.inbox.split(context, item_id, update.ranges))
+
+
+class IntakeDismissInput(_Strict):
+    reason: str = Field(min_length=1, max_length=40)
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/intake/items/{item_id}/dismiss")
+def intake_dismiss(item_id: str, update: IntakeDismissInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.inbox.dismiss(context, item_id, update.reason, update.note))
+
+
+@router.post("/intake/items/{item_id}/restore")
+def intake_restore(item_id: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.inbox.restore(context, item_id))
+
+
+@router.get("/intake/addresses")
+def intake_addresses(context: Practice, services: Services) -> list[dict]:
+    return _run(lambda: services.inbox.addresses(context))
+
+
+class IntakeAddressInput(_Strict):
+    channel: Literal["fax", "email"]
+    address: str | None = Field(default=None, max_length=40)  # the fax number; email addresses are generated
+
+
+@router.post("/intake/addresses", status_code=201)
+def intake_add_address(update: IntakeAddressInput, context: Practice, services: Services) -> list[dict]:
+    from backend.config import environment
+
+    provider = environment.get(f"LAMINA_{update.channel.upper()}_PROVIDER", "").strip().casefold() or "unconfigured"
+    return _run(lambda: services.inbox.add_address(context, update.channel, update.address, provider))
+
+
+# ---------------------------------------------------------------------- patients (run 3)
+
+
+@router.get("/patients/{patient_id}")
+def patient_detail(patient_id: str, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.patients.detail(context, patient_id))
+
+
+class PatientMergeInput(_Strict):
+    into_patient_id: str = Field(min_length=1, max_length=100)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/patients/{patient_id}/merge")
+def patient_merge(patient_id: str, update: PatientMergeInput, context: Practice, services: Services) -> dict:
+    """A person confirmed two records are the same patient: this one merges INTO the other."""
+    return _run(lambda: services.patients.merge(context, update.into_patient_id, patient_id, update.reason))
+
+
+class PatientUnmergeInput(_Strict):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/patient-merges/{merge_id}/undo")
+def patient_unmerge(merge_id: str, update: PatientUnmergeInput, context: Practice, services: Services) -> dict:
+    return _run(lambda: services.patients.unmerge(context, merge_id, update.reason))

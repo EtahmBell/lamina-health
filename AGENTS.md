@@ -99,6 +99,13 @@ Rules that keep the modes separate:
   `lamina_app` privileges and must be tested on Postgres. Pilot tests run on Postgres (`tests/pg_support.py`).
   The demo stays on SQLite. Configuration profiles and production refusals: `backend/profiles.py`; model
   calls must declare `contains_patient_data` (`backend/model_provider.py`). See docs/PILOT_DEPLOYMENT_READINESS.md.
+- Intake pipeline (run 3, docs/PILOT_INTAKE_PIPELINE.md): every received document (upload, fax, email)
+  goes through `backend/pilot/inbox.py` — stored, extracted (`extraction.py`; Textract in production, a
+  patient-data call), fields PROPOSED with page and region, then a person routes it. Extracted values are
+  never verified clinical evidence; nothing is silently dropped (dismissals need a reason and can be
+  restored). Fax/email vendors plug in as `inbound.py` providers (signed webhooks, replay-protected);
+  `mock` vendors are refused in production. Patients: one record per practice; possible duplicates are
+  suggested, never merged automatically; merges are audited and reversible (`patients.py`).
 - `backend/dev_test_auth.py` (e2e test sign-in) is DEV-only: never import it from `backend.main`;
   it refuses to install outside the e2e harness or in production.
 
@@ -148,7 +155,9 @@ Rules that keep the modes separate:
 - The hosted synthetic deployment (Railway) runs `LAMINA_PROFILE=demo`: synthetic data only, never
   PHI; it refuses test sign-in, MFA exemptions, debug flags and `LAMINA_MODEL_PATIENT_DATA_APPROVED`,
   and shows a "Synthetic demo · no PHI" banner. See `docs/RAILWAY_SYNTHETIC_DEPLOYMENT.md`.
-- The `anthropic` model provider (direct Anthropic API) is dev-only: never approved for patient data;
-  the demo and production profiles refuse it. Provider comparisons use the synthetic eval
+- The `anthropic` model provider (direct Anthropic API) has no BAA: dev, e2e and the hosted synthetic
+  demo only; never approved for patient data; production refuses it. On the demo every model call is
+  limited per session/IP and per day (`backend/demo_model_budget.py`, `LAMINA_DEMO_MODEL_DAILY_CAP`), with
+  a fallback to the non-AI behaviour. Provider comparisons use the synthetic eval
   (`python -m scripts.provider_eval`, `docs/PROVIDER_EVAL.md`), never real referrals.
 - The sibling `../lamina-og/` tree is read-only reference material. Never modify it.

@@ -467,8 +467,9 @@ class TeachingService:
                 result = client.structured(
                     _INSTRUCTIONS, {"instruction": text, "existing_referral_types": known_types}, _SCHEMA,
                     use_case="pilot_teach_interpretation", schema_name="practice_rule_interpretation",
-                    # A physician's practice rule (no patient record); see the audit for the residual risk.
-                    contains_patient_data=False,
+                    # Run 3: treated as patient data. It is a practice rule, but a physician could type a
+                    # patient's name or identifiers into it (the Teach input asks them not to).
+                    contains_patient_data=True,
                 )
                 validated = validate_model_interpretation(result, text, known_types)
                 if validated is not None:

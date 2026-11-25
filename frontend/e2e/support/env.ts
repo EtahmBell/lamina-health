@@ -83,6 +83,9 @@ export type SeedState = {
   practice_b_referrals: { accepted: string; declined: string }
   practice_proposal_id: string
   private_markers: string[]
+  /** Run 3: set by the intake-scenarios seed step. */
+  intake?: { fax_number: string; email: string; fixtures: string; reply_referral: string; existing_patient_referral: string; existing_patient: string
+    items?: Record<string, string>; old_result_referral?: string; duplicate_patient?: string }
 }
 
 export function seedState(): SeedState {
@@ -119,6 +122,10 @@ export function e2eDatabaseUrl(): string {
  * launcher; the API refuses it outside this harness and in production (backend/dev_test_auth.py).
  * The captured accounts were signed in before MFA was required: they alone count as MFA-verified
  * here (the explicit, gated bypass) -- every new account in the specs sets up real TOTP. */
+/** Synthetic webhook secrets for the mock vendors (e2e only; not credentials for anything). */
+export const E2E_FAX_WEBHOOK_SECRET = 'e2e-synthetic-fax-webhook-secret-not-a-credential'
+export const E2E_EMAIL_WEBHOOK_SECRET = 'e2e-synthetic-email-webhook-secret-not-a-credential'
+
 export function apiEnvironment(): NodeJS.ProcessEnv {
   return {
     ...process.env,
@@ -134,6 +141,10 @@ export function apiEnvironment(): NodeJS.ProcessEnv {
     LAMINA_OPENAI_ENABLED: 'false',
     LAMINA_PILOT_LLM_EXTRACTION_ENABLED: 'false',
     LAMINA_MAIL_ADAPTER: 'dev',
+    // Run 3: the synthetic fax/email vendors and the dev text extractor (no real vendor, no OCR).
+    LAMINA_FAX_PROVIDER: 'mock', LAMINA_FAX_WEBHOOK_SECRET: E2E_FAX_WEBHOOK_SECRET,
+    LAMINA_EMAIL_PROVIDER: 'mock', LAMINA_EMAIL_WEBHOOK_SECRET: E2E_EMAIL_WEBHOOK_SECRET,
+    LAMINA_EXTRACTION_PROVIDER: 'local', LAMINA_PILOT_LLM_INTAKE_EXTRACTION_ENABLED: 'false',
     LAMINA_API_PORT: String(API_PORT),
     LAMINA_CORS_ORIGINS: APP_URL,
     PYTHONIOENCODING: 'utf-8',

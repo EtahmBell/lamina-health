@@ -551,6 +551,116 @@ _INVITATION_COLUMNS = (
 )
 
 # A raw sender access link path (`/r/<token>`). Tokens are urlsafe base64, >= 20 chars.
+# Run 3: the intake pipeline (inbox items and their documents, inbound addresses and webhook
+# receipts) and basic patient identity (a record per practice; merges are audited and reversible).
+_SCHEMA_V9 = """
+CREATE TABLE IF NOT EXISTS patients (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  name_key TEXT NOT NULL,
+  date_of_birth TEXT,
+  phone_digits TEXT,
+  mrn TEXT,
+  merged_into_id TEXT REFERENCES patients(id),
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS patients_practice_dob ON patients(practice_id, date_of_birth);
+CREATE INDEX IF NOT EXISTS patients_practice_name ON patients(practice_id, name_key);
+CREATE TABLE IF NOT EXISTS patient_merges (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  action TEXT NOT NULL CHECK(action IN ('merge', 'unmerge')),
+  survivor_id TEXT NOT NULL REFERENCES patients(id),
+  merged_id TEXT NOT NULL REFERENCES patients(id),
+  referral_ids_json TEXT NOT NULL,
+  reverses_id TEXT REFERENCES patient_merges(id),
+  reason TEXT,
+  actor TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS patient_merges_no_update BEFORE UPDATE ON patient_merges
+BEGIN SELECT RAISE(ABORT, 'patient merges are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS patient_merges_no_delete BEFORE DELETE ON patient_merges
+BEGIN SELECT RAISE(ABORT, 'patient merges are append-only'); END;
+CREATE TABLE IF NOT EXISTS practice_inbound_addresses (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  channel TEXT NOT NULL CHECK(channel IN ('fax', 'email')),
+  address TEXT NOT NULL UNIQUE,
+  provider TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS intake_items (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  channel TEXT NOT NULL CHECK(channel IN ('upload', 'fax', 'email', 'public_form')),
+  status TEXT NOT NULL CHECK(status IN ('received', 'extracted', 'needs_review', 'routed', 'split', 'dismissed')),
+  provider TEXT,
+  provider_message_id TEXT,
+  from_address TEXT,
+  to_address TEXT,
+  subject TEXT,
+  received_at TEXT NOT NULL,
+  received_by TEXT NOT NULL,
+  parent_item_id TEXT REFERENCES intake_items(id),
+  page_from INTEGER,
+  page_to INTEGER,
+  extraction_json TEXT,
+  suggestions_json TEXT,
+  routed_kind TEXT CHECK(routed_kind IN ('new_referral', 'attached', 'request_reply')),
+  routed_referral_id TEXT REFERENCES intake_referrals(id),
+  routed_request_id TEXT REFERENCES missing_information_requests(id),
+  patient_id TEXT REFERENCES patients(id),
+  dismissed_reason TEXT,
+  dismissed_note TEXT,
+  handled_by TEXT,
+  handled_at TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS intake_items_practice_status ON intake_items(practice_id, status, received_at);
+CREATE TABLE IF NOT EXISTS intake_documents (
+  id TEXT PRIMARY KEY,
+  practice_id TEXT NOT NULL REFERENCES practices(id),
+  item_id TEXT NOT NULL REFERENCES intake_items(id),
+  role TEXT NOT NULL CHECK(role IN ('file', 'email_body')),
+  filename TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  storage_key TEXT NOT NULL,
+  extraction_status TEXT NOT NULL,
+  extractor TEXT,
+  pages_json TEXT,
+  page_count INTEGER,
+  page_offset INTEGER NOT NULL DEFAULT 0,
+  referral_document_id TEXT REFERENCES referral_documents(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS intake_documents_item ON intake_documents(practice_id, item_id);
+CREATE TABLE IF NOT EXISTS inbound_webhook_receipts (
+  id TEXT PRIMARY KEY,
+  channel TEXT NOT NULL CHECK(channel IN ('fax', 'email')),
+  provider TEXT NOT NULL,
+  provider_event_id TEXT NOT NULL,
+  practice_id TEXT REFERENCES practices(id),
+  outcome TEXT NOT NULL CHECK(outcome IN ('accepted', 'unroutable')),
+  item_id TEXT REFERENCES intake_items(id),
+  received_at TEXT NOT NULL,
+  UNIQUE(provider, provider_event_id)
+);
+CREATE TRIGGER IF NOT EXISTS inbound_webhook_receipts_no_update BEFORE UPDATE ON inbound_webhook_receipts
+BEGIN SELECT RAISE(ABORT, 'webhook receipts are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS inbound_webhook_receipts_no_delete BEFORE DELETE ON inbound_webhook_receipts
+BEGIN SELECT RAISE(ABORT, 'webhook receipts are append-only'); END;
+"""
+
+
 SENDER_LINK_PATTERN = re.compile(r"/r/[A-Za-z0-9_-]{20,200}")
 # The same link including any scheme/host prefix, for restoring templates.
 _FULL_SENDER_LINK = re.compile(r"(?:https?://[^\s/]+)?/r/[A-Za-z0-9_-]{20,200}")
@@ -634,6 +744,10 @@ class PilotStore:
             self._add_column(db, "learning_questions", "owner_scope_id", "TEXT")
             # Run 2: per-practice idle sign-out (minutes; 15-60, admins change it, audited).
             self._add_column(db, "practices", "idle_timeout_minutes", "INTEGER NOT NULL DEFAULT 30")
+            # Run 3: the intake pipeline and patient identity.
+            db.executescript(_SCHEMA_V9)
+            self._add_column(db, "intake_referrals", "patient_id", "TEXT REFERENCES patients(id)")
+            db.execute("CREATE INDEX IF NOT EXISTS intake_referrals_patient ON intake_referrals(practice_id, patient_id)")
 
     @staticmethod
     def _rebuild_invitations(db: sqlite3.Connection) -> None:

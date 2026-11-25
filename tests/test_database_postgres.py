@@ -37,7 +37,10 @@ def test_translation(sqlite: str, postgres: str) -> None:
 
 def test_every_pilot_table_in_code_is_in_the_postgres_baseline() -> None:
     """A new pilot table must come with a migration (drift guard)."""
-    baseline = (ROOT / "backend" / "migrations" / "versions" / "0001_pilot_tables.sql").read_text(encoding="utf-8")
+    # Every migration's SQL (0001 baseline, 0003 intake pipeline, ...), plus columns added by ALTER.
+    baseline = "\n".join(path.read_text(encoding="utf-8") for path in
+                         sorted((ROOT / "backend" / "migrations" / "versions").glob("*.sql")))
+    added = {(table, column) for table, column in re.findall(r"^ALTER TABLE (\w+) ADD COLUMN (\w+)", baseline, re.MULTILINE)}
     migrated = set(re.findall(r"^CREATE TABLE (\w+) \(", baseline, re.MULTILINE))
     for module in ("store.py", "assistant.py"):
         text = (ROOT / "backend" / "pilot" / module).read_text(encoding="utf-8")
@@ -58,7 +61,8 @@ def test_every_pilot_table_in_code_is_in_the_postgres_baseline() -> None:
         for table in migrated:
             body = re.search(rf"^CREATE TABLE {table} \((.*?)^\);", baseline, re.MULTILINE | re.DOTALL).group(1)
             columns = set(re.findall(r"^\s*(\w+) ", body, re.MULTILINE))
-            missing += [f"{table}.{row[1]}" for row in db.execute(f"PRAGMA table_info({table})") if row[1] not in columns]
+            missing += [f"{table}.{row[1]}" for row in db.execute(f"PRAGMA table_info({table})")
+                        if row[1] not in columns and (table, row[1]) not in added]
         db.close()
     assert missing == [], f"columns missing from Postgres: {missing}"
 
@@ -200,3 +204,70 @@ def test_operator_scripts_open_postgres_read_only() -> None:
                 db.execute("INSERT INTO practices (id, name, created_at, updated_at) VALUES ('p', 'x', 't', 't')")
         finally:
             db.close()
+
+
+def test_the_move_runs_the_sqlite_upgrades_first_and_refuses_if_they_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run 3: the one-time SQLite upgrades run automatically on the source before anything moves;
+    an upgrade that raises, or one that leaves the source un-upgraded, stops the move."""
+    from backend.pilot import store as store_module
+    from backend.workflow import WorkflowStore
+    from scripts import migrate_sqlite_to_postgres as move
+
+    source = tmp_path / "legacy.sqlite"
+    store_module.PilotStore(workflow=WorkflowStore(source))
+    with sqlite3.connect(source) as db:
+        assert move.upgrade_problems(db) == [], "a store opened by the current code is fully upgraded"
+    raw = "/r/" + "A" * 32  # a pre-Step-16 raw sender link saved in stored text
+    with sqlite3.connect(":memory:") as bare:
+        bare.execute("CREATE TABLE practices (id TEXT)")
+        bare.execute("CREATE TABLE physician_referral_preferences (id TEXT, scope TEXT)")
+        assert any("layer is missing" in problem for problem in move.upgrade_problems(bare))
+        bare.execute("CREATE TABLE outbound_messages (body TEXT)")
+        bare.execute("INSERT INTO outbound_messages VALUES (?)", (f"see {raw}",))
+    with sqlite3.connect(":memory:") as linked:
+        linked.execute("CREATE TABLE outbound_messages (body TEXT)")
+        linked.execute("INSERT INTO outbound_messages VALUES (?)", (f"see {raw}",))
+        assert move.upgrade_problems(linked) == ["outbound_messages still holds a raw sender link (the token scrub did not run)"]
+
+    def failing(*_args, **_kwargs):
+        raise sqlite3.OperationalError("simulated")
+
+    monkeypatch.setattr(store_module, "PilotStore", failing)
+    with pytest.raises(SystemExit, match=r"one-time upgrades failed \(OperationalError\); not migrating"):
+        move.migrate(source, "postgresql://unused.invalid/none")
+    # The real attempt backed the source up before upgrading it.
+    assert len(list(tmp_path.glob("legacy.pre-upgrade-*.sqlite"))) == 1
+    monkeypatch.setattr(store_module, "PilotStore", lambda **_kwargs: None)  # "ran" but did nothing
+    monkeypatch.setattr(move, "upgrade_problems", lambda _db: ["practices.idle_timeout_minutes is missing"])
+    with pytest.raises(SystemExit, match="did not complete; not migrating"):
+        move.migrate(source, "postgresql://unused.invalid/none", dry_run=True)
+    assert len(list(tmp_path.glob("legacy.pre-upgrade-*.sqlite"))) == 1, "a dry run works on a temporary copy"
+
+
+@needs_postgres
+def test_intake_pipeline_audit_tables_are_append_only(pg) -> None:
+    """Run 3 (migration 0003): webhook receipts and patient merges -- triggers and privileges."""
+    pg.execute("INSERT INTO practices (id, name, created_by_user_id, created_at, updated_at) VALUES ('p', 'Synthetic', 'u', 't', 't')")
+    pg.execute("INSERT INTO patients (id, practice_id, name, name_key, created_by, created_at, updated_at) "
+               "VALUES ('pa', 'p', 'A', 'a', 'u', 't', 't'), ('pb', 'p', 'B', 'b', 'u', 't', 't')")
+    rows = {
+        "inbound_webhook_receipts": (("INSERT INTO inbound_webhook_receipts (id, channel, provider, provider_event_id, outcome, received_at) "
+                                     "VALUES ('{id}', 'fax', 'mock', '{id}', 'unroutable', 't')"), "outcome = outcome",
+                                     "webhook receipts are append-only"),
+        "patient_merges": (("INSERT INTO patient_merges (id, practice_id, action, survivor_id, merged_id, referral_ids_json, actor, "
+                           "actor_role, created_at) VALUES ('{id}', 'p', 'merge', 'pa', 'pb', '[]', 'user:u', 'staff', 't')"),
+                           "reason = 'x'", "patient merges are append-only"),
+    }
+    for table, (insert, change, message) in rows.items():
+        pg.execute(insert.format(id="r1"))
+        _fails(pg, f"UPDATE {table} SET {change}", match=message)
+        _fails(pg, f"DELETE FROM {table}", match=message)
+        _fails(pg, f"TRUNCATE {table}", match=message)
+        pg.execute("SET ROLE lamina_app")
+        try:
+            _fails(pg, f"UPDATE {table} SET {change}", match="permission denied")
+            pg.execute(insert.format(id="r2"))  # appending is allowed
+        finally:
+            pg.execute("RESET ROLE")
+    # The same replayed vendor event can't be recorded twice.
+    _fails(pg, rows["inbound_webhook_receipts"][0].format(id="r1").replace("VALUES ('r1'", "VALUES ('r9'"), match="duplicate key")

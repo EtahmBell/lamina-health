@@ -154,7 +154,30 @@ const SHOTS: Shot[] = [
   // `after` puts the second physician back in their own practice: the next viewport replays the list.
   { name: 'second-physician-conflict-other-physician', actor: 'second_physician', to: (s) => referralPath(s.referrals.conflict_keep), ready: card,
     after: () => seedStep('return-second-physician') },
+  // Run 3: the intake pipeline (inbox delivered through the signed mock fax/email webhooks).
+  { name: 'intake-inbox-email-referral', actor: 'staff', before: () => seedStep('intake-inbox'), to: () => intakeItem('email:Robin Lumen-Synthetic'),
+    ready: text('Read from the document') },
+  { name: 'intake-fax-reply-request-match', actor: 'staff', to: () => intakeItem('fax:Robin Lumen-Synthetic'),
+    ready: (p) => expect(p.getByRole('group', { name: 'Possible reply to an information request' })).toBeVisible() },
+  { name: 'intake-multi-referral-split', actor: 'staff', to: () => intakeItem('fax:Quinn Harbor-Synthetic'), ready: text('Read from the document'),
+    act: async (p) => { await p.getByRole('button', { name: 'Split by page…' }).click() } },
+  { name: 'intake-junk-dismiss', actor: 'staff', to: () => intakeItem('fax:unidentified'), ready: text('Read from the document'),
+    act: async (p) => { await p.getByRole('button', { name: 'Dismiss…' }).click() } },
+  { name: 'intake-scanned-referral-create', actor: 'staff', to: () => intakeItem('fax:JORDAN ASH-SYNTHETIC'), ready: text('Read from the document'),
+    act: async (p) => { await p.getByRole('button', { name: 'Create referral…' }).click() } },
+  { name: 'intake-physician-read-only', actor: 'physician', to: () => intakeItem('fax:Quinn Harbor-Synthetic'), ready: text('Act on this item') },
+  { name: 'staff-home-intake-waiting', actor: 'staff', to: () => '/me/home', ready: text(/waiting in Intake/) },
+  { name: 'referral-evidence-outside-window', actor: 'staff', to: () => referralPath(seedState().intake!.old_result_referral!), ready: text('Outside the window.') },
+  { name: 'patient-possible-duplicate', actor: 'staff', to: () => `/me/patients/${seedState().intake!.duplicate_patient}`,
+    ready: (p) => expect(p.getByRole('region', { name: 'Possible duplicates' })).toBeVisible() },
+  { name: 'teach-input-privacy-hint', actor: 'physician', to: () => '/me/agent?tab=teach', ready: text('Avoid patient names or identifiers.') },
 ]
+
+function intakeItem(key: string): string {
+  const id = seedState().intake?.items?.[key]
+  if (!id) throw new Error(`no seeded intake item ${key}`)
+  return `/me/intake?item=${id}`
+}
 
 // E2E_ONLY=name,name captures just those screens (e.g. a follow-up round on affected screens);
 // numbering stays the same as the full list so rounds compare file-for-file.

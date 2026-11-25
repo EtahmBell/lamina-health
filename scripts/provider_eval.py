@@ -11,7 +11,7 @@ Options: --only triage,teaching,agent  --cases <id-prefix>  --json <path>  --max
          --price-in / --price-out (USD per million tokens, when the model isn't in PRICES)
 
 Keys come from the environment / the gitignored .env (OPENAI_API_KEY, ANTHROPIC_API_KEY) and are
-never printed. The profile must be dev (the anthropic provider is dev-only).
+never printed. The eval runs in the dev profile (synthetic data; no demo spend limits apply).
 """
 
 from __future__ import annotations
@@ -189,9 +189,12 @@ def run_triage(case: dict, recorder: Recorder | None) -> dict:
               "visit_type": recommendation.suggested_modality == expect["modality"]}
     item_checks = {key: states.get(key) == wanted for key, wanted in expect["states"].items()}
     checks["items"] = all(item_checks.values())
+    windows = {item.key: item.window_status for item in recommendation.requirements}
+    if expect.get("windows"):
+        checks["evidence_window"] = all(windows.get(key) == wanted for key, wanted in expect["windows"].items())
     got = {"fit": recommendation.fit, "priority": recommendation.suggested_priority,
            "visit_type": recommendation.suggested_modality, "states": {k: states.get(k) for k in expect["states"]},
-           "missing_items": recommendation.missing_items}
+           "missing_items": recommendation.missing_items, "windows": {k: windows.get(k) for k in expect.get("windows", {})}}
     return {"checks": checks, "item_checks": item_checks, "got": got}
 
 
@@ -270,7 +273,42 @@ def regrade(path: str) -> dict:
     return saved
 
 
-DIMENSIONS = {"triage": (cases.TRIAGE, run_triage), "teaching": (cases.TEACHING, run_teaching), "agent": (cases.AGENT, run_agent)}
+def run_extraction(case: dict, recorder: Recorder | None) -> dict:
+    """Run 3: intake field extraction. A provider is graded on the MODEL's proposals alone (the
+    product merges them under the rule-based ones); the no-model baseline is the rule-based mapper."""
+    from backend.pilot import extraction as ex
+
+    pages = [ex._page(text) for text in case["pages"]]
+    if recorder is None:
+        proposals = ex.propose_fields(pages, cases.EXTRACTION_TYPES)
+    else:
+        try:
+            proposals = ex.model_proposals(ResponsesApiClient(provider=recorder), pages, cases.EXTRACTION_TYPES)
+        except BudgetExceeded:
+            raise
+        except Exception:  # noqa: BLE001 -- a failed call proposes nothing (the rules still stand in the product)
+            proposals = {"fields": {}, "results": []}
+    fields, expect = proposals["fields"], case["expect"]
+    norm = lambda text: " ".join(str(text or "").split()).casefold()
+    checks: dict[str, bool] = {}
+    for name, wanted in expect.get("fields", {}).items():
+        got = fields.get(name) or {}
+        value = got.get("matched_type") if name == "referral_type" else got.get("value")
+        checks[f"field_{name}"] = norm(value) == norm(wanted)
+    if expect.get("name_contains"):
+        checks["field_patient_name"] = all(token in norm((fields.get("patient_name") or {}).get("value")) for token in expect["name_contains"])
+    if expect.get("absent"):
+        checks["nothing_invented"] = not any(name in fields for name in expect["absent"])
+    if expect.get("type_unmatched"):
+        checks["field_referral_type"] = not (fields.get("referral_type") or {}).get("matched_type")
+    if "result_dates" in expect:
+        checks["result_dates"] = sorted({item["date"] for item in proposals["results"] if item.get("date")}) == sorted(expect["result_dates"])
+    got = {name: entry.get("matched_type") or entry.get("value") for name, entry in fields.items()}
+    return {"checks": checks, "got": {"fields": got, "result_dates": [item.get("date") for item in proposals["results"]]}}
+
+
+DIMENSIONS = {"triage": (cases.TRIAGE, run_triage), "teaching": (cases.TEACHING, run_teaching), "agent": (cases.AGENT, run_agent),
+              "extraction": (cases.EXTRACTION, run_extraction)}
 
 
 def make_provider(name: str) -> Any:
@@ -314,7 +352,7 @@ def summarize(results: dict, recorder: Recorder | None) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Provider eval on synthetic cases")
     parser.add_argument("--provider", required=True, choices=["openai", "anthropic", "deterministic"])
-    parser.add_argument("--only", default="triage,teaching,agent")
+    parser.add_argument("--only", default="triage,teaching,agent,extraction")
     parser.add_argument("--cases", default="", help="run only cases whose id starts with this")
     parser.add_argument("--max-usd", type=float, default=None)
     parser.add_argument("--price-in", type=float, default=None)

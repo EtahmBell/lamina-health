@@ -233,3 +233,38 @@ def sender_response(
     return _sender_errors(lambda: services.sender.respond(
         token, update.message, [item.model_dump() for item in update.items]))
 
+
+
+# ---------------------------------------------------------------- inbound webhooks (run 3)
+# Fax and email vendors post here. No session: each request is authenticated by the vendor's
+# signature (HMAC over timestamp + body, constant-time compare), refused outside a 5-minute window,
+# deduplicated by the vendor's event id, and rate limited per client. Only the provider configured
+# for the channel answers. Bodies and headers are never logged.
+
+INBOUND_LIMIT = (300, 60)
+INBOUND_MAX_BYTES = 40 * 1024 * 1024  # base64-encoded documents
+
+
+@router.post("/inbound/{channel}/{provider}")
+async def inbound_webhook(channel: str, provider: str, request: Request, services: Services) -> dict:
+    from .inbound import WebhookRejected, configured_provider, now_utc
+
+    vendor = configured_provider(channel, provider) if channel in {"fax", "email"} else None
+    if vendor is None:
+        raise HTTPException(404, {"code": "not_found", "message": "Not found"})
+    limiter.check(f"inbound:{channel}:{provider}:{_client(request)}", *INBOUND_LIMIT)
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > INBOUND_MAX_BYTES:
+        raise HTTPException(413, {"code": "payload_too_large", "message": "Payload too large"})
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > INBOUND_MAX_BYTES:
+            raise HTTPException(413, {"code": "payload_too_large", "message": "Payload too large"})
+        chunks.append(chunk)
+    try:
+        message = vendor.verify_and_parse(dict(request.headers), b"".join(chunks), now_utc())
+        result = services.inbox.receive_inbound(message)
+    except WebhookRejected as error:
+        raise HTTPException(error.status, {"code": error.code, "message": error.message}) from error
+    return {"received": True, **result}

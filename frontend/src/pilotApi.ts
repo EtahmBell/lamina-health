@@ -141,6 +141,8 @@ export type RationaleSource = {
 export type RequirementAssessment = {
   key: string; label: string; required: boolean; freshness_days: number | null; state: RequirementState
   rule_id: string; rule_version: number; evidence: RationaleSource | null; detail: string
+  /** Run 3: a proposed document item's date against the rule's window (shown; a person still confirms). */
+  evidence_date?: string | null; window_status?: 'within' | 'outside' | 'undated' | null; window_note?: string | null
 }
 export type TriageRecommendation = {
   id: string; fit: Fit; readiness: 'ready' | 'missing_information' | 'unknown'
@@ -151,7 +153,7 @@ export type TriageRecommendation = {
   rules_snapshot_id: string; created_at: string
   type_match?: TypeMatch | null
   /** Step 17: the representation statements relied on, and any layer conflicts. */
-  statements_used?: Array<{ kind: StatementKind; rule_id: string; version: number; layer: 'practice' | 'physician'; referral_type: string; item: string; label?: string | null; drives: boolean }>
+  statements_used?: Array<{ kind: StatementKind; rule_id: string; version: number; layer: 'practice' | 'physician'; referral_type: string; item: string; label?: string | null; drives: boolean; rule_phrase?: string | null }>
   conflicts?: Array<{ kind: string; referral_type: string }>
   representation_version_id?: string | null
 }
@@ -164,6 +166,8 @@ export type SubmittedItem = {
 export type ReferralDocument = { id: string; filename: string; content_type: string; size_bytes: number; uploaded_at: string; extraction_status: 'extracted' | 'unsupported' | 'failed' | 'empty'; page_count: number | null }
 export type IntakeReferral = {
   id: string; status: IntakeStatus; source: 'manual' | 'upload' | 'public_form'
+  /** Run 3: the practice's patient record this referral is for. */
+  patient_id?: string | null
   sender: { name: string; practice: string | null; contact: string | null; npi: string | null }
   patient: { name: string; date_of_birth: string | null; sex: string | null; phone: string | null; insurance: string | null; external_id: string | null }
   referral_type: string; reason: string; clinical_context: string | null; sender_priority: Priority | null
@@ -187,6 +191,8 @@ export type TriageCorrection = { id: string; field: CorrectableField; from: stri
 export type CorrectionConflict = {
   field: CorrectableField; corrected_value: string; rule_value: string; referral_type: string; rule_id: string; rule_version: number
   corrected_by_name: string | null; rule_by_name: string | null; corrected_by_you: boolean; rule_by_you: boolean
+  /** Only the physician who made the correction, or an admin physician, decides it (server-decided). */
+  can_resolve?: boolean
 }
 export type TriageChange = { field: string; from: unknown; to: unknown; by: string; because: string | null; triggered_by: string | null; at: string }
 /** One line of triage rationale. `text` is rendered by the server for this reader from the
@@ -559,6 +565,83 @@ export const flagAgentItem = (itemId: string, serious: boolean, note: string) =>
 /** Resolving a flag always takes a short note on what the physician found. */
 export const resolveAgentFlag = (flagId: string, note: string) => apiRequest<ActivationReview>(`/api/me/practice/activation/flags/${encodeURIComponent(flagId)}/resolve`, json({ note }))
 export const acknowledgeCapabilityNotice = (eventId: string) => apiRequest<ActivationReview>(`/api/me/practice/activation/notices/${encodeURIComponent(eventId)}/acknowledge`, json({}))
+
+/* ----------------------------------------------------------- intake pipeline (run 3) */
+
+export type IntakeChannel = 'upload' | 'fax' | 'email' | 'public_form'
+export type IntakeItemStatus = 'received' | 'extracted' | 'needs_review' | 'routed' | 'split' | 'dismissed'
+export type IntakeRegion = [number, number, number, number]
+export type IntakeField = { value: string; page: number; bbox: IntakeRegion; source: 'rules' | 'model'; quote?: string; matched_type?: string | null }
+export type IntakeResult = { label: string; text: string; date: string | null; page: number; bbox: IntakeRegion; source: 'rules' | 'model' }
+export type PatientSummary = { id: string; name: string; date_of_birth: string | null; phone_last4: string | null; mrn: string | null; merged_into_id: string | null; created_at: string }
+export type PatientMatch = { patient: PatientSummary; strength: 'strong' | 'possible'; reasons: string[] }
+export type IntakeItemSummary = {
+  id: string; channel: IntakeChannel; status: IntakeItemStatus; received_at: string; from_address: string | null; subject: string | null
+  provider: string | null; parent_item_id: string | null; page_from: number | null; page_to: number | null
+  document_count: number; page_count: number; patient_name: string | null; referral_type: string | null; several_patients?: number
+  has_request_match: boolean; has_patient_match: boolean; routed_kind: 'new_referral' | 'attached' | 'request_reply' | null
+  routed_referral_id: string | null; routed_request_id: string | null; dismissed_reason: string | null; dismissed_note: string | null
+  handled_by: string | null; handled_at: string | null; extraction_problem: boolean
+}
+export type IntakeDocument = {
+  id: string; filename: string; content_type: string; size_bytes: number; role: 'file' | 'email_body'
+  extraction_status: string; extractor: string | null; page_count: number | null; first_page: number
+  pages: Array<{ text: string; lines: Array<{ text: string; bbox: IntakeRegion }> }>
+}
+export type IntakeItemDetail = IntakeItemSummary & {
+  documents: IntakeDocument[]
+  extraction: { patients_found?: Array<{ name: string; page: number }>; fields?: Partial<Record<'patient_name' | 'date_of_birth' | 'mrn' | 'patient_phone' | 'referring_clinician' | 'referring_practice' | 'contact' | 'referral_question' | 'referral_type', IntakeField>>; results?: IntakeResult[] }
+  suggestions: {
+    patients?: PatientMatch[]; referral_type?: string | null
+    requests?: Array<{ request_id: string; referral_id: string; patient_name: string; items: string[]; sent_at: string | null; reasons: string[] }>
+    referrals?: Array<{ referral_id: string; referral_type: string; status: string; patient_name: string; received_at: string }>
+  }
+  children: IntakeItemSummary[]; dismiss_reasons: string[]; can_act: boolean
+}
+export type PatientDetail = {
+  patient: PatientSummary
+  referrals: Array<{ id: string; referral_type: string; status: string; received_at: string }>
+  possible_duplicates: PatientMatch[]
+  merges: Array<{ id: string; action: 'merge' | 'unmerge'; survivor_id: string; merged_id: string; referral_ids: string[]; reverses_id: string | null; reason: string | null; actor: string; created_at: string; undone?: boolean }>
+}
+
+const INTAKE = '/api/me/practice/intake'
+const intakeItemPath = (id: string, action = '') => `${INTAKE}/items/${encodeURIComponent(id)}${action ? `/${action}` : ''}`
+export const listIntakeItems = (view: 'open' | 'routed' | 'dismissed' | 'all' = 'open') => apiRequest<IntakeItemSummary[]>(`${INTAKE}/items?view=${view}`)
+export const getIntakeItem = (id: string) => apiRequest<IntakeItemDetail>(intakeItemPath(id))
+export const createReferralFromIntake = (id: string, referral: NewReferral, patientId: string | null) =>
+  apiRequest<ReferralDetail>(intakeItemPath(id, 'create-referral'), json({ referral, patient_id: patientId }))
+export const attachIntakeItem = (id: string, referralId: string) => apiRequest<ReferralDetail>(intakeItemPath(id, 'attach'), json({ referral_id: referralId }))
+export const replyFromIntake = (id: string, requestId: string) => apiRequest<ReferralDetail>(intakeItemPath(id, 'reply'), json({ request_id: requestId }))
+export const splitIntakeItem = (id: string, ranges: Array<[number, number]>) => apiRequest<IntakeItemDetail>(intakeItemPath(id, 'split'), json({ ranges }))
+export const dismissIntakeItem = (id: string, reason: string, note: string) => apiRequest<IntakeItemDetail>(intakeItemPath(id, 'dismiss'), json({ reason, note: note || null }))
+export const restoreIntakeItem = (id: string) => apiRequest<IntakeItemDetail>(intakeItemPath(id, 'restore'), json({}))
+export const getPatient = (id: string) => apiRequest<PatientDetail>(`/api/me/practice/patients/${encodeURIComponent(id)}`)
+export const mergePatient = (id: string, intoId: string, reason: string) =>
+  apiRequest<PatientDetail>(`/api/me/practice/patients/${encodeURIComponent(id)}/merge`, json({ into_patient_id: intoId, reason: reason || null }))
+export const undoPatientMerge = (mergeId: string, reason: string) =>
+  apiRequest<PatientDetail>(`/api/me/practice/patient-merges/${encodeURIComponent(mergeId)}/undo`, json({ reason: reason || null }))
+
+/** Manual upload into Intake: the first file makes an item; more files join it (one referral). */
+export async function uploadIntakeFile(file: File, itemId?: string): Promise<IntakeItemDetail> {
+  const response = await fetch(`${apiBaseUrl}${itemId ? intakeItemPath(itemId, 'files') : `${INTAKE}/items`}`, {
+    method: 'POST',
+    headers: await authHeaders({ 'Content-Type': file.type || 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) }),
+    body: file,
+    credentials: 'include',
+  })
+  if (!response.ok) return raise(response)
+  const detail = await response.json() as IntakeItemDetail
+  notifyPilotDataChanged()
+  return detail
+}
+
+/** The received file as a short-lived object URL for the side-by-side preview (never a public link). */
+export async function intakeDocumentUrl(documentId: string): Promise<string> {
+  const response = await fetch(`${apiBaseUrl}${INTAKE}/documents/${encodeURIComponent(documentId)}`, { headers: await authHeaders(), credentials: 'include' })
+  if (!response.ok) return raise(response)
+  return URL.createObjectURL(await response.blob())
+}
 
 /* ------------------------------------------------- public (no account needed) */
 

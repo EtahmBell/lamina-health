@@ -29,9 +29,10 @@ test('pilot shell is the demo physician shell: same classes, nav glyphs, account
   }
 })
 
-test('pilot nav is the demo general physician nav: Home, For you, Patients, Network, Your Agent', () => {
+// Run 3: Intake (received faxes, emails and uploads) joins the demo's general physician nav.
+test('pilot nav is the demo general physician nav plus Intake: Home, For you, Intake, Patients, Network, Your Agent', () => {
   const nav = slice(pilot, 'const navFor = ', ']\n')
-  assert.deepEqual([...nav.matchAll(/title: (?:physician \? )?'([^']+)'/g)].map((match) => match[1]), ['Home', 'For you', 'Patients', 'Network', 'Your Agent'])
+  assert.deepEqual([...nav.matchAll(/title: (?:physician \? )?'([^']+)'/g)].map((match) => match[1]), ['Home', 'For you', 'Intake', 'Patients', 'Network', 'Your Agent'])
   // Staff see the physician's agent in the third person, in the nav too.
   assert.match(nav, /title: physician \? 'Your Agent' : `\$\{doctor\}’s agent`/)
   assert.doesNotMatch(nav, /'Referrals'/)

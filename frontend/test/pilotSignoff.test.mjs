@@ -111,5 +111,7 @@ test('a correction that a newer rule disagrees with is shown with keep / apply c
   assert.match(conflictText({ ...conflict, rule_by_you: false, rule_by_name: null }), /the updated rule \(author not recorded\)/)
   assert.match(pilot, /resolveCorrectionConflict\(referral\.id, conflict\.field, 'keep_correction'\)\)\}>\{conflictWording\(conflict, physician, doctor\)\.keep\}/, 'the keep label names whose correction it is')
   assert.match(pilot, /resolveCorrectionConflict\(referral\.id, conflict\.field, 'apply_rule'\)\)\}>Apply the rule/)
-  assert.match(pilot, /\{physician && <div className="pilot-actions">\s*<button className="button-secondary" disabled=\{busy\} onClick=\{\(\) => void act\(\(\) => resolveCorrectionConflict/, 'only physicians choose')
+  // Run 3: only the correction's author or an admin physician (server-decided `can_resolve`) chooses.
+  assert.match(pilot, /\{physician && conflict\.can_resolve !== false && <div className="pilot-actions">\s*<button className="button-secondary" disabled=\{busy\} onClick=\{\(\) => void act\(\(\) => resolveCorrectionConflict/, 'only the author or an admin physician chooses')
+  assert.match(pilot, /\{physician && conflict\.can_resolve === false && <p className="muted-note">\{conflictDecider\(conflict\)\}<\/p>\}/)
 })

@@ -337,7 +337,8 @@ function TeachTab({ physician, doctor, data, summary, navigate, onChange }: { ph
       {askedProposal && <ProposalSummary proposal={askedProposal} voice={{ physician, doctor }} />}
     </section>}
     <form className="pilot-teach-composer" onSubmit={(event) => void teach(event)}>
-      <label><span className="practice-subheading">{physician ? 'Teach your agent' : `Suggest something to ${doctor}`}</span><textarea rows={2} value={text} onChange={(event) => setText(event.target.value)} placeholder={physician ? 'e.g. I usually want a recent A1c before reviewing diabetes referrals.' : 'e.g. The office usually sends the A1c separately; could we ask for it up front?'} maxLength={2000} disabled={busy} /></label>
+      <label><span className="practice-subheading">{physician ? 'Teach your agent' : `Suggest something to ${doctor}`}</span><textarea rows={2} value={text} onChange={(event) => setText(event.target.value)} placeholder={physician ? 'e.g. I usually want a recent A1c before reviewing diabetes referrals.' : 'e.g. The office usually sends the A1c separately; could we ask for it up front?'} maxLength={2000} disabled={busy} aria-describedby="teach-privacy-hint" /></label>
+      <p className="muted-note pilot-teach-hint" id="teach-privacy-hint">Avoid patient names or identifiers.</p>
       {error && <p className="error-banner" role="alert">{error}</p>}
       <div className="pilot-actions"><button className="button-primary" type="submit" disabled={busy || text.trim().length < 3}>{busy ? 'Saving…' : physician ? 'Teach' : `Send to ${doctor}`} <span>→</span></button></div>
     </form>

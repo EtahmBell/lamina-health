@@ -93,7 +93,18 @@ def create_app(mode: str | None = None) -> FastAPI:
             "X-Filename",
             "X-Lamina-Workspace-Bootstrap",
         ],
+        # The synthetic demo says when its AI limits were reached (backend/demo_model_budget.py).
+        expose_headers=["X-Lamina-AI-Limited"],
     )
+    from backend.profiles import is_synthetic_deployment as _synthetic
+
+    if _synthetic():
+        from backend.config import environment as _environment
+        from backend.demo_model_budget import DemoCallerMiddleware
+        from backend.demo_workspace import DEFAULT_COOKIE_NAME
+
+        application.add_middleware(DemoCallerMiddleware,
+                                   cookie_name=_environment.get("LAMINA_DEMO_COOKIE_NAME", DEFAULT_COOKIE_NAME))
     if resolved == "pilot":
         # Pilot only (the demo shares the onboarding and approval routers and is unchanged):
         # onboarding needs MFA and is closed to staff accounts; operator routes need MFA.

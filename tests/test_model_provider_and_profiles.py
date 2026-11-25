@@ -114,10 +114,11 @@ def test_provider_selection_and_the_wrapper(monkeypatch: pytest.MonkeyPatch) -> 
 def test_every_pilot_call_site_declares_patient_data() -> None:
     """Patient-data paths say so explicitly; the audit in docs/PILOT_DEPLOYMENT_READINESS.md lists them."""
     root = Path(mp.__file__).resolve().parents[1] / "backend" / "pilot"
-    for name, expected in (("assistant.py", 2), ("public_agent.py", 1), ("triage.py", 1)):
+    # Run 3: teaching interpretation is declared patient data too (identifiers could be typed into a rule).
+    for name, expected in (("assistant.py", 2), ("public_agent.py", 1), ("triage.py", 1), ("teaching.py", 1)):
         text = (root / name).read_text(encoding="utf-8")
         assert text.count("contains_patient_data=True") == expected, name
-    assert "contains_patient_data=False" in (root / "teaching.py").read_text(encoding="utf-8")
+        assert "contains_patient_data=False" not in text, name
 
 
 # -------------------------------------------------------------------- profiles
@@ -131,6 +132,8 @@ GOOD = {
     "LAMINA_SUPABASE_MFA_TOTP_ENABLED": "true", "SUPABASE_JWT_ISSUER": "https://x.supabase.co/auth/v1",
     "SUPABASE_JWKS_URL": "https://x.supabase.co/auth/v1/.well-known/jwks.json", "LAMINA_PILOT_ADMIN_USER_IDS": "op",
     "LAMINA_CORS_ORIGINS": "https://app.example", "LAMINA_PUBLIC_APP_URL": "https://app.example",
+    # Run 3: the intake pipeline's text extraction (Textract, under the BAA).
+    "LAMINA_EXTRACTION_PROVIDER": "textract", "LAMINA_EXTRACTION_PATIENT_DATA_APPROVED": "true",
 }
 
 
@@ -155,6 +158,12 @@ def test_a_complete_production_configuration_passes(tmp_path: Path) -> None:
     ({"SUPABASE_JWKS_URL": ""}, "SUPABASE_JWKS_URL is missing"),
     ({"LAMINA_PRODUCT_MODE": "demo"}, "must be pilot"),
     ({"LAMINA_CORS_ORIGINS": "http://app.example"}, "https origins"),
+    # Run 3: intake pipeline.
+    ({"LAMINA_EXTRACTION_PROVIDER": "local"}, "local extraction is dev-only"),
+    ({"LAMINA_EXTRACTION_PATIENT_DATA_APPROVED": "false"}, "Textract is covered by the signed BAA"),
+    ({"LAMINA_FAX_PROVIDER": "mock", "LAMINA_FAX_WEBHOOK_SECRET": "x" * 40}, "synthetic test vendor"),
+    ({"LAMINA_EMAIL_PROVIDER": "realvendor", "LAMINA_EMAIL_WEBHOOK_SECRET": "short"}, "LAMINA_EMAIL_WEBHOOK_SECRET must be set"),
+    ({"LAMINA_PILOT_LLM_INTAKE_EXTRACTION_ENABLED": "true", "LAMINA_MODEL_PROVIDER": "disabled"}, "without an approved model provider"),
 ])
 def test_production_refuses_each_unsafe_setting(tmp_path: Path, change: dict, expected: str) -> None:
     env = {**GOOD, **change}
