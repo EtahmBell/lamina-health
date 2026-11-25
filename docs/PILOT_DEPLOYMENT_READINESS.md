@@ -8,7 +8,7 @@ synthetic data; AWS was only ever mocked (moto, stub clients).
 
 | Area | In code | How it is checked |
 |---|---|---|
-| Profiles | `LAMINA_PROFILE` = `dev` \| `e2e` \| `production` (`backend/profiles.py`) | `create_app` refuses to start in production with any problem below |
+| Profiles | `LAMINA_PROFILE` = `dev` \| `e2e` \| `demo` \| `production` (`backend/profiles.py`) | `create_app` refuses to start in production with any problem below; `demo` is the hosted synthetic deployment (Railway, never PHI: docs/RAILWAY_SYNTHETIC_DEPLOYMENT.md) and refuses the patient-data approval flag, test sign-in, MFA exemptions and debug flags |
 | Database | Postgres via `LAMINA_DATABASE_URL`; schema and every guarantee in Alembic migrations (`backend/migrations`) | production refuses SQLite or a URL without TLS; the app refuses a database not at the migration head |
 | Append-only audit | PL/pgSQL triggers (no UPDATE/DELETE/TRUNCATE) **and** privileges (`lamina_app` has no UPDATE/DELETE/TRUNCATE on those tables) | `tests/test_database_postgres.py` |
 | Documents | `S3DocumentStorage`: SSE-KMS on every object, private bucket, presigned GET ≤ 5 min after the practice check | production refuses local storage; at startup it refuses a bucket without a full public-access block or SSE-KMS default encryption |
@@ -67,6 +67,17 @@ is per account and per feature — **confirm in writing with OpenAI** that the R
 
 Bedrock is covered by the AWS BAA (confirm it is on the current *HIPAA Eligible Services
 Reference* for the region, and that the chosen Claude model is offered in that region).
+
+### Anthropic API (direct) -- dev only
+
+`LAMINA_MODEL_PROVIDER=anthropic` (Messages API, structured output via `output_config.format`) exists
+for local development and the synthetic provider eval (docs/PROVIDER_EVAL.md). There is no BAA: it is
+never approved for patient data (hard-coded), the `demo` and `production` profiles refuse it at
+startup, and `guarded_call` refuses it outside dev/e2e. Its SDK is in the `dev` extra only, so the
+deployment build never installs it.
+
+Run-3 prompt changes from the eval (extraction, teaching, agent compose) and a validator fix for
+per-item time windows are listed in docs/PROVIDER_EVAL.md.
 
 ### Residual risks
 * Teaching interpretation is declared non-patient-data; a physician could still type identifiers

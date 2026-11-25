@@ -30,6 +30,8 @@ dev = [
   "ruff>=0.9,<1",
   # Local AWS mock for the S3/Bedrock tests (never real AWS).
   "moto[s3]>=5,<6",
+  # Dev-only direct Anthropic API provider and the provider eval (never installed by the deployment).
+  "anthropic>=1,<2",
 ]
 
 [tool.setuptools.packages.find]

@@ -25,7 +25,8 @@ test('the reusable provider exposes session lifecycle primitives', () => {
   assert.match(auth, /export async function signOutEverywhere\(\) \{\s+await \(await authBackend\(\)\)\.signOut\('global'\)/)
   assert.match(provider, /onAuthStateChange/)
   assert.match(provider, /useAuth/)
-  assert.match(main, /<AuthProvider><App \/><\/AuthProvider>/)
+  // The hosted synthetic deployment's "no PHI" strip sits beside App, inside the same provider.
+  assert.match(main, /<AuthProvider>(<SyntheticDeploymentBanner \/>)?<App \/><\/AuthProvider>/)
 })
 
 test('one shared request layer attaches the access token', () => {

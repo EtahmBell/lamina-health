@@ -140,4 +140,15 @@ Rules that keep the modes separate:
   records to models.
 - Do not commit `.env` files, credentials, local databases, uploaded documents, generated artifacts,
   or sensitive data.
+- Dependencies: after changing `pyproject.toml`, run `uv lock`; after changing `frontend/package.json`,
+  run `npm install` in `frontend/`. Commit the updated lockfile (`uv.lock`, `frontend/package-lock.json`)
+  with the manifest — Railway builds from the lockfile and fails on a stale one. The gates run
+  `python -m scripts.check_lockfiles --with-tools` (and `tests/test_lockfiles.py`), which fail when a
+  lockfile is out of sync.
+- The hosted synthetic deployment (Railway) runs `LAMINA_PROFILE=demo`: synthetic data only, never
+  PHI; it refuses test sign-in, MFA exemptions, debug flags and `LAMINA_MODEL_PATIENT_DATA_APPROVED`,
+  and shows a "Synthetic demo · no PHI" banner. See `docs/RAILWAY_SYNTHETIC_DEPLOYMENT.md`.
+- The `anthropic` model provider (direct Anthropic API) is dev-only: never approved for patient data;
+  the demo and production profiles refuse it. Provider comparisons use the synthetic eval
+  (`python -m scripts.provider_eval`, `docs/PROVIDER_EVAL.md`), never real referrals.
 - The sibling `../lamina-og/` tree is read-only reference material. Never modify it.

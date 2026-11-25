@@ -111,11 +111,16 @@ def create_app(mode: str | None = None) -> FastAPI:
         for router in DEMO_ROUTERS:
             application.include_router(router)
 
+    from backend.profiles import is_synthetic_deployment
+
+    # The hosted synthetic deployment (LAMINA_PROFILE=demo) says so, for the "no PHI" banner.
+    synthetic_deployment = {"deployment": "synthetic"} if is_synthetic_deployment() else {}
+
     @application.get("/health")
     def health() -> dict[str, str]:
         if resolved == "demo":
-            return {"status": "ok", "data_mode": "synthetic"}  # Unchanged demo contract.
-        return {"status": "ok", "data_mode": "pilot", "product_mode": "pilot"}
+            return {"status": "ok", "data_mode": "synthetic", **synthetic_deployment}  # Unchanged demo contract.
+        return {"status": "ok", "data_mode": "pilot", "product_mode": "pilot", **synthetic_deployment}
 
     return application
 

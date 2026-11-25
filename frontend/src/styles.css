@@ -3642,3 +3642,6 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
 .pilot-idle-setting label { display: grid; gap: 4px; font-size: .72rem; }
 .pilot-idle-setting select { min-width: 180px; }
 .pilot-idle-setting p { flex-basis: 100%; margin: 0; }
+
+/* Hosted synthetic deployment (LAMINA_PROFILE=demo): always visible, every width. */
+.synthetic-deployment-banner { position: sticky; top: 0; z-index: 1000; padding: 6px 16px; text-align: center; font-size: .72rem; font-weight: 600; color: var(--text-primary, #1f2421); background: var(--surface-warning, #f6ead2); border-bottom: 1px solid var(--border, #e2ddd3); }

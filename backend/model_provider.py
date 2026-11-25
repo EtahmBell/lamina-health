@@ -6,12 +6,17 @@ Providers:
 * `bedrock`  -- Anthropic Claude via Amazon Bedrock (Converse API; structured output through a
                 single forced tool whose input schema is the requested JSON schema). Bedrock is
                 HIPAA-eligible under the AWS BAA. Tested with mocks only.
+* `anthropic`-- DEV ONLY: Claude through the direct Anthropic API (ANTHROPIC_API_KEY,
+                LAMINA_ANTHROPIC_MODEL, LAMINA_ANTHROPIC_EFFORT). No BAA: it is never approved for
+                patient data, whatever any flag says; the demo and production profiles refuse it
+                (backend/profiles.py) and `guarded_call` refuses it outside dev/e2e as well.
 * `disabled` -- no model; every caller falls back to its deterministic path.
 
 Patient data. `LAMINA_MODEL_PATIENT_DATA_APPROVED=true` declares that the configured provider is
 covered by a signed BAA for patient data (ePHI). Every call says whether it carries patient data;
 in the production profile such a call refuses to run unless that flag is set (and production
-refuses to start with an unapproved provider at all -- backend/profiles.py).
+refuses to start with an unapproved provider at all -- backend/profiles.py). In the demo profile (the
+hosted synthetic deployment) the flag is refused at startup and ignored here: nothing is approved.
 
 Settings: LAMINA_MODEL_PROVIDER = openai | bedrock | disabled. When unset, the previous behaviour
 stands: `openai` if LAMINA_OPENAI_ENABLED is true, else `disabled`. OpenAI: OPENAI_API_KEY,
@@ -29,7 +34,8 @@ from typing import Any, Protocol
 from backend.config import environment
 
 logger = logging.getLogger(__name__)
-PROVIDERS = ("openai", "bedrock", "disabled")
+PROVIDERS = ("openai", "bedrock", "anthropic", "disabled")
+DEV_ONLY_PROVIDERS = frozenset({"anthropic"})
 
 
 class PatientDataNotApprovedError(RuntimeError):
@@ -53,8 +59,21 @@ def _flag(name: str, default: str = "false") -> bool:
     return environment.get(name, default).strip().casefold() in {"1", "true", "yes", "on"}
 
 
+def _profile() -> str:
+    from backend.profiles import current_profile
+
+    return current_profile()
+
+
 def patient_data_approved() -> bool:
-    return _flag("LAMINA_MODEL_PATIENT_DATA_APPROVED")
+    """The operator's BAA declaration -- never honoured on the hosted synthetic deployment."""
+    return _flag("LAMINA_MODEL_PATIENT_DATA_APPROVED") and _profile() != "demo"
+
+
+def _approval(explicit: bool | None) -> bool:
+    if _profile() == "demo":
+        return False
+    return patient_data_approved() if explicit is None else explicit
 
 
 def configured_provider_name() -> str:
@@ -63,7 +82,7 @@ def configured_provider_name() -> str:
         enabled = environment.get("LAMINA_OPENAI_ENABLED", environment.get("LAMINA_RESPONSES_ENABLED", "false"))
         return "openai" if enabled.strip().casefold() in {"1", "true", "yes", "on"} else "disabled"
     if raw not in PROVIDERS:
-        raise RuntimeError("LAMINA_MODEL_PROVIDER must be openai, bedrock or disabled")
+        raise RuntimeError("LAMINA_MODEL_PROVIDER must be openai, bedrock, anthropic (dev only) or disabled")
     return raw
 
 
@@ -93,7 +112,7 @@ class OpenAIProvider:
 
     @property
     def approved_for_patient_data(self) -> bool:
-        return patient_data_approved() if self._approved is None else self._approved
+        return _approval(self._approved)
 
     def _client(self) -> Any:
         if self._sdk_client is None:
@@ -115,6 +134,9 @@ class OpenAIProvider:
             store=False,
             text={"format": {"type": "json_schema", "name": schema_name, "strict": True, "schema": schema}},
         )
+        usage = getattr(response, "usage", None)
+        self.last_usage = {"input_tokens": getattr(usage, "input_tokens", None),
+                           "output_tokens": getattr(usage, "output_tokens", None)} if usage is not None else None
         output_text = getattr(response, "output_text", None)
         if output_text is None and isinstance(response, dict):
             output_text = response.get("output_text")
@@ -143,7 +165,7 @@ class BedrockClaudeProvider:
 
     @property
     def approved_for_patient_data(self) -> bool:
-        return patient_data_approved() if self._approved is None else self._approved
+        return _approval(self._approved)
 
     def _client(self) -> Any:
         if self._client_instance is None:
@@ -168,11 +190,83 @@ class BedrockClaudeProvider:
                                                 "inputSchema": {"json": schema}}}],
                         "toolChoice": {"tool": {"name": tool}}},
         )
+        usage = response.get("usage") or {}
+        self.last_usage = {"input_tokens": usage.get("inputTokens"), "output_tokens": usage.get("outputTokens")}
         for block in response.get("output", {}).get("message", {}).get("content", []):
             use = block.get("toolUse")
             if use and use.get("name") == tool and isinstance(use.get("input"), dict):
                 return use["input"]
         raise TypeError("No structured response output")
+
+
+class AnthropicProvider:
+    """DEV ONLY. Claude through the direct Anthropic API, structured output via
+    `output_config.format` (JSON schema). Never approved for patient data: there is no BAA."""
+
+    name = "anthropic"
+    approved_for_patient_data = False  # never, in any profile
+
+    def __init__(self, client: Any | None = None, *, model: str | None = None, effort: str | None = None,
+                 api_key: str | None = None, max_tokens: int = 16000) -> None:
+        self.model = (model if model is not None else environment.get("LAMINA_ANTHROPIC_MODEL", "claude-opus-5-5")).strip()
+        self.effort = (effort if effort is not None else environment.get("LAMINA_ANTHROPIC_EFFORT", "low")).strip() or None
+        self._api_key = api_key if api_key is not None else environment.get("ANTHROPIC_API_KEY", "")
+        self._client_instance = client
+        self.max_tokens = max_tokens
+        self.last_usage: dict | None = None
+
+    @property
+    def available(self) -> bool:
+        return bool(self.model and (self._api_key or self._client_instance is not None))
+
+    def _client(self) -> Any:
+        if self._client_instance is None:
+            import anthropic  # dev extra only; the deployment build never installs it
+
+            self._client_instance = anthropic.Anthropic(api_key=self._api_key, timeout=60.0, max_retries=1)
+        return self._client_instance
+
+    def structured(self, instructions: str, payload: dict[str, Any], schema: dict[str, Any], *, use_case: str,
+                   schema_name: str, contains_patient_data: bool, web_search: bool = False) -> dict:
+        if web_search:
+            raise RuntimeError("Web search isn't used with the dev Anthropic provider")
+        output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": anthropic_schema(schema)}}
+        if self.effort:
+            output_config["effort"] = self.effort
+        response = self._client().messages.create(
+            model=self.model, max_tokens=self.max_tokens, system=instructions,
+            messages=[{"role": "user", "content": json.dumps(payload)}], output_config=output_config,
+        )
+        usage = getattr(response, "usage", None)
+        self.last_usage = {"input_tokens": getattr(usage, "input_tokens", None),
+                           "output_tokens": getattr(usage, "output_tokens", None)} if usage is not None else None
+        if getattr(response, "stop_reason", None) in {"refusal", "max_tokens"}:
+            raise TypeError(f"No structured response output ({response.stop_reason})")
+        text = next((block.text for block in response.content if getattr(block, "type", "") == "text"), None)
+        if not isinstance(text, str):
+            raise TypeError("No structured response output")
+        return json.loads(text)
+
+
+def anthropic_schema(schema: Any) -> Any:
+    """The same JSON schema in the subset Anthropic structured outputs accept: a nullable
+    `type: [T, "null"]` becomes `anyOf`, and array-size limits other than minItems 0/1 are dropped
+    (the callers' validators still enforce them)."""
+    if isinstance(schema, list):
+        return [anthropic_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {key: anthropic_schema(value) for key, value in schema.items() if key != "maxItems"}
+    if isinstance(out.get("minItems"), int) and out["minItems"] > 1:
+        out.pop("minItems")
+    kind = out.get("type")
+    if isinstance(kind, list) and "null" in kind and len(kind) == 2:
+        base = next(item for item in kind if item != "null")
+        branch: dict[str, Any] = {"type": base, **{k: v for k, v in out.items() if k not in {"type", "enum"}}}
+        if "enum" in out:
+            branch["enum"] = [value for value in out["enum"] if value is not None]
+        return {"anyOf": [branch, {"type": "null"}]}
+    return out
 
 
 def provider_from_environment() -> ModelProvider:
@@ -181,6 +275,8 @@ def provider_from_environment() -> ModelProvider:
         return OpenAIProvider()
     if name == "bedrock":
         return BedrockClaudeProvider()
+    if name == "anthropic":
+        return AnthropicProvider()
     return DisabledProvider()
 
 
@@ -192,6 +288,8 @@ def guarded_call(provider: ModelProvider, instructions: str, payload: dict[str, 
 
     if not provider.available:
         raise RuntimeError("AI service is not configured")
+    if provider.name in DEV_ONLY_PROVIDERS and current_profile() not in {"dev", "e2e"}:
+        raise PatientDataNotApprovedError("This model provider is for local development only")
     if contains_patient_data and current_profile() == "production" and not provider.approved_for_patient_data:
         logger.warning("lamina_ai_call", extra={"use_case": use_case, "success": False, "provider": provider.name,
                                                 "refused": "patient_data_not_approved"})

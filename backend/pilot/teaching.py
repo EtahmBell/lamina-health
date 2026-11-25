@@ -43,7 +43,10 @@ _WINDOW = re.compile(
     r"\b(?:within|in)\s+(?:the\s+)?(?:last\s+|past\s+|prior\s+)?" + _AMOUNT + r"\s+(day|week|month|year)s?"
     r"|\b(?:from|in)\s+the\s+(?:last|past)\s+" + _AMOUNT + r"\s+(day|week|month|year)s?"
     r"|\b(?:no\s+older\s+than|less\s+than|under|not\s+older\s+than)\s+" + _AMOUNT + r"\s+(day|week|month|year)s?(?:\s+old)?"
-    r"|\b(?:last|past)\s+" + _AMOUNT + r"\s+(day|week|month|year)s?",
+    r"|\b(?:last|past)\s+" + _AMOUNT + r"\s+(day|week|month|year)s?"
+    # "from the past year", "within the last month": one unit. It needs within/from/in, so a bare
+    # "last week" elsewhere in a sentence is not a window.
+    r"|\b(?:within|from|in)\s+the\s+(?:last|past)\s+(day|week|month|year)\b",
     re.IGNORECASE,
 )
 
@@ -56,7 +59,10 @@ def _freshness(sentence: str) -> int | None:
     match = _window_match(sentence)
     if not match:
         return None
-    amount, unit = next((match.group(i), match.group(i + 1)) for i in range(1, 9, 2) if match.group(i))
+    if match.group(9):
+        amount, unit = "1", match.group(9)
+    else:
+        amount, unit = next((match.group(i), match.group(i + 1)) for i in range(1, 9, 2) if match.group(i))
     number = int(amount) if amount.isdigit() else _NUMBER_WORDS[amount.lower()]
     if unit.lower() == "month" and number % 12 == 0:
         return number // 12 * 365  # "12 months" is a year, not 360 days
@@ -289,8 +295,25 @@ _INSTRUCTIONS = (
     "Convert a specialist's instruction about how they want to receive REFERRALS into a structured "
     "intake rule. Only extract what the text explicitly says; never add items, criteria, or timeframes "
     "that are not stated. referral_type must be one of the provided existing types when one applies; "
-    "otherwise null with a single short clarification_question. This is intake triage, not clinical advice."
+    "otherwise null with a single short clarification_question. This is intake triage, not clinical advice. "
+    # Provider eval (docs/PROVIDER_EVAL.md): labels must survive the grounding check and stay clean.
+    "Write every label and phrase in the physician's own words (do not expand abbreviations or add "
+    "synonyms, e.g. keep 'A1c'). A label names only the item: never put a time window, condition or "
+    "exception in it. Conditions and exceptions ('unless ...', 'except ...') are never items. Something "
+    "the physician says they don't need is never an item. Give each item only the time window stated "
+    "for that item (or one shared window stated for all of them), in days (3 months = 90, a year = 365); "
+    "otherwise null. `required`: items the physician needs, requires, wants or asks to be sent before "
+    "review (\"I need X\" is required). `helpful`: only items they call helpful, nice to have, optional, "
+    "or wanted if available. `good_fit`: only case features they say they are a good fit for or "
+    "interested in -- never the referral type itself. `outside_scope`: cases they say they don't see, "
+    "take or accept."
 )
+
+
+def stated_windows(text: str) -> set[int]:
+    """Every recency window the text states, in days ("an A1c within 3 months and a lipid panel
+    from the past year" -> {90, 365}). A model's freshness_days must be one of these."""
+    return {days for match in _WINDOW.finditer(text) if (days := _freshness(match.group(0))) is not None}
 
 
 def _grounded(phrase: str, source_tokens: set[str]) -> bool:
@@ -313,8 +336,8 @@ def validate_model_interpretation(result: dict, text: str, known_types: list[str
         content = {
             "good_fit": [p.strip() for p in result["good_fit"]], "outside_scope": [p.strip() for p in result["outside_scope"]],
             "required": [{"key": "_".join(sorted(_tokens(i["label"])))[:80], "label": i["label"].strip(), "required": True,
-                          "freshness_days": i["freshness_days"] if i["freshness_days"] and str(i["freshness_days"]) in text or
-                          (i["freshness_days"] and _freshness(text) == i["freshness_days"]) else None}
+                          "freshness_days": i["freshness_days"] if i["freshness_days"] and (
+                              str(i["freshness_days"]) in text or i["freshness_days"] in stated_windows(text)) else None}
                          for i in result["required"]],
             "helpful": [{"key": "_".join(sorted(_tokens(p)))[:80], "label": p.strip(), "required": False, "freshness_days": None}
                         for p in result["helpful"]],
