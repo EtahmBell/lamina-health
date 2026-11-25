@@ -1,8 +1,9 @@
 # Pilot end-to-end tests (Playwright)
 
 DEV ONLY. Synthetic data only. The harness drives the real pilot app (Vite) and the real pilot API
-(the DEV launcher `scripts/dev_pilot_server.py`, fictional NPPES) against a dedicated database,
-`data/e2e/pilot-e2e.sqlite`. It never touches the walkthrough database, the database in `.env`, or
+(the DEV launcher `scripts/dev_pilot_server.py`, fictional NPPES) against a dedicated Postgres
+database, `lamina_e2e`, on the local dev container (run 2; dropped and re-migrated with Alembic at
+every run). It never touches the walkthrough database, the database in `.env`, or
 any production system. It uses the installed Google Chrome (`channel: 'chrome'`), so no browser
 download is needed.
 
@@ -30,6 +31,18 @@ Specs run one at a time (one shared seeded database) in file order. Each scenari
 seeded referral, so specs don't depend on each other.
 
 ## One-time setup
+
+0. **Local Postgres.** Install Docker Desktop, put a local-only password in the gitignored `.env`,
+   and start the container (loopback only, port 5433):
+
+   ```
+   LAMINA_DEV_PG_PASSWORD=<local password>
+   LAMINA_TEST_DATABASE_URL=postgresql://lamina:<same password>@127.0.0.1:5433/lamina_dev
+   ```
+
+   `docker compose -f docker-compose.dev.yml up -d`. The harness derives the `lamina_e2e` URL from
+   `LAMINA_TEST_DATABASE_URL` and refuses anything not on loopback. The backend tests use the same
+   server (a fresh database per test, cloned from a migrated template).
 
 1. **Declare the DEV Supabase project.** Create `frontend/e2e/.env.e2e` (gitignored):
 
@@ -90,7 +103,7 @@ Deterministic, fictional, marked "E2E", written through the real pilot API in-pr
   still initializing, two closed referrals.
 
 The seed refuses to run unless `LAMINA_E2E=1`, pilot mode, fictional NPPES, and the e2e database
-path are all set. Ids and the sender link land in `frontend/e2e/.state/seed.json` (gitignored).
+(`lamina_e2e` on loopback) are all set. Ids and the sender link land in `frontend/e2e/.state/seed.json` (gitignored).
 Dev-only scenario switches used by specs: `python -m scripts.e2e_seed step
 join-second-physician | return-second-physician | initializing-second-physician |
 shadow-second-physician`, and read-only `inspect signoff|resolutions <referral id>`.

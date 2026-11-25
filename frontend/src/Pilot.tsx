@@ -25,7 +25,7 @@ import {
   getAssistant, sendAssistantMessage, type AgentCardExecute, type AgentReplyBody,
 } from './pilotApi.ts'
 import {
-  accountIdentity, actorText, canUse, conflictText, historyHighlights, changeText, correctionText, countWord, emptyReferralForm, eventLabel, itemLabel, FIT_LABELS, isClosed, physicianLabel,
+  accountIdentity, actorText, canUse, conflictText, conflictWording, historyHighlights, changeText, correctionText, countWord, emptyReferralForm, eventLabel, itemLabel, FIT_LABELS, isClosed, physicianLabel,
   MODALITY_LABELS, NEXT_STEP_LABELS, patientInitials, patientWorkSections, pilotErrorCopy, pilotPaths, PRIORITY_LABELS, proposalLines,
   receivedReferralWorkItem, REQUIREMENT_STATE_LABELS, referralFormErrors, referralPayload, resolveAgentTab,
   resolvePilotRoute, resolveSetupStage, itemKindLabel, layerNote, representationItemText, statementText, STATUS_LABELS,
@@ -218,8 +218,9 @@ function PilotShell({ status, navigate, section, agentDock = false, children }: 
   const me = accountIdentity(status, user?.email)
   const physician = status.role === 'physician'
   // Session safety: idle sign-out on this device, with a warning first.
-  const onIdle = useCallback(() => { void signOut().then(() => navigate(signInWithReason('idle'))) }, [signOut, navigate])
-  const idle = useIdleSignOut(onIdle)
+  const idleMinutes = status.practice?.idle_timeout_minutes ?? 30
+  const onIdle = useCallback(() => { void signOut().then(() => navigate(signInWithReason('idle', idleMinutes))) }, [signOut, navigate, idleMinutes])
+  const idle = useIdleSignOut(onIdle, idleMinutes)
   const account = <AccountMenu initials={me.initials} name={me.name} items={[
     { label: 'Profile & practice', onSelect: () => navigate(pilotPaths.practice) },
     ...(physician ? [{ label: 'Public physician profile', onSelect: () => navigate(pilotPaths.publicProfile) }, { label: 'Pilot metrics', onSelect: () => navigate(pilotPaths.metrics) }] : []),
@@ -862,10 +863,10 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
           {!closed && changes.length > 0 && <p className="pilot-decision pilot-change-note" role="status">Changed since you last looked: {changes.map(changeText).join('; ')}</p>}
           {/* An earlier correction that a newer rule disagrees with: kept until the physician chooses. */}
           {!closed && (detail.correction_conflicts ?? []).map((conflict) => <div className="pilot-conflict" role="region" aria-label="Correction differs from a newer rule" key={`${conflict.field}-${conflict.rule_version}`}>
-            <p className="pilot-conflict-title"><span aria-hidden="true">!</span> {physician ? 'Your correction differs from your newer rule' : `${doctor}’s correction differs from ${doctor}’s newer rule`}</p>
+            <p className="pilot-conflict-title"><span aria-hidden="true">!</span> {conflictWording(conflict, physician, doctor).title}</p>
             <p>{conflictText(conflict)}. The correction still applies.</p>
             {physician && <div className="pilot-actions">
-              <button className="button-secondary" disabled={busy} onClick={() => void act(() => resolveCorrectionConflict(referral.id, conflict.field, 'keep_correction'))}>Keep my correction</button>
+              <button className="button-secondary" disabled={busy} onClick={() => void act(() => resolveCorrectionConflict(referral.id, conflict.field, 'keep_correction'))}>{conflictWording(conflict, physician, doctor).keep}</button>
               <button className="button-secondary" disabled={busy} onClick={() => void act(() => resolveCorrectionConflict(referral.id, conflict.field, 'apply_rule'))}>Apply the rule</button>
             </div>}
           </div>)}
@@ -935,8 +936,8 @@ function ReferralDetailPage({ id, status, navigate }: { id: string; status: Pilo
 
           {physician && canUse(actions, 'accept') && <div className="pilot-disposition">
             <h4>Your decision</h4>
-            <p className="muted-note">Accept, redirect or decline signs off this triage{corrections.length ? ', including your corrections' : ''}. There’s no separate approval.</p>
-            {conflictsOpen && <p className="pilot-decision-caution">Deciding now uses your correction — it still applies until you keep it or apply the rule above.</p>}
+            <p className="muted-note">Accept, redirect or decline signs off this triage{corrections.length ? ', including its corrections' : ''}. There’s no separate approval.</p>
+            {conflictsOpen && <p className="pilot-decision-caution">{conflictWording((detail.correction_conflicts ?? [])[0], physician, doctor).caution}</p>}
             {missingItems.length > 0 && <p className="pilot-decision-caution">Still missing: {missingItems.join(', ')}. You can decide now; accepting doesn’t request it.</p>}
             <div className="pilot-actions pilot-decision-actions">
               <button className={decisionLeads ? 'button-primary' : 'button-secondary'} disabled={busy} onClick={() => openPanel('accept')}>Accept referral</button>
@@ -1177,6 +1178,6 @@ function ProfilePage({ status, reload, navigate }: { status: PilotStatus; reload
       </div>}
     </section>}
 
-    <SecuritySection status={status} navigate={navigate} />
+    <SecuritySection status={status} navigate={navigate} onSettingsChanged={reload} />
   </main>
 }

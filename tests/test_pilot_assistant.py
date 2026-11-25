@@ -7,7 +7,6 @@ fake client exercises the model path (plan + compose), failures, and prompt inje
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import UTC, datetime
 
 import pytest
@@ -32,7 +31,7 @@ class Scripted:
     def __init__(self, plans: list[dict] | None = None, compose: dict | None = None, fail: bool = False) -> None:
         self.plans, self.compose, self.fail, self.calls = list(plans or []), compose, fail, []
 
-    def structured(self, instructions, payload, schema, *, use_case, schema_name, web_search=False):
+    def structured(self, instructions, payload, schema, *, use_case, schema_name, web_search=False, contains_patient_data=False):
         self.calls.append((use_case, payload))
         if self.fail:
             raise RuntimeError("AI service is temporarily unavailable")
@@ -68,7 +67,7 @@ def say(p: Pilot, text: str, user: str = "user-a", **extra) -> dict:
 
 
 def _rule_count(p: Pilot) -> int:
-    with sqlite3.connect(p.store.path) as db:
+    with p.store._connect() as db:
         return db.execute("SELECT COUNT(*) FROM physician_referral_preferences").fetchone()[0]
 
 
@@ -172,7 +171,7 @@ def test_staff_cannot_teach_but_can_chat_and_prepare(agent: Pilot) -> None:
     # Staff teaching becomes a pending suggestion for the physician, never a confirmed rule.
     assert suggested["intent"] == "teach" and "as a suggestion. It doesn’t change triage" in suggested["reply"]["paragraphs"][0]
     assert _rule_count(agent) == before + 1
-    with sqlite3.connect(agent.store.path) as db:
+    with agent.store._connect() as db:
         statuses = [row[0] for row in db.execute(
             "SELECT operational_status FROM physician_referral_preferences ORDER BY rowid DESC LIMIT 1")]
     assert statuses == ["inferred"]
@@ -191,7 +190,7 @@ def test_information_request_is_prepared_not_created_or_sent(agent: Pilot) -> No
     assert card["execute"]["items"] == ["Recent HbA1c", "Renal function"]
     detail = agent.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
     assert detail["information_requests"] == [] and detail["referral"]["status"] != "needs_information"
-    with sqlite3.connect(agent.store.path) as db:
+    with agent.store._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM outbound_messages").fetchone()[0] == 0
     # The human click goes through the existing endpoint, which still only makes a DRAFT.
     created = agent.post(f"/api/me/practice/referrals/{rid}/request-information", "user-a", {"items": card["execute"]["items"]})
@@ -303,7 +302,7 @@ def test_prompt_injection_in_documents_never_reaches_the_planner_or_acts(agent: 
     assert "ignore prior instructions" not in json.dumps({k: v for k, v in compose_payload["facts"]["triage"].items() if k != "untrusted_document_text"})
     detail = agent.get(f"/api/me/practice/referrals/{rid}", "user-a").json()
     assert detail["referral"]["status"] not in {"accepted", "declined", "redirected"}
-    with sqlite3.connect(agent.store.path) as db:
+    with agent.store._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM outbound_messages").fetchone()[0] == 0
 
 
@@ -344,7 +343,7 @@ def test_turns_are_audited_without_message_text_and_history_can_be_cleared(agent
 
 def test_history_respects_retention(agent: Pilot, monkeypatch: pytest.MonkeyPatch) -> None:
     say(agent, "Hello")
-    with sqlite3.connect(agent.store.path) as db:
+    with agent.store._connect() as db:
         db.execute("UPDATE agent_messages SET created_at = '2020-01-01T00:00:00+00:00'")
     monkeypatch.setenv("LAMINA_AGENT_HISTORY_DAYS", "30")
     assert agent.get("/api/me/practice/assistant", "user-a").json()["messages"] == []

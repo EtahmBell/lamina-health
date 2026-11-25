@@ -21,7 +21,7 @@ from .attribution import ActorDirectory
 from .documents import (
     DocumentRejectedError,
     DocumentStorage,
-    LocalDocumentStorage,
+    document_storage_from_environment,
     extract_pages,
     safe_filename,
     sha256_hex,
@@ -141,7 +141,7 @@ class IntakeService:
     @property
     def storage(self) -> DocumentStorage:
         if self._storage is None:
-            self._storage = LocalDocumentStorage()
+            self._storage = document_storage_from_environment()
         return self._storage
 
     def _resolved_extractor(self) -> EvidenceExtractor | None:
@@ -596,7 +596,16 @@ class IntakeService:
                 "standing": referral_standing(
                     status=referral.status, recommendation=recommendation.model_dump(mode="json") if recommendation else None,
                     next_step=effective.get("next_step"), requests=request_rows.get(referral.id, []), voice=voice),
-                "has_conflict": bool(self._correction_conflicts(referral, recommendation)),
+                # Who made each conflicting correction, and whose rule disagrees, so Home can show each
+                # physician their own (and name the physician for someone else's practice-wide one).
+                "conflicts": (conflicts := [
+                    {"corrected_by": conflict["corrected_by"], "corrected_by_name": directory.describe(conflict["corrected_by"])["name"]
+                     if conflict["corrected_by"] else None, "rule_by": conflict["rule_by"],
+                     "rule_layer": (self.store.fetch_one("SELECT layer FROM physician_referral_preferences WHERE id = ?",
+                                                         (conflict["rule_id"],)) or {}).get("layer") or "practice",
+                     "referral_type": conflict["referral_type"]}
+                    for conflict in self._correction_conflicts(referral, recommendation)]),
+                "has_conflict": bool(conflicts),
                 "office_notified": referral.id in notified,
             })
         return items
@@ -720,6 +729,21 @@ class IntakeService:
             referral_id=row["referral_id"], metadata={"document_id": document_id},
         )
         return row, self.storage.get(row["storage_key"])
+
+    def document_link(self, context: PracticeContext, document_id: str, expires_seconds: int = 60) -> dict | None:
+        """A short-lived signed download link (S3) for a member of THIS practice; None when the
+        storage can't sign (local: use the streamed download). Recorded like a view."""
+        row = self.store.document_row(context.practice_id, document_id)
+        if not row:
+            raise PilotError("document_not_found", "Document not found", 404)
+        url = self.storage.signed_url(row["storage_key"], row["filename"], row["content_type"], expires_seconds)
+        if url is None:
+            return None
+        self.store.append_event(
+            "document_link_issued", actor=context.actor, practice_id=context.practice_id,
+            referral_id=row["referral_id"], metadata={"document_id": document_id, "expires_seconds": expires_seconds},
+        )
+        return {"url": url, "expires_in": expires_seconds}
 
     def _documents_text(self, practice_id: str, referral_id: str) -> list[DocumentText]:
         return [

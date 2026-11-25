@@ -10,8 +10,9 @@ test('admin physician confirms; non-admin physician and staff cannot', async ({ 
     const second = await as('second_physician')
     await second.goto('/me/agent?tab=teach')
     await expect(second.locator(proposal)).toContainText('calcium level')
-    await second.locator(proposal).getByRole('button', { name: 'Confirm', exact: true }).click()
-    await expect(second.locator(proposal).getByRole('alert')).toContainText('Only an admin physician can confirm or change practice-wide statements')
+    // Run 2: a non-admin physician sees it read-only -- no Confirm button that would only fail.
+    await expect(second.locator(proposal)).toContainText('an admin physician confirms practice-wide statements')
+    await expect(second.locator(proposal).getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0)
 
     const staff = await as('staff')
     await staff.goto('/me/agent?tab=teach')

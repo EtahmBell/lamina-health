@@ -80,9 +80,24 @@ def network_roster_scope(workspace_id: str, persona_id: str = "lucy") -> str:
 class WorkflowStore:
     LEGACY_WORKSPACE_ID = "legacy-local-workspace"
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None, *, url: str | None = None) -> None:
+        """SQLite (the demo, dev fast path) or Postgres (the pilot, run 2): Postgres when a URL is
+        given, or when no path is given in pilot mode and LAMINA_DATABASE_URL is a Postgres URL.
+        On Postgres the schema belongs to Alembic: nothing is created here; the database must be
+        at the migration head."""
+        from backend.database import assert_at_migration_head, database_url, is_postgres_url
+
+        if url is None and path is None and environment.get("LAMINA_PRODUCT_MODE", "").strip().casefold() == "pilot":
+            url = database_url() or None
+        self.url = url if is_postgres_url(url) else None
+        if self.url:
+            self.path = None
+            self.key = self.url
+            assert_at_migration_head(self.url)
+            return
         default = Path(__file__).resolve().parents[1] / "data" / "workflow.sqlite"
         self.path = path or Path(environment.get("LAMINA_WORKFLOW_DATABASE", str(default)))
+        self.key = str(Path(self.path).resolve())
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.executescript(
@@ -443,6 +458,10 @@ class WorkflowStore:
                 db.execute("ALTER TABLE patient_activity ADD COLUMN last_started TEXT")
 
     def _connect(self) -> sqlite3.Connection:
+        if self.url:
+            from backend.database import connect
+
+            return connect(self.url)  # type: ignore[return-value]
         db = sqlite3.connect(self.path, timeout=5)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout=5000")

@@ -587,9 +587,10 @@ class ActivationService:
 
     # ---------------------------------------------------------------- gating
 
-    def learning_enabled(self, practice_id: str) -> tuple[bool, timedelta]:
-        """Backend gate for learning questions: off → none are asked."""
-        owner = self.representation.referral_physician(practice_id)
+    def learning_enabled(self, practice_id: str, owner_scope_id: str | None = None) -> tuple[bool, timedelta]:
+        """Backend gate for learning questions: off → none are asked. Each physician's own setting
+        decides for their questions; practice-wide ones follow the practice's physician (if one)."""
+        owner = owner_scope_id or self.representation.referral_physician(practice_id)
         if not owner:
             return True, timedelta(hours=24)
         state = self.state(practice_id, owner, "learning_questions")

@@ -578,6 +578,7 @@ class ResponsesEvidenceExtractor:
             _EXTRACTION_SCHEMA,
             use_case="pilot_referral_evidence_extraction",
             schema_name="referral_evidence",
+            contains_patient_data=True,  # referral document text
         )
         return [
             EvidenceProposal(

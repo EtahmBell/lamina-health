@@ -588,6 +588,12 @@ class PilotStore:
         # (owner scopes, claims, canonical rule store) and their migrations exist.
         self.workflow = workflow or (WorkflowStore(path) if path else workflow_store)
         self.path = self.workflow.path
+        # Postgres (run 2): the schema and every guarantee live in Alembic migrations
+        # (backend/migrations); the workflow store already checked the database is at head.
+        self.url = getattr(self.workflow, "url", None)
+        self.key = getattr(self.workflow, "key", str(self.path))
+        if self.url:
+            return
         with self._connect() as db:
             db.executescript(_SCHEMA)
             db.executescript(_SCHEMA_V2)
@@ -624,6 +630,10 @@ class PilotStore:
             self._add_column(db, "agent_item_flags", "resolution_note", "TEXT")
             self._rebuild_invitations(db)
             db.executescript(_SCHEMA_V8)
+            # Run 2: whose learning question this is (NULL = practice-wide, for an admin).
+            self._add_column(db, "learning_questions", "owner_scope_id", "TEXT")
+            # Run 2: per-practice idle sign-out (minutes; 15-60, admins change it, audited).
+            self._add_column(db, "practices", "idle_timeout_minutes", "INTEGER NOT NULL DEFAULT 30")
 
     @staticmethod
     def _rebuild_invitations(db: sqlite3.Connection) -> None:
@@ -726,6 +736,10 @@ class PilotStore:
             )
 
     def _connect(self) -> sqlite3.Connection:
+        if self.url:
+            from backend.database import connect
+
+            return connect(self.url)  # type: ignore[return-value]  # same interface, Postgres
         db = sqlite3.connect(self.path, timeout=5)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys = ON")
@@ -1447,7 +1461,7 @@ _stores: dict[str, PilotStore] = {}
 
 def pilot_store_for(workflow: WorkflowStore) -> PilotStore:
     """One PilotStore per workflow database file."""
-    key = str(Path(workflow.path).resolve())
+    key = getattr(workflow, "key", None) or str(Path(workflow.path).resolve())
     if key not in _stores:
         _stores[key] = PilotStore(workflow=workflow)
     return _stores[key]

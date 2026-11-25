@@ -369,7 +369,7 @@ def test_versions_are_append_only_and_track_confirmed_changes(pilot: Pilot) -> N
     _thyroid_referral(pilot)  # triage records the version it used
     versions = pilot.get(f"{BASE}/versions", "user-a").json()
     assert versions[0]["version"] > first["version"]
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         with pytest.raises(sqlite3.DatabaseError):
             db.execute("UPDATE representation_versions SET reason = 'x'")
         with pytest.raises(sqlite3.DatabaseError):
@@ -385,7 +385,7 @@ def test_recommendation_links_representation_version_and_decisions(pilot: Pilot)
     rec = detail["recommendation"]
     assert rec["representation_version_id"]
     assert {"scope_policy"} <= {s["kind"] for s in rec["statements_used"]}
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         stored = db.execute("SELECT representation_version_id FROM triage_recommendations WHERE id = ?", (rec["id"],)).fetchone()[0]
     assert stored == rec["representation_version_id"]
     pilot.post(f"/api/me/practice/referrals/{rid}/correct", "user-a", {"suggested_modality": "econsult"})

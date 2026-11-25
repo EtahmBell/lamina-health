@@ -1,0 +1,25 @@
+# DEV / E2E ONLY: a local Postgres for the pilot (dev, unit tests, e2e). Never used in production.
+#   LAMINA_DEV_PG_PASSWORD=<a local dev password> docker compose -f docker-compose.dev.yml up -d
+# Listens on loopback only (127.0.0.1:5433). The password comes from your environment (or your
+# gitignored .env), never from this file. Data lives in the named volume `lamina-pg-dev`.
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: lamina-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lamina
+      POSTGRES_DB: lamina_dev
+      POSTGRES_PASSWORD: ${LAMINA_DEV_PG_PASSWORD:?Set LAMINA_DEV_PG_PASSWORD (dev only)}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - lamina-pg-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lamina -d lamina_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  lamina-pg-dev:

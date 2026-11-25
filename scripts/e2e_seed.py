@@ -1,12 +1,12 @@
 """DEV/E2E ONLY: reset and seed the dedicated Playwright database with fictional data.
 
-    python -m scripts.e2e_seed reset                 # wipe data/e2e/pilot-e2e.sqlite and seed it
+    python -m scripts.e2e_seed reset                 # drop, re-migrate and seed the lamina_e2e database
     python -m scripts.e2e_seed step <name>           # scenario switch while the e2e API runs
     python -m scripts.e2e_seed inspect <what> <id>   # read-only JSON for assertions (no secrets)
 
 Refuses to run unless LAMINA_E2E=1, LAMINA_PRODUCT_MODE=pilot, LAMINA_DEV_FAKE_NPPES=true and
-LAMINA_WORKFLOW_DATABASE points at data/e2e/pilot-e2e.sqlite. Never touches the walkthrough or any
-other database. Every practice, physician, patient and referral is fictional and marked "E2E".
+LAMINA_DATABASE_URL is the `lamina_e2e` Postgres database on loopback (run 2; derived from
+LAMINA_TEST_DATABASE_URL). Never touches the walkthrough or any other database. Every practice, physician, patient and referral is fictional and marked "E2E".
 
 Seeding goes through the real pilot API in-process (FastAPI TestClient), so the data is what the
 product itself writes. Supabase user ids come from frontend/e2e/.auth/accounts.json, which the
@@ -33,7 +33,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 E2E_DIR = ROOT / "data" / "e2e"
-DB_PATH = E2E_DIR / "pilot-e2e.sqlite"
+# Run 2: the e2e database is Postgres -- a dedicated `lamina_e2e` database on the local dev
+# container (loopback only), dropped and re-migrated (Alembic) at every reset.
+E2E_DATABASE = "lamina_e2e"
+
+
+def e2e_url() -> str:
+    return os.environ.get("LAMINA_DATABASE_URL", "").strip()
 ACCOUNTS = ROOT / "frontend" / "e2e" / ".auth" / "accounts.json"
 STATE = ROOT / "frontend" / "e2e" / ".state" / "seed.json"
 OPERATOR = "e2e-seed-operator"
@@ -74,9 +80,15 @@ def guard() -> None:
         problems.append("LAMINA_PRODUCT_MODE is not pilot")
     if os.environ.get("LAMINA_DEV_FAKE_NPPES", "").casefold() != "true":
         problems.append("LAMINA_DEV_FAKE_NPPES is not true")
-    configured = Path(os.environ.get("LAMINA_WORKFLOW_DATABASE", "")).resolve()
-    if configured != DB_PATH.resolve():
-        problems.append("LAMINA_WORKFLOW_DATABASE is not the dedicated e2e database")
+    from urllib.parse import urlparse
+
+    url = urlparse(e2e_url())
+    if url.scheme not in {"postgresql", "postgres"} or url.path.strip("/") != E2E_DATABASE:
+        problems.append(f"LAMINA_DATABASE_URL is not the dedicated Postgres e2e database ({E2E_DATABASE})")
+    elif url.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        problems.append("the e2e database is not on loopback")
+    if not os.environ.get("LAMINA_TEST_DATABASE_URL"):
+        problems.append("LAMINA_TEST_DATABASE_URL (the local admin connection) is not set")
     if problems:
         sys.exit("Refusing to touch any database: " + "; ".join(problems) + ". (e2e only)")
 
@@ -116,7 +128,7 @@ class Seeder:
                 raise AuthenticationError("invalid")
 
         fake = FictionalNppes()
-        self.workflow = WorkflowStore(DB_PATH)
+        self.workflow = WorkflowStore(url=e2e_url())
         physician_onboarding.onboarding_service = PhysicianOnboardingService(
             self.workflow, NppesIdentityResolver(fake, cache_seconds=0), search_transport=fake)
         app = create_app("pilot")
@@ -160,13 +172,26 @@ class Seeder:
         return self.call("PUT", f"/api/me/practice/rules/{rid}", "physician", {**base, **changes})
 
 
+def _recreate_e2e_database() -> None:
+    """Drop and recreate `lamina_e2e`, then migrate it to the Alembic head (the real migrations)."""
+    import subprocess
+
+    import psycopg
+
+    with psycopg.connect(os.environ["LAMINA_TEST_DATABASE_URL"], autocommit=True) as admin:
+        admin.execute(f'DROP DATABASE IF EXISTS "{E2E_DATABASE}" WITH (FORCE)')
+        admin.execute(f'CREATE DATABASE "{E2E_DATABASE}"')
+    migrated = subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", str(ROOT / "backend" / "migrations" / "alembic.ini"), "upgrade", "head"],
+        cwd=ROOT, env=os.environ.copy(), capture_output=True, text=True, check=False)
+    if migrated.returncode != 0:
+        sys.exit("Migrating the e2e database failed:\n" + migrated.stderr[-1500:])
+
+
 def reset() -> None:
     guard()
     E2E_DIR.mkdir(parents=True, exist_ok=True)
-    for suffix in ("", "-wal", "-shm", "-journal"):
-        path = Path(str(DB_PATH) + suffix)
-        if path.exists():
-            path.unlink()
+    _recreate_e2e_database()
     users = _accounts()
     STATE.parent.mkdir(parents=True, exist_ok=True)
     if set(users) != set(ROLES):
@@ -280,7 +305,7 @@ def step(name: str) -> None:
     from backend.pilot.store import PilotStore
     from backend.workflow import WorkflowStore
 
-    store = PilotStore(workflow=WorkflowStore(DB_PATH))
+    store = PilotStore(workflow=WorkflowStore(url=e2e_url()))
     state = json.loads(STATE.read_text(encoding="utf-8"))
     users = _accounts()
     second = users["second_physician"]
@@ -409,7 +434,7 @@ def inspect(what: str, referral_id: str) -> None:
     from backend.pilot.store import PilotStore
     from backend.workflow import WorkflowStore
 
-    store = PilotStore(workflow=WorkflowStore(DB_PATH))
+    store = PilotStore(workflow=WorkflowStore(url=e2e_url()))
     state = json.loads(STATE.read_text(encoding="utf-8"))
     practice = state["practice_a"]["id"]
     if what == "signoff":

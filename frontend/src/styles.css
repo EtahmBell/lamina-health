@@ -3638,3 +3638,7 @@ body.agent-dock-open .physician-shell.has-agent-dock { padding-right: var(--dock
   .claim-account-chip { display: none; }
   .claim-header-actions .text-button { flex: none; }
 }
+.pilot-idle-setting { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin: 6px 0 16px; }
+.pilot-idle-setting label { display: grid; gap: 4px; font-size: .72rem; }
+.pilot-idle-setting select { min-width: 180px; }
+.pilot-idle-setting p { flex-basis: 100%; margin: 0; }

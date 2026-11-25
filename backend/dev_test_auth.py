@@ -10,7 +10,7 @@ were captured before MFA was required) -- the explicit, gated "MFA bypass".
 How it is gated (all must hold, else `install_dev_test_auth` raises and the launcher exits):
 * nothing in `backend.main` imports this module; only `scripts/dev_pilot_server.py` installs it;
 * LAMINA_E2E=1 and LAMINA_E2E_TEST_AUTH=1, LAMINA_PRODUCT_MODE=pilot, LAMINA_DEV_FAKE_NPPES=true;
-* LAMINA_WORKFLOW_DATABASE is the dedicated e2e database (data/e2e/pilot-e2e.sqlite);
+* LAMINA_DATABASE_URL is the dedicated e2e database (Postgres `lamina_e2e` on loopback);
 * no production marker in the environment (LAMINA_ENVIRONMENT=production, RAILWAY_*, VERCEL, ...);
 * the launcher binds to 127.0.0.1 only.
 
@@ -30,7 +30,6 @@ import struct
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from threading import RLock
 from typing import Annotated, Any
 
@@ -44,7 +43,7 @@ ISSUER = "lamina-dev-test-auth"
 KEY_ID = "lamina-dev-test"
 AUDIENCE = "authenticated"
 TOKEN_SECONDS = 3600
-E2E_DATABASE = Path("data") / "e2e" / "pilot-e2e.sqlite"
+E2E_DATABASE = "lamina_e2e"
 PRODUCTION_MARKERS = (
     "RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID", "VERCEL", "VERCEL_ENV", "RENDER",
     "FLY_APP_NAME", "K_SERVICE", "DYNO", "HEROKU_APP_ID", "AWS_EXECUTION_ENV", "ECS_CONTAINER_METADATA_URI",
@@ -63,9 +62,14 @@ def refusal_reasons(env: Mapping[str, str] | None = None) -> list[str]:
         problems.append("LAMINA_PRODUCT_MODE is not pilot")
     if env.get("LAMINA_DEV_FAKE_NPPES", "").casefold() != "true":
         problems.append("LAMINA_DEV_FAKE_NPPES is not true")
-    database = env.get("LAMINA_WORKFLOW_DATABASE", "")
-    if not database or not Path(database).as_posix().endswith(E2E_DATABASE.as_posix()):
+    # The dedicated e2e database: Postgres `lamina_e2e` on loopback (run 2).
+    from urllib.parse import urlparse
+
+    url = urlparse(env.get("LAMINA_DATABASE_URL", ""))
+    if url.path.strip("/") != E2E_DATABASE or url.hostname not in {"127.0.0.1", "localhost", "::1"}:
         problems.append("the database is not the dedicated e2e database")
+    if env.get("LAMINA_PROFILE", "").strip().casefold() == "production":
+        problems.append("LAMINA_PROFILE is production")
     for name in ("LAMINA_ENVIRONMENT", "ENVIRONMENT", "APP_ENV", "NODE_ENV"):
         if env.get(name, "").casefold() in {"production", "prod"}:
             problems.append(f"{name} says production")

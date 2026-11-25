@@ -171,7 +171,9 @@ def answer_question(snapshot: dict, question: str, referral_context: str | None 
     try:
         result = client.structured(_INSTRUCTIONS, {"snapshot": snapshot, "question": question,
                                                    "referral_context": referral_context or ""},
-                                   _SCHEMA, use_case="pilot_public_agent", schema_name="public_answer")
+                                   _SCHEMA, use_case="pilot_public_agent", schema_name="public_answer",
+                                   # A referring office may type patient details into a question.
+                                   contains_patient_data=True)
         answer = str(result.get("answer", "")).strip()
         if (not result.get("in_scope") or result.get("category") == "out_of_scope" or not answer
                 or len(answer) > 800 or _CLINICAL.search(answer) or re.search(r"https?://", answer)):

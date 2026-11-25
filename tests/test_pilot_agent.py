@@ -65,7 +65,7 @@ def test_missing_info_request_is_persistent_and_needs_approval_before_sending(pi
     assert draft["status"] == "draft" and draft["channel"] == "manual"  # contact is a fax number
     assert "{status_link}" in draft["draft_message"] and draft["approved_by"] is None
     assert detail["referral"]["status"] == "needs_information"
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM outbound_messages").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM sender_links").fetchone()[0] == 0
     duplicate = pilot.post(f"/api/me/practice/referrals/{rid}/request-information", "user-a", {})
@@ -78,7 +78,7 @@ def test_missing_info_request_is_persistent_and_needs_approval_before_sending(pi
     sent = pilot.post(f"/api/me/practice/information-requests/{draft['id']}/send", "user-a", {"mode": "send"}).json()
     assert sent["status"] == "sent" and sent["approved_by"] == "user:user-a" and sent["sent_via"] == "dev_outbox"
     assert sent["status_link"].startswith("http") and "/r/" in sent["status_link"]
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         recipient, body = db.execute("SELECT recipient, body FROM outbound_messages").fetchone()
         token_hashes = [row[0] for row in db.execute("SELECT token_hash FROM sender_links")]
     # Step 16: the token-bearing link is delivered (returned once) but never stored.
@@ -372,7 +372,7 @@ def test_publication_is_explicit_versioned_and_never_leaks_private_rules(pilot: 
                      json={**DIABETES_RULE, "good_fit": ["secret new criterion"]})
     assert "secret new criterion" not in json.dumps(pilot.client.get(f"/api/public/p/{slug}").json())
     assert pilot.get("/api/me/practice/public-profile", "user-a").json()["unpublished_changes"] is True
-    with sqlite3.connect(pilot.store.path) as db, pytest.raises(sqlite3.DatabaseError):
+    with pilot.store._connect() as db, pytest.raises(sqlite3.DatabaseError):
         db.execute("UPDATE public_profile_snapshots SET snapshot_json='{}'")
     pilot.post("/api/me/practice/public-profile/unpublish", "user-a")
     assert pilot.client.get(f"/api/public/p/{slug}").status_code == 404

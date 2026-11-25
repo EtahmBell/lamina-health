@@ -4,24 +4,31 @@ isolated fictional practices through the real pilot API. Fictional user ids only
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from backend.pilot.store import PilotStore
 from backend.workflow import WorkflowStore
 from scripts import e2e_seed
+from tests.pg_support import _with_database, admin_url, test_db_mode
+
+pytestmark = pytest.mark.skipif(test_db_mode() == "sqlite", reason="the e2e seed runs on Postgres (run 2)")
 
 
 @pytest.fixture
-def e2e_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    db = tmp_path / "e2e" / "pilot-e2e.sqlite"
-    monkeypatch.setattr(e2e_seed, "E2E_DIR", db.parent)
-    monkeypatch.setattr(e2e_seed, "DB_PATH", db)
+def e2e_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # Its own throwaway database on the local server: never the real `lamina_e2e`.
+    name = f"lamina_e2e_test_{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(e2e_seed, "E2E_DATABASE", name)
+    monkeypatch.setattr(e2e_seed, "E2E_DIR", tmp_path / "e2e")
     monkeypatch.setattr(e2e_seed, "ACCOUNTS", tmp_path / "auth" / "accounts.json")
     monkeypatch.setattr(e2e_seed, "STATE", tmp_path / "state" / "seed.json")
     for key, value in {"LAMINA_E2E": "1", "LAMINA_PRODUCT_MODE": "pilot", "LAMINA_DEV_FAKE_NPPES": "true",
-                       "LAMINA_WORKFLOW_DATABASE": str(db), "LAMINA_OPENAI_ENABLED": "false",
+                       "LAMINA_DATABASE_URL": _with_database(admin_url(), name), "LAMINA_TEST_DATABASE_URL": admin_url(),
+                       "LAMINA_OPENAI_ENABLED": "false",
                        "LAMINA_PILOT_DOCUMENT_DIR": str(tmp_path / "docs"),
                        # The seeder sets this in-process; registering it here restores it afterwards.
                        "LAMINA_PILOT_ADMIN_USER_IDS": ""}.items():
@@ -30,14 +37,20 @@ def e2e_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     # The seeder swaps in a fictional-NPPES onboarding service; restore the original after.
     monkeypatch.setattr(physician_onboarding, "onboarding_service", physician_onboarding.onboarding_service)
-    return tmp_path
+    yield tmp_path
+    with psycopg.connect(admin_url(), autocommit=True) as admin:
+        admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
 
 
 def test_refuses_any_database_but_the_e2e_one(e2e_paths: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LAMINA_WORKFLOW_DATABASE", str(e2e_paths / "walkthrough.sqlite"))
+    e2e_url = e2e_seed.e2e_url()
+    monkeypatch.setenv("LAMINA_DATABASE_URL", _with_database(admin_url(), "lamina_dev"))  # not the e2e database
     with pytest.raises(SystemExit, match="Refusing"):
         e2e_seed.reset()
-    monkeypatch.setenv("LAMINA_WORKFLOW_DATABASE", str(e2e_seed.DB_PATH))
+    monkeypatch.setenv("LAMINA_DATABASE_URL", e2e_url.replace("127.0.0.1", "db.example.com"))  # not loopback
+    with pytest.raises(SystemExit, match="loopback"):
+        e2e_seed.reset()
+    monkeypatch.setenv("LAMINA_DATABASE_URL", e2e_url)
     monkeypatch.delenv("LAMINA_E2E")
     with pytest.raises(SystemExit, match="LAMINA_E2E"):
         e2e_seed.reset()
@@ -54,7 +67,7 @@ def test_seeds_two_isolated_fictional_practices(e2e_paths: Path) -> None:
     e2e_seed.reset()
     state = json.loads(e2e_seed.STATE.read_text())
     assert state["seeded"] and state["practice_a"]["physician_name"] == "Dr. Avery Testwell"
-    store = PilotStore(workflow=WorkflowStore(e2e_seed.DB_PATH))
+    store = PilotStore(workflow=WorkflowStore(url=e2e_seed.e2e_url()))
     a, b = state["practice_a"]["id"], state["practice_b"]["id"]
     names_a = {json.loads(row["patient_json"])["name"] for row in store.referral_rows(a)}
     names_b = {json.loads(row["patient_json"])["name"] for row in store.referral_rows(b)}

@@ -85,13 +85,13 @@ test('the team: invite by email and role, revoke, deactivate with a confirmation
   assert.match(profile, /It won’t be shown again/)
   assert.match(profile, /Deactivate \{member\.label \?\? 'this member'\}\?<\/strong> Their access ends now, on every device\. Their past work stays in the history under their name\./)
   assert.match(profile, /Invited as \{item\.role === 'physician' \? 'a physician' : 'staff'\}/)
-  assert.match(profile, /<SecuritySection status=\{status\} navigate=\{navigate\} \/>/)
+  assert.match(profile, /<SecuritySection status=\{status\} navigate=\{navigate\} onSettingsChanged=\{reload\} \/>/)
   // The link lives only in component state: never stored, never logged.
   assert.doesNotMatch(profile, /localStorage|sessionStorage|console\./)
 })
 
 test('session safety: idle sign-out with a warning, and sign out everywhere', () => {
-  assert.match(pilot, /const idle = useIdleSignOut\(onIdle\)/)
+  assert.match(pilot, /const idle = useIdleSignOut\(onIdle, idleMinutes\)/)
   assert.match(pilot, /\{idle\.warning && <IdleWarning onStay=\{idle\.stay\} \/>\}/)
   const security = slice(access, 'export function SecuritySection')
   assert.match(security, /await revokeAllSessions\(\)/)
@@ -111,4 +111,47 @@ test('the dev-only test sign-in can never be part of a real build', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   assert.match(pkg.scripts.build, /vite build && node scripts\/check-bundle\.mjs$/, 'every build refuses a bundle with the dev sign-in')
   for (const file of ['PilotAccess.tsx', 'authClient.ts', 'devTestAuth.ts']) assert.doesNotMatch(source(file), /console\.(log|info|debug)/, file)
+})
+
+/* Run 2 fixes. */
+
+test('the idle timeout is the practice setting, chosen by an admin from 15 to 60 minutes', () => {
+  assert.equal(idleState(0, 42 * 60_000, 45), 'active')
+  assert.equal(idleState(0, 43 * 60_000 + 1, 45), 'warning')
+  assert.equal(idleState(0, 45 * 60_000, 45), 'expired')
+  assert.match(pilot, /const idleMinutes = status\.practice\?\.idle_timeout_minutes \?\? 30/)
+  assert.match(pilot, /useIdleSignOut\(onIdle, idleMinutes\)/)
+  const security = slice(access, 'export function SecuritySection')
+  assert.match(security, /\{status\.is_admin && <form className="pilot-idle-setting"/)
+  assert.match(security, /IDLE_TIMEOUT_CHOICES\.map/)
+  assert.match(api, /updateIdleTimeout = \(minutes: number\) => apiRequest<Practice>\('\/api\/me\/practice\/security-settings'/)
+})
+
+test('the pilot header never shows the demo-only identities link; read-only learnings say why', () => {
+  assert.match(source('Claim.tsx'), /\{physicianLinks && productMode !== 'pilot' && <button.*>My physician identities/)
+  const agent = source('PilotAgent.tsx')
+  assert.match(agent, /physician && proposal\.can_confirm !== false\n\s+\? <ProposalCard/)
+  assert.match(agent, /an admin physician confirms practice-wide statements/)
+})
+
+test('run 2: a non-admin physician sees practice-wide learnings read-only on Train, not counted as their own', () => {
+  const agent = readFileSync(new URL('../src/PilotAgent.tsx', import.meta.url), 'utf8')
+  assert.match(agent, /readOnlyPracticeWide = \(proposal: Proposal\) => physician && proposal\.can_confirm === false && proposal\.layer !== 'physician'/)
+  assert.match(agent, /pendingIds\.has\(proposal\.id\) \|\| readOnlyPracticeWide\(proposal\)/)
+  assert.match(agent, /an admin physician confirms practice-wide statements/)
+})
+
+test('run 2: a conflict is worded for the reader -- "your" only for their own correction or rule', async () => {
+  const { conflictWording } = await import('../src/pilotState.ts')
+  const own = conflictWording({ corrected_by_name: 'Dr. A', rule_by_name: 'Dr. A', corrected_by_you: true, rule_by_you: true }, true, 'Dr. A')
+  assert.deepEqual([own.title, own.keep], ['Your correction differs from your newer rule', 'Keep my correction'])
+  const other = conflictWording({ corrected_by_name: 'Dr. A', rule_by_name: 'Dr. A', corrected_by_you: false, rule_by_you: false }, true, 'Dr. A')
+  assert.equal(other.title, 'Dr. A’s correction differs from Dr. A’s newer rule')
+  assert.equal(other.keep, 'Keep Dr. A’s correction')
+  assert.doesNotMatch(other.caution, /\byour\b/)
+  const staff = conflictWording({ corrected_by_name: 'Dr. B', rule_by_name: null, corrected_by_you: false, rule_by_you: false }, false, 'Dr. A')
+  assert.equal(staff.title, 'Dr. B’s correction differs from the newer practice rule')
+  const agent = readFileSync(new URL('../src/PilotAgent.tsx', import.meta.url), 'utf8')
+  assert.match(agent, /'Learned from repeated corrections in the practice'/)
+  assert.match(agent, /not active until an admin physician confirms/)
 })

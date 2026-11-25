@@ -106,7 +106,14 @@ Query: `GET /api/me/practice/events?event_type=…&referral_id=…` (physician o
 
 ## Migrations
 
-All schema changes are additive and run automatically on startup (`WorkflowStore.__init__` and
+**Run 2: the pilot runs on Postgres.** The schema and every append-only/immutability guarantee
+live in Alembic migrations (`backend/migrations`); the app never creates or alters tables on
+Postgres and refuses a database that is not at the migration head. Schema changes go in a new
+migration only. The paragraph below describes the SQLite store, which the demo still uses and
+which a SQLite pilot database is upgraded with before the one-time move
+(`scripts/migrate_sqlite_to_postgres.py`, see docs/PILOT_DEPLOYMENT_READINESS.md).
+
+On SQLite, schema changes are additive and run automatically on startup (`WorkflowStore.__init__` and
 `PilotStore.__init__`, `CREATE … IF NOT EXISTS` / guarded `ALTER TABLE ADD COLUMN`). Re-running is
 idempotent. Existing rows are never rewritten except the one-time backfill of the new rule-store
 columns from `status`. Back up `data/workflow.sqlite` before first start on an existing database.
@@ -124,8 +131,9 @@ Prerequisites: a Supabase project (email/password auth) and the repo installed p
    LAMINA_PILOT_ADMIN_USER_IDS=<your Supabase user id>
    LAMINA_OPENAI_ENABLED=false
    LAMINA_PILOT_LLM_EXTRACTION_ENABLED=false
-   # Optional: keep pilot data apart from your demo database
-   LAMINA_WORKFLOW_DATABASE=data/pilot-workflow.sqlite
+   # Run 2: the pilot database is Postgres (docker compose -f docker-compose.dev.yml up -d, then
+   # LAMINA_DATABASE_URL=<lamina_dev URL> python -m alembic -c backend/migrations/alembic.ini upgrade head)
+   LAMINA_DATABASE_URL=postgresql://lamina:<local password>@127.0.0.1:5433/lamina_dev
    ```
 2. `frontend/.env`:
    ```text

@@ -347,8 +347,9 @@ class AssistantService:
         self.store, self.intake, self.missing, self.rules, self.teaching, self.home = store, intake, missing, rules, teaching, home
         self.representation = representation
         self._client = client
-        with store._connect() as db:
-            db.executescript(_SCHEMA)
+        if not getattr(store, "url", None):  # Postgres: the table is in the Alembic baseline
+            with store._connect() as db:
+                db.executescript(_SCHEMA)
         self.handlers: dict[str, Callable[[PracticeContext, dict], dict]] = {
             "practice_context": self._practice_context, "list_referrals": self._list_referrals,
             "referral_detail": self._referral_detail, "triage_explanation": self._triage_explanation,
@@ -467,6 +468,7 @@ class AssistantService:
                     "current_referral": current,
                 },
                 _PLAN_SCHEMA, use_case="pilot_agent_plan", schema_name="agent_turn_plan",
+                contains_patient_data=True,  # the message and the referral index (patient names)
             )
             intent = result.get("intent")
             if intent not in INTENTS:
@@ -1090,7 +1092,8 @@ class AssistantService:
             return deterministic
         try:
             result = client.structured(_COMPOSE_INSTRUCTIONS, {"question": question, "facts": facts}, _COMPOSE_SCHEMA,
-                                       use_case="pilot_agent_compose", schema_name="agent_answer")
+                                       use_case="pilot_agent_compose", schema_name="agent_answer",
+                                       contains_patient_data=True)  # referral facts
             paragraphs = [str(p)[:900] for p in result.get("paragraphs") or [] if str(p).strip()][:4]
             if not paragraphs:
                 return deterministic

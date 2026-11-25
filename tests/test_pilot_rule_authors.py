@@ -12,7 +12,7 @@ import pytest
 from backend.pilot.public_api import limiter
 from backend.pilot.store import PilotStore
 from scripts import check_rule_keys
-from tests.test_pilot_foundation import DIABETES_RULE, Pilot, pilot  # noqa: F401
+from tests.test_pilot_foundation import DIABETES_RULE, Pilot, pilot, sqlite_pilot  # noqa: F401
 from tests.test_pilot_onboarding import _h
 
 
@@ -54,7 +54,9 @@ def test_each_rule_version_records_its_author_and_confirmer(pilot: Pilot) -> Non
     assert confirmed["created_by"] == "user:user-a" and confirmed["author_source"] == "recorded"
 
 
-def test_backfill_uses_recorded_history_and_marks_unknowns(pilot: Pilot) -> None:
+def test_backfill_uses_recorded_history_and_marks_unknowns(sqlite_pilot: Pilot) -> None:
+    """A SQLite startup upgrade (run 2: explicit SQLite store; the SQLite -> Postgres move runs it first)."""
+    pilot = sqlite_pilot
     rule = _ready(pilot)
     with pilot.store._connect() as db:
         # As written before authors were stored: no author columns, no actor in provenance.
@@ -128,7 +130,7 @@ def test_a_newer_rule_that_disagrees_with_a_correction_is_shown_and_the_choice_r
         "SELECT choice, rule_version, actor_role FROM correction_conflict_resolutions WHERE referral_id = ? ORDER BY created_at, rowid", (rid,))
     assert [(c["choice"], c["rule_version"], c["actor_role"]) for c in choices] == [
         ("keep_correction", 2, "physician"), ("apply_rule", 3, "physician")]
-    with sqlite3.connect(pilot.store.path) as db, pytest.raises(sqlite3.DatabaseError):
+    with pilot.store._connect() as db, pytest.raises(sqlite3.DatabaseError):
         db.execute("DELETE FROM correction_conflict_resolutions")
     # Later rule changes now flow through; the cleared correction doesn't come back.
     assert pilot.post(f"/api/me/practice/referrals/{rid}/correction-conflicts", "user-a",
@@ -158,7 +160,7 @@ def test_a_legacy_physician_edit_conflicting_with_a_newer_rule_is_shown(pilot: P
 def test_a_seeded_recommendation_decision_cannot_be_changed_or_deleted(pilot: Pilot) -> None:
     _ready(pilot)
     detail = pilot.referral()
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         db.execute(
             "INSERT INTO recommendation_decisions (id, recommendation_id, referral_id, practice_id, decision, "
             "changed_fields_json, actor, actor_role, created_at) VALUES ('dec_seed', ?, ?, ?, 'accepted', '{}', "
@@ -216,5 +218,5 @@ def test_rule_key_check_is_clean_on_a_store_written_by_the_product(pilot: Pilot)
     rule = _ready(pilot)
     pilot.referral()
     _revise(pilot, rule["id"], required=[{**item, "key": item["key"] + "_renamed"} for item in DIABETES_RULE["required"]])
-    report = check_rule_keys.scan(Path(pilot.store.path))
+    report = check_rule_keys.scan(pilot.store.url or pilot.store.path)  # Postgres in the gates
     assert report["ok"] and report["drift"] == [] and report["stranded_evidence"] == []

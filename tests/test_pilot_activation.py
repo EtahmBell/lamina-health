@@ -396,7 +396,7 @@ def test_recompute_script_matches_the_review_read_only(pilot: Pilot, capsys: pyt
     services = _services(pilot)
     member = services.store.membership_for_user("user-a")
     code = activation_metrics.main(["--practice", member["practice_id"], "--owner", member["physician_owner_scope_id"],
-                                    "--db", str(services.store.path)])
+                                    "--db", str(services.store.url or services.store.path)])
     assert code == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["all_time"]["dimensions"] == _review(pilot)["metrics"]["all_time"]["dimensions"]

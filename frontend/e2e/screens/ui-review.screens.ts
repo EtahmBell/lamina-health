@@ -24,7 +24,7 @@ const text = (value: string | RegExp) => (page: Page) => expect(page.getByText(v
  * link, the authenticator setup key and its QR code. */
 type Tools = { admin: () => Promise<Page>; newcomer: () => Promise<Invitee>; leaver: () => Promise<Invitee> }
 type Shot = {
-  name: string; actor: Actor | 'newcomer' | 'leaver'; to: (seed: SeedState) => string; ready?: (page: Page) => Promise<void>; before?: () => void
+  name: string; actor: Actor | 'newcomer' | 'leaver'; to: (seed: SeedState) => string; ready?: (page: Page) => Promise<void>; before?: () => void; after?: () => void
   mock?: 'loading' | 'error'; act?: (page: Page, tools: Tools) => Promise<void>; prepare?: (page: Page) => Promise<void>; mask?: string[]
 }
 const MASK = ['.pilot-link-field input', '.pilot-setup-key', '.pilot-mfa-secret img']
@@ -146,6 +146,14 @@ const SHOTS: Shot[] = [
     act: async (p) => { await p.getByRole('button', { name: 'Resolve…' }).first().click(); await expect(p.getByLabel('What did you find?')).toBeVisible() } },
   { name: 'staff-ready-received-not-verified', actor: 'staff', before: () => seedStep('new-unverified-referral'), to: () => referralPath(seedState().referrals.unverified!), ready: card,
     act: async (p) => { await p.locator('.next-step-card').getByRole('button', { name: /^Ready for / }).click(); await expect(p.getByText('Received, not verified:')).toBeVisible() } },
+  // Run 2 (appended): the practice idle timeout an admin sets, and two physicians in one practice
+  // (the second joins practice A as a non-admin; nothing after this depends on where they are).
+  { name: 'security-idle-timeout-setting', actor: 'physician', to: () => '/me/practice#security', ready: (p) => expect(p.getByRole('form', { name: 'Idle sign-out for the practice' })).toBeVisible() },
+  { name: 'second-physician-practice-learning-read-only', actor: 'second_physician', before: () => seedStep('join-second-physician'), to: () => '/me/agent?tab=teach', ready: text('an admin physician confirms practice-wide statements') },
+  { name: 'second-physician-home-same-practice', actor: 'second_physician', to: () => '/me/home', ready: main },
+  // `after` puts the second physician back in their own practice: the next viewport replays the list.
+  { name: 'second-physician-conflict-other-physician', actor: 'second_physician', to: (s) => referralPath(s.referrals.conflict_keep), ready: card,
+    after: () => seedStep('return-second-physician') },
 ]
 
 // E2E_ONLY=name,name captures just those screens (e.g. a follow-up round on affected screens);
@@ -168,6 +176,7 @@ test('capture the UI-review screens', async ({ as, seed, invitee }, testInfo) =>
     if (only.size && !only.has(shot.name)) {
       // Steps that set up later shots still run, so a filtered run sees the same states.
       shot.before?.()
+      shot.after?.()
       continue
     }
     shot.before?.()
@@ -191,5 +200,6 @@ test('capture the UI-review screens', async ({ as, seed, invitee }, testInfo) =>
     // On the phone, also the first screen exactly as the viewport shows it (fixed elements in place).
     if (size.width < 600) await page.screenshot({ path: file.replace(/\.png$/, '.fold.png'), animations: 'disabled', mask })
     if (shot.mock) await page.unrouteAll({ behavior: 'ignoreErrors' })
+    shot.after?.()
   }
 })

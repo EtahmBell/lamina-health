@@ -49,6 +49,9 @@ PILOT_ROUTERS = (
 
 
 def create_app(mode: str | None = None) -> FastAPI:
+    from backend.profiles import assert_profile_ready
+
+    assert_profile_ready()  # production refuses to start with an unsafe configuration
     resolved: ProductMode = product_mode(mode)
     if resolved == "pilot":
         # Sender access tokens travel in /api/public/r/<token> paths: keep them out of logs.
@@ -62,6 +65,15 @@ def create_app(mode: str | None = None) -> FastAPI:
             from backend.pilot.api import get_pilot_services
 
             get_pilot_services()
+            from backend.profiles import current_profile
+
+            if current_profile() == "production":
+                # The document bucket must be private and SSE-KMS encrypted, checked at every start.
+                from backend.pilot.documents import document_storage_from_environment
+
+                problems = getattr(document_storage_from_environment(), "verify", lambda: ["not S3"])()
+                if problems:
+                    raise RuntimeError("Refusing to start: document storage " + "; ".join(problems))
         yield
 
     application = FastAPI(

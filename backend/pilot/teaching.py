@@ -444,6 +444,8 @@ class TeachingService:
                 result = client.structured(
                     _INSTRUCTIONS, {"instruction": text, "existing_referral_types": known_types}, _SCHEMA,
                     use_case="pilot_teach_interpretation", schema_name="practice_rule_interpretation",
+                    # A physician's practice rule (no patient record); see the audit for the residual risk.
+                    contains_patient_data=False,
                 )
                 validated = validate_model_interpretation(result, text, known_types)
                 if validated is not None:
@@ -513,7 +515,8 @@ class TeachingService:
         # physician (practice layer, labelled with who suggested it). Every other proposal is a
         # physician teaching. Either way it is only a PROPOSAL: confirming needs the right physician.
         if source == "correction_pattern":
-            layer = "practice"
+            # Practice-wide by default; a physician's own pattern (several physicians) is theirs.
+            layer = layer or "practice"
         elif context.role == "staff":
             from .attribution import ActorDirectory
 

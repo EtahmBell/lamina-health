@@ -109,7 +109,7 @@ test('a correction that a newer rule disagrees with is shown with keep / apply c
   assert.equal(conflictText({ ...conflict, corrected_by_you: false, rule_by_you: false }),
     'Visit type: Dr. Avery Testwell’s earlier correction (eConsult) differs from Dr. Avery Testwell’s updated rule (in-person, Thyroid nodule v5)')
   assert.match(conflictText({ ...conflict, rule_by_you: false, rule_by_name: null }), /the updated rule \(author not recorded\)/)
-  assert.match(pilot, /resolveCorrectionConflict\(referral\.id, conflict\.field, 'keep_correction'\)\)\}>Keep my correction/)
+  assert.match(pilot, /resolveCorrectionConflict\(referral\.id, conflict\.field, 'keep_correction'\)\)\}>\{conflictWording\(conflict, physician, doctor\)\.keep\}/, 'the keep label names whose correction it is')
   assert.match(pilot, /resolveCorrectionConflict\(referral\.id, conflict\.field, 'apply_rule'\)\)\}>Apply the rule/)
   assert.match(pilot, /\{physician && <div className="pilot-actions">\s*<button className="button-secondary" disabled=\{busy\} onClick=\{\(\) => void act\(\(\) => resolveCorrectionConflict/, 'only physicians choose')
 })

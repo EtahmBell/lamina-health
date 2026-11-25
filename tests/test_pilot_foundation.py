@@ -29,6 +29,7 @@ from backend.pilot.store import PilotStore
 from backend.pilot.triage import DocumentText, EvidenceProposal, triage_referral
 from backend.provider_network.identity import NppesIdentityResolver
 from backend.workflow import WorkflowStore
+from tests.pg_support import pilot_workflow_store
 from tests.test_pilot_onboarding import NPI_A, NPI_B, FakeTransport, FakeVerifier, _h
 
 TODAY = date(2026, 11, 9)
@@ -122,7 +123,22 @@ class Pilot:
 
 @pytest.fixture
 def pilot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    workflow = WorkflowStore(tmp_path / "workflow.sqlite")
+    # Run 2: every pilot test runs on its own fresh Postgres database at the migration head
+    # (tests/pg_support.py); LAMINA_TEST_DB=sqlite is an explicit, non-gate opt-in.
+    with pilot_workflow_store(tmp_path) as workflow:
+        yield from _pilot(tmp_path, monkeypatch, workflow)
+
+
+@pytest.fixture
+def sqlite_pilot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Explicitly SQLite, for tests of the SQLite store's own startup upgrades (legacy data written
+    before a fix, scrubbed or backfilled when the store opens). Postgres starts at the migration head
+    and never holds such data; the one-time move (scripts/migrate_sqlite_to_postgres.py) runs these
+    upgrades on the SQLite source before copying it."""
+    yield from _pilot(tmp_path, monkeypatch, WorkflowStore(tmp_path / "legacy-workflow.sqlite"))
+
+
+def _pilot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workflow: WorkflowStore):
     transport = SearchTransport()
     service = PhysicianOnboardingService(
         workflow, NppesIdentityResolver(transport, cache_seconds=0), LookupThrottle(limit=1000),
@@ -228,7 +244,7 @@ def test_pilot_scope_never_returns_demo_fixture_data(pilot: Pilot) -> None:
     assert pilot.get("/api/me/practice/rules", "user-a").json() == []
     # A demo persona's CONFIRMED preference in the same canonical table never leaks in.
     now = datetime.now(UTC).isoformat()
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         db.execute(
             "INSERT INTO physician_referral_preferences (id, workspace_id, physician_id, case_family, "
             "source_text, structured_rules_json, status, source, created_at, updated_at, confirmed_at) "
@@ -338,8 +354,8 @@ def test_staff_invitation_is_single_use_and_staff_permissions_are_limited(pilot:
     reuse = pilot.post("/api/me/practice/invitations/accept", "user-b", {"token": invite["token"]})
     assert reuse.status_code == 404 and reuse.json()["detail"]["code"] == "invitation_unavailable"
     # Token is stored only as a hash.
-    with sqlite3.connect(pilot.store.path) as db:
-        assert invite["token"] not in json.dumps(db.execute("SELECT * FROM practice_invitations").fetchall())
+    with pilot.store._connect() as db:
+        assert invite["token"] not in json.dumps([list(row) for row in db.execute("SELECT * FROM practice_invitations").fetchall()])
 
     pilot.add_rule()
     detail = pilot.referral("user-c")  # Staff can do intake.
@@ -405,7 +421,7 @@ def test_inbound_referral_exists_without_a_clinical_data_source_patient(pilot: P
     assert referral["entered_at"] >= referral["received_at"]
     assert referral["status"] == "triaged"
     assert referral["receiver_practice_id"] == referral["practice_id"]
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         token_hash = db.execute("SELECT sender_status_token_hash FROM intake_referrals").fetchone()[0]
     assert len(token_hash) == 64
     future = pilot.post("/api/me/practice/referrals", "user-a", {
@@ -484,10 +500,10 @@ def test_recommendation_persists_with_provenance_and_recoverable_rule_version(pi
     assert [(item["version"], item["operational_status"]) for item in history] == [
         (1, "superseded"), (2, "confirmed"),
     ]
-    with sqlite3.connect(pilot.store.path) as db, pytest.raises(sqlite3.DatabaseError):
+    with pilot.store._connect() as db, pytest.raises(sqlite3.DatabaseError):
         db.execute("UPDATE physician_referral_preferences SET structured_rules_json='{}' WHERE id=?",
                    (rule["id"],))
-    with sqlite3.connect(pilot.store.path) as db, pytest.raises(sqlite3.DatabaseError):
+    with pilot.store._connect() as db, pytest.raises(sqlite3.DatabaseError):
         db.execute("UPDATE triage_recommendations SET generator='x'")
 
 
@@ -608,7 +624,7 @@ def test_corrections_and_signoff_persist_and_are_immutable(pilot: Pilot) -> None
     assert stored["recommendation"]["suggested_priority"] == "routine", "the agent's recommendation at decision time"
     assert stored["effective_triage"]["suggested_priority"] == "soon"
     assert stored["representation_version_id"] == corrected["recommendation"]["representation_version_id"]
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         for table in ("triage_corrections", "referral_signoffs"):
             with pytest.raises(sqlite3.DatabaseError):
                 db.execute(f"DELETE FROM {table}")
@@ -704,7 +720,7 @@ def test_pilot_events_are_append_only_and_queryable(pilot: Pilot) -> None:
     assert {"practice_created", "learning_confirmed", "physician_signed_in"} <= {e["event_type"] for e in events}
     only = pilot.get("/api/me/practice/events?event_type=learning_confirmed", "user-a").json()
     assert [event["event_type"] for event in only] == ["learning_confirmed"]
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         for statement in ("UPDATE pilot_events SET actor='x'", "DELETE FROM pilot_events"):
             with pytest.raises(sqlite3.DatabaseError):
                 db.execute(statement)

@@ -40,6 +40,7 @@ from tests.test_pilot_foundation import (  # noqa: F401
     _event_types,
     _referral_model,
     pilot,
+    sqlite_pilot,
 )
 from tests.test_pilot_onboarding import _h
 
@@ -82,7 +83,7 @@ def _token(link: str) -> str:
 
 def _all_text(store: PilotStore) -> str:
     """Every stored text column a token could hide in."""
-    with sqlite3.connect(store.path) as db:
+    with store._connect() as db:  # Postgres or (opted in) SQLite
         rows = []
         for table, columns in {
             "missing_information_requests": "draft_message, evidence_json",
@@ -90,7 +91,7 @@ def _all_text(store: PilotStore) -> str:
             "intake_referrals": "submitted_items_json, review_json, information_request_json",
             "sender_responses": "message, items_json",
         }.items():
-            rows += [json.dumps(row) for row in db.execute(f"SELECT {columns} FROM {table}")]
+            rows += [json.dumps(list(row)) for row in db.execute(f"SELECT {columns} FROM {table}")]
     return "\n".join(rows)
 
 
@@ -137,7 +138,7 @@ def test_expired_link_is_refused(pilot: Pilot) -> None:
     rid = pilot.referral()["referral"]["id"]
     token = _token(_send_request(pilot, rid)["status_link"])
     past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat(timespec="seconds")
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         db.execute("UPDATE sender_links SET expires_at = ? WHERE token_hash = ?", (past, hash_token(token)))
     assert pilot.client.get(f"/api/public/r/{token}").status_code == 404
     upload = pilot.client.post(f"/api/public/r/{token}/documents", headers={"Content-Type": "text/plain"}, content=b"x")
@@ -182,14 +183,16 @@ def test_access_log_redacts_sender_tokens() -> None:
     assert redact_sender_links(f"see http://x/r/{token} ok") == "see http://x/r/[secure link removed] ok"
 
 
-def test_legacy_rows_with_raw_tokens_are_scrubbed_and_their_links_revoked(pilot: Pilot) -> None:
-    """Simulates data written before Step 16: the rendered body (with the raw link) was saved."""
+def test_legacy_rows_with_raw_tokens_are_scrubbed_and_their_links_revoked(sqlite_pilot: Pilot) -> None:
+    """Simulates data written before Step 16: the rendered body (with the raw link) was saved.
+    A SQLite startup upgrade (run 2: explicit SQLite store; the SQLite -> Postgres move runs it first)."""
+    pilot = sqlite_pilot
     _ready(pilot)
     rid = pilot.referral()["referral"]["id"]
     sent = _send_request(pilot, rid, mode="send", recipient="office@clinic.test")
     link = sent["status_link"]
     token = _token(link)
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         db.execute("UPDATE missing_information_requests SET draft_message = ? WHERE id = ?",
                    (sent["draft_message"].replace("{status_link}", link), sent["id"]))
         db.execute("DROP TRIGGER outbound_messages_no_update")
@@ -199,7 +202,7 @@ def test_legacy_rows_with_raw_tokens_are_scrubbed_and_their_links_revoked(pilot:
     assert token in _all_text(pilot.store)
     PilotStore(workflow=pilot.workflow)  # startup migration
     assert token not in _all_text(pilot.store)
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         draft = db.execute("SELECT draft_message FROM missing_information_requests WHERE id = ?", (sent["id"],)).fetchone()[0]
         with pytest.raises(sqlite3.DatabaseError):
             db.execute("UPDATE outbound_messages SET body = 'x'")  # immutability restored
@@ -422,7 +425,7 @@ def test_no_approval_step_and_retriage_never_asks_for_one(pilot: Pilot) -> None:
     events = _event_types(pilot.store, referral_id=rid)
     assert "recommendation_approval_carried_forward" not in events
     assert "recommendation_changed" not in events, "only completeness moved: not a clinical change"
-    with sqlite3.connect(pilot.store.path) as db:
+    with pilot.store._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM recommendation_carryovers").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM recommendation_decisions").fetchone()[0] == 0
 

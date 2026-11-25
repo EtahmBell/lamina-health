@@ -1,9 +1,10 @@
 """Recompute a physician's readiness-review agreement metrics from the database, read-only.
 
-    python -m scripts.activation_metrics --practice <practice_id> --owner <owner_scope_id> [--db PATH]
+    python -m scripts.activation_metrics --practice <practice_id> --owner <owner_scope_id> [--db PATH_OR_URL]
 
 The same function the review endpoint uses (backend/pilot/activation.compute_metrics): only that
-physician's sign-offs, corrections and conflict choices are counted. Nothing is written.
+physician's sign-offs, corrections and conflict choices are counted. Nothing is written: a SQLite
+file opens with mode=ro, Postgres (a postgresql:// URL, default LAMINA_DATABASE_URL) in a read-only session.
 """
 
 from __future__ import annotations
@@ -11,17 +12,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import sys
-from pathlib import Path
 
 
 class _ReadOnlyStore:
-    """The two read methods compute_metrics needs, on a read-only SQLite connection."""
+    """The two read methods compute_metrics needs, on a read-only connection (SQLite or Postgres)."""
 
-    def __init__(self, path: Path) -> None:
-        self.db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        self.db.row_factory = sqlite3.Row
+    def __init__(self, target: str) -> None:
+        from backend.database import connect_read_only
+
+        self.db = connect_read_only(target)
 
     def fetch_all(self, sql: str, values: tuple = ()) -> list[dict]:
         return [dict(row) for row in self.db.execute(sql, values).fetchall()]
@@ -42,12 +42,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--practice", required=True)
     parser.add_argument("--owner", required=True, help="the physician's owner scope id")
-    parser.add_argument("--db", default=os.environ.get("LAMINA_WORKFLOW_DATABASE", ""))
+    parser.add_argument("--db", default=os.environ.get("LAMINA_DATABASE_URL") or os.environ.get("LAMINA_WORKFLOW_DATABASE", ""))
     args = parser.parse_args(argv)
-    if not args.db or not Path(args.db).is_file():
-        print("Database not found: pass --db or set LAMINA_WORKFLOW_DATABASE", file=sys.stderr)
+    try:
+        store = _ReadOnlyStore(args.db)
+    except (FileNotFoundError, OSError, ValueError) as error:
+        print(f"Database not found: pass --db or set LAMINA_DATABASE_URL ({type(error).__name__})", file=sys.stderr)
         return 2
-    store = _ReadOnlyStore(Path(args.db))
     member = store.fetch_one("SELECT user_id FROM practice_members WHERE practice_id = ? AND physician_owner_scope_id = ? "
                              "AND role = 'physician'", (args.practice, args.owner))
     if not member:

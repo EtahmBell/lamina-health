@@ -74,6 +74,25 @@ export const INVITATION_DAYS = 7
 /** Session safety: sign out after this long without activity, with a warning before. */
 export const IDLE_TIMEOUT_MINUTES = 30
 export const IDLE_WARNING_MINUTES = 2
+/** The choices an admin has for the practice's idle sign-out (server allows 15-60). */
+export const IDLE_TIMEOUT_CHOICES = [15, 20, 30, 45, 60]
+
+/** Run 2: a correction/rule conflict worded for THIS reader. Two physicians can share a practice,
+ * so "your" is used only for the reader's own correction or rule; otherwise the author is named.
+ * Staff always read it in the third person. */
+export type ConflictParties = { corrected_by_name: string | null; rule_by_name: string | null; corrected_by_you: boolean; rule_by_you: boolean }
+export function conflictWording(conflict: ConflictParties, physician: boolean, doctor: string): { title: string; keep: string; caution: string } {
+  const corrector = conflict.corrected_by_name || doctor
+  const mine = physician && conflict.corrected_by_you
+  const who = mine ? 'Your correction' : `${corrector}’s correction`
+  const rule = physician && conflict.rule_by_you ? 'your newer rule' : conflict.rule_by_name ? `${conflict.rule_by_name}’s newer rule` : 'the newer practice rule'
+  return {
+    title: `${who} differs from ${rule}`,
+    keep: mine ? 'Keep my correction' : `Keep ${corrector}’s correction`,
+    caution: `Deciding now uses ${mine ? 'your' : `${corrector}’s`} correction — it still applies until someone keeps it or applies the rule above.`,
+  }
+}
+
 
 /** The invitation link an admin shares (shown once; the token is never stored client-side). */
 export const invitationLink = (origin: string, token: string) => `${origin}${pilotPaths.join}?invite=${encodeURIComponent(token)}`

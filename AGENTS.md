@@ -94,6 +94,11 @@ Rules that keep the modes separate:
   accept an `aal1` session. Practices are invite-only (operator invitation or operator-approved
   request); invitations are email-bound, single use, 7 days. A staff account can never claim a
   physician identity. Only a Lamina operator can reset a member's MFA. See `docs/PILOT_ACCOUNTS.md`.
+- The pilot database is Postgres (`LAMINA_DATABASE_URL`). Schema changes go ONLY in a new Alembic
+  migration (`backend/migrations/versions`); append-only/immutability guarantees are Postgres triggers and
+  `lamina_app` privileges and must be tested on Postgres. Pilot tests run on Postgres (`tests/pg_support.py`).
+  The demo stays on SQLite. Configuration profiles and production refusals: `backend/profiles.py`; model
+  calls must declare `contains_patient_data` (`backend/model_provider.py`). See docs/PILOT_DEPLOYMENT_READINESS.md.
 - `backend/dev_test_auth.py` (e2e test sign-in) is DEV-only: never import it from `backend.main`;
   it refuses to install outside the e2e harness or in production.
 

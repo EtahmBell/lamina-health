@@ -25,12 +25,26 @@ for (const role of ROLES) {
     let outcome = await settle()
     if (outcome === 'stale-token') { await page.reload(); outcome = await settle() }
     if (outcome !== 'signed-in') throw new Error(`The ${ROLE_LABELS[role]} session has expired. Sign in again: npm run e2e:capture -- ${role}`)
-    const secondsLeft = await page.evaluate(() => {
+    const secondsLeft = () => page.evaluate(() => {
       const key = Object.keys(localStorage).find((name) => /^sb-.*-auth-token$/.test(name))
       const session = key ? JSON.parse(localStorage.getItem(key) ?? '{}') : {}
       return (session.expires_at ?? 0) - Math.floor(Date.now() / 1000)
     })
-    expect(secondsLeft, 'a fresh access token for the whole run').toBeGreaterThan(20 * 60)
+    if (await secondsLeft() <= 20 * 60) {
+      // Too little left for a whole run (Supabase itself refreshes only in the last ~90 s): mark
+      // the stored access token expired so the client refreshes it with the refresh token on load.
+      // Only the expiry field changes; no token is read out, logged or printed.
+      await page.evaluate(() => {
+        const key = Object.keys(localStorage).find((name) => /^sb-.*-auth-token$/.test(name))
+        if (!key) return
+        const session = JSON.parse(localStorage.getItem(key) ?? '{}')
+        localStorage.setItem(key, JSON.stringify({ ...session, expires_at: Math.floor(Date.now() / 1000) - 60 }))
+      })
+      await page.reload()
+      if (await settle() !== 'signed-in') throw new Error(`The ${ROLE_LABELS[role]} session could not be refreshed. Sign in again: npm run e2e:capture -- ${role}`)
+      await expect.poll(secondsLeft, { message: 'the refreshed session has a fresh access token', timeout: 30_000 }).toBeGreaterThan(20 * 60)
+    }
+    expect(await secondsLeft(), 'a fresh access token for the whole run').toBeGreaterThan(20 * 60)
     await context.storageState({ path: file })
     await context.close()
   })

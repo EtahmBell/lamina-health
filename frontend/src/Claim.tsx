@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import laminaLogo from './assets/lamina-logo-source.png'
 import { useAuth } from './AuthProvider.tsx'
 import { safeReturnPath } from './safeReturn.ts'
+import { productMode } from './productMode.ts'
 import { cleanName } from './demoIdentity.ts'
 import {
   ApiError,
@@ -81,7 +82,8 @@ export function ClaimShell({ children, navigate, physicianLinks = true }: { chil
       <nav className="claim-header-actions" aria-label="Physician account">
         {!configured && <span className="claim-auth-status">Authentication not configured</span>}
         {configured && !loading && user && <>
-          {physicianLinks && <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities</button>}
+          {/* Demo only: the pilot has no "physician identities" page (run 2). */}
+          {physicianLinks && productMode !== 'pilot' && <button className="text-button" onClick={() => navigate('/claim/my-identities')}>My physician identities</button>}
           <span className="claim-account-chip" title={user.email ?? undefined}>{user.email ?? 'Account'}</span>
           <button className="text-button" onClick={() => void handleSignOut()}>Sign out</button>
         </>}

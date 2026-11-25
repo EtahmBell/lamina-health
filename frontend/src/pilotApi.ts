@@ -35,6 +35,8 @@ export type PilotNextStep = 'mfa' | 'physician_onboarding' | 'practice_setup' | 
 export type Practice = {
   id: string; name: string; specialty: string | null; website: string | null; address: string | null
   phone: string | null; contact_email: string | null; status: 'active' | 'archived'; created_at: string
+  /** Run 2: idle sign-out for the practice, in minutes (15-60; an admin sets it). */
+  idle_timeout_minutes?: number
 }
 export type PracticeFields = Pick<Practice, 'name' | 'specialty' | 'website' | 'address' | 'phone' | 'contact_email'>
 export type PilotStatus = {
@@ -79,6 +81,8 @@ export const deactivateMember = (id: string) => apiRequest<MembersView>(`/api/me
 export const previewInvitation = (token: string) => apiRequest<InvitationPreview>('/api/me/practice/invitations/preview', json({ token }))
 export const acceptInvitation = (token: string) => apiRequest<PilotStatus>('/api/me/practice/invitations/accept', json({ token }))
 /** Sign out everywhere: the server refuses every session issued up to now. */
+/** Admin: idle sign-out for everyone in the practice (15-60 minutes; audited). */
+export const updateIdleTimeout = (minutes: number) => apiRequest<Practice>('/api/me/practice/security-settings', { ...json({ idle_timeout_minutes: minutes }), method: 'PUT' })
 export const revokeAllSessions = () => apiRequest<{ revoked_at: string }>('/api/me/practice/sessions/revoke-all', json({}))
 /** Lost authenticator: ask the Lamina team (never a practice admin) to reset two-step sign-in. */
 export const requestMfaRecovery = (reason: string) => apiRequest<{ status: string; created_at: string }>('/api/me/practice/mfa/recovery-request', json({ reason: reason || null }))
@@ -293,6 +297,17 @@ export async function uploadReferralDocument(id: string, file: File): Promise<Re
 
 /** Authenticated download into a short-lived object URL (no bearer token in a link). */
 export async function openReferralDocument(documentId: string): Promise<void> {
+  // S3 storage: a signed link that expires in 60 seconds (issued after the practice check). Local
+  // storage can't sign (409): stream the bytes through the authenticated API instead.
+  const linked = await fetch(`${apiBaseUrl}/api/me/practice/documents/${encodeURIComponent(documentId)}/link`, {
+    headers: await authHeaders(), credentials: 'include',
+  })
+  if (linked.ok) {
+    const { url } = await linked.json() as { url: string }
+    window.open(url, '_blank', 'noopener')
+    return
+  }
+  if (linked.status !== 409) return raise(linked)
   const response = await fetch(`${apiBaseUrl}/api/me/practice/documents/${encodeURIComponent(documentId)}`, {
     headers: await authHeaders(), credentials: 'include',
   })
@@ -344,6 +359,10 @@ export const getHome = () => apiRequest<HomeProjection>('/api/me/practice/home')
 
 export type Proposal = {
   id: string; referral_type: string; source_text: string
+  /** Run 2: whether THIS reader may confirm it (admin: practice-wide; owner: their own), and whether it's theirs. */
+  can_confirm?: boolean; mine?: boolean
+  /** Run 2: whether the reader wrote it, and otherwise its author's name (null when not a member). */
+  by_you?: boolean; author_name?: string | null
   content: PracticeRule['content'] & { interpretation_note?: string | null }
   confidence: number | null; operational_status: PracticeRule['operational_status']; physician_confirmed: boolean
   /** What the proposal is based on, in words ("Seen in 3 of the last 4 … decisions") -- shown, not the number. */

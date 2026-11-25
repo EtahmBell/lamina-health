@@ -117,7 +117,7 @@ def get_pilot_services() -> PilotServices:
     from backend.api import physician_onboarding
 
     store = pilot_store_for(physician_onboarding.onboarding_service.store)
-    key = str(store.path)
+    key = store.key
     if key not in _default or _default[key].store is not store:
         _default[key] = PilotServices.build(store)
     return _default[key]
@@ -204,6 +204,16 @@ def practice_status(user: PilotSession, services: Services) -> dict:
     status = _run(lambda: services.practice.status(
         user.id, onboarding, mfa_verified=verified, recovery=services.accounts.recovery_view(user.id)))
     return {**status, "account": {"email": user.email, "mfa_verified": verified}}
+
+
+class SessionSettingsInput(_Strict):
+    idle_timeout_minutes: int = Field(ge=1, le=1440)
+
+
+@router.put("/security-settings")
+def update_security_settings(update: SessionSettingsInput, context: Practice, services: Services) -> dict:
+    """Admin: idle sign-out for everyone in the practice (15-60 minutes; audited)."""
+    return _run(lambda: services.practice.set_idle_timeout(context, update.idle_timeout_minutes))
 
 
 @router.post("/sessions/revoke-all")
@@ -403,6 +413,16 @@ async def upload_document(
     return _run(lambda: services.intake.add_document(
         context, referral_id, content=b"".join(chunks), content_type=content_type, filename=filename,
     ))
+
+
+@router.get("/documents/{document_id}/link")
+def document_link(document_id: str, context: Practice, services: Services) -> dict:
+    """S3: a signed download link that expires in 60 seconds, for a member of this practice only.
+    Local storage can't sign: 409 `signed_links_unavailable` (the client streams it instead)."""
+    link = _run(lambda: services.intake.document_link(context, document_id))
+    if link is None:
+        raise HTTPException(409, {"code": "signed_links_unavailable", "message": "Download the document directly"})
+    return link
 
 
 @router.get("/documents/{document_id}")
@@ -647,9 +667,13 @@ class AnswerInput(_Strict):
 def list_proposals(context: Practice, services: Services) -> dict:
     # Today's question is shown to staff too, read-only ("waiting for Dr. X's answer"), so the
     # Train count matches what each reader can see. Only a physician can answer it.
-    question = services.learning.question_for_today(context.practice_id, mark_shown=False)
+    owner, include_practice = services.learning.audience(context)
+    question = services.learning.question_for_today(context.practice_id, mark_shown=False,
+                                                    owner_scope_id=owner, include_practice=include_practice)
     return {
-        "proposals": [services.teaching.view(rule) for rule in services.rules.proposals(context.practice_id)],
+        # Practice-wide proposals plus the reader's OWN physician-level ones -- never another
+        # physician's -- each saying whether this reader can confirm it.
+        "proposals": services.representation.visible_proposals(context),
         "question": question,
         "referral_types": services.rules.referral_types(context.practice_id),
     }

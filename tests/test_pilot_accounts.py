@@ -5,7 +5,6 @@ sign-in used by the e2e harness. Synthetic data only."""
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -154,8 +153,8 @@ def test_staff_invitation_by_email_expires_can_be_revoked_and_is_single_use(pilo
     stored = json.dumps(events)
     for secret in (invite["token"], revoked["token"], expired["token"], "user-c@example.test"):
         assert secret not in stored
-    with sqlite3.connect(pilot.store.path) as db:
-        assert invite["token"] not in json.dumps(db.execute("SELECT * FROM practice_invitations").fetchall())
+    with pilot.store._connect() as db:
+        assert invite["token"] not in json.dumps([list(row) for row in db.execute("SELECT * FROM practice_invitations").fetchall()])
 
 
 def test_only_admins_invite_and_an_older_invitation_without_email_is_not_usable(pilot: Pilot) -> None:
@@ -320,7 +319,7 @@ def test_an_operator_cannot_reset_their_own_mfa(pilot: Pilot) -> None:
 
 E2E_ENV = {
     "LAMINA_E2E": "1", "LAMINA_E2E_TEST_AUTH": "1", "LAMINA_PRODUCT_MODE": "pilot", "LAMINA_DEV_FAKE_NPPES": "true",
-    "LAMINA_WORKFLOW_DATABASE": "C:/x/lamina/data/e2e/pilot-e2e.sqlite",
+    "LAMINA_DATABASE_URL": "postgresql://lamina:x@127.0.0.1:5433/lamina_e2e",
 }
 
 
@@ -328,7 +327,10 @@ def test_dev_test_sign_in_is_refused_in_production_and_outside_the_e2e_harness()
     assert refusal_reasons(E2E_ENV) == []
     for override in ({"LAMINA_ENVIRONMENT": "production"}, {"RAILWAY_ENVIRONMENT": "production"}, {"VERCEL": "1"},
                      {"LAMINA_E2E": ""}, {"LAMINA_E2E_TEST_AUTH": "0"}, {"LAMINA_PRODUCT_MODE": "demo"},
-                     {"LAMINA_DEV_FAKE_NPPES": "false"}, {"LAMINA_WORKFLOW_DATABASE": "data/pilot.sqlite"}):
+                     {"LAMINA_DEV_FAKE_NPPES": "false"},
+                     {"LAMINA_DATABASE_URL": "postgresql://lamina:x@127.0.0.1:5433/lamina_dev"},
+                     {"LAMINA_DATABASE_URL": "postgresql://lamina:x@db.example.com:5432/lamina_e2e"},
+                     {"LAMINA_PROFILE": "production"}):
         with pytest.raises(RuntimeError, match="refused"):
             assert_dev_test_auth_allowed({**E2E_ENV, **override})
         with pytest.raises(RuntimeError):
@@ -391,3 +393,19 @@ def test_dev_test_sign_up_totp_and_the_gated_mfa_bypass() -> None:
     after = {"Authorization": f"Bearer {verified.json()['access_token']}"}
     assert client.get("/api/me/practice/status", headers=after).json()["account"]["mfa_verified"] is True
     assert client.post("/api/dev/test-auth/mfa/state", headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_idle_timeout_is_a_per_practice_admin_setting_and_audited(pilot: Pilot) -> None:
+    pilot.ready_physician()
+    pilot.add_staff()
+    assert pilot.status("user-c")["practice"]["idle_timeout_minutes"] == 30, "the default"
+    path = "/api/me/practice/security-settings"
+    assert _code(pilot.client.put(path, headers=_h("user-c"), json={"idle_timeout_minutes": 45})) == "practice_admin_required"
+    for out_of_range in (14, 61):
+        refused = pilot.client.put(path, headers=_h("user-a"), json={"idle_timeout_minutes": out_of_range})
+        assert refused.status_code == 422 and _code(refused) == "invalid_idle_timeout"
+    changed = pilot.client.put(path, headers=_h("user-a"), json={"idle_timeout_minutes": 45})
+    assert changed.status_code == 200 and changed.json()["idle_timeout_minutes"] == 45
+    assert pilot.status("user-c")["practice"]["idle_timeout_minutes"] == 45, "applies to everyone in the practice"
+    event = pilot.store.events(event_type="practice_idle_timeout_changed")[0]
+    assert event["actor"] == "user:user-a" and event["metadata"] == {"from": 30, "to": 45}

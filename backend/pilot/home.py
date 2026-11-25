@@ -90,12 +90,12 @@ class HomeService:
                                   "action": "Open"})
                 continue
             standing = item.get("standing") or {}
-            if item.get("has_conflict") and physician:
+            conflict = self._conflict_for(context, item) if physician else None
+            if conflict:
                 # A correction a newer rule disagrees with: the physician's decision, ranked first.
                 # Ranked just ahead of other decisions: it changes what deciding means.
                 needs.append({**base, "kind": "correction_conflict", "rank": 0 if item["priority"] == "urgent" else 0.5,
-                              "title": f"{name}: your correction differs from your newer {item['referral_type']} rule",
-                              "detail": f"{item['referral_type']} · choose which applies before you decide",
+                              "title": conflict, "detail": f"{item['referral_type']} · choose which applies before you decide",
                               "action": "Resolve"})
                 continue
             if item["status"] == "ready_for_review":
@@ -163,7 +163,9 @@ class HomeService:
                               "detail": f"{item['referral_type']} · missing {missing} · nothing requested yet",
                               "action": "Prepare request"})
         if physician:
-            question = self.learning.question_for_today(context.practice_id, mark_shown=record_view, actor="agent:learning")
+            owner, include_practice = self.learning.audience(context)
+            question = self.learning.question_for_today(context.practice_id, mark_shown=record_view, actor="agent:learning",
+                                                        owner_scope_id=owner, include_practice=include_practice)
             if question:
                 needs.append({"kind": "learning_question", "rank": 4, "question_id": question["id"],
                               "proposal_id": question["proposal_id"], "title": question["question"],
@@ -213,6 +215,23 @@ class HomeService:
         return {"briefing": self._briefing(needs, waiting, prepared, done, physician), "needs_you": needs,
                 "waiting": waiting, "prepared": prepared, "done": done[:12], "since": since, "learned": learned,
                 "role": context.role}
+
+    @staticmethod
+    def _conflict_for(context: PracticeContext, item: dict) -> str | None:
+        """The conflict this physician should see, worded for them: their own correction ("your
+        correction"), or -- only when the rule is practice-wide -- another physician's ("Dr. X's
+        correction"). Someone else's correction against their own rule isn't shown."""
+        name = item["patient_name"]
+        for conflict in item.get("conflicts") or []:
+            mine = conflict["corrected_by"] == context.actor
+            practice_wide = conflict["rule_layer"] == "practice"
+            if not mine and not practice_wide:
+                continue
+            rule = (f"your newer {conflict['referral_type']} rule" if conflict["rule_by"] in {context.actor, None}
+                    else f"the newer practice {conflict['referral_type']} rule")
+            who = "your correction" if mine else f"{conflict['corrected_by_name'] or 'another physician'}’s correction"
+            return f"{name}: {who} differs from {rule}"
+        return None
 
     def _actor_name(self, context: PracticeContext, actor: str) -> str:
         from .attribution import ActorDirectory

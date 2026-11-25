@@ -605,6 +605,27 @@ class RepresentationService:
 
     # ------------------------------------------------------- learned this week
 
+    def visible_proposals(self, context: PracticeContext) -> list[dict]:
+        """Pending learnings this reader may see: practice-wide ones and (a physician) their OWN
+        physician-level ones -- never another physician's. `can_confirm`: an admin for practice-wide,
+        only the owner for physician-level (the same rule `require_can_edit` enforces)."""
+        from .attribution import ActorDirectory
+
+        physician = context.role == "physician"
+        directory = ActorDirectory(self.store, context.practice_id)
+        result = []
+        for rule in self.rules.proposals(context.practice_id, context.owner_scope_id if physician else None):
+            own = rule.layer == "physician" and rule.owner_scope_id == context.owner_scope_id
+            can = physician and (own or (rule.layer != "physician" and context.is_admin))
+            # Who wrote it, so a reader is never told "your instruction" about someone else's
+            # (two physicians can share a practice). Practice members only; never an id.
+            author = rule.created_by or ""
+            by_you = author == context.actor
+            author_name = directory.describe(author)["name"] if author.startswith("user:") and not by_you else None
+            result.append({**self.teaching.view(rule), "can_confirm": can, "mine": own,
+                           "by_you": by_you, "author_name": author_name})
+        return result
+
     def learning_summary(self, context: PracticeContext) -> dict:
         """THE source for every learning count shown anywhere (Home, Your Agent, Train badge):
         newly confirmed statements this week, pending learnings, open questions."""
@@ -616,21 +637,24 @@ class RepresentationService:
              "confirmed_at": rule.confirmed_at, "source": rule.source}
             for rule in confirmed_since(self.rules, context.practice_id, owner if physician_view else None, since)
         ]
-        proposals = [self.teaching.view(rule) for rule in self.rules.proposals(
-            context.practice_id, owner if physician_view else None)]
+        # A physician's learnings are the ones THEY can confirm (their own; practice-wide if admin).
+        proposals = [item for item in self.visible_proposals(context) if item["can_confirm"] or not physician_view]
         # Learnings come from teaching and corrections; unreviewed setup answers are counted
         # separately (they are reviewed in setup's Stage E, not as learnings).
         setup_pending = [item for item in proposals if item.get("setup_stage")]
+        audience_owner, include_practice = self.learning.audience(context) if self.learning is not None else (None, True)
         questions = [dict(row) for row in self.store.fetch_all(
-            "SELECT id, question, proposal_rule_id, created_at FROM learning_questions WHERE practice_id = ? "
-            "AND status = 'pending' ORDER BY created_at", (context.practice_id,))]
+            "SELECT id, question, proposal_rule_id, created_at, owner_scope_id FROM learning_questions WHERE practice_id = ? "
+            "AND status = 'pending' ORDER BY created_at", (context.practice_id,))
+            if (audience_owner and row["owner_scope_id"] == audience_owner) or (include_practice and not row["owner_scope_id"])]
         # Each thing to review is counted ONCE: a learning the agent is asking about (today or
         # queued) is a question, never also a pending learning, and never "learned".
         asked = {question["proposal_rule_id"] for question in questions}
         pending = [item for item in proposals if not item.get("setup_stage") and item["id"] not in asked]
         # One question a day: only today's question is actionable; the rest are queued. The
         # choice is the same one Home shows (LearningService.question_for_today).
-        today = (self.learning.question_for_today(context.practice_id, mark_shown=False)
+        today = (self.learning.question_for_today(context.practice_id, mark_shown=False, owner_scope_id=audience_owner,
+                                                  include_practice=include_practice)
                  if self.learning is not None else (questions[0] if questions else None))
         today_id = (today or {}).get("id")
         open_now = [question for question in questions if question["id"] == today_id]

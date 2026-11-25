@@ -14,5 +14,7 @@ def load_repository_environment(path: Path = REPOSITORY_ENV_FILE) -> bool:
     return load_dotenv(dotenv_path=path, override=False)
 
 
-load_repository_environment()
+# Production never reads a file: secrets come only from the environment (a secrets manager).
+if os.environ.get("LAMINA_PROFILE", "").strip().casefold() != "production":
+    load_repository_environment()
 environment = os.environ

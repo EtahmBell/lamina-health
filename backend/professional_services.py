@@ -6,7 +6,6 @@ import json
 import logging
 import re
 from datetime import UTC, datetime
-from time import perf_counter
 from typing import Any
 from urllib.parse import urlparse
 
@@ -62,7 +61,10 @@ DEMO_ENRICHMENT = {
 
 
 class ResponsesApiClient:
-    """Lazy backend-only OpenAI SDK adapter; never required during app boot."""
+    """The existing model wrapper, now over one provider interface (backend/model_provider.py):
+    OpenAI (Responses API, never stored), Anthropic Claude via Amazon Bedrock, or disabled.
+    Callers say whether a call carries patient data; production refuses such a call unless the
+    provider is approved for patient data (BAA). Lazy: never required during app boot."""
 
     def __init__(
         self,
@@ -70,26 +72,43 @@ class ResponsesApiClient:
         *,
         enabled: bool | None = None,
         model: str | None = None,
+        provider: Any | None = None,
     ) -> None:
+        from backend.model_provider import (
+            configured_provider_name,
+            provider_from_environment,
+        )
+
         self.api_key = environment.get("OPENAI_API_KEY", "")
         self.model = (model or environment.get("LAMINA_OPENAI_MODEL", "")).strip()
+        explicit = environment.get("LAMINA_MODEL_PROVIDER", "").strip().casefold()
         configured = environment.get(
             "LAMINA_OPENAI_ENABLED",
             environment.get("LAMINA_RESPONSES_ENABLED", "false"),
         )
-        self.enabled = _enabled(configured) if enabled is None else enabled
+        default_enabled = (explicit == "openai") if explicit else _enabled(configured)
+        self.enabled = default_enabled if enabled is None else enabled
         self._sdk_client = sdk_client
+        self._explicit_provider = provider
+        # An explicit provider wins outright: the environment's provider setting is not consulted.
+        self._openai = provider is None and (sdk_client is not None or enabled is not None or model is not None
+                                             or configured_provider_name() == "openai")
+        self._environment_provider = None if self._openai or provider is not None else provider_from_environment()
+
+    @property
+    def provider(self) -> Any:
+        """Resolved from the current settings (callers and tests may change enabled/model/api_key)."""
+        from backend.model_provider import OpenAIProvider
+
+        if self._explicit_provider is not None:
+            return self._explicit_provider
+        if self._openai or self.enabled:
+            return OpenAIProvider(self._sdk_client, model=self.model, api_key=self.api_key, enabled=self.enabled)
+        return self._environment_provider
 
     @property
     def available(self) -> bool:
-        return bool(self.enabled and self.model and (self.api_key or self._sdk_client))
-
-    def _client(self) -> Any:
-        if self._sdk_client is None:
-            from openai import OpenAI
-
-            self._sdk_client = OpenAI(api_key=self.api_key, timeout=20.0, max_retries=1)
-        return self._sdk_client
+        return bool(self.provider.available)
 
     def structured(
         self,
@@ -100,55 +119,12 @@ class ResponsesApiClient:
         use_case: str,
         schema_name: str,
         web_search: bool = False,
+        contains_patient_data: bool = False,
     ) -> dict:
-        if not self.available:
-            raise RuntimeError("AI service is not configured")
-        started = perf_counter()
-        try:
-            response = self._client().responses.create(
-                model=self.model,
-                instructions=instructions,
-                input=json.dumps(payload),
-                tools=[{"type": "web_search"}] if web_search else [],
-                text={
-                    "format": {
-                        "type": "json_schema",
-                        "name": schema_name,
-                        "strict": True,
-                        "schema": schema,
-                    }
-                },
-            )
-            output_text = getattr(response, "output_text", None)
-            if output_text is None and isinstance(response, dict):
-                output_text = response.get("output_text")
-            if not isinstance(output_text, str):
-                raise TypeError("No structured response output")
-            result = json.loads(output_text)
-            logger.info(
-                "lamina_ai_call",
-                extra={
-                    "use_case": use_case,
-                    "success": True,
-                    "model": self.model,
-                    "latency_ms": round((perf_counter() - started) * 1000),
-                    "fallback_used": False,
-                },
-            )
-            return result
-        except Exception as error:
-            logger.warning(
-                "lamina_ai_call",
-                extra={
-                    "use_case": use_case,
-                    "success": False,
-                    "model": self.model,
-                    "latency_ms": round((perf_counter() - started) * 1000),
-                    "fallback_used": True,
-                    "error_type": type(error).__name__,
-                },
-            )
-            raise RuntimeError("AI service is temporarily unavailable") from error
+        from backend.model_provider import guarded_call
+
+        return guarded_call(self.provider, instructions, payload, schema, use_case=use_case, schema_name=schema_name,
+                            contains_patient_data=contains_patient_data, web_search=web_search)
 
 
 _CANDIDATE_SCHEMA = {

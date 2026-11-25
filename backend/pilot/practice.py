@@ -245,7 +245,7 @@ class PracticeService:
             key: practice.get(key)
             for key in (
                 "id", "name", "specialty", "website", "address", "phone", "contact_email",
-                "status", "created_at",
+                "status", "created_at", "idle_timeout_minutes",
             )
         }
 
@@ -311,6 +311,23 @@ class PracticeService:
         if not cleaned.get("name"):
             raise PilotError("invalid_practice", "Practice name is required", 422)
         return self._practice_view(self.store.update_practice(context.practice_id, cleaned, context.actor))
+
+    IDLE_TIMEOUT_RANGE = (15, 60)
+
+    def set_idle_timeout(self, context: PracticeContext, minutes: int) -> dict:
+        """Admin: how long the practice's sessions may sit idle before signing out (15-60 min)."""
+        context.require_admin("change the practice's session settings")
+        low, high = self.IDLE_TIMEOUT_RANGE
+        if not low <= minutes <= high:
+            raise PilotError("invalid_idle_timeout", f"Choose between {low} and {high} minutes", 422)
+        before = int(context.practice.get("idle_timeout_minutes") or 30)
+        if minutes != before:
+            self.store.execute(
+                [("UPDATE practices SET idle_timeout_minutes = ?, updated_at = ? WHERE id = ?",
+                  (minutes, datetime.now(UTC).isoformat(timespec="seconds"), context.practice_id))],
+                [{"event_type": "practice_idle_timeout_changed", "actor": context.actor, "practice_id": context.practice_id,
+                  "metadata": {"from": before, "to": minutes}}])
+        return self._practice_view(self.store.practice(context.practice_id))
 
     # ---------------------------------------------------------------- members
 

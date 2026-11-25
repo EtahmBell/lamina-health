@@ -1,6 +1,6 @@
 """Check practice rules for requirement keys that drifted between versions.
 
-    python -m scripts.check_rule_keys [path/to/workflow.sqlite] [--json]
+    python -m scripts.check_rule_keys [path/to/workflow.sqlite | postgresql://...] [--json]
 
 A requirement is identified by its key. If one version of a rule calls "Recent TSH" `tsh` and a
 later version calls it `recent_tsh`, values the referring office already sent (or that were
@@ -11,7 +11,8 @@ recommendation no longer uses.
 
 Read-only. Reads only rule rows and referral metadata (keys, statuses, ids), never values.
 Exit code 0: no drift on an active rule and no stranded evidence. 1: something to review.
-2: the database can't be opened. Defaults to LAMINA_WORKFLOW_DATABASE.
+2: the database can't be opened. Defaults to LAMINA_DATABASE_URL (Postgres, read-only session), then
+LAMINA_WORKFLOW_DATABASE (SQLite, mode=ro).
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,9 +32,10 @@ def _items(content_json: str | None) -> list[dict]:
     return [*content.get("required", []), *content.get("helpful", [])]
 
 
-def scan(path: Path) -> dict[str, Any]:
-    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    db.row_factory = sqlite3.Row
+def scan(target: Path | str) -> dict[str, Any]:
+    from backend.database import connect_read_only, is_postgres_url
+
+    db = connect_read_only(str(target))
     try:
         rows = [dict(row) for row in db.execute(
             "SELECT id, practice_id, referral_type, version, operational_status, supersedes_id, structured_rules_json "
@@ -61,7 +62,10 @@ def scan(path: Path) -> dict[str, Any]:
                         })
                     first.setdefault(label, (item.get("key"), rule["version"]))
         stranded = []
-        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if is_postgres_url(str(target)):  # migrated: every pilot table exists
+            tables = {"intake_referrals", "triage_recommendations", "missing_information_requests"}
+        else:
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if {"intake_referrals", "triage_recommendations"} <= tables:
             for referral in db.execute(
                 "SELECT id, practice_id, status, current_recommendation_id, submitted_items_json FROM intake_referrals"
@@ -93,16 +97,18 @@ def scan(path: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("database", nargs="?", default=os.environ.get("LAMINA_WORKFLOW_DATABASE"))
+    parser.add_argument("database", nargs="?", default=os.environ.get("LAMINA_DATABASE_URL") or os.environ.get("LAMINA_WORKFLOW_DATABASE"))
     parser.add_argument("--json", action="store_true", help="print the full report as JSON")
     args = parser.parse_args(argv)
-    if not args.database or not Path(args.database).is_file():
-        print("No database found. Pass a path or set LAMINA_WORKFLOW_DATABASE.", file=sys.stderr)
+    from backend.database import is_postgres_url
+
+    if not args.database or (not is_postgres_url(args.database) and not Path(args.database).is_file()):
+        print("No database found. Pass a path or URL, or set LAMINA_DATABASE_URL.", file=sys.stderr)
         return 2
     try:
-        report = scan(Path(args.database))
-    except sqlite3.Error as error:
-        print(f"Could not read the database: {error}", file=sys.stderr)
+        report = scan(args.database)
+    except Exception as error:  # noqa: BLE001 -- sqlite3 or psycopg; the type only, never the URL
+        print(f"Could not read the database ({type(error).__name__})", file=sys.stderr)
         return 2
     if args.json:
         print(json.dumps(report, indent=2))

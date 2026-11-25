@@ -3,9 +3,9 @@ import { useAuth } from './AuthProvider.tsx'
 import { ApiError } from './api.ts'
 import { enrollTotp, mfaState, signOutEverywhere, verifyTotp, type MfaState, type TotpEnrollment } from './authClient.ts'
 import { ClaimShell, signInPath, signUpPath } from './Claim.tsx'
-import { acceptInvitation, previewInvitation, requestMfaRecovery, revokeAllSessions, type InvitationPreview, type PilotStatus } from './pilotApi.ts'
+import { acceptInvitation, previewInvitation, requestMfaRecovery, revokeAllSessions, updateIdleTimeout, type InvitationPreview, type PilotStatus } from './pilotApi.ts'
 import {
-  formatSetupKey, IDLE_TIMEOUT_MINUTES, IDLE_WARNING_MINUTES, idleState, invitationCopy, normalizeTotpInput, pilotErrorCopy, pilotPaths,
+  formatSetupKey, IDLE_TIMEOUT_CHOICES, IDLE_TIMEOUT_MINUTES, IDLE_WARNING_MINUTES, idleState, invitationCopy, normalizeTotpInput, pilotErrorCopy, pilotPaths,
 } from './pilotState.ts'
 import { safeReturnPath } from './safeReturn.ts'
 
@@ -27,11 +27,11 @@ function Panel({ navigate, children }: { navigate: Navigate; children: ReactNode
 /* ---------------------------------------------------------------- sign in */
 
 /** The pilot sign-in page with a short, truthful note about why the person is there. */
-export const signInWithReason = (reason: 'idle' | 'everywhere' | 'revoked') =>
-  `/claim/sign-in?reason=${reason}&return=${encodeURIComponent(pilotPaths.home)}`
+export const signInWithReason = (reason: 'idle' | 'everywhere' | 'revoked', minutes?: number) =>
+  `/claim/sign-in?reason=${reason}${minutes ? `&minutes=${minutes}` : ''}&return=${encodeURIComponent(pilotPaths.home)}`
 
 const SIGN_IN_NOTES: Record<string, string> = {
-  idle: `You were signed out after ${IDLE_TIMEOUT_MINUTES} minutes without activity.`,
+  idle: 'You were signed out after {minutes} minutes without activity.',
   everywhere: 'You signed out on every device. Sign in again to continue.',
   revoked: 'This session was signed out. Sign in again to continue.',
 }
@@ -43,7 +43,8 @@ export function PilotSignInPage({ navigate, params }: { navigate: Navigate; para
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const target = safeReturnPath(params.get('return'), pilotPaths.home)
-  const note = SIGN_IN_NOTES[params.get('reason') ?? '']
+  const idleMinutes = Math.min(60, Math.max(15, Number(params.get('minutes')) || IDLE_TIMEOUT_MINUTES))
+  const note = SIGN_IN_NOTES[params.get('reason') ?? '']?.replace('{minutes}', String(idleMinutes))
   useEffect(() => { if (user) navigate(target) }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('')
@@ -272,7 +273,8 @@ export function markActivity() {
 
 /** Idle timeout: after IDLE_TIMEOUT_MINUTES with no activity in any Lamina tab, sign out on this
  * device. A warning shows IDLE_WARNING_MINUTES before. */
-export function useIdleSignOut(onExpire: () => void): { warning: boolean; stay: () => void } {
+/** `minutes`: the practice's idle timeout (15-60, set by an admin; default 30). */
+export function useIdleSignOut(onExpire: () => void, minutes: number = IDLE_TIMEOUT_MINUTES): { warning: boolean; stay: () => void } {
   const [warning, setWarning] = useState(false)
   const expired = useRef(false)
   const touch = useCallback(() => { markActivity(); setWarning(false) }, [])
@@ -285,12 +287,12 @@ export function useIdleSignOut(onExpire: () => void): { warning: boolean; stay: 
     const timer = window.setInterval(() => {
       let shared = lastActivityAt
       try { shared = Math.max(shared, Number(window.localStorage.getItem(ACTIVITY_KEY) ?? 0)) } catch { /* ignore */ }
-      const state = idleState(shared, Date.now())
+      const state = idleState(shared, Date.now(), minutes)
       setWarning(state === 'warning')
       if (state === 'expired' && !expired.current) { expired.current = true; onExpire() }
     }, 10_000)
     return () => { for (const name of events) window.removeEventListener(name, onActivity); window.clearInterval(timer) }
-  }, [onExpire, touch])
+  }, [onExpire, touch, minutes])
   return { warning, stay: touch }
 }
 
@@ -302,9 +304,18 @@ export function IdleWarning({ onStay }: { onStay: () => void }) {
 }
 
 /** Profile → Sign-in & security: two-step sign-in status, recovery, sign out everywhere. */
-export function SecuritySection({ status, navigate }: { status: PilotStatus; navigate: Navigate }) {
+export function SecuritySection({ status, navigate, onSettingsChanged }: { status: PilotStatus; navigate: Navigate; onSettingsChanged?: () => void }) {
   const { user } = useAuth()
   const [confirming, setConfirming] = useState(false)
+  const idleMinutes = status.practice?.idle_timeout_minutes ?? IDLE_TIMEOUT_MINUTES
+  const [draftMinutes, setDraftMinutes] = useState(idleMinutes)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState('')
+  const saveIdle = async (event: FormEvent) => {
+    event.preventDefault(); setSaving(true); setError(''); setSaved('')
+    try { await updateIdleTimeout(draftMinutes); setSaved(`Saved: everyone in the practice is signed out after ${draftMinutes} minutes without activity.`); onSettingsChanged?.() }
+    catch (err) { setError(errorText(err, 'Could not save the setting.')) } finally { setSaving(false) }
+  }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const everywhere = async () => {
@@ -320,8 +331,16 @@ export function SecuritySection({ status, navigate }: { status: PilotStatus; nav
     <dl className="pilot-facts">
       <div><dt>Account</dt><dd>{user?.email ?? status.account?.email ?? '—'}</dd></div>
       <div><dt>Two-step sign-in</dt><dd>{status.account?.mfa_verified === false ? 'Not completed for this session' : 'On · authenticator app'}</dd></div>
-      <div><dt>Inactivity</dt><dd>Signed out after {IDLE_TIMEOUT_MINUTES} minutes without activity</dd></div>
+      <div><dt>Inactivity</dt><dd>Signed out after {idleMinutes} minutes without activity{status.is_admin ? '' : ' (set by a practice admin)'}</dd></div>
     </dl>
+    {status.is_admin && <form className="pilot-idle-setting" onSubmit={(event) => void saveIdle(event)} aria-label="Idle sign-out for the practice">
+      <label><span>Sign everyone out after (minutes without activity)</span>
+        <select value={draftMinutes} onChange={(event) => { setDraftMinutes(Number(event.target.value)); setSaved('') }} disabled={saving}>
+          {IDLE_TIMEOUT_CHOICES.map((value) => <option key={value} value={value}>{value} minutes{value === IDLE_TIMEOUT_MINUTES ? ' (default)' : ''}</option>)}
+        </select></label>
+      <button className="button-secondary" type="submit" disabled={saving || draftMinutes === idleMinutes}>{saving ? 'Saving…' : 'Save'}</button>
+      {saved && <p className="muted-note" role="status">{saved}</p>}
+    </form>}
     <p className="profile-section-explainer">Lost your authenticator? Use “Lost your authenticator?” on the sign-in code screen. Only the Lamina team can reset two-step sign-in — a practice admin can’t.</p>
     {error && <div className="error-banner" role="alert">{error}</div>}
     {!confirming && <button className="button-secondary" onClick={() => setConfirming(true)}>Sign out everywhere</button>}

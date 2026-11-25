@@ -31,11 +31,15 @@ function ProposalSummary({ proposal, voice = { physician: true, doctor: 'the phy
   const lines = proposalLines(proposal.content)
   // Whose words these are, and who confirms — in the reader's voice.
   const fromStaff = proposal.suggested_by_role === 'staff'
-  const whose = voice.physician ? 'your' : `${voice.doctor}’s`
+  // Run 2: "your" only when the reader wrote it. A practice-wide learning seen by another physician
+  // names its author, or (learned from corrections) says it came from the practice's corrections.
+  const someoneElses = voice.physician && proposal.mine === false && proposal.by_you === false
+  const whose = someoneElses ? (proposal.author_name ? `${proposal.author_name}’s` : 'a colleague’s') : voice.physician ? 'your' : `${voice.doctor}’s`
   const origin = proposal.source === 'onboarding' ? `From ${whose} setup answer`
-    : proposal.source === 'correction_pattern' ? `Learned from ${whose} repeated corrections`
+    : proposal.source === 'correction_pattern' ? (someoneElses ? 'Learned from repeated corrections in the practice' : `Learned from ${whose} repeated corrections`)
     : fromStaff ? `From ${proposal.suggested_by_name ?? 'a staff member'}’s suggestion` : `From ${whose} instruction`
-  const pending = voice.physician ? 'not active until you confirm' : `not active until ${voice.doctor} confirms`
+  const pending = someoneElses && proposal.can_confirm === false ? 'not active until an admin physician confirms'
+    : voice.physician ? 'not active until you confirm' : `not active until ${voice.doctor} confirms`
   return <div className="pilot-proposal-body">
     {/* A person's words are quoted; text Lamina drafted from a correction pattern is not, and
         its values are shown in plain language. */}
@@ -313,7 +317,10 @@ function TeachTab({ physician, doctor, data, summary, navigate, onChange }: { ph
   // there), never again as a pending card. It is counted once too, as the question.
   const asked = data?.question?.proposal_id
   const askedProposal = (data?.proposals ?? []).find((proposal) => proposal.id === asked)
-  const learnings = (data?.proposals ?? []).filter((proposal) => pendingIds.has(proposal.id) && proposal.id !== asked)
+  // A non-admin physician also sees practice-wide learnings read-only (an admin confirms them);
+  // they are not counted as that physician's own learnings.
+  const readOnlyPracticeWide = (proposal: Proposal) => physician && proposal.can_confirm === false && proposal.layer !== 'physician' && !proposal.setup_stage
+  const learnings = (data?.proposals ?? []).filter((proposal) => (pendingIds.has(proposal.id) || readOnlyPracticeWide(proposal)) && proposal.id !== asked)
   const setupPending = summary?.counts.setup_pending ?? 0
   return <div className="pilot-teach-tab">
     <p className="page-intro">{physician
@@ -336,7 +343,11 @@ function TeachTab({ physician, doctor, data, summary, navigate, onChange }: { ph
     </form>
     <h2 className="pilot-subhead">Pending learnings</h2>
     {data && learnings.length === 0 && <p className="agent-empty-note">Nothing pending.</p>}
-    {learnings.map((proposal) => <div id={`proposal-${proposal.id}`} key={proposal.id}>{physician ? <ProposalCard proposal={proposal} referralTypes={data?.referral_types ?? []} onChange={onChange} /> : <section className="pilot-card"><ProposalSummary proposal={proposal} voice={{ physician, doctor }} /></section>}</div>)}
+    {learnings.map((proposal) => <div id={`proposal-${proposal.id}`} key={proposal.id}>{physician && proposal.can_confirm !== false
+      ? <ProposalCard proposal={proposal} referralTypes={data?.referral_types ?? []} onChange={onChange} />
+      : <section className="pilot-card"><ProposalSummary proposal={proposal} voice={{ physician, doctor }} />
+        {/* A non-admin physician sees practice-wide learnings read-only: an admin physician confirms them. */}
+        {physician && <p className="muted-note">Practice-wide — an admin physician confirms practice-wide statements. You can teach your own version instead.</p>}</section>}</div>)}
   </div>
 }
 

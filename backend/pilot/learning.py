@@ -25,6 +25,14 @@ from .teaching import TeachingService
 from .triage import _tokens
 
 REPEAT_THRESHOLD = 2
+
+
+def _owned(signature: str, owner: str | None) -> str:
+    """A physician's own pattern is distinct from the same pattern elsewhere in the practice."""
+    return f"{signature}@{owner}" if owner else signature
+
+
+
 ACCEPTED_WITHOUT_THRESHOLD = 3
 QUESTION_INTERVAL = timedelta(hours=24)
 MODALITY_WORDS = {"econsult": "eConsult", "in_person": "an in-person visit", "either": "either modality"}
@@ -49,49 +57,64 @@ class LearningService:
         groups: dict[str, dict] = {}
         # Physician signals only: corrections (current model) and physician edits from the retired
         # approval step. A staff review was never physician agreement or correction.
+        owner_of = self._owner_resolver(practice_id)
         modality_changes = [
-            ({"decision_id": row["id"]}, row["referral_id"], json.loads(row["changed_fields_json"]).get("suggested_modality"))
+            ({"decision_id": row["id"]}, row["referral_id"], json.loads(row["changed_fields_json"]).get("suggested_modality"), row["actor"])
             for row in self.store.fetch_all(
                 "SELECT * FROM recommendation_decisions WHERE practice_id = ? AND decision = 'edited' "
                 "AND actor_role = 'physician'", (practice_id,))
         ] + [
-            ({"correction_id": row["id"]}, row["referral_id"], {"from": json.loads(row["from_value"]), "to": json.loads(row["to_value"])})
+            ({"correction_id": row["id"]}, row["referral_id"], {"from": json.loads(row["from_value"]), "to": json.loads(row["to_value"])},
+             row["actor"])
             for row in self.store.fetch_all(
                 "SELECT * FROM triage_corrections WHERE practice_id = ? AND field = 'suggested_modality'", (practice_id,))
         ]
-        for ref, referral_id, change in modality_changes:
+        for ref, referral_id, change, actor in modality_changes:
             referral_type = types.get(referral_id)
             if not change or not referral_type or change["to"] not in MODALITY_WORDS:
                 continue
-            signature = f"modality:{normalize_referral_type(referral_type)}:{change['to']}"
+            owner = owner_of(actor)
+            signature = _owned(f"modality:{normalize_referral_type(referral_type)}:{change['to']}", owner)
             group = groups.setdefault(signature, {"kind": "modality", "referral_type": referral_type,
-                                                  "value": change["to"], "evidence": []})
+                                                  "value": change["to"], "evidence": [], "owner": owner})
             if any(item["referral_id"] == referral_id for item in group["evidence"]):
                 continue  # one referral is one piece of evidence, however many times it was corrected
             group["evidence"].append({**ref, "referral_id": referral_id})
         extra = defaultdict(list)
         for event in self.store.events(practice_id=practice_id, event_type="information_requested"):
             referral_type = types.get(event["referral_id"] or "")
+            owner = owner_of(event["actor"])
             for label in event["metadata"].get("extra_items", []):
                 if referral_type and _tokens(label):
                     key = "_".join(sorted(_tokens(label)))[:80]
-                    extra[(normalize_referral_type(referral_type), key)].append((referral_type, label, event["referral_id"]))
-        for (type_key, item_key), hits in extra.items():
+                    extra[(normalize_referral_type(referral_type), key, owner)].append((referral_type, label, event["referral_id"]))
+        for (type_key, item_key, owner), hits in extra.items():
             if len({hit[2] for hit in hits}) < REPEAT_THRESHOLD:
                 continue
-            groups[f"required:{type_key}:{item_key}"] = {
-                "kind": "required", "referral_type": hits[0][0], "value": hits[0][1],
+            groups[_owned(f"required:{type_key}:{item_key}", owner)] = {
+                "kind": "required", "referral_type": hits[0][0], "value": hits[0][1], "owner": owner,
                 "evidence": [{"referral_id": hit[2]} for hit in hits],
             }
-        groups.update(self._accepted_without(practice_id, types))
+        groups.update(self._accepted_without(practice_id, types, owner_of))
         return [{**group, "signature": signature} for signature, group in groups.items()
                 if len({item["referral_id"] for item in group["evidence"]})
                 >= (ACCEPTED_WITHOUT_THRESHOLD if group["kind"] == "optional" else REPEAT_THRESHOLD)]
 
-    def _accepted_without(self, practice_id: str, types: dict[str, str]) -> dict[str, dict]:
+    def _owner_resolver(self, practice_id: str):
+        """Whose learning a signal is. One physician in the practice: every pattern is practice-wide
+        (unchanged). Several: a physician's own corrections and decisions form THEIR learnings
+        (their own layer, only they see them); staff signals stay practice-wide (for an admin)."""
+        physicians = {f"user:{member['user_id']}": member["physician_owner_scope_id"]
+                      for member in self.store.members(practice_id) if member["role"] == "physician"}
+        if len(physicians) <= 1:
+            return lambda _actor: None
+        return lambda actor: physicians.get(actor or "")
+
+    def _accepted_without(self, practice_id: str, types: dict[str, str], owner_of=lambda _actor: None) -> dict[str, dict]:
         """Accepted referrals whose recommendation still listed a required item as missing."""
         groups: dict[str, dict] = {}
         for event in self.store.events(practice_id=practice_id, event_type="referral_accepted"):
+            owner = owner_of(event["actor"])
             referral = self.store.referral_row(practice_id, event["referral_id"] or "")
             if not referral or not referral["current_recommendation_id"]:
                 continue
@@ -101,9 +124,10 @@ class LearningService:
             recommendation = json.loads(row["recommendation_json"])
             for item in recommendation.get("requirements", []):
                 if item.get("required") and item.get("state") != "satisfied":
-                    signature = f"optional:{normalize_referral_type(types[referral['id']])}:{item['key']}"
+                    signature = _owned(f"optional:{normalize_referral_type(types[referral['id']])}:{item['key']}", owner)
                     group = groups.setdefault(signature, {"kind": "optional", "referral_type": types[referral["id"]],
-                                                          "value": item["key"], "label": item["label"], "evidence": []})
+                                                          "value": item["key"], "label": item["label"], "evidence": [],
+                                                          "owner": owner})
                     if referral["id"] not in {entry["referral_id"] for entry in group["evidence"]}:
                         group["evidence"].append({"referral_id": referral["id"]})
         return groups
@@ -155,8 +179,10 @@ class LearningService:
                             "Should I treat it as required before review?")
                 text = f"Require {label} for {pattern['referral_type']} (from {count} corrections)"
             question_id = new_id("lq")
+            owner = pattern.get("owner")
+            author = self._physician_context(context, owner) if owner else context
             proposal = self.teaching.propose(
-                context, text, source="correction_pattern",
+                author, text, source="correction_pattern", layer="physician" if owner else None,
                 interpretation={"referral_type": pattern["referral_type"], "content": content, "structured": True,
                                 "confidence": min(0.9, 0.5 + 0.1 * count), "clarification": None,
                                 "interpreter": "correction_pattern"},
@@ -165,12 +191,26 @@ class LearningService:
             )
             self.store.execute([(
                 ("INSERT INTO learning_questions (id, practice_id, proposal_rule_id, signature, question, "
-                "evidence_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)"),
+                "evidence_json, status, created_at, owner_scope_id) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)"),
                 (question_id, context.practice_id, proposal["id"], pattern["signature"], question,
-                 json.dumps(pattern["evidence"]), now_iso()),
+                 json.dumps(pattern["evidence"]), now_iso(), owner),
             )])
             created.append(proposal)
         return created
+
+    def _physician_context(self, context: PracticeContext, owner_scope_id: str) -> PracticeContext:
+        member = next(m for m in self.store.members(context.practice_id)
+                      if m["role"] == "physician" and m["physician_owner_scope_id"] == owner_scope_id)
+        return PracticeContext(user_id=member["user_id"], practice=context.practice, member=member, role="physician",
+                               owner_scope_id=owner_scope_id)
+
+    @staticmethod
+    def audience(context: PracticeContext) -> tuple[str | None, bool]:
+        """Which questions a reader sees: (their own owner scope, whether practice-wide ones too).
+        Physicians: their own, plus practice-wide ones if they're an admin. Staff: practice-wide only."""
+        if context.role == "physician":
+            return context.owner_scope_id, context.is_admin
+        return None, True
 
     def on_decision(self, context: PracticeContext, _referral_id: str) -> None:
         if context.role in {"physician", "staff"}:
@@ -178,12 +218,17 @@ class LearningService:
 
     # --------------------------------------------------------------- questions
 
-    def question_for_today(self, practice_id: str, *, mark_shown: bool, actor: str = "agent:learning") -> dict | None:
-        enabled, interval = self.capability_gate(practice_id) if self.capability_gate else (True, QUESTION_INTERVAL)
+    def question_for_today(self, practice_id: str, *, mark_shown: bool, actor: str = "agent:learning",
+                           owner_scope_id: str | None = None, include_practice: bool = True) -> dict | None:
+        """At most one question a day per physician: their own questions, plus practice-wide ones
+        when `include_practice` (an admin; staff read-only)."""
+        enabled, interval = (self.capability_gate(practice_id, owner_scope_id) if self.capability_gate
+                             else (True, QUESTION_INTERVAL))
         if not enabled:
             return None  # the physician turned learning questions off
-        rows = self.store.fetch_all(
+        rows = [row for row in self.store.fetch_all(
             "SELECT * FROM learning_questions WHERE practice_id = ? ORDER BY created_at", (practice_id,))
+            if (owner_scope_id and row["owner_scope_id"] == owner_scope_id) or (include_practice and not row["owner_scope_id"])]
         cutoff = (datetime.now(UTC) - interval).isoformat(timespec="seconds")
         recent = [row for row in rows if (row["last_shown_at"] and row["last_shown_at"] > cutoff)
                   or (row["answered_at"] and row["answered_at"] > cutoff)]
@@ -205,6 +250,7 @@ class LearningService:
     @staticmethod
     def _question_view(row: dict) -> dict:
         return {"id": row["id"], "question": row["question"], "proposal_id": row["proposal_rule_id"],
+                "owner_scope_id": row.get("owner_scope_id"),
                 "evidence_count": len(json.loads(row["evidence_json"])), "status": row["status"],
                 "created_at": row["created_at"]}
 
@@ -213,8 +259,10 @@ class LearningService:
         context.require_physician("answer the practice agent's question")
         row = self.store.fetch_one(
             "SELECT * FROM learning_questions WHERE id = ? AND practice_id = ?", (question_id, context.practice_id))
-        if not row:
-            raise PilotError("question_not_found", "Question not found", 404)
+        owner, include_practice = self.audience(context)
+        if not row or not ((row["owner_scope_id"] and row["owner_scope_id"] == owner)
+                           or (not row["owner_scope_id"] and include_practice)):
+            raise PilotError("question_not_found", "Question not found", 404)  # someone else's question
         if row["status"] != "pending":
             raise PilotError("question_answered", "This question has already been answered")
         result: dict = {}
